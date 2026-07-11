@@ -1,7 +1,4 @@
-use std::{
-  path::{PathBuf}
-};
-
+use std::path::PathBuf;
 
 /// Represent the type of an entry in the project tree.
 ///
@@ -12,7 +9,7 @@ pub enum ProjectTreeEntryKind {
   /// A directory node containing child entries
   Directory,
   /// A file node with no children
-  File
+  File,
 }
 
 /// A node in the project tree representing a file or directory.
@@ -50,7 +47,7 @@ pub struct ProjectTreeEntry {
   /// Whether this entry is a file or a directory.
   pub kind: ProjectTreeEntryKind,
   /// Child entries if this is a directory; empty for files.
-  pub children: Vec<ProjectTreeEntry>
+  pub children: Vec<ProjectTreeEntry>,
 }
 
 /// The root container of a project file tree.
@@ -78,7 +75,7 @@ pub struct ProjectTreeEntry {
 pub struct ProjectTree {
   /// The root entry of the project tree. Typically a directory node representing
   /// the project's root folder.
-  pub root: ProjectTreeEntry
+  pub root: ProjectTreeEntry,
 }
 
 /// A complete project workspace containing both the root path and its file tree.
@@ -115,5 +112,5 @@ pub struct ProjectWorkspace {
   /// The root directory path of the workspace on disk.
   pub root: PathBuf,
   /// The in-memory recursive tree representation of the workspace.
-  pub tree: ProjectTree
+  pub tree: ProjectTree,
 }
