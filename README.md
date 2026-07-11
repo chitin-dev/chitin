@@ -1,30 +1,14 @@
-# Chitin
+<div align="center" name="markdown">
 
-Chitin is an agent-native computational chemistry and bioinformatics integrated development suite.
+![chitin](https://socialify.git.ci/chitin-dev/chitin/image?description=1&font=Source+Code+Pro&language=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fchitin-dev%2Fchitin%2F4f22ec7b692e59f8aa275f799c6b7a47c7e712ec%2Fassets%2Flogo.svg&name=1&owner=1&pattern=Transparent&theme=Dark)
 
-## Project Layout
+</div>
 
-- `crates/chitin-core`: domain model and non-UI application logic.
-- `crates/chitin-desktop`: GPUI desktop shell.
-- `assets`: shared visual assets.
+![Rule](https://cdn.jsdelivr.net/gh/andreasbm/readme/assets/lines/rainbow.png)
 
-## Development
+## ✨ Features
 
-On Arch Linux, install the Rust toolchain and common native build dependencies if needed:
+**Chitin** is an agent-native computational chemistry and bioinformatics integrated
+development suite.
 
-```sh
-sudo pacman -S rust base-devel pkgconf
-```
-
-Run the desktop app:
-
-```sh
-cargo run -p chitin-desktop
-```
-
-Check the workspace:
-
-```sh
-cargo check --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-```
+See [ROADMAP.md](ROADMAP.md) for the project roadmap.
