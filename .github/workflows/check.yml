@@ -23,6 +23,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
       - name: Show toolchain
         run: |
           rustc --version
