@@ -1,0 +1,20 @@
+[workspace]
+members = [
+  "crates/chitin-core",
+  "crates/chitin-desktop",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/chitin-dev/chitin"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+todo = "deny"
