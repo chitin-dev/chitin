@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod workspace;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceSummary {
   pub product_name: &'static str,
