@@ -1,6 +1,6 @@
 <div align="center" name="markdown">
 
-![chitin](https://socialify.git.ci/chitin-dev/chitin/image?description=1&font=Source+Code+Pro&language=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fchitin-dev%2Fchitin%2F4f22ec7b692e59f8aa275f799c6b7a47c7e712ec%2Fassets%2Flogo.svg&name=1&owner=1&pattern=Transparent&theme=Dark)
+![chitin](https://socialify.git.ci/chitin-dev/chitin/image?description=1&font=Source+Code+Pro&language=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fchitin-dev%2Fchitin%2F4f22ec7b692e59f8aa275f799c6b7a47c7e712ec%2Fassets%2Flogo.svg&name=1&owner=1&pattern=Charlie+Brown&theme=Dark)
 
 </div>
 
