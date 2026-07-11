@@ -1,0 +1,60 @@
+name: Scientific Engine Task
+description: Plan or implement independent core logic for chemistry, docking, structure, or bioinformatics engines.
+title: "engine: "
+labels:
+  - engine
+body:
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine Area
+      options:
+        - chitin-molecule
+        - chitin-structure
+        - chitin-docking
+        - chitin-viewer-core
+        - chitin-sequence
+        - Cross-engine
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What scientific concept, algorithm, parser, or data model is in scope?
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Scientific References Or Compatibility Targets
+      description: Papers, file-format specs, established software behavior, or fixture datasets.
+      placeholder: |
+        - PDB/mmCIF specification:
+        - AutoDock Vina behavior:
+        - Test fixture:
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: Proposed API Or Data Model
+      description: Sketch types, traits, inputs, outputs, and error behavior.
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test Strategy
+      description: Include deterministic fixtures, malformed inputs, and compatibility checks.
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: Does not depend on GPUI or desktop state.
+          required: true
+        - label: Returns diagnostics/errors instead of panicking on invalid scientific input.
+          required: true
+        - label: Keeps external tools behind adapter boundaries.
+          required: true

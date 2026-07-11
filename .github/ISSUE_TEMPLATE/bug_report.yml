@@ -1,0 +1,77 @@
+name: Bug Report
+description: Report a reproducible problem in Chitin.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail for someone else to reproduce it.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: Chitin crashes when opening a PDB file...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps To Reproduce
+      description: List the exact steps, commands, or files involved.
+      placeholder: |
+        1. Run `cargo run -p chitin-desktop`
+        2. Open ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should have happened?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What happened instead? Include logs or screenshots if relevant.
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit Or Version
+      description: Commit SHA, branch, or release version.
+      placeholder: main@abcdef0
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Desktop UI
+        - Workspace/project model
+        - Molecule/structure parsing
+        - Docking/workflows
+        - Agent runtime
+        - CI/build tooling
+        - Documentation
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Rust version, GPU/display stack, and relevant tool versions.
+      value: |
+        - OS:
+        - Rust:
+        - Display server:
+        - GPU/driver:
+        - Chitin command:
+    validations:
+      required: true

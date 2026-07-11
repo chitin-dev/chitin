@@ -1,0 +1,53 @@
+name: Feature Request
+description: Propose a user-facing Chitin feature.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem or workflow gap does this solve?
+      placeholder: As a user, I need to...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: Describe the feature and expected behavior.
+    validations:
+      required: true
+  - type: dropdown
+    id: product_area
+    attributes:
+      label: Product Area
+      options:
+        - Desktop workspace
+        - File viewer/editor
+        - Molecule/structure viewer
+        - Docking workflow
+        - Bioinformatics workflow
+        - Agent runtime
+        - Reporting/export
+        - Extension/plugin system
+        - Developer tooling
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance Criteria
+      description: What should be true when this is complete?
+      placeholder: |
+        - User can ...
+        - State persists ...
+        - Errors show ...
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Optional. Mention other approaches or tools considered.
