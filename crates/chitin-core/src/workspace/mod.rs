@@ -1,5 +1,5 @@
-mod tree;
 mod error;
+mod tree;
 
-pub use tree::{ProjectTree, ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace};
 pub use error::ProjectWorkspaceError;
+pub use tree::{ProjectTree, ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace};

@@ -1,7 +1,7 @@
 use std::{
   cmp::Ordering,
   ffi::OsStr,
-  fs::{self, FileType},
+  fs,
   path::{Path, PathBuf},
 };
 
@@ -432,5 +432,172 @@ impl ProjectWorkspace {
     };
 
     Ok(Self { root, tree })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::{
+    error::Error,
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+  };
+
+  use super::*;
+
+  struct TestProject {
+    root: PathBuf,
+  }
+
+  impl TestProject {
+    fn new(name: &str) -> Result<Self, Box<dyn Error>> {
+      let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+      let root =
+        std::env::temp_dir().join(format!("chitin-{name}-{}-{timestamp}", std::process::id()));
+
+      fs::create_dir(&root)?;
+
+      Ok(Self { root })
+    }
+
+    fn path(&self) -> &Path {
+      &self.root
+    }
+
+    fn mkdir(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+      fs::create_dir_all(self.root.join(path))?;
+      Ok(())
+    }
+
+    fn touch(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
+      let path = self.root.join(path);
+
+      if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+      }
+
+      fs::write(path, "")?;
+      Ok(())
+    }
+  }
+
+  impl Drop for TestProject {
+    fn drop(&mut self) {
+      let _ = fs::remove_dir_all(&self.root);
+    }
+  }
+
+  fn entry(name: &str, kind: ProjectTreeEntryKind) -> ProjectTreeEntry {
+    ProjectTreeEntry {
+      path: PathBuf::from(name),
+      name: name.to_string(),
+      kind,
+      children: Vec::new(),
+    }
+  }
+
+  fn child_names(entry: &ProjectTreeEntry) -> Vec<&str> {
+    entry
+      .children
+      .iter()
+      .map(|child| child.name.as_str())
+      .collect()
+  }
+
+  #[test]
+  fn display_name_should_return_final_path_component() {
+    let path = Path::new("/home/user/project/Cargo.toml");
+    assert_eq!(display_name(path), "Cargo.toml");
+  }
+
+  #[test]
+  fn display_name_should_fallback_to_path_display_for_root_path() {
+    let path = Path::new("/");
+    assert_eq!(display_name(path), "/");
+  }
+
+  #[test]
+  fn is_not_displayed_directory_should_hide_git_directory() {
+    let path = Path::new("/project/.git");
+    assert!(is_not_displayed_directory(path));
+  }
+
+  #[test]
+  fn is_not_displayed_directory_should_not_hide_regular_directory() {
+    let path = Path::new("/project/src");
+    assert!(!is_not_displayed_directory(path));
+  }
+
+  #[test]
+  fn compare_entries_should_sort_directories_before_files() {
+    let directory = entry("src", ProjectTreeEntryKind::Directory);
+    let file = entry("Cargo.toml", ProjectTreeEntryKind::File);
+    assert_eq!(compare_entries(&directory, &file), Ordering::Less);
+    assert_eq!(compare_entries(&file, &directory), Ordering::Greater);
+  }
+
+  #[test]
+  fn compare_entries_should_sort_names_case_insensitively() {
+    let left = entry("alpha.rs", ProjectTreeEntryKind::File);
+    let right = entry("Beta.rs", ProjectTreeEntryKind::File);
+    assert_eq!(compare_entries(&left, &right), Ordering::Less);
+  }
+
+  #[test]
+  fn project_workspace_open_should_reject_missing_path() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("missing-path")?;
+    let missing_path = project.path().join("missing");
+    // This path doesn't exist
+
+    let Err(error) = ProjectWorkspace::open(&missing_path) else {
+      return Err("missing path should return ProjectWorkspaceError::NotFound".into());
+    };
+
+    assert!(matches!(error, ProjectWorkspaceError::NotFound(path) if path == missing_path));
+    Ok(())
+  }
+
+  #[test]
+  fn project_workspace_open_should_reject_file_path() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("file-path")?;
+    project.touch("Cargo.toml")?;
+    let file_path = project.path().join("Cargo.toml").canonicalize()?;
+
+    let Err(error) = ProjectWorkspace::open(&file_path) else {
+      return Err("file path should return ProjectWorkspaceError::NotDirectory".into());
+    };
+
+    assert!(matches!(error, ProjectWorkspaceError::NotDirectory(path) if path == file_path));
+    Ok(())
+  }
+
+  #[test]
+  fn project_workspace_open_should_build_sorted_tree() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("sorted-tree")?;
+    project.mkdir("src")?;
+    project.mkdir("Assets")?;
+    project.touch("zeta.rs")?;
+    project.touch("Alpha.rs")?;
+
+    let workspace = ProjectWorkspace::open(project.path())?;
+    let names = child_names(&workspace.tree.root);
+
+    assert_eq!(names, vec!["Assets", "src", "Alpha.rs", "zeta.rs"]);
+    Ok(())
+  }
+
+  #[test]
+  fn project_workspace_open_should_skip_not_displayed_directories() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("hidden-directories")?;
+    project.mkdir(".git")?;
+    project.touch(".git/config")?;
+    project.mkdir("src")?;
+
+    let workspace = ProjectWorkspace::open(project.path())?;
+    let names = child_names(&workspace.tree.root);
+
+    assert_eq!(names, vec!["src"]);
+    Ok(())
   }
 }
