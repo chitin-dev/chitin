@@ -1,4 +1,27 @@
-use std::path::PathBuf;
+use std::{
+  cmp::Ordering,
+  ffi::OsStr,
+  fs::{self, FileType},
+  path::{Path, PathBuf},
+};
+
+use crate::workspace::ProjectWorkspaceError;
+
+/// Directories that should be hidden from the project tree UI.
+///
+/// Unlike `.gitignore`, this list is purely for visual cleanliness in the file
+/// tree. It hides directories that are internal implementation details of tools
+/// and should not be directly manipulated by users.
+///
+/// Currently only hides version control metadata:
+/// - `.git/` — Git repository database; editing it manually can corrupt the repo
+///
+/// # Note
+///
+/// This list is intentionally minimal. All other directories—including build
+/// outputs, cache directories, and IDE configs—remain visible because users may
+/// legitimately need to view or edit them.
+const NOT_DISPLAYED_DIRS: &[&str] = &[".git"];
 
 /// Represent the type of an entry in the project tree.
 ///
@@ -113,4 +136,301 @@ pub struct ProjectWorkspace {
   pub root: PathBuf,
   /// The in-memory recursive tree representation of the workspace.
   pub tree: ProjectTree,
+}
+
+impl ProjectTreeEntry {
+  /// Returns `true` if this entry represents a directory.
+  pub fn is_dir(&self) -> bool {
+    self.kind == ProjectTreeEntryKind::Directory
+  }
+
+  /// Returns `true` if this entry represents a file.
+  pub fn is_file(&self) -> bool {
+    self.kind == ProjectTreeEntryKind::File
+  }
+}
+
+/// Extracts a user-friendly display name from a filesystem path.
+///
+/// This function attempts to retrieve the final component of the path (the file
+/// or directory name) as a UTF-8 string. If the path has no final component
+/// (e.g., the root directory) or the filename contains invalid UTF-8 bytes,
+/// it falls back to the full path representation.
+///
+/// # Fallback Behavior
+///
+/// - For paths with a valid UTF-8 filename: returns the filename as `String`
+/// - For root directories (`/`, `C:\`): returns the full path
+/// - For paths with non-UTF-8 filenames: returns the full path
+///
+/// # Note
+///
+/// This function never panics and always returns a `String`. It is intended for
+/// UI display purposes where showing some string is better than crashing.
+///
+/// # See Also
+///
+/// - [`std::path::Path::file_name`] for the underlying method
+/// - [`std::ffi::OsStr::to_str`] for UTF-8 conversion behavior
+fn display_name(path: &Path) -> String {
+  path
+    .file_name()
+    .and_then(OsStr::to_str)
+    .map_or_else(|| path.display().to_string(), ToOwned::to_owned)
+}
+
+/// Determines whether a path points to a directory that should be hidden from
+/// the project tree UI.
+///
+/// # Returns
+///
+/// - `true` if the path's final component is in NOT_DISPLAYED_DIRECTORIES
+/// - `false` otherwise (including edge cases like root directories or
+///   non-UTF-8 filenames)
+///
+/// # Note
+///
+/// This function is for UI filtering only and does not affect filesystem
+/// operations. Users can still access hidden directories through other means
+/// (e.g., terminal, file explorer "show hidden files").
+///
+/// The list is intentionally minimal—only directories that are:
+/// - Internal implementation details of version control systems
+/// - Dangerous to modify manually
+/// - Not useful for everyday development tasks
+fn is_not_displayed_directory(path: &Path) -> bool {
+  path
+    .file_name()
+    .and_then(OsStr::to_str)
+    .is_some_and(|name| NOT_DISPLAYED_DIRS.contains(&name))
+}
+
+/// Compares two project tree entries for sorting.
+///
+/// This function defines the sorting order for entries in a project tree:
+/// 1. **Directories** always appear before **files** (directories first).
+/// 2. Entries are sorted **case-insensitively** by name (`A` and `a` are treated
+///    as equal for ordering purposes).
+/// 3. When two names are equal case-insensitively, the **original case** is used
+///    as a tie-breaker (e.g., `README.md` comes before `readme.md`).
+///
+/// # Ordering Rules
+///
+/// | Left      | Right     | Result                                              |
+/// |-----------|-----------|-----------------------------------------------------|
+/// | Directory | File      | `Less` (directory first)                            |
+/// | File      | Directory | `Greater` (file after directory)                    |
+/// | Directory | Directory | Compare by name (case-insensitive → case-sensitive) |
+/// | File      | File      | Compare by name (case-insensitive → case-sensitive) |
+///
+/// # Note
+///
+/// This function is intended for UI sorting in project tree views where
+/// directories should be visually grouped together before files.
+fn compare_entries(left: &ProjectTreeEntry, right: &ProjectTreeEntry) -> Ordering {
+  match (left.is_dir(), right.is_dir()) {
+    (true, false) => Ordering::Less,
+    (false, true) => Ordering::Greater,
+    _ => {
+      let left_lower_name = left.name.to_lowercase();
+      let right_lower_name = right.name.to_lowercase();
+
+      left_lower_name
+        .cmp(&right_lower_name)
+        .then_with(|| left.name.cmp(&right.name))
+    }
+  }
+}
+
+/// Recursively builds a hierarchical project tree entry for a given directory path.
+///
+/// This function traverses the filesystem starting from the provided directory,
+/// constructing a tree representation suitable for UI display. It recursively
+/// processes all subdirectories and files, filtering out hidden/internal
+/// directories (e.g., `.git`) and sorting entries consistently.
+///
+/// # Behavior
+///
+/// - **Directories**: Recursively traversed and expanded into tree nodes.
+/// - **Files**: Added as leaf nodes with no children.
+/// - **Filtering**: Directories matching `is_not_displayed_directory()` are
+///   skipped entirely (not included in the tree).
+/// - **Sorting**: Children are sorted using `compare_entries()` (directories
+///   first, then case-insensitive alphabetical order).
+///
+/// # Errors
+///
+/// Returns `ProjectWorkspaceError` for any filesystem operation failure:
+/// - `ReadDir`: Failed to read the directory contents.
+/// - `ReadEntry`: Failed to read a specific directory entry's metadata.
+/// - `FileType`: Failed to determine a path's file type.
+///
+/// # Panics
+///
+/// TODO:
+/// This function should not panic in normal operation. However, if a path
+/// unexpectedly changes during traversal (e.g., symlink cycles), recursion may
+/// lead to stack overflow in pathological cases.
+///
+/// # Note
+///
+/// TODO:
+/// This function uses recursion to traverse the directory tree. For extremely
+/// deep directory structures (e.g., nested > 1000 levels), consider using an
+/// iterative approach with an explicit stack to avoid potential stack overflow.
+/// The current implementation is suitable for typical project directory depths.
+fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspaceError> {
+  let mut children = Vec::new();
+
+  for entry in fs::read_dir(path).map_err(|source| ProjectWorkspaceError::read_dir(path, source))? {
+    let entry = entry.map_err(|source| ProjectWorkspaceError::read_entry(path, source))?;
+    let child_path = entry.path();
+    let file_type = entry
+      .file_type()
+      .map_err(|source| ProjectWorkspaceError::file_type(&child_path, source))?;
+
+    if file_type.is_dir() && is_not_displayed_directory(&child_path) {
+      continue;
+    }
+    if file_type.is_dir() {
+      // recursive function to work through the file tree
+      children.push(build_directory_entry(&child_path)?);
+    } else if file_type.is_file() {
+      children.push(ProjectTreeEntry {
+        path: child_path.clone(),
+        name: display_name(&child_path),
+        kind: ProjectTreeEntryKind::File,
+        children: Vec::new(),
+      });
+    }
+  }
+
+  children.sort_by(compare_entries);
+
+  Ok(ProjectTreeEntry {
+    path: path.to_path_buf(),
+    name: display_name(path),
+    kind: ProjectTreeEntryKind::Directory,
+    children,
+  })
+}
+
+/// Builds a project tree entry for a given filesystem path.
+///
+/// This function determines the type of the path (file or directory) and
+/// constructs the appropriate `ProjectTreeEntry`:
+/// - For **directories**: delegates to `build_directory_entry()` to recursively
+///   build the entire subtree.
+/// - For **files**: creates a leaf entry with no children.
+///
+/// # Behavior
+///
+/// - The path is first checked for its metadata to determine if it is a file,
+///   directory, or other special file type (symlinks are followed).
+/// - For directories, the entire contents are recursively traversed and
+///   filtered according to `build_directory_entry()` rules.
+/// - For files, a simple leaf node is created without further processing.
+///
+/// # Errors
+///
+/// Returns `ProjectWorkspaceError::FileType` if the path's metadata cannot be
+/// read (e.g., permission denied, broken symlink, or path does not exist).
+///
+/// # Note
+///
+/// Symlinks are followed and the target's file type is used. If a symlink
+/// points to a directory, it will be recursively traversed. For symlink cycles,
+/// the recursion will continue until the OS reports an error (e.g., too many
+/// levels) or the call stack overflows.
+fn build_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspaceError> {
+  let file_type = path
+    .metadata()
+    .map_err(|source| ProjectWorkspaceError::file_type(path, source))?
+    .file_type();
+
+  if file_type.is_dir() {
+    build_directory_entry(path)
+  } else {
+    Ok(ProjectTreeEntry {
+      path: path.to_path_buf(),
+      name: display_name(path),
+      kind: ProjectTreeEntryKind::File,
+      children: Vec::new(),
+    })
+  }
+}
+
+impl ProjectWorkspace {
+  /// Opens a workspace from a given filesystem path.
+  ///
+  /// This function initializes a new `ProjectWorkspace` by validating the provided
+  /// path and building a hierarchical tree representation of its contents. It
+  /// serves as the primary entry point for loading a project into the application.
+  ///
+  /// # Behavior
+  ///
+  /// - **Path resolution**: The provided path is canonicalized to resolve any
+  ///   symlinks and obtain an absolute, normalized path.
+  /// - **Validation**: The path must exist and point to a directory. Files are
+  ///   currently not supported as workspace roots (see TODO note below).
+  /// - **Tree construction**: If the path is valid, a `ProjectTree` is built
+  ///   recursively, filtering out internal directories (e.g., `.git`).
+  ///
+  /// # Arguments
+  ///
+  /// * `path` - A filesystem path to the workspace root directory. Accepts any
+  ///   type that implements `AsRef<Path>` (e.g., `&str`, `String`, `PathBuf`).
+  ///
+  /// # Returns
+  ///
+  /// * `Ok(Self)` - A new `ProjectWorkspace` instance with the validated root
+  ///   path and a fully built project tree.
+  /// * `Err(ProjectWorkspaceError)` - If the path does not exist, is not a
+  ///   directory, or cannot be canonicalized.
+  ///
+  /// # Errors
+  ///
+  /// | Error variant                    | Condition                                                                |
+  /// |----------------------------------|--------------------------------------------------------------------------|
+  /// | `NotFound`                       | The path does not exist on the filesystem.                               |
+  /// | `Canonicalize`                   | Failed to resolve symlinks or obtain an absolute path.                   |
+  /// | `NotDirectory`                   | The path exists but is not a directory.                                  |
+  /// | `ReadDir`/`ReadEntry`/`FileType` | Filesystem errors during tree traversal (propagated from `build_entry`). |
+  ///
+  /// # TODO
+  ///
+  /// Currently, passing a file path will result in a `NotDirectory` error.
+  /// Future versions should handle single-file parameters gracefully:
+  /// - When a file is provided, open the file directly without showing the
+  ///   project sidebar (e.g., "open → render" action).
+  ///
+  /// # Note
+  ///
+  /// This function performs synchronous filesystem I/O and may block the current
+  /// thread. For large directories, consider calling this function from a
+  /// background thread to avoid UI freezes.
+  pub fn open(path: impl AsRef<Path>) -> Result<Self, ProjectWorkspaceError> {
+    let path_reference = path.as_ref();
+    if !path_reference.exists() {
+      return Err(ProjectWorkspaceError::NotFound(
+        path_reference.to_path_buf(),
+      ));
+    }
+
+    let root = path_reference
+      .canonicalize()
+      .map_err(|source| ProjectWorkspaceError::canonicalize(path_reference, source))?;
+
+    if !root.is_dir() {
+      // TODO: chitin should treat a single file parameter as normal `open ->
+      // render` action without showing project sidebar
+      return Err(ProjectWorkspaceError::NotDirectory(root));
+    }
+
+    let tree = ProjectTree {
+      root: build_entry(&root)?,
+    };
+
+    Ok(Self { root, tree })
+  }
 }
