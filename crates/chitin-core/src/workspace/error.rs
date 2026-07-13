@@ -141,8 +141,8 @@ impl ProjectWorkspaceError {
 ///
 /// let err = ProjectWorkspaceError::NotFound(PathBuf::from("/nonexistent"));
 /// assert_eq!(
-///     err.to_string(),
-///     "project path doesn't exist: /nonexistent"
+///   err.to_string(),
+///   "project path doesn't exist: /nonexistent"
 /// );
 /// ```
 ///
@@ -154,7 +154,9 @@ impl ProjectWorkspaceError {
 impl fmt::Display for ProjectWorkspaceError {
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
-      Self::NotFound(path) => write!(formatter, "project path doesn't exist: {}", path.display()),
+      Self::NotFound(path) => {
+        write!(formatter, "project path doesn't exist: {}", path.display())
+      }
       Self::NotDirectory(path) => {
         write!(
           formatter,
