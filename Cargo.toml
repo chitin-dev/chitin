@@ -2,6 +2,7 @@
 members = [
   "crates/chitin-core",
   "crates/chitin-desktop",
+  "crates/chitin-ui",
 ]
 resolver = "2"
 
