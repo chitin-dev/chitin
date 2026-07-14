@@ -118,6 +118,76 @@ pub fn oklcha(lightness: f32, chroma: f32, hue_degrees: f32, alpha: f32) -> gpui
   oklch_to_hsla(lightness, chroma, hue_degrees, alpha)
 }
 
+/// Converts a CSS-style CIE Lab color to GPUI [`Hsla`].
+///
+/// The input follows CSS `lab()` conventions:
+///
+/// - `lightness_percent`: CIE lightness in percent, usually `0.0..=100.0`
+/// - `a`: green/red opponent axis
+/// - `b`: blue/yellow opponent axis
+/// - `alpha`: opacity in the range `0.0..=1.0`
+///
+/// CSS Lab is D50-referenced. This function converts Lab to XYZ D50, adapts
+/// D50 to D65 with the Bradford matrix, converts to sRGB, clips to the sRGB
+/// gamut, and finally returns GPUI's HSLA representation.
+///
+/// # Examples
+///
+/// ```
+/// use chitin_ui::themes::colors::lab_to_hsla;
+///
+/// let white = lab_to_hsla(100.0, 0.0, 0.0, 1.0);
+/// assert!((white.l - 1.0).abs() < 0.000_1);
+/// ```
+pub fn lab_to_hsla(lightness_percent: f32, a: f32, b: f32, alpha: f32) -> Hsla {
+  let fy = (lightness_percent + 16.0) / 116.0;
+  let fx = fy + a / 500.0;
+  let fz = fy - b / 200.0;
+
+  let x_d50 = 0.964_22 * lab_inverse_transfer(fx);
+  let y_d50 = lab_inverse_transfer(fy);
+  let z_d50 = 0.825_21 * lab_inverse_transfer(fz);
+
+  let x_d65 = 0.955_576_6 * x_d50 - 0.023_039_3 * y_d50 + 0.063_163_6 * z_d50;
+  let y_d65 = -0.028_289_5 * x_d50 + 1.009_941_6 * y_d50 + 0.021_007_7 * z_d50;
+  let z_d65 = 0.012_298_2 * x_d50 - 0.020_483 * y_d50 + 1.329_909_8 * z_d50;
+
+  let linear_red = 3.240_454_2 * x_d65 - 1.537_138_5 * y_d65 - 0.498_531_4 * z_d65;
+  let linear_green = -0.969_266 * x_d65 + 1.876_010_8 * y_d65 + 0.041_556 * z_d65;
+  let linear_blue = 0.055_643_4 * x_d65 - 0.204_025_9 * y_d65 + 1.057_225_2 * z_d65;
+
+  Rgba {
+    r: linear_srgb_to_srgb(linear_red),
+    g: linear_srgb_to_srgb(linear_green),
+    b: linear_srgb_to_srgb(linear_blue),
+    a: alpha.clamp(0.0, 1.0),
+  }
+  .into()
+}
+
+/// Creates a CSS Lab color with full opacity.
+pub fn lab(lightness_percent: f32, a: f32, b: f32) -> Hsla {
+  laba(lightness_percent, a, b, 1.0)
+}
+
+/// Creates a CSS Lab color with explicit alpha.
+pub fn laba(lightness_percent: f32, a: f32, b: f32, alpha: f32) -> Hsla {
+  lab_to_hsla(lightness_percent, a, b, alpha)
+}
+
+fn lab_inverse_transfer(value: f32) -> f32 {
+  const EPSILON: f32 = 216.0 / 24_389.0;
+  const KAPPA: f32 = 24_389.0 / 27.0;
+
+  let cubed = value * value * value;
+
+  if cubed > EPSILON {
+    cubed
+  } else {
+    (116.0 * value - 16.0) / KAPPA
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -147,6 +217,24 @@ mod tests {
     assert!(color.h < 0.01 || color.h > 0.99);
     assert!((color.s - 1.0).abs() < 0.01);
     assert!((color.l - 0.5).abs() < 0.01);
+  }
+
+  #[test]
+  fn lab_to_hsla_should_convert_neutral_white() {
+    let color = lab_to_hsla(100.0, 0.0, 0.0, 1.0);
+
+    assert_close(color.l, 1.0);
+    assert_close(color.s, 0.0);
+    assert_close(color.a, 1.0);
+  }
+
+  #[test]
+  fn lab_to_hsla_should_convert_neutral_black() {
+    let color = lab_to_hsla(0.0, 0.0, 0.0, 0.5);
+
+    assert_close(color.l, 0.0);
+    assert_close(color.s, 0.0);
+    assert_close(color.a, 0.5);
   }
 
   fn assert_close(actual: f32, expected: f32) {
