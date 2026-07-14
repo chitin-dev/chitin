@@ -44,8 +44,14 @@ pub struct UIBackgroundColors {
   pub active: Hsla,
   /// Background color for selected rows, tabs, or navigation items.
   pub selection: Hsla,
-  /// Background color for badges, destructive indicators, or urgent counts.
-  pub danger: Hsla,
+  /// Background color for error badges, destructive indicators, or urgent counts.
+  pub error: Hsla,
+  /// Background color for warning badges
+  pub warning: Hsla,
+  /// Background color for info badges
+  pub info: Hsla,
+  /// Background color for successful badges
+  pub success: Hsla,
 }
 
 /// Semantic border colors for UI containers and controls.
