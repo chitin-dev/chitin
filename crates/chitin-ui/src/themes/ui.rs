@@ -40,6 +40,40 @@ pub struct UIBackgroundColors {
   pub secondary: Hsla,
   /// Background color when the mouse hovers over an interactive element.
   pub hover: Hsla,
+  /// Background color for active or pressed interface elements.
+  pub active: Hsla,
+  /// Background color for selected rows, tabs, or navigation items.
+  pub selection: Hsla,
+  /// Background color for badges, destructive indicators, or urgent counts.
+  pub danger: Hsla,
+}
+
+/// Semantic border colors for UI containers and controls.
+///
+/// Border tokens keep component outlines consistent across panels, list items,
+/// focus states, and separators. Components should use these semantic fields
+/// instead of hardcoding visual divider colors.
+#[derive(Clone, Copy, Debug)]
+pub struct UIBorderColors {
+  /// Default border color for panels, sidebars, and controls.
+  pub primary: Hsla,
+  /// Muted border color for subtle separators.
+  pub muted: Hsla,
+  /// Focus border color for active keyboard or mouse focus.
+  pub focus: Hsla,
+}
+
+/// Semantic accent colors for interactive highlights.
+///
+/// Accent tokens are used for selected navigation indicators, focus rings,
+/// active item marks, and other UI elements that should stand out from neutral
+/// surfaces.
+#[derive(Clone, Copy, Debug)]
+pub struct UIAccentColors {
+  /// Primary accent color for selected indicators and focused controls.
+  pub primary: Hsla,
+  /// Foreground color that remains readable on top of the primary accent.
+  pub foreground: Hsla,
 }
 
 /// This is the root UI theme structure used throughout the Chitin IDE.
@@ -50,4 +84,8 @@ pub struct UIThemes {
   pub text: UITextColors,
   /// Background color tokens for all surface and interactive elements.
   pub background: UIBackgroundColors,
+  /// Border color tokens for outlines and separators.
+  pub border: UIBorderColors,
+  /// Accent color tokens for active indicators and high-emphasis affordances.
+  pub accent: UIAccentColors,
 }
