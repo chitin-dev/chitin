@@ -1,2 +1,2 @@
-pub mod themes;
 pub mod components;
+pub mod themes;

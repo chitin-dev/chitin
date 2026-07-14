@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 chitin-core = { path = "../chitin-core" }
+chitin-ui = { path = "../chitin-ui" }
 gpui = "0.2.2"
 
 [lints]

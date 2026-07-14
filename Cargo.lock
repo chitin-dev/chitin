@@ -826,6 +826,7 @@ name = "chitin-desktop"
 version = "0.1.0"
 dependencies = [
  "chitin-core",
+ "chitin-ui",
  "gpui",
 ]
 
