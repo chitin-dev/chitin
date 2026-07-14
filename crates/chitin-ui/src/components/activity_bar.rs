@@ -11,8 +11,8 @@
 //! routing, permissions, and persistence outside this crate.
 
 use gpui::{
-  App, Hsla, IntoElement, MouseButton, MouseUpEvent, Pixels, SharedString, Window, div, prelude::*,
-  px,
+  App, IntoElement, MouseButton, MouseUpEvent, Pixels, Rgba, SharedString, Window, div, prelude::*,
+  px, svg,
 };
 
 use crate::themes::{UIThemes, builtins};
@@ -27,14 +27,13 @@ type ActivityBarItemClickListener = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut 
 pub const DEFAULT_ACTIVITY_BAR_WIDTH: Pixels = px(48.0);
 /// Default radius of the badge in activity bar items.
 pub const DEFAULT_ACTIVITY_BAR_BADGE_RADIUS: Pixels = px(16.0);
+pub const DEFAULT_ACTIVITY_BAR_ICON_WIDTH: Pixels = px(20.0);
 
 /// A single activity bar button.
 ///
-/// An item has a stable id, a user-facing label, and a compact icon string. The
-/// icon is intentionally represented as text for now so the component remains
-/// independent from any icon asset pipeline. Callers can pass a one-letter
-/// placeholder, a Unicode symbol, or later replace this with an icon-aware
-/// wrapper component.
+/// An item has a stable id, a user-facing label, and an SVG icon asset path.
+/// The component owns icon sizing and state colors, while applications choose
+/// which icon assets to pass.
 ///
 /// # State
 ///
@@ -44,7 +43,7 @@ pub const DEFAULT_ACTIVITY_BAR_BADGE_RADIUS: Pixels = px(16.0);
 pub struct ActivityBarItem {
   id: SharedString,
   label: SharedString,
-  icon: SharedString,
+  icon_path: SharedString,
   badge: Option<SharedString>,
   theme: UIThemes,
   selected: bool,
@@ -57,17 +56,17 @@ impl ActivityBarItem {
   ///
   /// `id` should be stable across renders because it is used for active-item
   /// comparison. `label` should be human-readable and suitable for future
-  /// tooltip or accessibility use. `icon` is the compact visual mark rendered
-  /// inside the activity bar cell.
+  /// tooltip or accessibility use. `icon_path` is resolved by GPUI's asset
+  /// source and should point to an SVG that can be painted with `currentColor`.
   pub fn new(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
-    icon: impl Into<SharedString>,
+    icon_path: impl Into<SharedString>,
   ) -> Self {
     Self {
       id: id.into(),
       label: label.into(),
-      icon: icon.into(),
+      icon_path: icon_path.into(),
       badge: None,
       theme: builtins::dark(),
       selected: false,
@@ -141,7 +140,7 @@ impl ActivityBarItem {
     self
   }
 
-  fn text_color(&self) -> Hsla {
+  fn text_color(&self) -> Rgba {
     if self.disabled {
       self.theme.text.disabled
     } else if self.selected {
@@ -159,8 +158,9 @@ impl IntoElement for ActivityBarItem {
     let selected = self.selected;
     let disabled = self.disabled;
     let text_color = self.text_color();
-    let badge = self.badge.clone();
+    let badge = self.badge;
     let theme = self.theme;
+    let icon_path = self.icon_path;
     // background color will not change, it keeps the same color. When user's
     // cursor hovers at the activity bar item, it changes its icon's color
 
@@ -177,9 +177,17 @@ impl IntoElement for ActivityBarItem {
       .cursor_pointer()
       .child(
         div()
-          .text_sm()
-          .font_weight(gpui::FontWeight::SEMIBOLD)
-          .child(self.icon),
+          .flex()
+          .items_center()
+          .justify_center()
+          .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
+          .child(
+            svg()
+              .path(icon_path)
+              .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
+              .text_color(text_color)
+              .hover(move |style| style.text_color(theme.text.hover)),
+          ),
       );
 
     // This creates the effect of left callout block
@@ -187,7 +195,7 @@ impl IntoElement for ActivityBarItem {
       item = item.child(
         div()
           .absolute()
-          .left_0()
+          .left(px(-2.0))
           .top_0()
           .w(px(2.0))
           .h(px(40.0))
@@ -245,9 +253,13 @@ impl IntoElement for ActivityBarItem {
 ///
 /// let activity_bar = ActivityBar::new()
 ///   .active_item("files")
-///   .item(ActivityBarItem::new("files", "Files", "F"))
-///   .item(ActivityBarItem::new("search", "Search", "S"))
-///   .bottom_item(ActivityBarItem::new("settings", "Settings", "*"));
+///   .item(ActivityBarItem::new("files", "Files", "icons/activity-bar/files.svg"))
+///   .item(ActivityBarItem::new("search", "Search", "icons/activity-bar/search.svg"))
+///   .bottom_item(ActivityBarItem::new(
+///     "settings",
+///     "Settings",
+///     "icons/activity-bar/settings.svg",
+///   ));
 /// ```
 pub struct ActivityBar {
   width: Pixels,
