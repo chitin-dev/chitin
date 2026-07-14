@@ -1,4 +1,4 @@
-use gpui::Hsla;
+use gpui::Rgba;
 
 /// Semantic text color palette for the IDE interface.
 ///
@@ -7,25 +7,25 @@ use gpui::Hsla;
 #[derive(Clone, Copy, Debug)]
 pub struct UITextColors {
   /// Primary text color for main content (file names, menu items).
-  pub primary: Hsla,
+  pub primary: Rgba,
   /// Secondary text color for metadata, hints, path descriptions, and placeholders.
-  pub secondary: Hsla,
+  pub secondary: Rgba,
   /// Text color for disabled or inactive UI elements (grayed out).
-  pub disabled: Hsla,
+  pub disabled: Rgba,
   /// Text color when the mouse hovers over an interactive element.
-  pub hover: Hsla,
+  pub hover: Rgba,
   /// Text color for selected items in lists.
-  pub selection: Hsla,
+  pub selection: Rgba,
   /// Text color for transient highlights (e.g., search matches, find results).
-  pub highlight: Hsla,
+  pub highlight: Rgba,
   /// Text color for critical errors, validation failures, or docking mistakes.
-  pub error: Hsla,
+  pub error: Rgba,
   /// Text color for warnings or non-critical alerts (e.g., deprecated features).
-  pub warning: Hsla,
+  pub warning: Rgba,
   /// Text color for informational messages, tips, or neutral system notes.
-  pub info: Hsla,
+  pub info: Rgba,
   /// Text color for success info
-  pub success: Hsla,
+  pub success: Rgba,
 }
 
 /// Semantic background colors for the Chitin IDE interface.
@@ -35,23 +35,23 @@ pub struct UITextColors {
 #[derive(Clone, Copy, Debug)]
 pub struct UIBackgroundColors {
   /// Primary background color for main content (file names, menu items).
-  pub primary: Hsla,
+  pub primary: Rgba,
   /// Secondary background color for metadata, hints, path descriptions, and placeholders.
-  pub secondary: Hsla,
+  pub secondary: Rgba,
   /// Background color when the mouse hovers over an interactive element.
-  pub hover: Hsla,
+  pub hover: Rgba,
   /// Background color for active or pressed interface elements.
-  pub active: Hsla,
+  pub active: Rgba,
   /// Background color for selected rows, tabs, or navigation items.
-  pub selection: Hsla,
+  pub selection: Rgba,
   /// Background color for error badges, destructive indicators, or urgent counts.
-  pub error: Hsla,
+  pub error: Rgba,
   /// Background color for warning badges
-  pub warning: Hsla,
+  pub warning: Rgba,
   /// Background color for info badges
-  pub info: Hsla,
+  pub info: Rgba,
   /// Background color for successful badges
-  pub success: Hsla,
+  pub success: Rgba,
 }
 
 /// Semantic border colors for UI containers and controls.
@@ -62,11 +62,11 @@ pub struct UIBackgroundColors {
 #[derive(Clone, Copy, Debug)]
 pub struct UIBorderColors {
   /// Default border color for panels, sidebars, and controls.
-  pub primary: Hsla,
+  pub primary: Rgba,
   /// Muted border color for subtle separators.
-  pub muted: Hsla,
+  pub muted: Rgba,
   /// Focus border color for active keyboard or mouse focus.
-  pub focus: Hsla,
+  pub focus: Rgba,
 }
 
 /// Semantic accent colors for interactive highlights.
@@ -77,9 +77,9 @@ pub struct UIBorderColors {
 #[derive(Clone, Copy, Debug)]
 pub struct UIAccentColors {
   /// Primary accent color for selected indicators and focused controls.
-  pub primary: Hsla,
+  pub primary: Rgba,
   /// Foreground color that remains readable on top of the primary accent.
-  pub foreground: Hsla,
+  pub foreground: Rgba,
 }
 
 /// This is the root UI theme structure used throughout the Chitin IDE.
