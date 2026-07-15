@@ -18,9 +18,10 @@ use crate::workspace::ProjectWorkspaceError;
 ///
 /// # Note
 ///
-/// This list is intentionally minimal. All other directories—including build
-/// outputs, cache directories, and IDE configs—remain visible because users may
-/// legitimately need to view or edit them.
+/// This list is intentionally minimal. Build outputs, package directories, and
+/// cache directories remain visible because users may legitimately need to
+/// inspect them. Their contents should be loaded lazily by the UI instead of
+/// hidden here.
 const NOT_DISPLAYED_DIRS: &[&str] = &[".git"];
 
 /// Represent the type of an entry in the project tree.
@@ -242,19 +243,18 @@ fn compare_entries(left: &ProjectTreeEntry, right: &ProjectTreeEntry) -> Orderin
   }
 }
 
-/// Recursively builds a hierarchical project tree entry for a given directory path.
+/// Builds a shallow project tree entry for a given directory path.
 ///
-/// This function traverses the filesystem starting from the provided directory,
-/// constructing a tree representation suitable for UI display. It recursively
-/// processes all subdirectories and files, filtering out hidden/internal
-/// directories (e.g., `.git`) and sorting entries consistently.
+/// This function reads only the direct children of `path`. Child directories are
+/// represented as expandable nodes with empty `children`; their contents should
+/// be loaded later when the user expands that node.
 ///
 /// # Behavior
 ///
-/// - **Directories**: Recursively traversed and expanded into tree nodes.
+/// - **Directories**: Added as child nodes without recursively reading them.
 /// - **Files**: Added as leaf nodes with no children.
 /// - **Filtering**: Directories matching `is_not_displayed_directory()` are
-///   skipped entirely (not included in the tree).
+///   skipped entirely.
 /// - **Sorting**: Children are sorted using `compare_entries()` (directories
 ///   first, then case-insensitive alphabetical order).
 ///
@@ -265,20 +265,11 @@ fn compare_entries(left: &ProjectTreeEntry, right: &ProjectTreeEntry) -> Orderin
 /// - `ReadEntry`: Failed to read a specific directory entry's metadata.
 /// - `FileType`: Failed to determine a path's file type.
 ///
-/// # Panics
-///
-/// TODO:
-/// This function should not panic in normal operation. However, if a path
-/// unexpectedly changes during traversal (e.g., symlink cycles), recursion may
-/// lead to stack overflow in pathological cases.
-///
 /// # Note
 ///
-/// TODO:
-/// This function uses recursion to traverse the directory tree. For extremely
-/// deep directory structures (e.g., nested > 1000 levels), consider using an
-/// iterative approach with an explicit stack to avoid potential stack overflow.
-/// The current implementation is suitable for typical project directory depths.
+/// Keeping this function shallow is important for desktop startup performance:
+/// large generated directories such as `target` or `node_modules` stay visible
+/// but are not traversed until the UI asks for them.
 fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspaceError> {
   let mut children = Vec::new();
 
@@ -293,8 +284,12 @@ fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspa
       continue;
     }
     if file_type.is_dir() {
-      // recursive function to work through the file tree
-      children.push(build_directory_entry(&child_path)?);
+      children.push(ProjectTreeEntry {
+        path: child_path.clone(),
+        name: display_name(&child_path),
+        kind: ProjectTreeEntryKind::Directory,
+        children: Vec::new(),
+      });
     } else if file_type.is_file() {
       children.push(ProjectTreeEntry {
         path: child_path.clone(),
@@ -319,16 +314,16 @@ fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspa
 ///
 /// This function determines the type of the path (file or directory) and
 /// constructs the appropriate `ProjectTreeEntry`:
-/// - For **directories**: delegates to `build_directory_entry()` to recursively
-///   build the entire subtree.
+/// - For **directories**: delegates to `build_directory_entry()` to build the
+///   immediate child list.
 /// - For **files**: creates a leaf entry with no children.
 ///
 /// # Behavior
 ///
 /// - The path is first checked for its metadata to determine if it is a file,
 ///   directory, or other special file type (symlinks are followed).
-/// - For directories, the entire contents are recursively traversed and
-///   filtered according to `build_directory_entry()` rules.
+/// - For directories, only direct children are read. Nested directories are
+///   loaded on demand through [`ProjectWorkspace::load_directory_children`].
 /// - For files, a simple leaf node is created without further processing.
 ///
 /// # Errors
@@ -336,12 +331,6 @@ fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspa
 /// Returns `ProjectWorkspaceError::FileType` if the path's metadata cannot be
 /// read (e.g., permission denied, broken symlink, or path does not exist).
 ///
-/// # Note
-///
-/// Symlinks are followed and the target's file type is used. If a symlink
-/// points to a directory, it will be recursively traversed. For symlink cycles,
-/// the recursion will continue until the OS reports an error (e.g., too many
-/// levels) or the call stack overflows.
 fn build_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspaceError> {
   let file_type = path
     .metadata()
@@ -373,8 +362,8 @@ impl ProjectWorkspace {
   ///   symlinks and obtain an absolute, normalized path.
   /// - **Validation**: The path must exist and point to a directory. Files are
   ///   currently not supported as workspace roots (see TODO note below).
-  /// - **Tree construction**: If the path is valid, a `ProjectTree` is built
-  ///   recursively, filtering out internal directories (e.g., `.git`).
+  /// - **Tree construction**: If the path is valid, a shallow `ProjectTree` is
+  ///   built for the root. Nested directories are loaded on user expansion.
   ///
   /// # Arguments
   ///
@@ -395,7 +384,7 @@ impl ProjectWorkspace {
   /// | `NotFound`                       | The path does not exist on the filesystem.                               |
   /// | `Canonicalize`                   | Failed to resolve symlinks or obtain an absolute path.                   |
   /// | `NotDirectory`                   | The path exists but is not a directory.                                  |
-  /// | `ReadDir`/`ReadEntry`/`FileType` | Filesystem errors during tree traversal (propagated from `build_entry`). |
+  /// | `ReadDir`/`ReadEntry`/`FileType` | Filesystem errors while reading direct children.                         |
   ///
   /// # TODO
   ///
@@ -406,9 +395,9 @@ impl ProjectWorkspace {
   ///
   /// # Note
   ///
-  /// This function performs synchronous filesystem I/O and may block the current
-  /// thread. For large directories, consider calling this function from a
-  /// background thread to avoid UI freezes.
+  /// This function performs synchronous filesystem I/O for the root directory
+  /// only. Directory expansion should still move to a background task once the
+  /// UI supports async loading indicators.
   pub fn open(path: impl AsRef<Path>) -> Result<Self, ProjectWorkspaceError> {
     let path_reference = path.as_ref();
     if !path_reference.exists() {
@@ -432,6 +421,18 @@ impl ProjectWorkspace {
     };
 
     Ok(Self { root, tree })
+  }
+
+  /// Loads the direct children of `path` without recursively reading
+  /// descendants.
+  ///
+  /// This is the core operation the UI should call when a collapsed directory
+  /// row is expanded. Directories such as `target` and `node_modules` remain
+  /// visible, but their contents are only read when the user explicitly asks.
+  pub fn load_directory_children(
+    path: impl AsRef<Path>,
+  ) -> Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError> {
+    Ok(build_directory_entry(path.as_ref())?.children)
   }
 }
 
@@ -519,14 +520,16 @@ mod tests {
 
   #[test]
   fn is_not_displayed_directory_should_hide_git_directory() {
-    let path = Path::new("/project/.git");
-    assert!(is_not_displayed_directory(path));
+    assert!(is_not_displayed_directory(Path::new("/project/.git")));
   }
 
   #[test]
-  fn is_not_displayed_directory_should_not_hide_regular_directory() {
-    let path = Path::new("/project/src");
-    assert!(!is_not_displayed_directory(path));
+  fn is_not_displayed_directory_should_not_hide_regular_or_generated_directory() {
+    assert!(!is_not_displayed_directory(Path::new("/project/src")));
+    assert!(!is_not_displayed_directory(Path::new("/project/target")));
+    assert!(!is_not_displayed_directory(Path::new(
+      "/project/node_modules"
+    )));
   }
 
   #[test]
@@ -588,16 +591,53 @@ mod tests {
   }
 
   #[test]
+  fn project_workspace_open_should_not_recursively_load_nested_directories()
+  -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("shallow-tree")?;
+    project.touch("src/main.rs")?;
+
+    let workspace = ProjectWorkspace::open(project.path())?;
+    let src = workspace
+      .tree
+      .root
+      .children
+      .iter()
+      .find(|child| child.name == "src")
+      .ok_or("src directory should exist")?;
+
+    assert!(src.children.is_empty());
+    Ok(())
+  }
+
+  #[test]
+  fn project_workspace_load_directory_children_should_load_on_demand() -> Result<(), Box<dyn Error>>
+  {
+    let project = TestProject::new("lazy-children")?;
+    project.touch("target/debug/chitin-desktop")?;
+
+    let target_path = project.path().join("target");
+    let children = ProjectWorkspace::load_directory_children(&target_path)?;
+    let names: Vec<_> = children.iter().map(|child| child.name.as_str()).collect();
+
+    assert_eq!(names, vec!["debug"]);
+    Ok(())
+  }
+
+  #[test]
   fn project_workspace_open_should_skip_not_displayed_directories() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("hidden-directories")?;
     project.mkdir(".git")?;
     project.touch(".git/config")?;
+    project.mkdir("target")?;
+    project.touch("target/debug/chitin-desktop")?;
+    project.mkdir("node_modules")?;
+    project.touch("node_modules/package/index.js")?;
     project.mkdir("src")?;
 
     let workspace = ProjectWorkspace::open(project.path())?;
     let names = child_names(&workspace.tree.root);
 
-    assert_eq!(names, vec!["src"]);
+    assert_eq!(names, vec!["node_modules", "src", "target"]);
     Ok(())
   }
 }
