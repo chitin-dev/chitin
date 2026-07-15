@@ -173,7 +173,7 @@ impl IntoElement for ActivityBarItem {
       .rounded_sm()
       .bg(theme.background.primary)
       .text_color(text_color)
-      .hover(|style| style.text_color(theme.text.hover))
+      .hover(|style| style.text_color(theme.accent.primary))
       .cursor_pointer()
       .child(
         div()
@@ -186,7 +186,7 @@ impl IntoElement for ActivityBarItem {
               .path(icon_path)
               .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
               .text_color(text_color)
-              .hover(move |style| style.text_color(theme.text.hover)),
+              .hover(move |style| style.text_color(theme.accent.primary)),
           ),
       );
 
