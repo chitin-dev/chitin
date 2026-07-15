@@ -72,26 +72,26 @@ pub fn render_activity_bar(
     .item(activity_item(
       cx,
       ActiveActivity::Files,
-      "icons/activity-bar/lucide-workspace.svg",
+      "icons/activity-bar/codicon-workspace.svg",
     ))
     .item(activity_item(
       cx,
       ActiveActivity::Search,
-      "icons/activity-bar/lucide-search.svg",
+      "icons/activity-bar/codicon-search.svg",
     ))
     .item(activity_item(
       cx,
       ActiveActivity::Jobs,
-      "icons/activity-bar/lucide-job.svg",
+      "icons/activity-bar/codicon-job.svg",
     ))
     .item(activity_item(
       cx,
       ActiveActivity::Agents,
-      "icons/activity-bar/lucide-agent.svg",
+      "icons/activity-bar/codicon-agent.svg",
     ))
     .bottom_item(activity_item(
       cx,
       ActiveActivity::Settings,
-      "icons/activity-bar/lucide-settings.svg",
+      "icons/activity-bar/codicon-settings.svg",
     ))
 }
