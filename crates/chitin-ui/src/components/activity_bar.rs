@@ -27,7 +27,7 @@ type ActivityBarItemClickListener = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut 
 pub const DEFAULT_ACTIVITY_BAR_WIDTH: Pixels = px(48.0);
 /// Default radius of the badge in activity bar items.
 pub const DEFAULT_ACTIVITY_BAR_BADGE_RADIUS: Pixels = px(16.0);
-pub const DEFAULT_ACTIVITY_BAR_ICON_WIDTH: Pixels = px(20.0);
+pub const DEFAULT_ACTIVITY_BAR_ICON_WIDTH: Pixels = px(24.0);
 
 /// A single activity bar button.
 ///
