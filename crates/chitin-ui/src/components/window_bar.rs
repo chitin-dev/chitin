@@ -1,3 +1,11 @@
+//! Window title bar components.
+//!
+//! This module provides a generic custom window bar with an app icon, title,
+//! optional subtitle, and caller-supplied right-side items. It does not decide
+//! which platform controls should be shown; applications provide minimize,
+//! maximize, close, or other commands through
+//! [`WindowBarItem`](crate::components::window_bar::WindowBarItem).
+
 use gpui::{
   App, InteractiveElement, IntoElement, MouseButton, MouseUpEvent, ParentElement, Pixels,
   SharedString, Styled, Window, div, px, svg,
@@ -166,7 +174,9 @@ impl IntoElement for WindowBarItem {
 ///   .subtitle("(unsaved)");
 /// ```
 pub enum WindowBarSubtitlePosition {
+  /// Render the subtitle before the main title.
   Left,
+  /// Render the subtitle after the main title.
   Right,
 }
 
@@ -199,13 +209,18 @@ pub struct WindowBar {
   app_icon_path: SharedString,
   /// Global visual theme defining the colors and styling
   theme: UIThemes,
-  /// Window bar items at right
-  /// TODO: Should it appear in Mac? Should consider the difference at different
-  /// platforms
+  /// Window bar items rendered at the right edge.
+  ///
+  /// Platform-specific decoration policies are handled by the application that
+  /// chooses which items to provide.
   right_items: Vec<WindowBarItem>,
 }
 
 impl WindowBar {
+  /// Creates a window bar with a title, app icon, and subtitle placement.
+  ///
+  /// `app_icon_path` is resolved by GPUI's asset source. Right-side window
+  /// controls can be added with [`Self::item`] or [`Self::items`].
   pub fn new(
     title: impl Into<SharedString>,
     app_icon_path: impl Into<SharedString>,

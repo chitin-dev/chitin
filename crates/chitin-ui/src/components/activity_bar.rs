@@ -7,7 +7,8 @@
 //!
 //! This module intentionally stays domain-neutral. It does not know about
 //! Chitin workspaces, molecules, docking jobs, or agents. Applications should
-//! map their own state into [`ActivityBarItem`] values and keep selection,
+//! map their own state into
+//! [`ActivityBarItem`](crate::components::activity_bar::ActivityBarItem) values and keep selection,
 //! routing, permissions, and persistence outside this crate.
 
 use gpui::{
@@ -27,6 +28,7 @@ type ActivityBarItemClickListener = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut 
 pub const DEFAULT_ACTIVITY_BAR_WIDTH: Pixels = px(48.0);
 /// Default radius of the badge in activity bar items.
 pub const DEFAULT_ACTIVITY_BAR_BADGE_RADIUS: Pixels = px(16.0);
+/// Default SVG icon size used by activity bar items.
 pub const DEFAULT_ACTIVITY_BAR_ICON_WIDTH: Pixels = px(24.0);
 
 /// A single activity bar button.
@@ -203,8 +205,8 @@ impl IntoElement for ActivityBarItem {
       );
     }
 
-    // TODO: badge's background color should depend on the status, some successful
-    // task finish, its status and background color should also be `success`.
+    // Badges currently use the theme's informational color. Status-specific
+    // colors should be added when the badge API grows a semantic status field.
     if let Some(badge) = badge {
       item = item.child(
         div()
