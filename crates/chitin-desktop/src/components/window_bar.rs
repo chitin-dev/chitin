@@ -1,3 +1,8 @@
+//! Desktop window bar composition.
+//!
+//! This module maps Chitin's window controls onto the generic
+//! `chitin-ui::WindowBar` component.
+
 use chitin_ui::{
   components::window_bar::{WindowBar, WindowBarItem, WindowBarSubtitlePosition},
   themes::builtins,
@@ -6,6 +11,7 @@ use gpui::{Context, IntoElement};
 
 use crate::app::ChitinApp;
 
+/// Renders the top window bar with app title and platform window controls.
 pub fn render_window_bar(_cx: &mut Context<ChitinApp>) -> impl IntoElement {
   let theme = builtins::dark();
 

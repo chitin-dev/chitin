@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+//! Chitin desktop binary entry point.
 
 mod app;
 mod components;
@@ -11,6 +12,7 @@ use gpui::{
   WindowOptions, px, size,
 };
 
+/// GPUI asset source backed by the repository's `assets/` directory.
 struct DesktopAssets {
   base: PathBuf,
 }
@@ -39,6 +41,8 @@ impl AssetSource for DesktopAssets {
 }
 
 fn main() {
+  let project_path = std::env::args_os().nth(1).map(PathBuf::from);
+
   Application::new()
     .with_assets(DesktopAssets {
       base: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
@@ -48,9 +52,13 @@ fn main() {
       let result = cx.open_window(
         WindowOptions {
           window_bounds: Some(WindowBounds::Windowed(bounds)),
+          app_id: Some("dev.chitin.Chitin".to_string()),
           ..Default::default()
         },
-        |_, cx| cx.new(|_| ChitinApp::new()),
+        |window, cx| {
+          window.activate_window();
+          cx.new(|_| ChitinApp::new(project_path))
+        },
       );
 
       if let Err(error) = result {

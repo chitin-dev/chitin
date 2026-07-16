@@ -1,3 +1,9 @@
+//! Desktop activity bar composition.
+//!
+//! This module maps Chitin workbench activities onto the generic
+//! `chitin-ui` activity bar component and wires item clicks into `ChitinApp`
+//! state.
+
 use chitin_ui::{
   components::activity_bar::{ActivityBar, ActivityBarItem},
   themes::builtins,
@@ -7,15 +13,22 @@ use gpui::{Context, IntoElement};
 use crate::app::ChitinApp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Top-level workbench area selected from the activity bar.
 pub enum ActiveActivity {
+  /// Project files and workspace tree.
   Files,
+  /// Search across project and scientific assets.
   Search,
+  /// Local and external job execution status.
   Jobs,
+  /// Agent sessions and planning views.
   Agents,
+  /// Application and workspace settings.
   Settings,
 }
 
 impl ActiveActivity {
+  /// Stable id used for activity bar selection.
   pub fn id(self) -> &'static str {
     match self {
       Self::Files => "files",
@@ -26,6 +39,7 @@ impl ActiveActivity {
     }
   }
 
+  /// Human-readable activity label.
   pub fn title(self) -> &'static str {
     match self {
       Self::Files => "Files",
@@ -36,6 +50,7 @@ impl ActiveActivity {
     }
   }
 
+  /// Short placeholder description for the main content area.
   pub fn description(self) -> &'static str {
     match self {
       Self::Files => "Project file tree will appear here.",
@@ -60,6 +75,7 @@ fn activity_item(
   ))
 }
 
+/// Renders the desktop activity bar and wires item clicks to app state.
 pub fn render_activity_bar(
   active_activity: ActiveActivity,
   cx: &mut Context<ChitinApp>,
