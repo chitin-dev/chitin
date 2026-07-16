@@ -361,7 +361,7 @@ impl ProjectWorkspace {
   /// - **Path resolution**: The provided path is canonicalized to resolve any
   ///   symlinks and obtain an absolute, normalized path.
   /// - **Validation**: The path must exist and point to a directory. Files are
-  ///   currently not supported as workspace roots (see TODO note below).
+  ///   currently rejected with [`ProjectWorkspaceError::NotDirectory`].
   /// - **Tree construction**: If the path is valid, a shallow `ProjectTree` is
   ///   built for the root. Nested directories are loaded on user expansion.
   ///
@@ -386,13 +386,6 @@ impl ProjectWorkspace {
   /// | `NotDirectory`                   | The path exists but is not a directory.                                  |
   /// | `ReadDir`/`ReadEntry`/`FileType` | Filesystem errors while reading direct children.                         |
   ///
-  /// # TODO
-  ///
-  /// Currently, passing a file path will result in a `NotDirectory` error.
-  /// Future versions should handle single-file parameters gracefully:
-  /// - When a file is provided, open the file directly without showing the
-  ///   project sidebar (e.g., "open → render" action).
-  ///
   /// # Note
   ///
   /// This function performs synchronous filesystem I/O for the root directory
@@ -411,8 +404,6 @@ impl ProjectWorkspace {
       .map_err(|source| ProjectWorkspaceError::canonicalize(path_reference, source))?;
 
     if !root.is_dir() {
-      // TODO: chitin should treat a single file parameter as normal `open ->
-      // render` action without showing project sidebar
       return Err(ProjectWorkspaceError::NotDirectory(root));
     }
 
