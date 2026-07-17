@@ -335,8 +335,16 @@ impl IntoElement for SidebarFooter {
 /// Sections are useful for grouping filters, tree roots, recent items, or
 /// tool-specific controls without forcing the whole sidebar into cards.
 pub struct SidebarSection {
+  /// Whether the section should fill remaining body space.
+  ///
+  /// Enable this for children that need a bounded viewport, such as virtual
+  /// lists or tree views.
+  fill: bool,
+  /// Theme applied to the section container.
   theme: UIThemes,
+  /// Child elements rendered inside the section.
   children: Vec<AnyElement>,
+  /// Whether the section should be hidden from layout.
   hidden: bool,
 }
 
@@ -344,6 +352,7 @@ impl SidebarSection {
   /// Creates an empty sidebar section.
   pub fn new() -> Self {
     Self {
+      fill: false,
       theme: builtins::dark(),
       children: Vec::new(),
       hidden: false,
@@ -359,6 +368,14 @@ impl SidebarSection {
   /// Overrides the visual theme used by this section.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
+    self
+  }
+
+  /// Makes this section fill the remaining height of the sidebar body.
+  ///
+  /// This is useful for virtualized content that needs a measurable viewport.
+  pub fn fill(mut self, fill: bool) -> Self {
+    self.fill = fill;
     self
   }
 
@@ -387,6 +404,7 @@ impl IntoElement for SidebarSection {
       .flex()
       .flex_col()
       .w_full()
+      .when(self.fill, |section| section.flex_1().min_h_0())
       .bg(self.theme.background.primary)
       .children(self.children)
   }

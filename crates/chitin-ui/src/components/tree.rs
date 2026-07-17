@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use gpui::{
   App, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString, Styled, Window,
-  div, px,
+  div, px, uniform_list,
 };
 
 use crate::themes::{UIThemes, builtins};
@@ -19,6 +19,18 @@ pub const DEFAULT_TREE_INDENT: f32 = 12.0;
 pub const DEFAULT_TREE_ROW_HEIGHT: gpui::Pixels = px(24.0);
 
 type TreeItemClickListener = Rc<dyn Fn(&TreeItemClickEvent, &mut Window, &mut App)>;
+
+/// One row in a flattened visible tree.
+///
+/// `Tree` converts expanded hierarchical data into this linear form before
+/// handing rows to GPUI's virtual list renderer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VisibleTreeItem {
+  /// Tree item rendered on this row.
+  pub item: TreeItem,
+  /// Zero-based nesting level used for indentation.
+  pub depth: usize,
+}
 
 /// Event emitted when a tree row is clicked.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -180,45 +192,82 @@ impl IntoElement for Tree {
   type Element = gpui::Div;
 
   fn into_element(self) -> Self::Element {
+    let rows = Rc::new(visible_tree_items(&self.root));
+    let row_count = rows.len();
+    let theme = self.theme;
+    let on_click = self.on_click;
+
     div()
       .flex()
-      .flex_col()
+      .flex_1()
+      .min_h_0()
       .w_full()
-      .text_color(self.theme.text.primary)
-      .child(render_tree_item(self.root, self.theme, 0, self.on_click))
+      .text_color(theme.text.primary)
+      .child(
+        uniform_list("tree-rows", row_count, move |range, _, _| {
+          range
+            .filter_map(|index| rows.get(index).cloned())
+            .map(|row| render_tree_row(row, theme, on_click.clone()))
+            .collect()
+        })
+        .size_full(),
+      )
   }
 }
 
-/// Renders a tree item and its descendants recursively.
+/// Flattens an expanded tree into rows suitable for virtual list rendering.
 ///
-/// Each row displays an expand/collapse marker for nodes, the item label,
-/// and applies indentation based on nesting depth. Hover and click interactions
-/// are handled with the provided theme and callback.
+/// Collapsed descendants are skipped, so the returned vector represents the
+/// rows that can appear in the viewport.
+pub fn visible_tree_items(root: &TreeItem) -> Vec<VisibleTreeItem> {
+  let mut rows = Vec::new();
+  collect_visible_tree_items(root, 0, &mut rows);
+  rows
+}
+
+fn collect_visible_tree_items(item: &TreeItem, depth: usize, rows: &mut Vec<VisibleTreeItem>) {
+  rows.push(VisibleTreeItem {
+    item: item.clone(),
+    depth,
+  });
+
+  if item.expanded {
+    for child in &item.children {
+      collect_visible_tree_items(child, depth + 1, rows);
+    }
+  }
+}
+
+/// Renders one virtualized tree row.
+///
+/// Each row displays a generic leading slot, the item label, and indentation
+/// based on nesting depth. Hover and click interactions are handled with the
+/// provided theme and callback. The row spans the full available width so hover
+/// styling and pointer hitboxes do not shrink to the text content.
 ///
 /// # Arguments
-/// * `item` - The tree item to render
+/// * `row` - The flattened row to render
 /// * `theme` - Visual styling for the item and descendants
-/// * `depth` - Nesting level used for indentation
 /// * `on_click` - Optional callback triggered when the item is clicked
 ///
 /// # Returns
-/// A `Div` element containing the rendered row and expanded children.
-fn render_tree_item(
-  item: TreeItem,
+/// A `Div` element containing the rendered row.
+fn render_tree_row(
+  row: VisibleTreeItem,
   theme: UIThemes,
-  depth: usize,
   on_click: Option<TreeItemClickListener>,
 ) -> gpui::Div {
+  let item = row.item;
   let id = item.id;
   let label = item.label;
-  let children = item.children;
-  let expanded = item.expanded;
 
   let mut row = div()
     .flex()
     .items_center()
+    // Keep hover background and pointer hitbox full-width inside uniform_list.
+    .w_full()
     .h(DEFAULT_TREE_ROW_HEIGHT)
-    .pl(px(depth as f32 * DEFAULT_TREE_INDENT))
+    .pl(px(row.depth as f32 * DEFAULT_TREE_INDENT))
     .pr_2()
     .gap_1()
     .text_xs()
@@ -245,17 +294,7 @@ fn render_tree_item(
     });
   }
 
-  let mut node = div().flex().flex_col().w_full().child(row);
-
-  if expanded {
-    node = node.children(
-      children
-        .into_iter()
-        .map(move |child| render_tree_item(child, theme, depth + 1, on_click.clone())),
-    );
-  }
-
-  node
+  row
 }
 
 #[cfg(test)]
@@ -270,5 +309,29 @@ mod tests {
 
     assert_eq!(item.children.len(), 1);
     assert_eq!(item.children[0].id(), "second");
+  }
+
+  #[test]
+  fn visible_tree_items_should_skip_collapsed_descendants() {
+    let tree = TreeItem::new("root", "root", TreeItemKind::Node)
+      .children([
+        TreeItem::new("expanded", "expanded", TreeItemKind::Node)
+          .expanded(true)
+          .children([TreeItem::new("child", "child", TreeItemKind::Leaf)]),
+        TreeItem::new("collapsed", "collapsed", TreeItemKind::Node).children([TreeItem::new(
+          "hidden",
+          "hidden",
+          TreeItemKind::Leaf,
+        )]),
+      ])
+      .expanded(true);
+
+    let rows = visible_tree_items(&tree);
+
+    let labels = rows
+      .iter()
+      .map(|row| row.item.label().as_ref())
+      .collect::<Vec<_>>();
+    assert_eq!(labels, ["root", "expanded", "child", "collapsed"]);
   }
 }

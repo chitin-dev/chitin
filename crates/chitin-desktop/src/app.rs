@@ -10,10 +10,10 @@ use std::{
 
 use chitin_core::{
   WorkspaceSummary,
-  workspace::{ProjectTreeEntry, ProjectWorkspace},
+  workspace::{ProjectTreeEntry, ProjectWorkspace, ProjectWorkspaceError},
 };
 use chitin_ui::themes::builtins;
-use gpui::{Context, FontWeight, Render, Window, div, prelude::*};
+use gpui::{Context, FontWeight, Render, Task, Window, div, prelude::*};
 
 use crate::components::{
   activity_bar::{ActiveActivity, render_activity_bar},
@@ -29,6 +29,8 @@ pub struct ChitinApp {
   workspace: Option<ProjectWorkspace>,
   /// Workspace tree directories currently expanded in the project sidebar.
   expanded_project_paths: HashSet<PathBuf>,
+  /// Workspace tree directories currently loading their direct children.
+  loading_project_paths: HashSet<PathBuf>,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
 }
@@ -88,6 +90,7 @@ impl ChitinApp {
       summary: WorkspaceSummary::default(),
       workspace,
       expanded_project_paths,
+      loading_project_paths: HashSet::new(),
       active_activity: ActiveActivity::Files,
     }
   }
@@ -95,32 +98,84 @@ impl ChitinApp {
   /// Toggles a project tree entry by filesystem path.
   ///
   /// Directory expansion is lazy: if the entry has no loaded children, this
-  /// method asks `chitin-core` to load only that directory's direct children.
-  pub(crate) fn toggle_project_tree_entry(&mut self, path: &Path) {
+  /// method schedules loading that directory's direct children on GPUI's
+  /// background executor and applies the result back to the app state.
+  pub(crate) fn toggle_project_tree_entry(&mut self, path: &Path, cx: &mut Context<Self>) {
+    if let ProjectTreeToggle::LoadChildren(path) = self.toggle_project_tree_entry_state(path) {
+      spawn_project_children_load(path, cx).detach();
+    }
+  }
+
+  fn toggle_project_tree_entry_state(&mut self, path: &Path) -> ProjectTreeToggle {
     let Some(workspace) = self.workspace.as_mut() else {
-      return;
+      return ProjectTreeToggle::None;
     };
 
     let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path) else {
-      return;
+      return ProjectTreeToggle::None;
     };
 
     if entry.is_file() {
-      return;
+      return ProjectTreeToggle::None;
     }
 
     if self.expanded_project_paths.remove(path) {
-      return;
+      return ProjectTreeToggle::None;
     }
 
     self.expanded_project_paths.insert(path.to_path_buf());
 
-    if entry.children.is_empty()
-      && let Ok(children) = ProjectWorkspace::load_directory_children(path)
+    if entry.children.is_empty() && self.loading_project_paths.insert(path.to_path_buf()) {
+      return ProjectTreeToggle::LoadChildren(path.to_path_buf());
+    }
+
+    ProjectTreeToggle::None
+  }
+
+  fn apply_project_children_load(
+    &mut self,
+    path: &Path,
+    result: Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError>,
+  ) {
+    self.loading_project_paths.remove(path);
+
+    let Ok(children) = result else {
+      return;
+    };
+
+    if !self.expanded_project_paths.contains(path) {
+      return;
+    }
+
+    if let Some(workspace) = self.workspace.as_mut()
+      && let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path)
+      && entry.children.is_empty()
     {
       entry.children = children;
     }
   }
+}
+
+enum ProjectTreeToggle {
+  None,
+  /// Expand a directory whose direct children have not been loaded yet.
+  LoadChildren(PathBuf),
+}
+
+/// Loads one directory's direct children away from the GPUI render path.
+fn spawn_project_children_load(path: PathBuf, cx: &mut Context<ChitinApp>) -> Task<()> {
+  cx.spawn(async move |app, cx| {
+    let load_path = path.clone();
+    let result = cx
+      .background_executor()
+      .spawn(async move { ProjectWorkspace::load_directory_children(&load_path) })
+      .await;
+
+    let _ = app.update(cx, |this, cx| {
+      this.apply_project_children_load(&path, result);
+      cx.notify();
+    });
+  })
 }
 
 fn find_project_entry_mut<'a>(
@@ -158,6 +213,7 @@ impl Render for ChitinApp {
             layout.child(render_project_sidebar(
               self.workspace.as_ref(),
               &self.expanded_project_paths,
+              &self.loading_project_paths,
               theme,
               cx,
             ))
@@ -287,9 +343,18 @@ mod tests {
       .map(|entry| entry.path.clone())
       .ok_or("non-UTF-8 child directory should be present")?;
 
-    app.toggle_project_tree_entry(&entry_path);
+    let toggle = app.toggle_project_tree_entry_state(&entry_path);
 
     assert!(app.expanded_project_paths.contains(&entry_path));
+    assert!(app.loading_project_paths.contains(&entry_path));
+
+    let ProjectTreeToggle::LoadChildren(load_path) = toggle else {
+      return Err("directory toggle should request lazy child loading".into());
+    };
+    assert_eq!(load_path, entry_path);
+
+    let children = ProjectWorkspace::load_directory_children(&load_path)?;
+    app.apply_project_children_load(&load_path, Ok(children));
 
     let workspace = app.workspace.as_ref().ok_or("workspace should stay open")?;
     let entry = workspace

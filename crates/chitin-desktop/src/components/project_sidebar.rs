@@ -25,6 +25,7 @@ pub const DEFAULT_PROJECT_WORKSPACE_TITLE: &str = "EXPLORER";
 pub fn render_project_sidebar(
   workspace: Option<&ProjectWorkspace>,
   expanded_paths: &HashSet<PathBuf>,
+  loading_paths: &HashSet<PathBuf>,
   theme: UIThemes,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
@@ -36,26 +37,26 @@ pub fn render_project_sidebar(
         .child(SidebarTitle::new(DEFAULT_PROJECT_WORKSPACE_TITLE).theme(theme)),
     )
     .child(
-      SidebarBody::new()
-        .theme(theme)
-        .id("project-sidebar-tree-scroll")
-        .scrollable(true)
-        .child(match workspace {
-          Some(workspace) => SidebarSection::new()
+      SidebarBody::new().theme(theme).child(match workspace {
+        Some(workspace) => {
+          SidebarSection::new()
             .theme(theme)
+            .fill(true)
             .child(render_workspace_tree(
               &workspace.tree.root,
               expanded_paths,
+              loading_paths,
               theme,
               cx,
-            )),
-          None => SidebarSection::new().theme(theme).child(
-            div()
-              .p_3()
-              .text_xs()
-              .text_color(theme.text.secondary)
-              .child("Open a project path to show files."),
-          ),
-        }),
+            ))
+        }
+        None => SidebarSection::new().theme(theme).child(
+          div()
+            .p_3()
+            .text_xs()
+            .text_color(theme.text.secondary)
+            .child("Open a project path to show files."),
+        ),
+      }),
     )
 }
