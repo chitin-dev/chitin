@@ -38,9 +38,47 @@ impl ChitinApp {
   ///
   /// If no path is provided, the current working directory is used. Workspace
   /// loading is shallow; child directories are loaded later when expanded.
+  ///
+  /// Workspace loading failures are logged so they can be distinguished from
+  /// the "no workspace" state.
   pub fn new(project_path: Option<PathBuf>) -> Self {
-    let workspace_path = project_path.or_else(|| std::env::current_dir().ok());
-    let workspace = workspace_path.and_then(|path| ProjectWorkspace::open(path).ok());
+    let (_, workspace) = match project_path {
+      Some(path) => match ProjectWorkspace::open(path.clone()) {
+        Ok(workspace) => (Some(path), Some(workspace)),
+        Err(err) => {
+          eprintln!(
+            "Failed to open workspace for project path '{}': {}",
+            path.display(),
+            err
+          );
+          (Some(path), None)
+        }
+      },
+      None => {
+        // when no path is provided, current working directory is used
+        match std::env::current_dir() {
+          Ok(path) => match ProjectWorkspace::open(path.clone()) {
+            Ok(workspace) => (Some(path), Some(workspace)),
+            Err(err) => {
+              eprintln!(
+                "Failed to open workspace for current directory '{}': {}",
+                path.display(),
+                err
+              );
+              (Some(path), None)
+            }
+          },
+          Err(err) => {
+            eprintln!(
+              "Failed to determine current directory for workspace: {}",
+              err
+            );
+            (None, None)
+          }
+        }
+      }
+    };
+
     let expanded_project_paths = workspace
       .as_ref()
       .map(|workspace| HashSet::from([workspace.tree.root.path.clone()]))
