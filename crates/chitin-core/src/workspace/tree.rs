@@ -185,7 +185,7 @@ fn display_name(path: &Path) -> String {
 ///
 /// # Returns
 ///
-/// - `true` if the path's final component is in NOT_DISPLAYED_DIRECTORIES
+/// - `true` if the path's final component is in NOT_DISPLAYED_DIR
 /// - `false` otherwise (including edge cases like root directories or
 ///   non-UTF-8 filenames)
 ///
