@@ -163,8 +163,15 @@ impl IntoElement for ActivityBarItem {
     let badge = self.badge;
     let theme = self.theme;
     let icon_path = self.icon_path;
-    // background color will not change, it keeps the same color. When user's
-    // cursor hovers at the activity bar item, it changes its icon's color
+
+    let mut icon = svg()
+      .path(icon_path)
+      .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
+      .text_color(text_color);
+
+    if !disabled {
+      icon = icon.hover(move |style| style.text_color(theme.accent.primary));
+    }
 
     let mut item = div()
       .relative()
@@ -175,22 +182,20 @@ impl IntoElement for ActivityBarItem {
       .rounded_sm()
       .bg(theme.background.primary)
       .text_color(text_color)
-      .hover(|style| style.text_color(theme.accent.primary))
-      .cursor_pointer()
       .child(
         div()
           .flex()
           .items_center()
           .justify_center()
           .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
-          .child(
-            svg()
-              .path(icon_path)
-              .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
-              .text_color(text_color)
-              .hover(move |style| style.text_color(theme.accent.primary)),
-          ),
+          .child(icon),
       );
+
+    if !disabled {
+      item = item
+        .hover(move |style| style.text_color(theme.accent.primary))
+        .cursor_pointer();
+    }
 
     // This creates the effect of left callout block
     if selected {
