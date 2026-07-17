@@ -9,5 +9,12 @@ description = "Reusable GPUI components for chitin desktop application"
 [dependencies]
 gpui = "0.2.2"
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "tree_virtualization"
+harness = false
+
 [lints]
 workspace = true

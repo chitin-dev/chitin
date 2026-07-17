@@ -26,8 +26,14 @@ type TreeItemClickListener = Rc<dyn Fn(&TreeItemClickEvent, &mut Window, &mut Ap
 /// handing rows to GPUI's virtual list renderer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VisibleTreeItem {
-  /// Tree item rendered on this row.
-  pub item: TreeItem,
+  /// Stable id of the item rendered on this row.
+  pub id: SharedString,
+  /// Display text shown on this row.
+  pub label: SharedString,
+  /// Semantic classification of the row item.
+  pub kind: TreeItemKind,
+  /// Whether this row's node is expanded.
+  pub expanded: bool,
   /// Zero-based nesting level used for indentation.
   pub depth: usize,
 }
@@ -227,7 +233,10 @@ pub fn visible_tree_items(root: &TreeItem) -> Vec<VisibleTreeItem> {
 
 fn collect_visible_tree_items(item: &TreeItem, depth: usize, rows: &mut Vec<VisibleTreeItem>) {
   rows.push(VisibleTreeItem {
-    item: item.clone(),
+    id: item.id.clone(),
+    label: item.label.clone(),
+    kind: item.kind,
+    expanded: item.expanded,
     depth,
   });
 
@@ -257,9 +266,8 @@ fn render_tree_row(
   theme: UIThemes,
   on_click: Option<TreeItemClickListener>,
 ) -> gpui::Div {
-  let item = row.item;
-  let id = item.id;
-  let label = item.label;
+  let id = row.id;
+  let label = row.label;
 
   let mut row = div()
     .flex()
@@ -330,7 +338,7 @@ mod tests {
 
     let labels = rows
       .iter()
-      .map(|row| row.item.label().as_ref())
+      .map(|row| row.label.as_ref())
       .collect::<Vec<_>>();
     assert_eq!(labels, ["root", "expanded", "child", "collapsed"]);
   }
