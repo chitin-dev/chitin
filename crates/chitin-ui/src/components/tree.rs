@@ -96,7 +96,7 @@ impl TreeItem {
 
   /// Replaces this item's children.
   pub fn children(mut self, children: impl IntoIterator<Item = TreeItem>) -> Self {
-    self.children.extend(children);
+    self.children = children.into_iter().collect();
     self
   }
 
@@ -256,4 +256,19 @@ fn render_tree_item(
   }
 
   node
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn children_should_replace_existing_children() {
+    let item = TreeItem::new("root", "root", TreeItemKind::Node)
+      .children([TreeItem::new("first", "first", TreeItemKind::Leaf)])
+      .children([TreeItem::new("second", "second", TreeItemKind::Leaf)]);
+
+    assert_eq!(item.children.len(), 1);
+    assert_eq!(item.children[0].id(), "second");
+  }
 }
