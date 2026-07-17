@@ -253,6 +253,8 @@ fn compare_entries(left: &ProjectTreeEntry, right: &ProjectTreeEntry) -> Orderin
 ///
 /// - **Directories**: Added as child nodes without recursively reading them.
 /// - **Files**: Added as leaf nodes with no children.
+/// - **Symlinks**: Classified using target metadata, so linked files and
+///   directories are visible while retaining the symlink path in the tree.
 /// - **Filtering**: Directories matching `is_not_displayed_directory()` are
 ///   skipped entirely.
 /// - **Sorting**: Children are sorted using `compare_entries()` (directories
@@ -276,9 +278,9 @@ fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspa
   for entry in fs::read_dir(path).map_err(|source| ProjectWorkspaceError::read_dir(path, source))? {
     let entry = entry.map_err(|source| ProjectWorkspaceError::read_entry(path, source))?;
     let child_path = entry.path();
-    let file_type = entry
-      .file_type()
-      .map_err(|source| ProjectWorkspaceError::file_type(&child_path, source))?;
+    let file_type = fs::metadata(&child_path)
+      .map_err(|source| ProjectWorkspaceError::file_type(&child_path, source))?
+      .file_type();
 
     if file_type.is_dir() && is_not_displayed_directory(&child_path) {
       continue;
@@ -578,6 +580,57 @@ mod tests {
     let names = child_names(&workspace.tree.root);
 
     assert_eq!(names, vec!["Assets", "src", "Alpha.rs", "zeta.rs"]);
+    Ok(())
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn project_workspace_open_should_include_symlinked_file() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let project = TestProject::new("symlinked-file")?;
+    project.touch("data/source.sdf")?;
+    symlink(
+      project.path().join("data/source.sdf"),
+      project.path().join("linked.sdf"),
+    )?;
+
+    let workspace = ProjectWorkspace::open(project.path())?;
+    let linked = workspace
+      .tree
+      .root
+      .children
+      .iter()
+      .find(|entry| entry.name == "linked.sdf")
+      .ok_or("symlinked file should be visible")?;
+
+    assert_eq!(linked.kind, ProjectTreeEntryKind::File);
+    Ok(())
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn project_workspace_open_should_include_symlinked_directory() -> Result<(), Box<dyn Error>> {
+    use std::os::unix::fs::symlink;
+
+    let project = TestProject::new("symlinked-directory")?;
+    project.touch("external-data/sample.pdb")?;
+    symlink(
+      project.path().join("external-data"),
+      project.path().join("linked-data"),
+    )?;
+
+    let workspace = ProjectWorkspace::open(project.path())?;
+    let linked = workspace
+      .tree
+      .root
+      .children
+      .iter()
+      .find(|entry| entry.name == "linked-data")
+      .ok_or("symlinked directory should be visible")?;
+
+    assert_eq!(linked.kind, ProjectTreeEntryKind::Directory);
+    assert!(linked.children.is_empty());
     Ok(())
   }
 
