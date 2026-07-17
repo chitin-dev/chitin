@@ -80,10 +80,10 @@ pub fn render_workspace_tree(
     uniform_list(
       "project-workspace-tree-rows",
       row_count,
-      cx.processor(move |this, range: Range<usize>, _, cx| {
+      cx.processor(move |_, range: Range<usize>, _, cx| {
         range
           .filter_map(|index| rows.get(index).cloned())
-          .map(|row| render_workspace_row(row, theme, this, cx))
+          .map(|row| render_workspace_row(row, theme, cx))
           .collect::<Vec<_>>()
       }),
     )
@@ -139,17 +139,10 @@ fn collect_visible_workspace_tree_rows(
 fn render_workspace_row(
   row: WorkspaceTreeRow,
   theme: UIThemes,
-  app: &mut ChitinApp,
   cx: &mut Context<ChitinApp>,
 ) -> gpui::Div {
   match row {
-    WorkspaceTreeRow::Entry {
-      path,
-      name,
-      kind,
-      expanded,
-      depth,
-    } => render_workspace_entry_row(path, name, kind, expanded, depth, theme, app, cx),
+    WorkspaceTreeRow::Entry { .. } => render_workspace_entry_row(row, theme, cx),
     WorkspaceTreeRow::Message { label, depth } => {
       render_workspace_tree_message(label, theme, depth)
     }
@@ -161,15 +154,21 @@ fn render_workspace_row(
 /// The row must occupy the full available width so hover backgrounds and click
 /// hitboxes span the sidebar instead of shrinking to icon and label content.
 fn render_workspace_entry_row(
-  path: PathBuf,
-  name: String,
-  kind: ProjectTreeEntryKind,
-  expanded: bool,
-  depth: usize,
+  row: WorkspaceTreeRow,
   theme: UIThemes,
-  _app: &mut ChitinApp,
   cx: &mut Context<ChitinApp>,
 ) -> gpui::Div {
+  let WorkspaceTreeRow::Entry {
+    path,
+    name,
+    kind,
+    expanded,
+    depth,
+  } = row
+  else {
+    return div().hidden();
+  };
+
   let is_dir = kind == ProjectTreeEntryKind::Directory;
   let item_icon = if is_dir {
     if expanded {
