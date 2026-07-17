@@ -1,71 +1,72 @@
 #![forbid(unsafe_code)]
+//! Chitin desktop binary entry point.
 
-use chitin_core::WorkspaceSummary;
+mod app;
+mod components;
+
+use std::{borrow::Cow, fs, path::PathBuf};
+
+use app::ChitinApp;
 use gpui::{
-  App, Application, Bounds, Context, FontWeight, Render, Window, WindowBounds, WindowOptions, div,
-  prelude::*, px, rgb, size,
+  App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds,
+  WindowOptions, px, size,
 };
 
-struct ChitinApp {
-  summary: WorkspaceSummary,
+/// GPUI asset source backed by the repository's `assets/` directory.
+struct DesktopAssets {
+  base: PathBuf,
 }
 
-impl Render for ChitinApp {
-  fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl gpui::IntoElement {
-    div()
-      .flex()
-      .flex_col()
-      .size_full()
-      .bg(rgb(0x101419))
-      .text_color(rgb(0xe8eef5))
-      .p_8()
-      .gap_4()
-      .child(
-        div()
-          .text_3xl()
-          .font_weight(FontWeight::SEMIBOLD)
-          .child(self.summary.product_name),
-      )
-      .child(
-        div()
-          .text_lg()
-          .text_color(rgb(0xaebdcc))
-          .child(self.summary.focus),
-      )
-      .child(
-        div()
-          .mt_6()
-          .p_4()
-          .rounded_md()
-          .border_1()
-          .border_color(rgb(0x2b3744))
-          .bg(rgb(0x161d24))
-          .child("Agent-native desktop shell initialized with GPUI."),
-      )
+impl AssetSource for DesktopAssets {
+  fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+    fs::read(self.base.join(path))
+      .map(|data| Some(Cow::Owned(data)))
+      .map_err(Into::into)
+  }
+
+  fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+    fs::read_dir(self.base.join(path))
+      .map(|entries| {
+        entries
+          .filter_map(|entry| {
+            entry
+              .ok()
+              .and_then(|entry| entry.file_name().into_string().ok())
+              .map(SharedString::from)
+          })
+          .collect()
+      })
+      .map_err(Into::into)
   }
 }
 
 fn main() {
-  Application::new().run(|cx: &mut App| {
-    let bounds = Bounds::centered(None, size(px(1100.0), px(760.0)), cx);
-    let result = cx.open_window(
-      WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(bounds)),
-        ..Default::default()
-      },
-      |_, cx| {
-        cx.new(|_| ChitinApp {
-          summary: WorkspaceSummary::default(),
-        })
-      },
-    );
+  let project_path = std::env::args_os().nth(1).map(PathBuf::from);
 
-    if let Err(error) = result {
-      eprintln!("failed to open Chitin desktop window: {error}");
-      cx.quit();
-      return;
-    }
+  Application::new()
+    .with_assets(DesktopAssets {
+      base: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
+    })
+    .run(|cx: &mut App| {
+      let bounds = Bounds::centered(None, size(px(1100.0), px(760.0)), cx);
+      let result = cx.open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(bounds)),
+          app_id: Some("dev.chitin.Chitin".to_string()),
+          ..Default::default()
+        },
+        |window, cx| {
+          window.activate_window();
+          cx.new(|_| ChitinApp::new(project_path))
+        },
+      );
 
-    cx.activate(true);
-  });
+      if let Err(error) = result {
+        eprintln!("failed to open Chitin desktop window: {error}");
+        cx.quit();
+        return;
+      }
+
+      cx.activate(true);
+    });
 }
