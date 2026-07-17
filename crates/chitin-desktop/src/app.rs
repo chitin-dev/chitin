@@ -92,18 +92,16 @@ impl ChitinApp {
     }
   }
 
-  /// Toggles a project tree entry by filesystem path string.
+  /// Toggles a project tree entry by filesystem path.
   ///
   /// Directory expansion is lazy: if the entry has no loaded children, this
   /// method asks `chitin-core` to load only that directory's direct children.
-  pub(crate) fn toggle_project_tree_entry(&mut self, id: &str) {
-    let path = PathBuf::from(id);
-
+  pub(crate) fn toggle_project_tree_entry(&mut self, path: &Path) {
     let Some(workspace) = self.workspace.as_mut() else {
       return;
     };
 
-    let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, &path) else {
+    let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path) else {
       return;
     };
 
@@ -111,14 +109,14 @@ impl ChitinApp {
       return;
     }
 
-    if self.expanded_project_paths.remove(&path) {
+    if self.expanded_project_paths.remove(path) {
       return;
     }
 
-    self.expanded_project_paths.insert(path.clone());
+    self.expanded_project_paths.insert(path.to_path_buf());
 
     if entry.children.is_empty()
-      && let Ok(children) = ProjectWorkspace::load_directory_children(&path)
+      && let Ok(children) = ProjectWorkspace::load_directory_children(path)
     {
       entry.children = children;
     }
@@ -212,5 +210,98 @@ impl Render for ChitinApp {
               ),
           ),
       )
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::{
+    error::Error,
+    ffi::OsString,
+    fs,
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+  };
+
+  use super::*;
+
+  struct TestProject {
+    root: PathBuf,
+  }
+
+  impl TestProject {
+    fn new(name: &str) -> Result<Self, Box<dyn Error>> {
+      let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+      let root =
+        std::env::temp_dir().join(format!("chitin-{name}-{}-{timestamp}", std::process::id()));
+
+      fs::create_dir(&root)?;
+
+      Ok(Self { root })
+    }
+
+    fn path(&self) -> &Path {
+      &self.root
+    }
+  }
+
+  impl Drop for TestProject {
+    fn drop(&mut self) {
+      let _ = fs::remove_dir_all(&self.root);
+    }
+  }
+
+  #[cfg(unix)]
+  fn non_utf8_name() -> OsString {
+    use std::os::unix::ffi::OsStringExt;
+
+    OsString::from_vec(b"non-utf8-\xFF".to_vec())
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn display_path_string_should_not_be_used_as_project_tree_id() {
+    let path = PathBuf::from(non_utf8_name());
+    let displayed = path.display().to_string();
+
+    assert_ne!(PathBuf::from(displayed), path);
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn toggle_project_tree_entry_should_support_non_utf8_paths() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("non-utf8-toggle")?;
+    let child_dir = project.path().join(non_utf8_name());
+    fs::create_dir(&child_dir)?;
+    fs::write(child_dir.join("child.txt"), "")?;
+
+    let mut app = ChitinApp::new(Some(project.path().to_path_buf()));
+    let workspace = app.workspace.as_ref().ok_or("workspace should open")?;
+    let entry_path = workspace
+      .tree
+      .root
+      .children
+      .iter()
+      .find(|entry| entry.path == child_dir)
+      .map(|entry| entry.path.clone())
+      .ok_or("non-UTF-8 child directory should be present")?;
+
+    app.toggle_project_tree_entry(&entry_path);
+
+    assert!(app.expanded_project_paths.contains(&entry_path));
+
+    let workspace = app.workspace.as_ref().ok_or("workspace should stay open")?;
+    let entry = workspace
+      .tree
+      .root
+      .children
+      .iter()
+      .find(|entry| entry.path == entry_path)
+      .ok_or("expanded non-UTF-8 directory should stay present")?;
+
+    assert_eq!(entry.children.len(), 1);
+    assert_eq!(entry.children[0].name, "child.txt");
+
+    Ok(())
   }
 }

@@ -28,8 +28,9 @@ const LIST_OPEN_ICON: &str = "icons/workspace/codicon-list-open.svg";
 /// Renders a workspace tree rooted at `root`.
 ///
 /// `expanded_paths` controls which directory rows display their loaded children.
-/// Clicking a row delegates to `ChitinApp::toggle_project_tree_entry`, which
-/// owns lazy loading and expansion state.
+/// Clicking a row delegates to `ChitinApp::toggle_project_tree_entry` with the
+/// original [`PathBuf`], which avoids lossy string round trips for non-UTF-8
+/// filesystem paths.
 pub fn render_workspace_tree(
   root: &ProjectTreeEntry,
   expanded_paths: &HashSet<PathBuf>,
@@ -51,7 +52,7 @@ fn render_workspace_entry(
   let theme = builtins::dark();
   let is_dir = entry.kind == ProjectTreeEntryKind::Directory;
   let expanded = expanded_paths.contains(&entry.path);
-  let path = entry.path.display().to_string();
+  let path = entry.path.clone();
   let item_icon = if is_dir {
     if expanded {
       FOLDER_OPEN_ICON
@@ -122,7 +123,7 @@ fn render_workspace_entry(
   row = row.on_mouse_up(
     MouseButton::Left,
     cx.listener(move |this, _, _, cx| {
-      this.toggle_project_tree_entry(path.as_str());
+      this.toggle_project_tree_entry(&path);
       cx.notify();
     }),
   );
