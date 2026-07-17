@@ -7,7 +7,7 @@
 use std::{collections::HashSet, path::PathBuf};
 
 use chitin_core::workspace::{ProjectTreeEntry, ProjectTreeEntryKind};
-use chitin_ui::themes::builtins;
+use chitin_ui::themes::UIThemes;
 use gpui::{
   Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, div, prelude::*,
   px, svg,
@@ -34,22 +34,23 @@ const LIST_OPEN_ICON: &str = "icons/workspace/codicon-list-open.svg";
 pub fn render_workspace_tree(
   root: &ProjectTreeEntry,
   expanded_paths: &HashSet<PathBuf>,
+  theme: UIThemes,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
   div()
     .flex()
     .flex_col()
     .w_full()
-    .child(render_workspace_entry(root, expanded_paths, 0, cx))
+    .child(render_workspace_entry(root, expanded_paths, theme, 0, cx))
 }
 
 fn render_workspace_entry(
   entry: &ProjectTreeEntry,
   expanded_paths: &HashSet<PathBuf>,
+  theme: UIThemes,
   depth: usize,
   cx: &mut Context<ChitinApp>,
 ) -> gpui::Div {
-  let theme = builtins::dark();
   let is_dir = entry.kind == ProjectTreeEntryKind::Directory;
   let expanded = expanded_paths.contains(&entry.path);
   let path = entry.path.clone();
@@ -135,7 +136,7 @@ fn render_workspace_entry(
       entry
         .children
         .iter()
-        .map(|child| render_workspace_entry(child, expanded_paths, depth + 1, cx)),
+        .map(|child| render_workspace_entry(child, expanded_paths, theme, depth + 1, cx)),
     );
   }
 

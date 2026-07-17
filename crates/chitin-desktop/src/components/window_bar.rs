@@ -5,16 +5,14 @@
 
 use chitin_ui::{
   components::window_bar::{WindowBar, WindowBarItem, WindowBarSubtitlePosition},
-  themes::builtins,
+  themes::UIThemes,
 };
 use gpui::{Context, IntoElement};
 
 use crate::app::ChitinApp;
 
 /// Renders the top window bar with app title and platform window controls.
-pub fn render_window_bar(_cx: &mut Context<ChitinApp>) -> impl IntoElement {
-  let theme = builtins::dark();
-
+pub fn render_window_bar(theme: UIThemes, _cx: &mut Context<ChitinApp>) -> impl IntoElement {
   WindowBar::new("Chitin", "logo-app.svg", WindowBarSubtitlePosition::Right)
     .theme(theme)
     .subtitle("open your project")

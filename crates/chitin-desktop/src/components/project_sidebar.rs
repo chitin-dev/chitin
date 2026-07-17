@@ -8,7 +8,7 @@ use std::{collections::HashSet, path::PathBuf};
 use chitin_core::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::sidebar::{Sidebar, SidebarBody, SidebarHeader, SidebarSection, SidebarTitle},
-  themes::builtins,
+  themes::UIThemes,
 };
 use gpui::{Context, IntoElement, div, prelude::*};
 
@@ -25,10 +25,9 @@ pub const DEFAULT_PROJECT_WORKSPACE_TITLE: &str = "EXPLORER";
 pub fn render_project_sidebar(
   workspace: Option<&ProjectWorkspace>,
   expanded_paths: &HashSet<PathBuf>,
+  theme: UIThemes,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
-  let theme = builtins::dark();
-
   Sidebar::new()
     .theme(theme)
     .child(
@@ -47,6 +46,7 @@ pub fn render_project_sidebar(
             .child(render_workspace_tree(
               &workspace.tree.root,
               expanded_paths,
+              theme,
               cx,
             )),
           None => SidebarSection::new().theme(theme).child(

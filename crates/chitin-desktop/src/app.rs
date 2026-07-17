@@ -147,17 +147,18 @@ impl Render for ChitinApp {
       .size_full()
       .bg(theme.background.primary)
       .text_color(theme.text.primary)
-      .child(render_window_bar(cx))
+      .child(render_window_bar(theme, cx))
       .child(
         div()
           .flex()
           .flex_1()
           .min_h_0()
-          .child(render_activity_bar(self.active_activity, cx))
+          .child(render_activity_bar(self.active_activity, theme, cx))
           .when(self.active_activity == ActiveActivity::Files, |layout| {
             layout.child(render_project_sidebar(
               self.workspace.as_ref(),
               &self.expanded_project_paths,
+              theme,
               cx,
             ))
           })

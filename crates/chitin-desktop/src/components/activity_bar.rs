@@ -6,7 +6,7 @@
 
 use chitin_ui::{
   components::activity_bar::{ActivityBar, ActivityBarItem},
-  themes::builtins,
+  themes::UIThemes,
 };
 use gpui::{Context, IntoElement};
 
@@ -78,10 +78,9 @@ fn activity_item(
 /// Renders the desktop activity bar and wires item clicks to app state.
 pub fn render_activity_bar(
   active_activity: ActiveActivity,
+  theme: UIThemes,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
-  let theme = builtins::dark();
-
   ActivityBar::new()
     .theme(theme)
     .active_item(active_activity.id())
