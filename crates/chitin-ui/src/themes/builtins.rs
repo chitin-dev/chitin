@@ -35,7 +35,8 @@ mod vscode_modern {
     use super::{Rgba, rgb_const, rgba_const};
 
     pub(in crate::themes::builtins) const BLUE: Rgba = rgb_const(0x0078d4);
-    pub(in crate::themes::builtins) const BLUE_HOVER: Rgba = rgb_const(0x026ec1);
+    pub(in crate::themes::builtins) const BLUE_TRANSPARENT: Rgba = rgba_const(0x0078d455);
+    pub(in crate::themes::builtins) const BLUE_HARD: Rgba = rgb_const(0x026ec1);
     pub(in crate::themes::builtins) const BLUE_LIGHT: Rgba = rgb_const(0x4daafc);
     pub(in crate::themes::builtins) const GREEN: Rgba = rgb_const(0x2ea043);
     pub(in crate::themes::builtins) const RED: Rgba = rgb_const(0xf85149);
@@ -68,7 +69,8 @@ mod vscode_modern {
     use super::{Rgba, rgb_const, rgba_const};
 
     pub(in crate::themes::builtins) const BLUE: Rgba = rgb_const(0x005fb8);
-    pub(in crate::themes::builtins) const BLUE_HOVER: Rgba = rgb_const(0x0258a8);
+    pub(in crate::themes::builtins) const BLUE_TRANSPARENT: Rgba = rgba_const(0x005fb8cc);
+    pub(in crate::themes::builtins) const BLUE_HARD: Rgba = rgb_const(0x0258a8);
     pub(in crate::themes::builtins) const BLUE_LIGHT: Rgba = rgb_const(0x68a3da);
     pub(in crate::themes::builtins) const GREEN: Rgba = rgb_const(0x2ea043);
     pub(in crate::themes::builtins) const RED: Rgba = rgb_const(0xf85149);
@@ -121,7 +123,7 @@ pub fn dark() -> UIThemes {
       secondary: dark::GRAY_1F,
       hover: dark::GRAY_2B,
       active: dark::GRAY_1F,
-      selection: dark::GRAY_2B,
+      selection: dark::BLUE_TRANSPARENT,
       error: dark::RED,
       warning: dark::YELLOW,
       info: dark::BLUE,
@@ -130,7 +132,7 @@ pub fn dark() -> UIThemes {
     border: UIBorderColors {
       primary: dark::GRAY_2B,
       muted: dark::WHITE_09,
-      focus: dark::BLUE,
+      focus: dark::BLUE_HARD,
     },
     accent: UIAccentColors {
       primary: dark::BLUE,
@@ -162,7 +164,7 @@ pub fn light() -> UIThemes {
       secondary: light::WHITE,
       hover: light::GRAY_F2,
       active: light::GRAY_E8,
-      selection: light::GRAY_E8,
+      selection: light::BLUE,
       error: light::RED,
       warning: light::YELLOW,
       info: light::BLUE,
@@ -171,7 +173,7 @@ pub fn light() -> UIThemes {
     border: UIBorderColors {
       primary: light::GRAY_E5,
       muted: light::GRAY_E5,
-      focus: light::BLUE,
+      focus: light::BLUE_HARD,
     },
     accent: UIAccentColors {
       primary: light::BLUE,

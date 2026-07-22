@@ -1,12 +1,9 @@
 //! Root GPUI application state and rendering.
 //!
 //! `ChitinApp` owns desktop-level state such as the active activity, currently
-//! opened project workspace, and the set of expanded workspace tree paths.
+//! opened project workspace, and project sidebar state.
 
-use std::{
-  collections::HashSet,
-  path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use chitin_core::{
   WorkspaceSummary,
@@ -17,7 +14,7 @@ use gpui::{Context, FontWeight, Render, Task, Window, div, prelude::*};
 
 use crate::components::{
   activity_bar::{ActiveActivity, render_activity_bar},
-  project_sidebar::render_project_sidebar,
+  project_sidebar::{ProjectSidebarState, render_project_sidebar},
   window_bar::render_window_bar,
 };
 
@@ -27,10 +24,8 @@ pub struct ChitinApp {
   summary: WorkspaceSummary,
   /// Currently opened project workspace, if a path was accepted.
   workspace: Option<ProjectWorkspace>,
-  /// Workspace tree directories currently expanded in the project sidebar.
-  expanded_project_paths: HashSet<PathBuf>,
-  /// Workspace tree directories currently loading their direct children.
-  loading_project_paths: HashSet<PathBuf>,
+  /// Project workspace sidebar state owned by the app.
+  project_sidebar_state: ProjectSidebarState,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
 }
@@ -81,20 +76,26 @@ impl ChitinApp {
       }
     };
 
-    // workspace is [`Option<ProjectWorkspace>`], so the `expanded_project_paths`
-    // will first be only a root of workspace
-    let expanded_project_paths = workspace
-      .as_ref()
-      .map(|workspace| HashSet::from([workspace.tree.root.path.clone()]))
-      .unwrap_or_default();
+    // The workspace root starts expanded so first-level entries are visible
+    // immediately after opening the desktop.
+    let project_sidebar_state = ProjectSidebarState::with_workspace_root(
+      workspace
+        .as_ref()
+        .map(|workspace| workspace.tree.root.path.as_path()),
+    );
 
     Self {
       summary: WorkspaceSummary::default(),
       workspace,
-      expanded_project_paths,
-      loading_project_paths: HashSet::new(),
+      project_sidebar_state,
       active_activity: ActiveActivity::Files,
     }
+  }
+
+  /// Selects and focuses a project tree entry by clicking
+  pub(crate) fn click_project_tree_entry(&mut self, path: &Path) {
+    self.project_sidebar_state.select_entry(path);
+    self.project_sidebar_state.focus_entry(path);
   }
 
   /// Toggles a project tree entry by filesystem path.
@@ -122,13 +123,21 @@ impl ChitinApp {
       return ProjectTreeToggle::None;
     }
 
-    if self.expanded_project_paths.remove(path) {
+    if self.project_sidebar_state.expanded_paths.remove(path) {
       return ProjectTreeToggle::None;
     }
 
-    self.expanded_project_paths.insert(path.to_path_buf());
+    self
+      .project_sidebar_state
+      .expanded_paths
+      .insert(path.to_path_buf());
 
-    if entry.children.is_empty() && self.loading_project_paths.insert(path.to_path_buf()) {
+    if entry.children.is_empty()
+      && self
+        .project_sidebar_state
+        .loading_paths
+        .insert(path.to_path_buf())
+    {
       return ProjectTreeToggle::LoadChildren(path.to_path_buf());
     }
 
@@ -154,9 +163,8 @@ impl ChitinApp {
     path: &Path,
     result: Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError>,
   ) {
-    // remove the path from [`loading_project_paths`], that means no matter the
-    // loading succeeds or fails, it removes the loading path
-    self.loading_project_paths.remove(path);
+    // Remove loading state no matter whether the load succeeds or fails.
+    self.project_sidebar_state.loading_paths.remove(path);
 
     let Ok(children) = result else {
       // if the loading fails, return directly
@@ -164,7 +172,7 @@ impl ChitinApp {
       return;
     };
 
-    if !self.expanded_project_paths.contains(path) {
+    if !self.project_sidebar_state.expanded_paths.contains(path) {
       // if the user collapsed this path before loading completed (no matter
       // succeeded or failed), return directly
       log::debug!(
@@ -299,8 +307,7 @@ impl Render for ChitinApp {
           .when(self.active_activity == ActiveActivity::Files, |layout| {
             layout.child(render_project_sidebar(
               self.workspace.as_ref(),
-              &self.expanded_project_paths,
-              &self.loading_project_paths,
+              &self.project_sidebar_state,
               theme,
               cx,
             ))
@@ -413,6 +420,29 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
+  fn select_project_tree_entry_should_update_selected_and_focused_paths()
+  -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("select-tree-entry")?;
+    let entry_path = project.path().join(non_utf8_name());
+    fs::write(&entry_path, "")?;
+
+    let mut app = ChitinApp::new(Some(project.path().to_path_buf()));
+    app.click_project_tree_entry(&entry_path);
+
+    assert_eq!(
+      app.project_sidebar_state.selected_path.as_deref(),
+      Some(entry_path.as_path())
+    );
+    assert_eq!(
+      app.project_sidebar_state.focused_path.as_deref(),
+      Some(entry_path.as_path())
+    );
+
+    Ok(())
+  }
+
+  #[cfg(unix)]
+  #[test]
   fn toggle_project_tree_entry_should_support_non_utf8_paths() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("non-utf8-toggle")?;
     let child_dir = project.path().join(non_utf8_name());
@@ -432,8 +462,18 @@ mod tests {
 
     let toggle = app.toggle_project_tree_entry_state(&entry_path);
 
-    assert!(app.expanded_project_paths.contains(&entry_path));
-    assert!(app.loading_project_paths.contains(&entry_path));
+    assert!(
+      app
+        .project_sidebar_state
+        .expanded_paths
+        .contains(&entry_path)
+    );
+    assert!(
+      app
+        .project_sidebar_state
+        .loading_paths
+        .contains(&entry_path)
+    );
 
     let ProjectTreeToggle::LoadChildren(load_path) = toggle else {
       return Err("directory toggle should request lazy child loading".into());

@@ -4,7 +4,7 @@
 //! intentionally desktop-specific: it uses workspace SVG assets and dispatches
 //! row clicks into `ChitinApp` so directories can be loaded lazily.
 
-use std::{collections::HashSet, path::PathBuf};
+use std::path::PathBuf;
 
 use chitin_core::workspace::{ProjectTreeEntry, ProjectTreeEntryKind};
 use chitin_ui::{
@@ -19,7 +19,7 @@ use gpui::{
   WeakEntity, div, prelude::*, px, svg,
 };
 
-use crate::app::ChitinApp;
+use crate::{app::ChitinApp, components::project_sidebar::ProjectSidebarState};
 
 const TREE_ICON_SIZE_VALUE: f32 = 16.0;
 const TREE_ICON_SIZE: gpui::Pixels = px(TREE_ICON_SIZE_VALUE);
@@ -42,19 +42,22 @@ struct WorkspaceEntryRow {
   name: String,
   /// Whether the entry represents a directory or file.
   kind: ProjectTreeEntryKind,
+  /// Whether this entry is currently selected etc. opened files
+  selected: bool,
+  /// Whether this entry is currently focused etc. keyboard navigation
+  focused: bool,
 }
 
 /// Renders a workspace tree rooted at `root`.
 ///
-/// `expanded_paths` controls which directory rows display their loaded children.
-/// `loading_paths` controls which directory rows display a loading placeholder.
+/// `state` controls which directory rows are expanded, loading, selected, or
+/// focused.
 /// Clicking a row delegates to `ChitinApp::toggle_project_tree_entry` with the
 /// original [`PathBuf`], which avoids lossy string round trips for non-UTF-8
 /// filesystem paths.
 pub fn render_workspace_tree(
   root: &ProjectTreeEntry,
-  expanded_paths: &HashSet<PathBuf>,
-  loading_paths: &HashSet<PathBuf>,
+  state: &ProjectSidebarState,
   theme: UIThemes,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
@@ -62,7 +65,7 @@ pub fn render_workspace_tree(
 
   virtual_tree_rows(
     "project-workspace-tree-rows",
-    visible_workspace_tree_rows(root, expanded_paths, loading_paths),
+    visible_workspace_tree_rows(root, state),
     move |row, _, _| render_workspace_row(row, theme, &app),
   )
 }
@@ -73,11 +76,10 @@ pub fn render_workspace_tree(
 /// filesystem-specific identity in [`WorkspaceEntryRow`].
 fn visible_workspace_tree_rows(
   entry: &ProjectTreeEntry,
-  expanded_paths: &HashSet<PathBuf>,
-  loading_paths: &HashSet<PathBuf>,
+  state: &ProjectSidebarState,
 ) -> Vec<TreeRow<WorkspaceEntryRow>> {
   let mut rows = Vec::new();
-  collect_visible_workspace_tree_rows(entry, expanded_paths, loading_paths, 0, &mut rows);
+  collect_visible_workspace_tree_rows(entry, state, 0, &mut rows);
   rows
 }
 
@@ -87,19 +89,22 @@ fn visible_workspace_tree_rows(
 /// loading receive a placeholder row instead of stale or empty children.
 fn collect_visible_workspace_tree_rows(
   entry: &ProjectTreeEntry,
-  expanded_paths: &HashSet<PathBuf>,
-  loading_paths: &HashSet<PathBuf>,
+  state: &ProjectSidebarState,
   depth: usize,
   rows: &mut Vec<TreeRow<WorkspaceEntryRow>>,
 ) {
   // Expansion and loading state are owned by `ChitinApp`, not by `chitin-ui`.
-  let expanded = expanded_paths.contains(&entry.path);
-  let loading = loading_paths.contains(&entry.path);
+  let expanded = state.expanded_paths.contains(&entry.path);
+  let loading = state.loading_paths.contains(&entry.path);
+  let selected = state.selected_path.as_deref() == Some(entry.path.as_path());
+  let focused = state.focused_path.as_deref() == Some(entry.path.as_path());
   rows.push(TreeRow::Item(TreeItemRow {
     data: WorkspaceEntryRow {
       path: entry.path.clone(),
       name: entry.name.clone(),
       kind: entry.kind,
+      selected,
+      focused,
     },
     expanded,
     depth,
@@ -115,7 +120,7 @@ fn collect_visible_workspace_tree_rows(
   // Loaded expanded directories contribute their visible descendants.
   if expanded && !loading {
     for child in &entry.children {
-      collect_visible_workspace_tree_rows(child, expanded_paths, loading_paths, depth + 1, rows);
+      collect_visible_workspace_tree_rows(child, state, depth + 1, rows);
     }
   }
 }
@@ -149,6 +154,8 @@ fn render_workspace_entry_row(
   let path = row.data.path;
   let name = row.data.name;
   let kind = row.data.kind;
+  let selected = row.data.selected;
+  let focused = row.data.focused;
   let expanded = row.expanded;
   let depth = row.depth;
 
@@ -177,13 +184,25 @@ fn render_workspace_entry_row(
     .pl(px(depth as f32 * DEFAULT_TREE_INDENT))
     .pr_2()
     .gap_1()
+    .when(selected, |row| {
+      row.border_2().bg(theme.background.selection)
+    })
+    .when(focused, |row| {
+      row.border_2().border_color(theme.border.focus)
+    })
     .text_xs()
     .cursor_pointer()
     .text_color(theme.text.secondary)
     .hover(move |style| {
-      style
-        .bg(theme.background.hover)
-        .text_color(theme.text.primary)
+      if selected {
+        style
+          .bg(theme.background.selection)
+          .text_color(theme.text.primary)
+      } else {
+        style
+          .bg(theme.background.hover)
+          .text_color(theme.text.primary)
+      }
     })
     .child(
       div()
@@ -226,6 +245,7 @@ fn render_workspace_entry_row(
     let app = app.clone();
     move |_, _, cx| {
       let _ = app.update(cx, |this, cx| {
+        this.click_project_tree_entry(&path);
         this.toggle_project_tree_entry(&path, cx);
         cx.notify();
       });
