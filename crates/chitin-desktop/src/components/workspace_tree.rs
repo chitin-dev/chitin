@@ -4,20 +4,24 @@
 //! intentionally desktop-specific: it uses workspace SVG assets and dispatches
 //! row clicks into `ChitinApp` so directories can be loaded lazily.
 
-use std::{collections::HashSet, ops::Range, path::PathBuf, rc::Rc};
+use std::{collections::HashSet, path::PathBuf};
 
 use chitin_core::workspace::{ProjectTreeEntry, ProjectTreeEntryKind};
-use chitin_ui::themes::UIThemes;
+use chitin_ui::{
+  components::tree::{
+    DEFAULT_TREE_INDENT, DEFAULT_TREE_ROW_HEIGHT, TreeItemRow, TreeMessageRow, TreeRow,
+    virtual_tree_rows,
+  },
+  themes::UIThemes,
+};
 use gpui::{
-  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString, Styled, div,
-  prelude::*, px, svg, uniform_list,
+  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString, Styled,
+  WeakEntity, div, prelude::*, px, svg,
 };
 
 use crate::app::ChitinApp;
 
-const TREE_INDENT: f32 = 12.0;
 const TREE_ICON_SIZE_VALUE: f32 = 16.0;
-const TREE_ROW_HEIGHT: gpui::Pixels = px(24.0);
 const TREE_ICON_SIZE: gpui::Pixels = px(TREE_ICON_SIZE_VALUE);
 
 const FILE_ICON: &str = "icons/workspace/catppuccin-default-file.svg";
@@ -26,33 +30,18 @@ const FOLDER_OPEN_ICON: &str = "icons/workspace/catppuccin-default-folder-open.s
 const LIST_CLOSED_ICON: &str = "icons/workspace/codicon-list-close.svg";
 const LIST_OPEN_ICON: &str = "icons/workspace/codicon-list-open.svg";
 
-/// A desktop-specific row in the flattened workspace tree.
+/// Desktop-specific payload for one workspace tree item row.
 ///
-/// The workspace tree is flattened before it is handed to GPUI's virtual list.
-/// This keeps rendering bounded by the viewport while preserving Chitin's
-/// desktop-specific icons and `PathBuf` click payloads outside `chitin-ui`.
-#[derive(Clone)]
-enum WorkspaceTreeRow {
-  /// A real filesystem entry row.
-  Entry {
-    /// Original filesystem path used for non-lossy click handling.
-    path: PathBuf,
-    /// Display name shown in the tree.
-    name: String,
-    /// Whether the entry represents a directory or file.
-    kind: ProjectTreeEntryKind,
-    /// Whether this directory is currently expanded.
-    expanded: bool,
-    /// Zero-based nesting level used for indentation.
-    depth: usize,
-  },
-  /// A non-interactive status row, such as a loading placeholder.
-  Message {
-    /// Status text shown in the row.
-    label: String,
-    /// Zero-based nesting level used for indentation.
-    depth: usize,
-  },
+/// The payload deliberately stores the original [`PathBuf`] so row events never
+/// round-trip through lossy display strings for non-UTF-8 filesystem paths.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WorkspaceEntryRow {
+  /// Original filesystem path used for non-lossy click handling.
+  path: PathBuf,
+  /// Display name shown in the tree.
+  name: String,
+  /// Whether the entry represents a directory or file.
+  kind: ProjectTreeEntryKind,
 }
 
 /// Renders a workspace tree rooted at `root`.
@@ -69,42 +58,24 @@ pub fn render_workspace_tree(
   theme: UIThemes,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
-  let rows = Rc::new(visible_workspace_tree_rows(
-    root,
-    expanded_paths,
-    loading_paths,
-  ));
-  let row_count = rows.len();
+  let app = cx.weak_entity();
 
-  // we use native [`uniform_list`] function provided by gpui to lazy rendering
-  // the workspace tree elements when there are too many children nodes.
-  div().flex().flex_1().min_h_0().w_full().child(
-    uniform_list(
-      "project-workspace-tree-rows",
-      row_count,
-      cx.processor(move |_, range: Range<usize>, _, cx| {
-        log::debug!("Visible range in workspace tree: {:?}", range);
-        range
-          .filter_map(|index| rows.get(index).cloned())
-          .map(|row| render_workspace_row(row, theme, cx))
-          .collect::<Vec<_>>()
-      }),
-    )
-    .size_full(),
+  virtual_tree_rows(
+    "project-workspace-tree-rows",
+    visible_workspace_tree_rows(root, expanded_paths, loading_paths),
+    move |row, _, _| render_workspace_row(row, theme, &app),
   )
 }
 
-/// Collect visible workspace tree rows from root, it's invoked in public function
-/// [`render_workspace_tree`] from root entry
+/// Builds the flattened workspace rows consumed by `chitin-ui`.
 ///
-/// It first creates new vector in type `Vec[WorkspaceTreeRow]`, then use internal
-/// function [`collect_visible_workspace_tree_rows`] to collect visible rows under
-/// workspace recursively
+/// This adapts [`ProjectTreeEntry`] into generic [`TreeRow`] values while keeping
+/// filesystem-specific identity in [`WorkspaceEntryRow`].
 fn visible_workspace_tree_rows(
   entry: &ProjectTreeEntry,
   expanded_paths: &HashSet<PathBuf>,
   loading_paths: &HashSet<PathBuf>,
-) -> Vec<WorkspaceTreeRow> {
+) -> Vec<TreeRow<WorkspaceEntryRow>> {
   let mut rows = Vec::new();
   collect_visible_workspace_tree_rows(entry, expanded_paths, loading_paths, 0, &mut rows);
   rows
@@ -119,29 +90,29 @@ fn collect_visible_workspace_tree_rows(
   expanded_paths: &HashSet<PathBuf>,
   loading_paths: &HashSet<PathBuf>,
   depth: usize,
-  rows: &mut Vec<WorkspaceTreeRow>,
+  rows: &mut Vec<TreeRow<WorkspaceEntryRow>>,
 ) {
-  // `expanded_paths` and `loading_paths` are managed by [`chitin_desktop::ChitinApp`]
+  // Expansion and loading state are owned by `ChitinApp`, not by `chitin-ui`.
   let expanded = expanded_paths.contains(&entry.path);
   let loading = loading_paths.contains(&entry.path);
-  rows.push(WorkspaceTreeRow::Entry {
-    path: entry.path.clone(),
-    name: entry.name.clone(),
-    kind: entry.kind,
+  rows.push(TreeRow::Item(TreeItemRow {
+    data: WorkspaceEntryRow {
+      path: entry.path.clone(),
+      name: entry.name.clone(),
+      kind: entry.kind,
+    },
     expanded,
     depth,
-  });
+  }));
 
   if expanded && loading {
-    log::debug!("Loading paths: {:?}", loading_paths);
-    rows.push(WorkspaceTreeRow::Message {
-      label: "Loading...".to_string(),
+    rows.push(TreeRow::Message(TreeMessageRow {
+      label: "Loading...".into(),
       depth: depth + 1,
-    });
+    }));
   }
 
-  // when the entry is expanded and finishes loading, we need to walk through
-  // `&entry.children` and collect them
+  // Loaded expanded directories contribute their visible descendants.
   if expanded && !loading {
     for child in &entry.children {
       collect_visible_workspace_tree_rows(child, expanded_paths, loading_paths, depth + 1, rows);
@@ -149,17 +120,18 @@ fn collect_visible_workspace_tree_rows(
   }
 }
 
-/// Render the workspace row according to its type: [`WorkspaceTreeRow::Entry`]
-/// will render the entry using file icons and directory icons;
-/// [`WorkspaceTreeRow::Message`] will render the message placeholder only.
+/// Render the workspace row according to its type.
+///
+/// Item rows render file and directory icons; message rows render status
+/// placeholders such as loading states.
 fn render_workspace_row(
-  row: WorkspaceTreeRow,
+  row: TreeRow<WorkspaceEntryRow>,
   theme: UIThemes,
-  cx: &mut Context<ChitinApp>,
+  app: &WeakEntity<ChitinApp>,
 ) -> gpui::Div {
   match row {
-    WorkspaceTreeRow::Entry { .. } => render_workspace_entry_row(row, theme, cx),
-    WorkspaceTreeRow::Message { label, depth } => {
+    TreeRow::Item(row) => render_workspace_entry_row(row, theme, app),
+    TreeRow::Message(TreeMessageRow { label, depth }) => {
       render_workspace_tree_message(label, theme, depth)
     }
   }
@@ -170,20 +142,15 @@ fn render_workspace_row(
 /// The row must occupy the full available width so hover backgrounds and click
 /// hitboxes span the sidebar instead of shrinking to icon and label content.
 fn render_workspace_entry_row(
-  row: WorkspaceTreeRow,
+  row: TreeItemRow<WorkspaceEntryRow>,
   theme: UIThemes,
-  cx: &mut Context<ChitinApp>,
+  app: &WeakEntity<ChitinApp>,
 ) -> gpui::Div {
-  let WorkspaceTreeRow::Entry {
-    path,
-    name,
-    kind,
-    expanded,
-    depth,
-  } = row
-  else {
-    return div().hidden();
-  };
+  let path = row.data.path;
+  let name = row.data.name;
+  let kind = row.data.kind;
+  let expanded = row.expanded;
+  let depth = row.depth;
 
   let is_dir = kind == ProjectTreeEntryKind::Directory;
   let item_icon = if is_dir {
@@ -206,8 +173,8 @@ fn render_workspace_entry_row(
     .items_center()
     // Keep hover background and pointer hitbox full-width inside uniform_list.
     .w_full()
-    .h(TREE_ROW_HEIGHT)
-    .pl(px(depth as f32 * TREE_INDENT))
+    .h(DEFAULT_TREE_ROW_HEIGHT)
+    .pl(px(depth as f32 * DEFAULT_TREE_INDENT))
     .pr_2()
     .gap_1()
     .text_xs()
@@ -255,13 +222,15 @@ fn render_workspace_entry_row(
         .child(name),
     );
 
-  row = row.on_mouse_up(
-    MouseButton::Left,
-    cx.listener(move |this, _, _, cx| {
-      this.toggle_project_tree_entry(&path, cx);
-      cx.notify();
-    }),
-  );
+  row = row.on_mouse_up(MouseButton::Left, {
+    let app = app.clone();
+    move |_, _, cx| {
+      let _ = app.update(cx, |this, cx| {
+        this.toggle_project_tree_entry(&path, cx);
+        cx.notify();
+      });
+    }
+  });
 
   row
 }
@@ -280,8 +249,10 @@ fn render_workspace_tree_message(
     .items_center()
     // Match entry row width so status-row backgrounds align with tree rows.
     .w_full()
-    .h(TREE_ROW_HEIGHT)
-    .pl(px(depth as f32 * TREE_INDENT + TREE_ICON_SIZE_VALUE * 2.0))
+    .h(DEFAULT_TREE_ROW_HEIGHT)
+    .pl(px(
+      depth as f32 * DEFAULT_TREE_INDENT + TREE_ICON_SIZE_VALUE * 2.0,
+    ))
     .pr_2()
     .text_xs()
     .text_color(theme.text.disabled)

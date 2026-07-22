@@ -81,6 +81,8 @@ impl ChitinApp {
       }
     };
 
+    // workspace is [`Option<ProjectWorkspace>`], so the `expanded_project_paths`
+    // will first be only a root of workspace
     let expanded_project_paths = workspace
       .as_ref()
       .map(|workspace| HashSet::from([workspace.tree.root.path.clone()]))
@@ -111,6 +113,7 @@ impl ChitinApp {
       return ProjectTreeToggle::None;
     };
 
+    // find the entry matches the path
     let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path) else {
       return ProjectTreeToggle::None;
     };
@@ -132,25 +135,53 @@ impl ChitinApp {
     ProjectTreeToggle::None
   }
 
+  /// Applies the result of an asynchronous directory children load operation.
+  ///
+  /// Clears the loading state for the given path, and if the load succeeded and
+  /// the directory is still expanded, updates the tree with the loaded children.
+  ///
+  /// # Arguments
+  /// * `path` - The directory path whose children were loaded
+  /// * `result` - The load result containing children or an error
+  ///
+  /// # Behavior
+  /// * On error: Clears loading state and returns without changes
+  /// * On success: Adds children to the tree if the directory is still expanded
+  ///   and currently has no children (prevents duplicate updates)
+  /// * If the user collapsed the directory during loading, children are discarded
   fn apply_project_children_load(
     &mut self,
     path: &Path,
     result: Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError>,
   ) {
+    // remove the path from [`loading_project_paths`], that means no matter the
+    // loading succeeds or fails, it removes the loading path
     self.loading_project_paths.remove(path);
 
     let Ok(children) = result else {
+      // if the loading fails, return directly
+      log::error!("Failed to load path: {:?}", path);
       return;
     };
 
     if !self.expanded_project_paths.contains(path) {
+      // if the user collapsed this path before loading completed (no matter
+      // succeeded or failed), return directly
+      log::debug!(
+        "User collapsed this path before loading completed: {:?}",
+        path
+      );
       return;
     }
 
     if let Some(workspace) = self.workspace.as_mut()
+      // get the mutable reference to `self.workspace`
       && let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path)
+      // find the entry that matches the path
       && entry.children.is_empty()
+    // only load entry which doesn't have children nodes, avoid duplicate loading
     {
+      log::debug!("Update the expanded state: {:?}", entry.path);
       entry.children = children;
     }
   }
@@ -162,10 +193,41 @@ enum ProjectTreeToggle {
   LoadChildren(PathBuf),
 }
 
-/// Loads one directory's direct children away from the GPUI render path.
+/// Spawns a background task to load a directory's direct children.
+///
+/// This function offloads filesystem I/O to a background executor to avoid
+/// blocking the UI thread. The loaded children are automatically applied
+/// to the workspace tree and the UI is refreshed upon completion.
+///
+/// # Arguments
+/// * `path` - The directory path whose children should be loaded
+/// * `cx` - GPUI context for spawning the task and updating the UI
+///
+/// # Returns
+/// A `Task<()>` that can be detached to run in the background or awaited
+/// if the result is needed synchronously.
+///
+/// # Behavior
+/// * The loading operation runs on `background_executor()`
+/// * Results are applied via `apply_project_children_load`
+/// * `cx.notify()` is called to refresh the UI after update
+/// * Errors are logged and handled gracefully without crashing
+///
+/// # Example
+/// ```no_run
+/// if let ProjectTreeToggle::LoadChildren(path) = toggle_state {
+///   spawn_project_children_load(path, cx).detach();
+/// }
+/// ```
+///
+/// # Note
+/// The spawned task is typically detached to run asynchronously, allowing
+/// the UI to remain responsive while directory contents are being loaded.
 fn spawn_project_children_load(path: PathBuf, cx: &mut Context<ChitinApp>) -> Task<()> {
+  // create an async task from current GPUI context
   cx.spawn(async move |app, cx| {
     let load_path = path.clone();
+    // execute time-consuming filesystem tasks in background
     let result = cx
       .background_executor()
       .spawn(async move { ProjectWorkspace::load_directory_children(&load_path) })
@@ -178,14 +240,39 @@ fn spawn_project_children_load(path: PathBuf, cx: &mut Context<ChitinApp>) -> Ta
   })
 }
 
+/// Finds and returns a mutable reference to the project tree entry at the
+/// specified filesystem path.
+///
+/// This function performs a depth-first search through the project tree,
+/// starting from the given root entry, and returns a mutable reference to
+/// the first entry whose `path` field matches the provided `path`.
+///
+/// # Parameters
+/// - `entry`: A mutable reference to the root of the project tree subtree
+///   to search within.
+/// - `path`: The filesystem path to locate within the project tree.
+///
+/// # Returns
+/// `Some(&mut ProjectTreeEntry)` containing a mutable reference to the
+/// matching entry if found, or `None` if no entry matches the given path.
+///
+/// # Notes
+/// - The search is recursive and visits all children of each directory entry.
+/// - Only the first matching entry is returned; duplicate paths are not supported.
+/// - This function does not follow symlinks or resolve path canonicalization.
 fn find_project_entry_mut<'a>(
   entry: &'a mut ProjectTreeEntry,
   path: &Path,
 ) -> Option<&'a mut ProjectTreeEntry> {
+  // using this lifecycle notation, it marks the lifecycle of returned reference
+  // has same lifecycle with the `entry` because it refers the path in entry,
+  // otherwise Rust doesn't know the lifecycle of returned reference.
+
   if entry.path == path {
     return Some(entry);
   }
 
+  // it uses recursive function to find the path in entry
   entry
     .children
     .iter_mut()

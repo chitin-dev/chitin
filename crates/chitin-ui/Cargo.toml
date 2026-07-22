@@ -8,6 +8,7 @@ description = "Reusable GPUI components for chitin desktop application"
 
 [dependencies]
 gpui = "0.2.2"
+log = "0.4.33"
 
 [dev-dependencies]
 criterion = "0.5"
