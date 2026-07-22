@@ -9,8 +9,8 @@ use std::{collections::HashSet, ops::Range, path::PathBuf, rc::Rc};
 use chitin_core::workspace::{ProjectTreeEntry, ProjectTreeEntryKind};
 use chitin_ui::themes::UIThemes;
 use gpui::{
-  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled, div, prelude::*,
-  px, svg, uniform_list,
+  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString, Styled, div,
+  prelude::*, px, svg, uniform_list,
 };
 
 use crate::app::ChitinApp;
@@ -76,11 +76,14 @@ pub fn render_workspace_tree(
   ));
   let row_count = rows.len();
 
+  // we use native [`uniform_list`] function provided by gpui to lazy rendering
+  // the workspace tree elements when there are too many children nodes.
   div().flex().flex_1().min_h_0().w_full().child(
     uniform_list(
       "project-workspace-tree-rows",
       row_count,
       cx.processor(move |_, range: Range<usize>, _, cx| {
+        log::debug!("Visible range in workspace tree: {:?}", range);
         range
           .filter_map(|index| rows.get(index).cloned())
           .map(|row| render_workspace_row(row, theme, cx))
@@ -91,6 +94,12 @@ pub fn render_workspace_tree(
   )
 }
 
+/// Collect visible workspace tree rows from root, it's invoked in public function
+/// [`render_workspace_tree`] from root entry
+///
+/// It first creates new vector in type `Vec[WorkspaceTreeRow]`, then use internal
+/// function [`collect_visible_workspace_tree_rows`] to collect visible rows under
+/// workspace recursively
 fn visible_workspace_tree_rows(
   entry: &ProjectTreeEntry,
   expanded_paths: &HashSet<PathBuf>,
@@ -112,6 +121,7 @@ fn collect_visible_workspace_tree_rows(
   depth: usize,
   rows: &mut Vec<WorkspaceTreeRow>,
 ) {
+  // `expanded_paths` and `loading_paths` are managed by [`chitin_desktop::ChitinApp`]
   let expanded = expanded_paths.contains(&entry.path);
   let loading = loading_paths.contains(&entry.path);
   rows.push(WorkspaceTreeRow::Entry {
@@ -123,12 +133,15 @@ fn collect_visible_workspace_tree_rows(
   });
 
   if expanded && loading {
+    log::debug!("Loading paths: {:?}", loading_paths);
     rows.push(WorkspaceTreeRow::Message {
       label: "Loading...".to_string(),
       depth: depth + 1,
     });
   }
 
+  // when the entry is expanded and finishes loading, we need to walk through
+  // `&entry.children` and collect them
   if expanded && !loading {
     for child in &entry.children {
       collect_visible_workspace_tree_rows(child, expanded_paths, loading_paths, depth + 1, rows);
@@ -136,6 +149,9 @@ fn collect_visible_workspace_tree_rows(
   }
 }
 
+/// Render the workspace row according to its type: [`WorkspaceTreeRow::Entry`]
+/// will render the entry using file icons and directory icons;
+/// [`WorkspaceTreeRow::Message`] will render the message placeholder only.
 fn render_workspace_row(
   row: WorkspaceTreeRow,
   theme: UIThemes,
@@ -255,7 +271,7 @@ fn render_workspace_entry_row(
 /// Message rows share the same fixed height as entry rows so `uniform_list`
 /// can virtualize them with the same measurement.
 fn render_workspace_tree_message(
-  message: impl Into<gpui::SharedString>,
+  message: impl Into<SharedString>,
   theme: UIThemes,
   depth: usize,
 ) -> gpui::Div {

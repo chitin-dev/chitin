@@ -41,6 +41,7 @@ impl AssetSource for DesktopAssets {
 }
 
 fn main() {
+  env_logger::init();
   let project_path = std::env::args_os().nth(1).map(PathBuf::from);
 
   Application::new()
