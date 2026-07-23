@@ -121,7 +121,8 @@ impl ChitinApp {
 /// Builds default keybindings for the project workspace tree.
 ///
 /// Arrow keys and `j`/`k` move focus, `Enter` activates the focused row, and
-/// `Home`/`End` jump to the first or last visible row. Every binding is scoped
+/// `Home`/`End` jump to the first or last visible row. Vim-style `g g` and
+/// `G` provide alternate first/last navigation. Every binding is scoped
 /// to [`PROJECT_TREE_KEY_CONTEXT`] so text inputs and future editors can
 /// override the same keystrokes in their own contexts.
 ///
@@ -131,8 +132,8 @@ impl ChitinApp {
 ///
 /// # Returns
 ///
-/// Seven GPUI keybindings for the current workspace tree navigation commands.
-pub(crate) fn default_key_bindings() -> [KeyBinding; 7] {
+/// Nine GPUI keybindings for the current workspace tree navigation commands.
+pub(crate) fn default_key_bindings() -> [KeyBinding; 9] {
   [
     KeyBinding::new("up", FocusPreviousEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("k", FocusPreviousEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
@@ -145,6 +146,8 @@ pub(crate) fn default_key_bindings() -> [KeyBinding; 7] {
     ),
     KeyBinding::new("home", FocusFirstEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("end", FocusLastEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
+    KeyBinding::new("g g", FocusFirstEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
+    KeyBinding::new("G", FocusLastEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
   ]
 }
 
@@ -180,8 +183,37 @@ mod tests {
   fn default_key_bindings_should_use_project_tree_context() {
     let bindings = default_key_bindings();
 
-    assert_eq!(bindings.len(), 7);
+    assert_eq!(bindings.len(), 9);
     assert!(bindings.iter().all(|binding| binding.predicate().is_some()));
+  }
+
+  /// Verifies that Vim-style tree navigation bindings are registered.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if the multi-key `g g` sequence or
+  /// uppercase `G` binding is not registered.
+  fn default_key_bindings_should_include_vim_bounds_navigation() {
+    let bindings = default_key_bindings();
+
+    assert!(bindings.iter().any(|binding| {
+      let keystrokes = binding.keystrokes();
+      keystrokes.len() == 2
+        && keystrokes.iter().all(|keystroke| {
+          keystroke.key() == "g"
+            && !keystroke.modifiers().shift
+            && !keystroke.modifiers().control
+            && !keystroke.modifiers().alt
+        })
+    }));
+    assert!(bindings.iter().any(|binding| {
+      let keystrokes = binding.keystrokes();
+      keystrokes.len() == 1 && keystrokes[0].key() == "g" && keystrokes[0].modifiers().shift
+    }));
   }
 
   /// Verifies that workspace commands map onto workspace tree navigation.
