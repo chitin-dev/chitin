@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 use chitin_core::{WorkspaceSummary, workspace::ProjectWorkspace};
 use chitin_ui::themes::builtins;
-use gpui::{Context, Render, Window, div, prelude::*};
+use gpui::{
+  Context, CursorStyle, InteractiveElement, MouseButton, Render, Window, div, prelude::*,
+};
 
 use crate::components::{
   activity_bar::{ActiveActivity, render_activity_bar},
@@ -98,6 +100,7 @@ impl Render for ChitinApp {
   /// Renders the root desktop workbench layout.
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
     let theme = builtins::dark();
+    let app = cx.weak_entity();
 
     div()
       .flex()
@@ -105,6 +108,26 @@ impl Render for ChitinApp {
       .size_full()
       .bg(theme.background.primary)
       .text_color(theme.text.primary)
+      .when(self.project_sidebar_state.is_resizing(), |layout| {
+        layout.cursor(CursorStyle::ResizeLeftRight)
+      })
+      .on_mouse_move({
+        let app = app.clone();
+        move |event, _, cx| {
+          let _ = app.update(cx, |this, cx| {
+            if this.project_sidebar_state.drag_resize(event.position.x) {
+              cx.notify();
+            }
+          });
+        }
+      })
+      .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+        let _ = app.update(cx, |this, cx| {
+          if this.project_sidebar_state.stop_resize() {
+            cx.notify();
+          }
+        });
+      })
       .child(render_window_bar(theme, cx))
       .child(
         div()

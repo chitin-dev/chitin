@@ -5,12 +5,17 @@
 //! panels: applications decide whether a sidebar shows files, search results,
 //! agent sessions, job queues, or settings.
 
+use std::rc::Rc;
+
 use gpui::{
-  AnyElement, Div, IntoElement, ParentElement, Pixels, SharedString, StatefulInteractiveElement,
-  Styled, div, prelude::*, px,
+  AnyElement, App, CursorStyle, Div, InteractiveElement, IntoElement, MouseButton, ParentElement,
+  Pixels, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px,
 };
 
 use crate::themes::{UIThemes, builtins};
+
+/// Callback invoked when a sidebar resize gesture starts.
+type SidebarResizeStartHandler = dyn Fn(Pixels, &mut Window, &mut App);
 
 /// Default width of the sidebar panel in pixels.
 ///
@@ -18,12 +23,175 @@ use crate::themes::{UIThemes, builtins};
 /// balancing content visibility with available screen space. Applications can
 /// override this value when creating their sidebar instance.
 pub const DEFAULT_SIDEBAR_WIDTH: Pixels = px(260.0);
+/// Default minimum width for a resizable sidebar.
+pub const DEFAULT_SIDEBAR_MIN_WIDTH: Pixels = px(180.0);
+/// Default maximum width for a resizable sidebar.
+pub const DEFAULT_SIDEBAR_MAX_WIDTH: Pixels = px(480.0);
+/// Default width of the sidebar resize handle.
+pub const DEFAULT_SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(4.0);
 /// Default height of the header/title bar in pixels.
 ///
 /// This value provides sufficient height for labels, icons, and interactive
 /// controls while maintaining a compact UI. Commonly used for workspace headers,
 /// panel titles, and toolbar sections.
 pub const DEFAULT_HEADER_HEIGHT: Pixels = px(30.0);
+
+/// Drag state for a sidebar resize interaction.
+#[derive(Clone, Copy, Debug)]
+struct SidebarResizeDrag {
+  /// Cursor x-position when the resize started.
+  start_x: Pixels,
+  /// Sidebar width when the resize started.
+  start_width: Pixels,
+}
+
+/// Reusable state for a resizable sidebar.
+///
+/// This type is UI-generic and owns only geometry state: current width, resize
+/// bounds, and active drag metadata. Applications keep this state in their own
+/// app model, forward pointer positions to it, and pass [`Self::width`] into
+/// [`Sidebar::width`].
+///
+/// # Example
+///
+/// ```no_run
+/// use chitin_ui::components::sidebar::SidebarResizeState;
+/// use gpui::px;
+///
+/// let mut resize = SidebarResizeState::default();
+/// resize.start_resize(px(100.0));
+/// resize.drag_resize(px(140.0));
+/// assert_eq!(resize.width(), px(300.0));
+/// resize.stop_resize();
+/// ```
+#[derive(Clone, Debug)]
+pub struct SidebarResizeState {
+  /// Current sidebar width.
+  width: Pixels,
+  /// Minimum allowed sidebar width.
+  min_width: Pixels,
+  /// Maximum allowed sidebar width.
+  max_width: Pixels,
+  /// Active resize drag metadata.
+  resize_drag: Option<SidebarResizeDrag>,
+}
+
+impl SidebarResizeState {
+  /// Creates sidebar resize state with default width bounds.
+  pub fn new() -> Self {
+    Self {
+      width: DEFAULT_SIDEBAR_WIDTH,
+      min_width: DEFAULT_SIDEBAR_MIN_WIDTH,
+      max_width: DEFAULT_SIDEBAR_MAX_WIDTH,
+      resize_drag: None,
+    }
+  }
+
+  /// Sets the initial sidebar width.
+  pub fn with_width(mut self, width: Pixels) -> Self {
+    self.resize_width(width);
+    self
+  }
+
+  /// Sets the minimum sidebar width.
+  pub fn with_min_width(mut self, min_width: Pixels) -> Self {
+    self.min_width = min_width;
+    self.resize_width(self.width);
+    self
+  }
+
+  /// Sets the maximum sidebar width.
+  pub fn with_max_width(mut self, max_width: Pixels) -> Self {
+    self.max_width = max_width;
+    self.resize_width(self.width);
+    self
+  }
+
+  /// Returns the current sidebar width.
+  pub fn width(&self) -> Pixels {
+    self.width
+  }
+
+  /// Returns whether the sidebar is currently being resized.
+  pub fn is_resizing(&self) -> bool {
+    self.resize_drag.is_some()
+  }
+
+  /// Starts a sidebar resize drag at the current cursor x-position.
+  pub fn start_resize(&mut self, start_x: Pixels) {
+    self.resize_drag = Some(SidebarResizeDrag {
+      start_x,
+      start_width: self.width,
+    });
+  }
+
+  /// Updates sidebar width from the current resize cursor x-position.
+  pub fn drag_resize(&mut self, current_x: Pixels) -> bool {
+    let Some(resize_drag) = self.resize_drag else {
+      return false;
+    };
+
+    self.resize_width(px(
+      f32::from(resize_drag.start_width) + f32::from(current_x) - f32::from(resize_drag.start_x),
+    ));
+    //    |------------|----------|
+    // 0            current_x  start_x
+    // so the current_width = start_width + (current_x - start_x)
+    true
+  }
+
+  /// Stops the current sidebar resize drag.
+  pub fn stop_resize(&mut self) -> bool {
+    self.resize_drag.take().is_some()
+    // take will remove the dragging state from self.resize_drag
+  }
+
+  /// Resizes the sidebar while respecting configured width bounds.
+  pub fn resize_width(&mut self, width: Pixels) {
+    self.width = self.clamp_width(width);
+  }
+
+  /// Clamps a width to this resize state's bounds. Clamping means the width will
+  /// not be less than min_width and will not be greater than max_width
+  fn clamp_width(&self, width: Pixels) -> Pixels {
+    px(f32::from(width).clamp(f32::from(self.min_width), f32::from(self.max_width)))
+  }
+}
+
+impl Default for SidebarResizeState {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+/// Configuration for rendering a sidebar resize handle.
+///
+/// `Sidebar` owns the generic handle visuals and pointer cursor. The caller
+/// provides state updates through `on_resize_start` so application state remains
+/// outside `chitin-ui`.
+#[derive(Clone)]
+pub struct SidebarResizeConfig {
+  /// Width of the resize handle.
+  handle_width: Pixels,
+  /// Callback invoked with cursor x-position when resizing starts.
+  on_resize_start: Rc<SidebarResizeStartHandler>,
+}
+
+impl SidebarResizeConfig {
+  /// Creates a resize configuration with the default handle width.
+  pub fn new(on_resize_start: impl Fn(Pixels, &mut Window, &mut App) + 'static) -> Self {
+    Self {
+      handle_width: DEFAULT_SIDEBAR_RESIZE_HANDLE_WIDTH,
+      on_resize_start: Rc::new(on_resize_start),
+    }
+  }
+
+  /// Sets the resize handle width.
+  pub fn handle_width(mut self, handle_width: Pixels) -> Self {
+    self.handle_width = handle_width;
+    self
+  }
+}
 
 /// Header region for a sidebar panel.
 ///
@@ -520,10 +688,17 @@ impl IntoElement for SidebarAction {
 /// right-side border, background, and vertical layout. Header/body/footer
 /// pieces can be composed as children.
 pub struct Sidebar {
+  /// Base container element for the sidebar shell.
   base: Div,
+  /// Theme applied to the sidebar frame and resize handle.
   theme: UIThemes,
+  /// Current sidebar width.
   width: gpui::Pixels,
+  /// Child elements rendered inside the sidebar.
   children: Vec<AnyElement>,
+  /// Optional resize behavior for the sidebar shell.
+  resize: Option<SidebarResizeConfig>,
+  /// Whether the sidebar should be hidden from layout.
   hidden: bool,
 }
 
@@ -535,6 +710,7 @@ impl Sidebar {
       theme: builtins::dark(),
       width: DEFAULT_SIDEBAR_WIDTH,
       children: Vec::new(),
+      resize: None,
       hidden: false,
     }
   }
@@ -554,6 +730,12 @@ impl Sidebar {
   /// Sets the sidebar width.
   pub fn width(mut self, width: gpui::Pixels) -> Self {
     self.width = width;
+    self
+  }
+
+  /// Enables the generic right-edge resize handle.
+  pub fn resizable(mut self, resize: SidebarResizeConfig) -> Self {
+    self.resize = Some(resize);
     self
   }
 
@@ -578,15 +760,86 @@ impl IntoElement for Sidebar {
       return div().hidden();
     }
 
-    self
+    let theme = self.theme;
+    let width = self.width;
+
+    let sidebar = self
       .base
       .flex()
       .flex_col()
-      .w(self.width)
+      .w(width)
       .h_full()
       .border_r_1()
-      .border_color(self.theme.border.primary)
-      .bg(self.theme.background.primary)
-      .children(self.children)
+      .border_color(theme.border.primary)
+      .bg(theme.background.primary)
+      .children(self.children);
+
+    if let Some(resize) = self.resize {
+      div()
+        .relative()
+        .flex()
+        .h_full()
+        .w(width)
+        .child(sidebar)
+        .child(render_sidebar_resize_handle(theme, resize))
+    } else {
+      sidebar
+    }
+  }
+}
+
+/// Renders the generic sidebar right-edge resize handle.
+fn render_sidebar_resize_handle(theme: UIThemes, resize: SidebarResizeConfig) -> Div {
+  let on_resize_start = resize.on_resize_start.clone();
+
+  div()
+    .absolute()
+    .right_0()
+    .top_0()
+    .bottom_0()
+    .w(resize.handle_width)
+    .cursor(CursorStyle::ResizeLeftRight)
+    .hover(move |style| style.bg(theme.border.focus))
+    .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+      on_resize_start(event.position.x, window, cx);
+    })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Verifies that sidebar resize width is clamped to the configured range.
+  #[test]
+  fn resize_width_should_clamp_to_sidebar_bounds() {
+    let mut state = SidebarResizeState::default();
+
+    state.resize_width(px(1.0));
+    assert_eq!(state.width(), DEFAULT_SIDEBAR_MIN_WIDTH);
+
+    state.resize_width(px(10_000.0));
+    assert_eq!(state.width(), DEFAULT_SIDEBAR_MAX_WIDTH);
+  }
+
+  /// Verifies that drag resize applies cursor delta to the starting width.
+  #[test]
+  fn drag_resize_should_apply_delta_from_drag_start() {
+    let mut state = SidebarResizeState::default();
+
+    state.start_resize(px(100.0));
+    assert!(state.drag_resize(px(140.0)));
+
+    assert_eq!(state.width(), px(f32::from(DEFAULT_SIDEBAR_WIDTH) + 40.0));
+  }
+
+  /// Verifies that stopping resize clears active resize state.
+  #[test]
+  fn stop_resize_should_clear_active_resize_state() {
+    let mut state = SidebarResizeState::default();
+
+    state.start_resize(px(100.0));
+    assert!(state.is_resizing());
+    assert!(state.stop_resize());
+    assert!(!state.is_resizing());
   }
 }
