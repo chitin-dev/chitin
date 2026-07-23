@@ -90,7 +90,7 @@ mod vscode_modern {
     use super::{Rgba, rgb_const, rgba_const};
 
     pub(in crate::themes::builtins) const BLUE: Rgba = rgb_const(0x005fb8);
-    pub(in crate::themes::builtins) const BLUE_TRANSPARENT: Rgba = rgba_const(0x005fb8cc);
+    pub(in crate::themes::builtins) const BLUE_TRANSPARENT: Rgba = rgba_const(0x005fb855);
     pub(in crate::themes::builtins) const BLUE_HARD: Rgba = rgb_const(0x0258a8);
     pub(in crate::themes::builtins) const BLUE_LIGHT: Rgba = rgb_const(0x68a3da);
     pub(in crate::themes::builtins) const GREEN: Rgba = rgb_const(0x2ea043);
@@ -201,7 +201,7 @@ pub fn light() -> UIThemes {
       secondary: light::WHITE,
       hover: light::GRAY_F2,
       active: light::GRAY_E8,
-      selection: light::BLUE,
+      selection: light::BLUE_TRANSPARENT,
       error: light::RED,
       warning: light::YELLOW,
       info: light::BLUE,
