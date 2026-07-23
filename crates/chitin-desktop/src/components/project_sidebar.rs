@@ -16,7 +16,10 @@ use chitin_ui::{
   },
   themes::UIThemes,
 };
-use gpui::{Context, FocusHandle, IntoElement, Pixels, div, prelude::*};
+use gpui::{
+  Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, UniformListScrollHandle, div,
+  prelude::*,
+};
 
 use crate::{
   app::ChitinApp,
@@ -48,6 +51,8 @@ pub struct ProjectSidebarState {
   pub selected_path: Option<PathBuf>,
   /// Workspace tree entry focused for keyboard navigation.
   pub focused_path: Option<PathBuf>,
+  /// Scroll handle for keeping keyboard-focused workspace tree rows visible.
+  pub tree_scroll: UniformListScrollHandle,
   /// Generic resize state for the project sidebar shell.
   pub resize: SidebarResizeState,
 }
@@ -71,6 +76,7 @@ impl ProjectSidebarState {
       loading_paths: HashSet::new(),
       selected_path: None,
       focused_path: None,
+      tree_scroll: UniformListScrollHandle::new(),
       resize: SidebarResizeState::default(),
     }
   }
@@ -99,6 +105,23 @@ impl ProjectSidebarState {
   /// This function returns `()` and mutates `focused_path`.
   pub fn focus_entry(&mut self, path: &Path) {
     self.focused_path = Some(path.to_path_buf());
+  }
+
+  /// Scrolls the workspace tree viewport until a rendered row is visible.
+  ///
+  /// # Parameters
+  ///
+  /// `row_index` is the zero-based index in the rendered virtual tree row
+  /// list, including non-focusable message rows.
+  ///
+  /// `strategy` controls which viewport edge should be used when the row is
+  /// outside the visible range.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` and records a deferred GPUI scroll request.
+  pub fn reveal_tree_row(&self, row_index: usize, strategy: ScrollStrategy) {
+    self.tree_scroll.scroll_to_item(row_index, strategy);
   }
 
   /// Starts a sidebar resize drag at the current cursor position.

@@ -12,13 +12,13 @@ use chitin_core::workspace::{
 use chitin_ui::{
   components::tree::{
     DEFAULT_TREE_INDENT, DEFAULT_TREE_ROW_HEIGHT, TreeItemRow, TreeMessageRow, TreeRow,
-    virtual_tree_rows,
+    virtual_tree_rows_with_scroll,
   },
   themes::{UIThemes, builtins},
 };
 use gpui::{
-  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString, Styled, Task,
-  WeakEntity, div, prelude::*, px, svg,
+  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, ScrollStrategy,
+  SharedString, Styled, Task, WeakEntity, div, prelude::*, px, svg,
 };
 
 use crate::{
@@ -100,11 +100,11 @@ impl ChitinApp {
 
     match navigation {
       WorkspaceTreeNavigation::FocusPrevious => {
-        self.focus_project_tree_entry(ProjectTreeFocusTarget::Previous);
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::Previous, ScrollStrategy::Top);
         ProjectTreeActivation::None
       }
       WorkspaceTreeNavigation::FocusNext => {
-        self.focus_project_tree_entry(ProjectTreeFocusTarget::Next);
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::Next, ScrollStrategy::Bottom);
         ProjectTreeActivation::None
       }
       WorkspaceTreeNavigation::ActivateFocused => {
@@ -115,11 +115,11 @@ impl ChitinApp {
         self.activate_project_tree_entry_state(&path)
       }
       WorkspaceTreeNavigation::FocusFirst => {
-        self.focus_project_tree_entry(ProjectTreeFocusTarget::First);
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::First, ScrollStrategy::Top);
         ProjectTreeActivation::None
       }
       WorkspaceTreeNavigation::FocusLast => {
-        self.focus_project_tree_entry(ProjectTreeFocusTarget::Last);
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::Last, ScrollStrategy::Bottom);
         ProjectTreeActivation::None
       }
     }
@@ -153,16 +153,28 @@ impl ChitinApp {
   /// `target` describes whether focus should move relatively
   /// (`Previous`/`Next`) or jump absolutely (`First`/`Last`).
   ///
+  /// `scroll_strategy` controls which viewport edge GPUI should use if the
+  /// focused row is outside the current virtual-list viewport.
+  ///
   /// # Returns
   ///
   /// `true` when focus was moved to a visible path; `false` when no workspace
   /// or visible tree row exists.
-  fn focus_project_tree_entry(&mut self, target: ProjectTreeFocusTarget) -> bool {
+  fn focus_project_tree_entry(
+    &mut self,
+    target: ProjectTreeFocusTarget,
+    scroll_strategy: ScrollStrategy,
+  ) -> bool {
     let Some(workspace) = self.workspace.as_ref() else {
       return false;
     };
 
-    let paths = visible_workspace_entry_paths(&workspace.tree.root, &self.project_sidebar_state);
+    let rows = visible_workspace_tree_rows(&workspace.tree.root, &self.project_sidebar_state);
+    let focusable_rows = focusable_workspace_tree_rows(&rows);
+    let paths = focusable_rows
+      .iter()
+      .map(|(_, path)| path.clone())
+      .collect::<Vec<_>>();
     let Some(target_index) = project_tree_focus_target_index(
       &paths,
       self.project_sidebar_state.focused_path.as_deref(),
@@ -172,7 +184,11 @@ impl ChitinApp {
       return false;
     };
 
-    self.project_sidebar_state.focus_entry(&paths[target_index]);
+    let (row_index, path) = focusable_rows[target_index].clone();
+    self.project_sidebar_state.focus_entry(&path);
+    self
+      .project_sidebar_state
+      .reveal_tree_row(row_index, scroll_strategy);
     true
   }
 
@@ -569,9 +585,10 @@ pub fn render_workspace_tree(
 ) -> impl IntoElement {
   let app = cx.weak_entity();
 
-  virtual_tree_rows(
+  virtual_tree_rows_with_scroll(
     "project-workspace-tree-rows",
     visible_workspace_tree_rows(root, state),
+    Some(state.tree_scroll.clone()),
     move |row, _, _| render_workspace_row(row, theme, &app),
   )
 }
@@ -615,14 +632,38 @@ fn visible_workspace_tree_rows(
 /// # Returns
 ///
 /// A `Vec<PathBuf>` containing the path of each visible entry in render order.
+#[cfg(test)]
 fn visible_workspace_entry_paths(
   entry: &ProjectTreeEntry,
   state: &ProjectSidebarState,
 ) -> Vec<PathBuf> {
-  visible_workspace_tree_rows(entry, state)
+  let rows = visible_workspace_tree_rows(entry, state);
+  focusable_workspace_tree_rows(&rows)
     .into_iter()
-    .filter_map(|row| match row {
-      TreeRow::Item(row) => Some(row.data.path),
+    .map(|(_, path)| path)
+    .collect()
+}
+
+/// Returns focusable row indexes and paths from flattened tree rows.
+///
+/// Message rows are intentionally skipped because keyboard focus should land
+/// only on real workspace entries, while the returned indexes still point into
+/// the complete rendered row list used by GPUI's virtual list.
+///
+/// # Parameters
+///
+/// `rows` is the flattened visible tree row list.
+///
+/// # Returns
+///
+/// A vector of `(row_index, path)` pairs for each focusable workspace entry in
+/// render order.
+fn focusable_workspace_tree_rows(rows: &[TreeRow<WorkspaceEntryRow>]) -> Vec<(usize, PathBuf)> {
+  rows
+    .iter()
+    .enumerate()
+    .filter_map(|(index, row)| match row {
+      TreeRow::Item(row) => Some((index, row.data.path.clone())),
       TreeRow::Message(_) => None,
     })
     .collect()

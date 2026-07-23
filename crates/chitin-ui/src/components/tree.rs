@@ -7,7 +7,10 @@
 
 use std::rc::Rc;
 
-use gpui::{App, ElementId, IntoElement, ParentElement, Styled, Window, div, px, uniform_list};
+use gpui::{
+  App, ElementId, IntoElement, ParentElement, Styled, UniformListScrollHandle, Window, div, px,
+  uniform_list,
+};
 
 /// Default indent of tree items between levels.
 pub const DEFAULT_TREE_INDENT: f32 = 12.0;
@@ -82,21 +85,66 @@ where
   T: Clone + 'static,
   R: IntoElement,
 {
+  virtual_tree_rows_with_scroll(id, rows, None, render_row)
+}
+
+/// Renders `rows` with a caller-owned uniform-list scroll handle.
+///
+/// The scroll handle lets application state drive viewport changes, such as
+/// keeping a keyboard-focused row visible while still reusing Chitin UI's
+/// generic tree virtualization. Callers should store the handle in stable view
+/// state and pass the same handle to this function on each render.
+///
+/// # Parameters
+///
+/// `id` is the stable GPUI element identifier used by `uniform_list`.
+///
+/// `rows` is the flattened list of visible item and message rows.
+///
+/// `scroll_handle` is the optional GPUI uniform-list handle used to preserve
+/// and control virtual-list scroll position.
+///
+/// `render_row` converts one row into a GPUI element when that row is inside
+/// the requested viewport range.
+///
+/// # Returns
+///
+/// A GPUI `Div` that fills its parent, tracks optional scroll state, and
+/// renders only rows requested by GPUI's virtual list machinery.
+pub fn virtual_tree_rows_with_scroll<T, R>(
+  id: impl Into<ElementId>,
+  rows: Vec<TreeRow<T>>,
+  scroll_handle: Option<UniformListScrollHandle>,
+  render_row: impl Fn(TreeRow<T>, &mut Window, &mut App) -> R + 'static,
+) -> gpui::Div
+where
+  T: Clone + 'static,
+  R: IntoElement,
+{
   let id = id.into();
   let log_id = id.clone();
   let rows = Rc::new(rows);
   let row_count = rows.len();
 
-  div().flex().flex_1().min_h_0().w_full().child(
-    uniform_list(id, row_count, move |range, window, cx| {
-      log::debug!("Virtual tree rows range is {:?}, from id {}", range, log_id);
-      range
-        .filter_map(|index| rows.get(index).cloned())
-        .map(|row| render_row(row, window, cx))
-        .collect()
-    })
-    .size_full(),
-  )
+  let list = uniform_list(id, row_count, move |range, window, cx| {
+    log::debug!("Virtual tree rows range is {:?}, from id {}", range, log_id);
+    range
+      .filter_map(|index| rows.get(index).cloned())
+      .map(|row| render_row(row, window, cx))
+      .collect()
+  });
+
+  let list = match scroll_handle {
+    Some(scroll_handle) => list.track_scroll(scroll_handle),
+    None => list,
+  };
+
+  div()
+    .flex()
+    .flex_1()
+    .min_h_0()
+    .w_full()
+    .child(list.size_full())
 }
 
 #[cfg(test)]
