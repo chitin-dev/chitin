@@ -104,7 +104,7 @@ impl ChitinApp {
       project_sidebar_state,
       project_sidebar_focus: None,
       active_document: None,
-      active_activity: ActiveActivity::Files,
+      active_activity: ActiveActivity::Workspace,
     }
   }
 
@@ -211,15 +211,18 @@ impl Render for ChitinApp {
           .flex_1()
           .min_h_0()
           .child(render_activity_bar(self.active_activity, theme, cx))
-          .when(self.active_activity == ActiveActivity::Files, |layout| {
-            layout.child(render_project_sidebar(
-              self.workspace.as_ref(),
-              &self.project_sidebar_state,
-              &project_sidebar_focus,
-              theme,
-              cx,
-            ))
-          })
+          .when(
+            self.active_activity == ActiveActivity::Workspace,
+            |layout| {
+              layout.child(render_project_sidebar(
+                self.workspace.as_ref(),
+                &self.project_sidebar_state,
+                &project_sidebar_focus,
+                theme,
+                cx,
+              ))
+            },
+          )
           .child(render_document_area(
             self.active_document.as_ref(),
             &self.summary,

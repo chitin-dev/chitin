@@ -154,6 +154,13 @@ mod tests {
 
   /// Verifies that workspace command IDs use stable dotted names.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if command IDs change unexpectedly.
   fn workspace_command_id_should_match_config_name() {
     assert_eq!(
       WorkspaceCommand::ActivateFocused.id(),
@@ -163,6 +170,13 @@ mod tests {
 
   /// Verifies that key bindings stay scoped to project tree focus.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if a keybinding loses its context.
   fn default_key_bindings_should_use_project_tree_context() {
     let bindings = default_key_bindings();
 
@@ -172,6 +186,13 @@ mod tests {
 
   /// Verifies that workspace commands map onto workspace tree navigation.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if command-to-navigation mapping changes.
   fn workspace_command_should_map_to_tree_navigation() {
     assert_eq!(
       WorkspaceCommand::FocusPrevious.tree_navigation(),

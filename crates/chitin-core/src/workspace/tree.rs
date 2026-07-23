@@ -141,11 +141,29 @@ pub struct ProjectWorkspace {
 
 impl ProjectTreeEntry {
   /// Returns `true` if this entry represents a directory.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`, the project tree entry being inspected.
+  ///
+  /// # Returns
+  ///
+  /// `true` when [`ProjectTreeEntry::kind`] is
+  /// [`ProjectTreeEntryKind::Directory`]; otherwise `false`.
   pub fn is_dir(&self) -> bool {
     self.kind == ProjectTreeEntryKind::Directory
   }
 
   /// Returns `true` if this entry represents a file.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`, the project tree entry being inspected.
+  ///
+  /// # Returns
+  ///
+  /// `true` when [`ProjectTreeEntry::kind`] is [`ProjectTreeEntryKind::File`];
+  /// otherwise `false`.
   pub fn is_file(&self) -> bool {
     self.kind == ProjectTreeEntryKind::File
   }
@@ -158,11 +176,14 @@ impl ProjectTreeEntry {
 /// (e.g., the root directory) or the filename contains invalid UTF-8 bytes,
 /// it falls back to the full path representation.
 ///
-/// # Fallback Behavior
+/// # Parameters
 ///
-/// - For paths with a valid UTF-8 filename: returns the filename as `String`
-/// - For root directories (`/`, `C:\`): returns the full path
-/// - For paths with non-UTF-8 filenames: returns the full path
+/// `path` is the filesystem path whose final component should be displayed.
+///
+/// # Returns
+///
+/// A display string using the valid UTF-8 file name when available, or the full
+/// path display string for roots and non-UTF-8 file names.
 ///
 /// # Note
 ///
@@ -180,14 +201,16 @@ fn display_name(path: &Path) -> String {
     .map_or_else(|| path.display().to_string(), ToOwned::to_owned)
 }
 
-/// Determines whether a path points to a directory that should be hidden from
-/// the project tree UI.
+/// Determines whether a path points to a directory hidden from the tree UI.
+///
+/// # Parameters
+///
+/// `path` is the filesystem path to test against the hidden-directory list.
 ///
 /// # Returns
 ///
-/// - `true` if the path's final component is in NOT_DISPLAYED_DIR
-/// - `false` otherwise (including edge cases like root directories or
-///   non-UTF-8 filenames)
+/// `true` when the path's final component is in [`NOT_DISPLAYED_DIRS`];
+/// otherwise `false`.
 ///
 /// # Note
 ///
@@ -214,6 +237,17 @@ fn is_not_displayed_directory(path: &Path) -> bool {
 ///    as equal for ordering purposes).
 /// 3. When two names are equal case-insensitively, the **original case** is used
 ///    as a tie-breaker (e.g., `README.md` comes before `readme.md`).
+///
+/// # Parameters
+///
+/// `left` is the first entry being compared.
+///
+/// `right` is the second entry being compared.
+///
+/// # Returns
+///
+/// An [`Ordering`] that places directories before files and then sorts names
+/// case-insensitively with case-sensitive tie-breaking.
 ///
 /// # Ordering Rules
 ///
@@ -259,6 +293,14 @@ fn compare_entries(left: &ProjectTreeEntry, right: &ProjectTreeEntry) -> Orderin
 ///   skipped entirely.
 /// - **Sorting**: Children are sorted using `compare_entries()` (directories
 ///   first, then case-insensitive alphabetical order).
+///
+/// # Parameters
+///
+/// `path` is the directory path to read.
+///
+/// # Returns
+///
+/// `Ok(ProjectTreeEntry)` for the directory with only direct children loaded.
 ///
 /// # Errors
 ///
@@ -328,6 +370,14 @@ fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspa
 ///   loaded on demand through [`ProjectWorkspace::load_directory_children`].
 /// - For files, a simple leaf node is created without further processing.
 ///
+/// # Parameters
+///
+/// `path` is the filesystem path to classify and convert into a tree entry.
+///
+/// # Returns
+///
+/// `Ok(ProjectTreeEntry)` for a file or a shallow directory entry.
+///
 /// # Errors
 ///
 /// Returns `ProjectWorkspaceError::FileType` if the path's metadata cannot be
@@ -367,17 +417,13 @@ impl ProjectWorkspace {
   /// - **Tree construction**: If the path is valid, a shallow `ProjectTree` is
   ///   built for the root. Nested directories are loaded on user expansion.
   ///
-  /// # Arguments
+  /// # Parameters
   ///
-  /// * `path` - A filesystem path to the workspace root directory. Accepts any
-  ///   type that implements `AsRef<Path>` (e.g., `&str`, `String`, `PathBuf`).
+  /// `path` is a filesystem path to the workspace root directory.
   ///
   /// # Returns
   ///
-  /// * `Ok(Self)` - A new `ProjectWorkspace` instance with the validated root
-  ///   path and a fully built project tree.
-  /// * `Err(ProjectWorkspaceError)` - If the path does not exist, is not a
-  ///   directory, or cannot be canonicalized.
+  /// `Ok(Self)` with the validated root path and a shallow project tree.
   ///
   /// # Errors
   ///
@@ -422,6 +468,19 @@ impl ProjectWorkspace {
   /// This is the core operation the UI should call when a collapsed directory
   /// row is expanded. Directories such as `target` and `node_modules` remain
   /// visible, but their contents are only read when the user explicitly asks.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the directory whose direct children should be loaded.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(Vec<ProjectTreeEntry>)` containing only direct child entries.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`ProjectWorkspaceError`] when the directory cannot be read or a
+  /// child entry cannot be classified.
   pub fn load_directory_children(
     path: impl AsRef<Path>,
   ) -> Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError> {
@@ -445,6 +504,15 @@ mod tests {
   }
 
   impl TestProject {
+    /// Creates a unique temporary project directory for one test.
+    ///
+    /// # Parameters
+    ///
+    /// `name` is a human-readable test name included in the directory prefix.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(TestProject)` when the temporary directory was created.
     fn new(name: &str) -> Result<Self, Box<dyn Error>> {
       let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
       let root =
@@ -455,15 +523,42 @@ mod tests {
       Ok(Self { root })
     }
 
+    /// Returns the root path of this temporary project.
+    ///
+    /// # Parameters
+    ///
+    /// This method reads `self`.
+    ///
+    /// # Returns
+    ///
+    /// A borrowed [`Path`] pointing at the project root.
     fn path(&self) -> &Path {
       &self.root
     }
 
+    /// Creates a directory inside the temporary project.
+    ///
+    /// # Parameters
+    ///
+    /// `path` is the project-relative directory path to create.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the directory and any missing parents were created.
     fn mkdir(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
       fs::create_dir_all(self.root.join(path))?;
       Ok(())
     }
 
+    /// Creates an empty file inside the temporary project.
+    ///
+    /// # Parameters
+    ///
+    /// `path` is the project-relative file path to create.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` when the file and any missing parent directories were created.
     fn touch(&self, path: impl AsRef<Path>) -> Result<(), Box<dyn Error>> {
       let path = self.root.join(path);
 
@@ -477,11 +572,32 @@ mod tests {
   }
 
   impl Drop for TestProject {
+    /// Removes the temporary project directory after the test.
+    ///
+    /// # Parameters
+    ///
+    /// This method mutably borrows `self` during drop.
+    ///
+    /// # Returns
+    ///
+    /// This function returns `()`. Cleanup errors are ignored because test
+    /// failures should report the assertion that failed first.
     fn drop(&mut self) {
       let _ = fs::remove_dir_all(&self.root);
     }
   }
 
+  /// Creates a synthetic project tree entry for sorting tests.
+  ///
+  /// # Parameters
+  ///
+  /// `name` is used as both the entry display name and path.
+  ///
+  /// `kind` is the file/directory kind assigned to the entry.
+  ///
+  /// # Returns
+  ///
+  /// A [`ProjectTreeEntry`] with no children.
   fn entry(name: &str, kind: ProjectTreeEntryKind) -> ProjectTreeEntry {
     ProjectTreeEntry {
       path: PathBuf::from(name),
@@ -491,6 +607,15 @@ mod tests {
     }
   }
 
+  /// Collects child names from a project tree entry.
+  ///
+  /// # Parameters
+  ///
+  /// `entry` is the tree node whose direct children should be inspected.
+  ///
+  /// # Returns
+  ///
+  /// Child names in their current vector order.
   fn child_names(entry: &ProjectTreeEntry) -> Vec<&str> {
     entry
       .children
@@ -500,23 +625,51 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if the display name is incorrect.
   fn display_name_should_return_final_path_component() {
     let path = Path::new("/home/user/project/Cargo.toml");
     assert_eq!(display_name(path), "Cargo.toml");
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if a root path display fallback fails.
   fn display_name_should_fallback_to_path_display_for_root_path() {
     let path = Path::new("/");
     assert_eq!(display_name(path), "/");
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if `.git` is not hidden.
   fn is_not_displayed_directory_should_hide_git_directory() {
     assert!(is_not_displayed_directory(Path::new("/project/.git")));
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if normal directories are hidden.
   fn is_not_displayed_directory_should_not_hide_regular_or_generated_directory() {
     assert!(!is_not_displayed_directory(Path::new("/project/src")));
     assert!(!is_not_displayed_directory(Path::new("/project/target")));
@@ -526,6 +679,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if directory/file ordering changes.
   fn compare_entries_should_sort_directories_before_files() {
     let directory = entry("src", ProjectTreeEntryKind::Directory);
     let file = entry("Cargo.toml", ProjectTreeEntryKind::File);
@@ -534,6 +694,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if case-insensitive name sorting changes.
   fn compare_entries_should_sort_names_case_insensitively() {
     let left = entry("alpha.rs", ProjectTreeEntryKind::File);
     let right = entry("Beta.rs", ProjectTreeEntryKind::File);
@@ -541,6 +708,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when missing paths are rejected as expected.
   fn project_workspace_open_should_reject_missing_path() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("missing-path")?;
     let missing_path = project.path().join("missing");
@@ -555,6 +729,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when file paths are rejected as non-directories.
   fn project_workspace_open_should_reject_file_path() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("file-path")?;
     project.touch("Cargo.toml")?;
@@ -569,6 +750,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when workspace children are sorted as expected.
   fn project_workspace_open_should_build_sorted_tree() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("sorted-tree")?;
     project.mkdir("src")?;
@@ -585,6 +773,13 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when symlinked files appear in the project tree.
   fn project_workspace_open_should_include_symlinked_file() -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::symlink;
 
@@ -610,6 +805,13 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when symlinked directories appear as shallow directory nodes.
   fn project_workspace_open_should_include_symlinked_directory() -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::symlink;
 
@@ -635,6 +837,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when nested directories are not loaded recursively on open.
   fn project_workspace_open_should_not_recursively_load_nested_directories()
   -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("shallow-tree")?;
@@ -654,6 +863,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when direct children load on demand for an expanded directory.
   fn project_workspace_load_directory_children_should_load_on_demand() -> Result<(), Box<dyn Error>>
   {
     let project = TestProject::new("lazy-children")?;
@@ -668,6 +884,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when hidden directories are skipped and visible directories stay.
   fn project_workspace_open_should_skip_not_displayed_directories() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("hidden-directories")?;
     project.mkdir(".git")?;

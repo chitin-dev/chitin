@@ -108,6 +108,13 @@ mod tests {
 
   /// Verifies that nested command IDs stay stable for text boundaries.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if hierarchical command IDs change.
   fn command_id_should_include_hierarchy_namespace() {
     let command = ChitinCommand::from(WorkspaceCommand::FocusNext);
 

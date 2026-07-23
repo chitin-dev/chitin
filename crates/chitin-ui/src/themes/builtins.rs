@@ -7,6 +7,15 @@
 use super::{UIAccentColors, UIBackgroundColors, UIBorderColors, UITextColors, UIThemes};
 use vscode_modern::{dark, light};
 
+/// Converts a 24-bit RGB hex value into a GPUI color.
+///
+/// # Parameters
+///
+/// `hex` is a `0xRRGGBB` color value.
+///
+/// # Returns
+///
+/// A fully opaque [`gpui::Rgba`] color.
 const fn rgb_const(hex: u32) -> gpui::Rgba {
   gpui::Rgba {
     r: ((hex >> 16) & 0xff) as f32 / 255.0,
@@ -16,6 +25,15 @@ const fn rgb_const(hex: u32) -> gpui::Rgba {
   }
 }
 
+/// Converts a 32-bit RGBA hex value into a GPUI color.
+///
+/// # Parameters
+///
+/// `hex` is a `0xRRGGBBAA` color value.
+///
+/// # Returns
+///
+/// A [`gpui::Rgba`] color with the alpha channel decoded from the low byte.
 const fn rgba_const(hex: u32) -> gpui::Rgba {
   gpui::Rgba {
     r: ((hex >> 24) & 0xff) as f32 / 255.0,
@@ -104,6 +122,14 @@ mod vscode_modern {
 ///
 /// The dark theme uses Visual Studio Code's Dark Modern colors, mapped into
 /// Chitin's semantic UI roles.
+///
+/// # Parameters
+///
+/// This function takes no parameters.
+///
+/// # Returns
+///
+/// A [`UIThemes`] value using Chitin's default dark theme colors.
 pub fn dark() -> UIThemes {
   UIThemes {
     text: UITextColors {
@@ -145,6 +171,14 @@ pub fn dark() -> UIThemes {
 ///
 /// The light theme uses Visual Studio Code's Light Modern colors, mapped into
 /// the same semantic UI roles as [`dark`].
+///
+/// # Parameters
+///
+/// This function takes no parameters.
+///
+/// # Returns
+///
+/// A [`UIThemes`] value using Chitin's default light theme colors.
 pub fn light() -> UIThemes {
   UIThemes {
     text: UITextColors {

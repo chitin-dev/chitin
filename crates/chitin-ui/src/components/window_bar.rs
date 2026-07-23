@@ -70,6 +70,18 @@ impl WindowBarItem {
   /// `label` should be human-readable and suitable for future tooltip or
   /// accessibility use. `icon_path` is resolved by GPUI's asset
   /// source and should point to an SVG that can be painted with `currentColor`.
+  ///
+  /// # Parameters
+  ///
+  /// `id` is the stable item identifier.
+  ///
+  /// `label` is the human-readable item label.
+  ///
+  /// `icon_path` is the asset-relative SVG path rendered by this item.
+  ///
+  /// # Returns
+  ///
+  /// A [`WindowBarItem`] with the built-in dark theme and no click handler.
   pub fn new(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
@@ -85,6 +97,14 @@ impl WindowBarItem {
   }
 
   /// Returns this item's stable id.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A borrowed stable item identifier.
   pub fn id(&self) -> &SharedString {
     &self.id
   }
@@ -94,6 +114,14 @@ impl WindowBarItem {
   /// The label is separate from the icon because compact activity bars often
   /// render only an icon while still needing descriptive text for tooltips,
   /// accessibility, command routing, and tests.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A borrowed human-readable item label.
   pub fn label(&self) -> &SharedString {
     &self.label
   }
@@ -102,6 +130,14 @@ impl WindowBarItem {
   ///
   /// This is usually set by [`WindowBar`] while it renders its children. It is
   /// public so callers can render individual activity items directly.
+  ///
+  /// # Parameters
+  ///
+  /// `theme` supplies colors used by this item.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`WindowBarItem`] for builder chaining.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
     self
@@ -112,6 +148,14 @@ impl WindowBarItem {
   /// The callback receives GPUI's mouse-up event, window, and app context. The
   /// callback should update application state outside `chitin-ui`; for example,
   /// minimalizing, maximalizing and closing.
+  ///
+  /// # Parameters
+  ///
+  /// `listener` is invoked when the item receives a left mouse-up event.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`WindowBarItem`] for builder chaining.
   pub fn on_click(
     mut self,
     listener: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
@@ -124,6 +168,15 @@ impl WindowBarItem {
 impl IntoElement for WindowBarItem {
   type Element = gpui::Div;
 
+  /// Converts this item into a GPUI element.
+  ///
+  /// # Parameters
+  ///
+  /// This method consumes `self`, including its optional click listener.
+  ///
+  /// # Returns
+  ///
+  /// A GPUI `Div` containing the icon button and click behavior.
   fn into_element(self) -> Self::Element {
     let theme = self.theme;
     let mut item = div()
@@ -221,6 +274,19 @@ impl WindowBar {
   ///
   /// `app_icon_path` is resolved by GPUI's asset source. Right-side window
   /// controls can be added with [`Self::item`] or [`Self::items`].
+  ///
+  /// # Parameters
+  ///
+  /// `title` is the main title rendered in the center of the bar.
+  ///
+  /// `app_icon_path` is the asset-relative app icon path.
+  ///
+  /// `subtitle_position` controls whether the optional subtitle is placed
+  /// before or after the title.
+  ///
+  /// # Returns
+  ///
+  /// A [`WindowBar`] with no subtitle and no right-side items.
   pub fn new(
     title: impl Into<SharedString>,
     app_icon_path: impl Into<SharedString>,
@@ -236,8 +302,15 @@ impl WindowBar {
     }
   }
 
-  /// Change the subtitle of window bar, that's useful when the window bar
-  /// subtitle should change with the status of application.
+  /// Sets the subtitle shown beside the main window title.
+  ///
+  /// # Parameters
+  ///
+  /// `subtitle` is the secondary title text.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`WindowBar`] for builder chaining.
   pub fn subtitle(mut self, subtitle: impl Into<SharedString>) -> Self {
     self.subtitle = Some(subtitle.into());
     self
@@ -247,18 +320,42 @@ impl WindowBar {
   ///
   /// Components default to [`builtins::dark`], but callers can pass another
   /// [`UIThemes`] value to keep an application-wide theme consistent.
+  ///
+  /// # Parameters
+  ///
+  /// `theme` supplies colors used by the window bar and right-side items.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`WindowBar`] for builder chaining.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
     self
   }
 
   /// Adds an item to the right-aligned section.
+  ///
+  /// # Parameters
+  ///
+  /// `item` is the right-side window bar item to append.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`WindowBar`] for builder chaining.
   pub fn item(mut self, item: WindowBarItem) -> Self {
     self.right_items.push(item);
     self
   }
 
   /// Adds multiple items to the right-aligned section.
+  ///
+  /// # Parameters
+  ///
+  /// `items` is the collection of right-side window bar items to append.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`WindowBar`] for builder chaining.
   pub fn items(mut self, items: impl IntoIterator<Item = WindowBarItem>) -> Self {
     self.right_items.extend(items);
     self
@@ -268,6 +365,16 @@ impl WindowBar {
 impl IntoElement for WindowBar {
   type Element = gpui::Div;
 
+  /// Converts this window bar into a GPUI element.
+  ///
+  /// # Parameters
+  ///
+  /// This method consumes `self` and all configured right-side items.
+  ///
+  /// # Returns
+  ///
+  /// A GPUI `Div` containing app icon, title text, optional subtitle, and
+  /// right-aligned items.
   fn into_element(self) -> Self::Element {
     let theme = self.theme;
     let left = div()

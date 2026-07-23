@@ -59,6 +59,20 @@ pub enum TreeRow<T> {
 /// The caller provides both the row payload type and the row renderer. This
 /// function owns only shared virtual-list mechanics: stable element id,
 /// viewport-bounded row selection, and full-size list layout.
+///
+/// # Parameters
+///
+/// `id` is the stable GPUI element identifier used by `uniform_list`.
+///
+/// `rows` is the flattened list of visible item and message rows.
+///
+/// `render_row` converts one row into a GPUI element when that row is inside
+/// the requested viewport range.
+///
+/// # Returns
+///
+/// A GPUI `Div` that fills its parent and renders only the rows requested by
+/// GPUI's virtual list machinery.
 pub fn virtual_tree_rows<T, R>(
   id: impl Into<ElementId>,
   rows: Vec<TreeRow<T>>,
@@ -95,6 +109,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if item rows lose payload or depth.
   fn tree_row_should_preserve_payload_and_depth() {
     let row = TreeRow::Item(TreeItemRow {
       data: TestPayload { id: "root" },
@@ -111,6 +132,13 @@ mod tests {
   }
 
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if message row fields are not preserved.
   fn tree_message_row_should_store_status_text_and_depth() {
     let row = TreeRow::<TestPayload>::Message(TreeMessageRow {
       label: "Loading...".into(),

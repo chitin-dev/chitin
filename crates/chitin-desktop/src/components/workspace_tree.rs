@@ -139,7 +139,7 @@ impl ChitinApp {
   /// `true` if the file explorer is visible and a workspace exists; `false`
   /// otherwise.
   fn project_tree_navigation_enabled(&self) -> bool {
-    self.active_activity == ActiveActivity::Files && self.workspace.is_some()
+    self.active_activity == ActiveActivity::Workspace && self.workspace.is_some()
   }
 
   /// Moves keyboard focus to a visible project tree entry.
@@ -413,6 +413,15 @@ enum ProjectTreeActivation {
 
 impl From<ProjectTreeToggle> for ProjectTreeActivation {
   /// Converts directory toggle results into row activation results.
+  ///
+  /// # Parameters
+  ///
+  /// `value` is the directory-toggle result to convert.
+  ///
+  /// # Returns
+  ///
+  /// [`ProjectTreeActivation::LoadChildren`] when `value` requests child
+  /// loading; otherwise [`ProjectTreeActivation::None`].
   fn from(value: ProjectTreeToggle) -> Self {
     match value {
       ProjectTreeToggle::None => Self::None,
@@ -427,6 +436,18 @@ impl From<ProjectTreeToggle> for ProjectTreeActivation {
 /// expanding a large or slow directory does not block the render thread. When
 /// loading finishes, the result is applied back on the app entity and the UI is
 /// notified.
+///
+/// # Parameters
+///
+/// `path` is the directory path whose direct children should be loaded.
+///
+/// `cx` is the GPUI context used to spawn the async task and later update the
+/// app entity.
+///
+/// # Returns
+///
+/// A detached-capable GPUI [`Task`] that completes after children are loaded
+/// and applied.
 ///
 /// # Example
 ///
@@ -450,7 +471,18 @@ fn spawn_project_children_load(path: PathBuf, cx: &mut Context<ChitinApp>) -> Ta
   })
 }
 
-/// Finds a mutable project tree entry by filesystem path using recursive function
+/// Finds a mutable project tree entry by filesystem path.
+///
+/// # Parameters
+///
+/// `entry` is the tree node where recursive search starts.
+///
+/// `path` is the filesystem path to find.
+///
+/// # Returns
+///
+/// `Some(&mut ProjectTreeEntry)` for the matching entry, or `None` when the
+/// path is not present in the loaded tree.
 fn find_project_entry_mut<'a>(
   entry: &'a mut ProjectTreeEntry,
   path: &Path,
@@ -459,16 +491,24 @@ fn find_project_entry_mut<'a>(
     return Some(entry);
   }
 
-  // use recursive function to walk through filesystem tree
-
   entry
     .children
     .iter_mut()
     .find_map(|child| find_project_entry_mut(child, path))
 }
 
-/// Finds an immutable project tree entry by filesystem path using recursive
-/// function
+/// Finds an immutable project tree entry by filesystem path.
+///
+/// # Parameters
+///
+/// `entry` is the tree node where recursive search starts.
+///
+/// `path` is the filesystem path to find.
+///
+/// # Returns
+///
+/// `Some(&ProjectTreeEntry)` for the matching entry, or `None` when the path is
+/// not present in the loaded tree.
 fn find_project_entry<'a>(
   entry: &'a ProjectTreeEntry,
   path: &Path,
@@ -507,6 +547,20 @@ struct WorkspaceEntryRow {
 /// focused. Clicking a row delegates to
 /// `ChitinApp::activate_project_tree_entry` with the original [`PathBuf`],
 /// which avoids lossy string round trips for non-UTF-8 filesystem paths.
+///
+/// # Parameters
+///
+/// `root` is the root project tree entry to render.
+///
+/// `state` contains expansion, loading, selection, and focus state.
+///
+/// `theme` supplies UI colors.
+///
+/// `cx` is the GPUI context used to create row event handlers.
+///
+/// # Returns
+///
+/// A virtualized GPUI tree element.
 pub fn render_workspace_tree(
   root: &ProjectTreeEntry,
   state: &ProjectSidebarState,
@@ -526,6 +580,17 @@ pub fn render_workspace_tree(
 ///
 /// This adapts [`ProjectTreeEntry`] into generic [`TreeRow`] values while keeping
 /// filesystem-specific identity in [`WorkspaceEntryRow`].
+///
+/// # Parameters
+///
+/// `entry` is the root tree entry to flatten.
+///
+/// `state` determines which descendants are visible and which rows are focused
+/// or selected.
+///
+/// # Returns
+///
+/// Visible tree rows in render order.
 fn visible_workspace_tree_rows(
   entry: &ProjectTreeEntry,
   state: &ProjectSidebarState,
@@ -612,6 +677,20 @@ fn project_tree_focus_target_index(
 ///
 /// Collapsed descendants are skipped. Expanded directories that are still
 /// loading receive a placeholder row instead of stale or empty children.
+///
+/// # Parameters
+///
+/// `entry` is the current tree node being collected.
+///
+/// `state` contains expansion and loading flags.
+///
+/// `depth` is the visual nesting depth for the current node.
+///
+/// `rows` is the flattened output collection being appended to.
+///
+/// # Returns
+///
+/// This function returns `()` and appends rows to `rows`.
 fn collect_visible_workspace_tree_rows(
   entry: &ProjectTreeEntry,
   state: &ProjectSidebarState,
@@ -654,6 +733,18 @@ fn collect_visible_workspace_tree_rows(
 ///
 /// Item rows render file and directory icons; message rows render status
 /// placeholders such as loading states.
+///
+/// # Parameters
+///
+/// `row` is the flattened row to render.
+///
+/// `theme` supplies UI colors.
+///
+/// `app` is a weak reference used by item row event handlers.
+///
+/// # Returns
+///
+/// A GPUI `Div` for the rendered row.
 fn render_workspace_row(
   row: TreeRow<WorkspaceEntryRow>,
   theme: UIThemes,
@@ -671,6 +762,19 @@ fn render_workspace_row(
 ///
 /// The row must occupy the full available width so hover backgrounds and click
 /// hitboxes span the sidebar instead of shrinking to icon and label content.
+///
+/// # Parameters
+///
+/// `row` is the tree item row and desktop-specific payload to render.
+///
+/// `theme` supplies UI colors.
+///
+/// `app` is a weak app entity used to dispatch activation on click.
+///
+/// # Returns
+///
+/// A GPUI `Div` containing icons, label, focus/selection styling, and click
+/// handling.
 fn render_workspace_entry_row(
   row: TreeItemRow<WorkspaceEntryRow>,
   theme: UIThemes,
@@ -783,6 +887,18 @@ fn render_workspace_entry_row(
 ///
 /// Message rows share the same fixed height as entry rows so `uniform_list`
 /// can virtualize them with the same measurement.
+///
+/// # Parameters
+///
+/// `message` is the status text displayed on the row.
+///
+/// `theme` supplies UI colors.
+///
+/// `depth` controls indentation for the message row.
+///
+/// # Returns
+///
+/// A GPUI `Div` for the non-interactive message row.
 fn render_workspace_tree_message(
   message: impl Into<SharedString>,
   theme: UIThemes,
@@ -823,6 +939,14 @@ mod tests {
 
   impl TestProject {
     /// Creates an empty temporary project directory.
+    ///
+    /// # Parameters
+    ///
+    /// `name` is a human-readable label included in the directory name.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(TestProject)` when the temporary directory was created.
     fn new(name: &str) -> Result<Self, Box<dyn Error>> {
       let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
       let root =
@@ -834,6 +958,14 @@ mod tests {
     }
 
     /// Returns the temporary project root path.
+    ///
+    /// # Parameters
+    ///
+    /// This method reads `self`.
+    ///
+    /// # Returns
+    ///
+    /// A borrowed [`Path`] pointing to the temporary project root.
     fn path(&self) -> &Path {
       &self.root
     }
@@ -841,12 +973,28 @@ mod tests {
 
   impl Drop for TestProject {
     /// Removes the temporary project directory after each test.
+    ///
+    /// # Parameters
+    ///
+    /// This method mutably borrows `self` during drop.
+    ///
+    /// # Returns
+    ///
+    /// This function returns `()` and ignores cleanup failures.
     fn drop(&mut self) {
       let _ = fs::remove_dir_all(&self.root);
     }
   }
 
   /// Builds a non-UTF-8 path component for Unix filesystem tests.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// An [`OsString`] containing bytes that are invalid UTF-8 on Unix.
   #[cfg(unix)]
   fn non_utf8_name() -> OsString {
     use std::os::unix::ffi::OsStringExt;
@@ -857,6 +1005,13 @@ mod tests {
   /// Verifies that display strings are not safe tree identifiers.
   #[cfg(unix)]
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if lossy display paths round-trip safely.
   fn display_path_string_should_not_be_used_as_project_tree_id() {
     let path = PathBuf::from(non_utf8_name());
     let displayed = path.display().to_string();
@@ -867,6 +1022,13 @@ mod tests {
   /// Verifies that file activation opens and selects a document.
   #[cfg(unix)]
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when file activation opens, selects, and focuses the entry.
   fn activate_project_tree_file_should_open_document_and_select_path() -> Result<(), Box<dyn Error>>
   {
     let project = TestProject::new("open-tree-file")?;
@@ -901,6 +1063,13 @@ mod tests {
 
   /// Verifies that next and previous navigation move focus through visible rows.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when keyboard focus moves through visible rows correctly.
   fn navigate_project_tree_should_move_focus_between_visible_rows() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-next-prev")?;
     let first_file = project.path().join("a.txt");
@@ -938,6 +1107,13 @@ mod tests {
 
   /// Verifies that Home and End jump to the first and last visible rows.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when focus jumps to visible tree bounds correctly.
   fn navigate_project_tree_should_jump_to_visible_bounds() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-bounds")?;
     fs::write(project.path().join("a.txt"), "")?;
@@ -964,6 +1140,13 @@ mod tests {
 
   /// Verifies that Enter opens the currently focused file row.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when keyboard activation opens the focused file.
   fn navigate_project_tree_enter_should_open_focused_file() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-enter-file")?;
     let file_path = project.path().join("focused.txt");
@@ -1004,6 +1187,13 @@ mod tests {
 
   /// Verifies that Enter toggles the currently focused directory row.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when keyboard activation toggles the focused directory.
   fn navigate_project_tree_enter_should_toggle_focused_directory() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-enter-directory")?;
     let child_dir = project.path().join("child");
@@ -1041,6 +1231,13 @@ mod tests {
   /// Verifies that directory activation focuses without opening a document.
   #[cfg(unix)]
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when directory activation focuses but does not select a document.
   fn activate_project_tree_directory_should_focus_without_selecting_document()
   -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("activate-tree-directory")?;
@@ -1084,6 +1281,13 @@ mod tests {
   /// Verifies that non-UTF-8 directory paths can be toggled and loaded.
   #[cfg(unix)]
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` when non-UTF-8 directory paths toggle and load correctly.
   fn toggle_project_tree_entry_should_support_non_utf8_paths() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("non-utf8-toggle")?;
     let child_dir = project.path().join(non_utf8_name());

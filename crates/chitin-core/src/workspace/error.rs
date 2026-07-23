@@ -63,15 +63,21 @@ pub enum ProjectWorkspaceError {
 }
 
 impl ProjectWorkspaceError {
-  /// Creates a `Canonicalize` error for a path that could not be resolved
-  /// to its absolute form.
+  /// Creates a canonicalization error for a path that could not be resolved.
   ///
-  /// This is a convenience constructor for `ProjectWorkspaceError::Canonicalize`.
-  /// Use this when `std::fs::canonicalize()` fails.
+  /// Use this helper when `std::fs::canonicalize` fails during workspace
+  /// opening or validation.
   ///
-  /// # Arguments
-  /// * `path` - The path that could not be canonicalized.
-  /// * `source` - The underlying I/O error from `std::fs::canonicalize`.
+  /// # Parameters
+  ///
+  /// `path` is the workspace path that could not be canonicalized.
+  ///
+  /// `source` is the underlying filesystem error.
+  ///
+  /// # Returns
+  ///
+  /// [`ProjectWorkspaceError::Canonicalize`] carrying an owned copy of `path`
+  /// and the original I/O error.
   pub(crate) fn canonicalize(path: &Path, source: io::Error) -> Self {
     Self::Canonicalize {
       path: path.to_path_buf(),
@@ -79,14 +85,20 @@ impl ProjectWorkspaceError {
     }
   }
 
-  /// Creates a `ReadDir` error for a directory that could not be read.
+  /// Creates a directory-read error for a path that could not be opened.
   ///
-  /// This is a convenience constructor for `ProjectWorkspaceError::ReadDir`.
-  /// Use this when `std::fs::read_dir()` fails.
+  /// Use this helper when `std::fs::read_dir` fails before iteration begins.
   ///
-  /// # Arguments
-  /// * `path` - The directory path that could not be read.
-  /// * `source` - The underlying I/O error from `std::fs::read_dir`.
+  /// # Parameters
+  ///
+  /// `path` is the directory that could not be read.
+  ///
+  /// `source` is the underlying filesystem error.
+  ///
+  /// # Returns
+  ///
+  /// [`ProjectWorkspaceError::ReadDir`] carrying an owned copy of `path` and
+  /// the original I/O error.
   pub(crate) fn read_dir(path: &Path, source: io::Error) -> Self {
     Self::ReadDir {
       path: path.to_path_buf(),
@@ -94,16 +106,21 @@ impl ProjectWorkspaceError {
     }
   }
 
-  /// Creates a `ReadEntry` error for a directory entry that could not be read.
+  /// Creates an entry-read error while iterating a directory.
   ///
-  /// This is a convenience constructor for `ProjectWorkspaceError::ReadEntry`.
-  /// Use this when iterating over directory entries and an individual entry
-  /// cannot be read, such as when `DirEntry::metadata()` or `DirEntry::file_type()`
-  /// fails.
+  /// Use this helper when one entry returned by a directory iterator cannot be
+  /// read even though opening the parent directory succeeded.
   ///
-  /// # Arguments
-  /// * `path` - The path of the directory entry that could not be read.
-  /// * `source` - The underlying I/O error.
+  /// # Parameters
+  ///
+  /// `path` is the parent directory being iterated when the entry read failed.
+  ///
+  /// `source` is the underlying filesystem error.
+  ///
+  /// # Returns
+  ///
+  /// [`ProjectWorkspaceError::ReadEntry`] carrying an owned copy of `path` and
+  /// the original I/O error.
   pub(crate) fn read_entry(path: &Path, source: io::Error) -> Self {
     Self::ReadEntry {
       path: path.to_path_buf(),
@@ -111,14 +128,20 @@ impl ProjectWorkspaceError {
     }
   }
 
-  /// Creates a `FileType` error for a path whose file type could not be determined.
+  /// Creates a file-type error for a path whose metadata could not be read.
   ///
-  /// This is a convenience constructor for `ProjectWorkspaceError::FileType`.
-  /// Use this when `std::fs::metadata()` or `DirEntry::file_type()` fails.
+  /// Use this helper when classifying a project tree entry fails.
   ///
-  /// # Arguments
-  /// * `path` - The path whose file type could not be determined.
-  /// * `source` - The underlying I/O error.
+  /// # Parameters
+  ///
+  /// `path` is the entry path whose file type could not be determined.
+  ///
+  /// `source` is the underlying filesystem error.
+  ///
+  /// # Returns
+  ///
+  /// [`ProjectWorkspaceError::FileType`] carrying an owned copy of `path` and
+  /// the original I/O error.
   pub(crate) fn file_type(path: &Path, source: io::Error) -> Self {
     Self::FileType {
       path: path.to_path_buf(),
@@ -152,6 +175,16 @@ impl ProjectWorkspaceError {
 /// omitted from the display output to keep messages clean and user-focused.
 /// Use the `source()` method to access the underlying cause when needed.
 impl fmt::Display for ProjectWorkspaceError {
+  /// Formats this workspace error for user-facing messages.
+  ///
+  /// # Parameters
+  ///
+  /// `formatter` is the formatter provided by Rust's formatting machinery.
+  ///
+  /// # Returns
+  ///
+  /// [`fmt::Result`] indicating whether the formatted message was written
+  /// successfully.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Self::NotFound(path) => {
@@ -234,6 +267,15 @@ impl fmt::Display for ProjectWorkspaceError {
 /// user-facing messages clean; callers can use this method to retrieve it
 /// for logging or diagnostic purposes.
 impl Error for ProjectWorkspaceError {
+  /// Returns the underlying filesystem cause for this workspace error.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`, the workspace error being inspected.
+  ///
+  /// # Returns
+  ///
+  /// `Some(error)` for variants that wrap an [`io::Error`], otherwise `None`.
   fn source(&self) -> Option<&(dyn Error + 'static)> {
     match self {
       Self::NotFound(_) | Self::NotDirectory(_) => None,

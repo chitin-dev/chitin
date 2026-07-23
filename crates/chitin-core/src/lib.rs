@@ -22,6 +22,16 @@ pub struct WorkspaceSummary {
 }
 
 impl Default for WorkspaceSummary {
+  /// Creates the default lightweight workspace summary.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// A [`WorkspaceSummary`] with Chitin's product name and current high-level
+  /// product focus string.
   fn default() -> Self {
     Self {
       product_name: "Chitin",

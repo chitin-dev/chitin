@@ -22,6 +22,15 @@ struct BenchTreePayload {
 ///
 /// This approximates a wide directory such as generated output folders or
 /// package dependency trees where one expanded node owns many direct children.
+///
+/// # Parameters
+///
+/// `visible_leaf_count` is the number of leaf rows appended under the root.
+///
+/// # Returns
+///
+/// A flattened tree row vector containing one expanded root and the requested
+/// number of leaf rows.
 fn flat_rows(visible_leaf_count: usize) -> Vec<TreeRow<BenchTreePayload>> {
   let mut rows = Vec::with_capacity(visible_leaf_count.saturating_add(1));
   rows.push(TreeRow::Item(TreeItemRow {
@@ -51,6 +60,17 @@ fn flat_rows(visible_leaf_count: usize) -> Vec<TreeRow<BenchTreePayload>> {
 ///
 /// This approximates a more realistic hierarchy where visible rows include
 /// both expanded container nodes and leaf rows.
+///
+/// # Parameters
+///
+/// `group_count` is the number of expanded group rows under the root.
+///
+/// `leaves_per_group` is the number of leaf rows appended under each group.
+///
+/// # Returns
+///
+/// A flattened tree row vector containing one root, group rows, and grouped
+/// leaf rows.
 fn grouped_rows(group_count: usize, leaves_per_group: usize) -> Vec<TreeRow<BenchTreePayload>> {
   let mut rows = Vec::with_capacity(
     group_count
@@ -96,6 +116,16 @@ fn grouped_rows(group_count: usize, leaves_per_group: usize) -> Vec<TreeRow<Benc
 ///
 /// This keeps pressure coverage for loading, empty, or error rows that share
 /// the same virtual scrolling path as normal item rows.
+///
+/// # Parameters
+///
+/// `rows` is the mutable row collection receiving the message row.
+///
+/// `depth` is the visual nesting depth assigned to the message row.
+///
+/// # Returns
+///
+/// This function returns `()` and appends one row to `rows`.
 fn append_message_row(rows: &mut Vec<TreeRow<BenchTreePayload>>, depth: usize) {
   rows.push(TreeRow::Message(TreeMessageRow {
     label: "Loading...".into(),
@@ -107,6 +137,18 @@ fn append_message_row(rows: &mut Vec<TreeRow<BenchTreePayload>>, depth: usize) {
 ///
 /// The range access mirrors the production `uniform_list` renderer, where GPUI
 /// asks the component to render only the visible item range.
+///
+/// # Parameters
+///
+/// `rows` is the flattened row slice to select from.
+///
+/// `start` is the first requested row index.
+///
+/// `count` is the maximum number of rows requested for the viewport.
+///
+/// # Returns
+///
+/// A cloned vector of rows inside the requested viewport range.
 fn collect_viewport_rows(
   rows: &[TreeRow<BenchTreePayload>],
   start: usize,
@@ -121,6 +163,14 @@ fn collect_viewport_rows(
 ///
 /// This measures the remaining O(visible rows) data preparation cost before
 /// GPUI receives the rows for virtual rendering.
+///
+/// # Parameters
+///
+/// `c` is Criterion's benchmark context.
+///
+/// # Returns
+///
+/// This function returns `()` after registering the benchmark group.
 fn bench_visible_row_construction(c: &mut Criterion) {
   let mut group = c.benchmark_group("tree_visible_row_construction");
 
@@ -171,6 +221,14 @@ fn bench_visible_row_construction(c: &mut Criterion) {
 ///
 /// This isolates the virtual-scrolling path that should remain effectively
 /// constant as total tree size grows.
+///
+/// # Parameters
+///
+/// `c` is Criterion's benchmark context.
+///
+/// # Returns
+///
+/// This function returns `()` after registering the benchmark group.
 fn bench_virtual_viewport_selection(c: &mut Criterion) {
   let mut group = c.benchmark_group("tree_virtual_viewport_selection");
 

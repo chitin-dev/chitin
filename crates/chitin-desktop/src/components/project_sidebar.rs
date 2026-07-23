@@ -54,6 +54,15 @@ pub struct ProjectSidebarState {
 
 impl ProjectSidebarState {
   /// Creates sidebar state with the workspace root expanded when present.
+  ///
+  /// # Parameters
+  ///
+  /// `root` is the optional workspace root path to mark as expanded.
+  ///
+  /// # Returns
+  ///
+  /// A [`ProjectSidebarState`] with empty selection/focus state and default
+  /// resize state.
   pub fn with_workspace_root(root: Option<&Path>) -> Self {
     Self {
       expanded_paths: root
@@ -67,16 +76,40 @@ impl ProjectSidebarState {
   }
 
   /// Selects the workspace tree entry that backs the active opened document.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the filesystem path to store as the selected project entry.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` and mutates `selected_path`.
   pub fn select_entry(&mut self, path: &Path) {
     self.selected_path = Some(path.to_path_buf());
   }
 
   /// Focuses a workspace tree entry for keyboard navigation.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the filesystem path to store as the focused project entry.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` and mutates `focused_path`.
   pub fn focus_entry(&mut self, path: &Path) {
     self.focused_path = Some(path.to_path_buf());
   }
 
   /// Starts a sidebar resize drag at the current cursor position.
+  ///
+  /// # Parameters
+  ///
+  /// `start_x` is the horizontal cursor position where dragging began.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` and records the active resize drag.
   pub fn start_resize(&mut self, start_x: Pixels) {
     log::debug!(
       "Project sidebar: start width resizing from width {:?}",
@@ -86,17 +119,41 @@ impl ProjectSidebarState {
   }
 
   /// Updates sidebar width from the current resize cursor position.
+  ///
+  /// # Parameters
+  ///
+  /// `current_x` is the latest horizontal cursor position during the drag.
+  ///
+  /// # Returns
+  ///
+  /// `true` when an active drag was updated; `false` when no drag is active.
   pub fn drag_resize(&mut self, current_x: Pixels) -> bool {
     self.resize.drag_resize(current_x)
   }
 
   /// Stops the current sidebar resize drag.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self` to clear resize state.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a drag was active and has been stopped; otherwise `false`.
   pub fn stop_resize(&mut self) -> bool {
     log::debug!("Project sidebar: stop width resizing from");
     self.resize.stop_resize()
   }
 
   /// Returns whether the sidebar is currently being resized.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a resize drag is active; otherwise `false`.
   pub fn is_resizing(&self) -> bool {
     self.resize.is_resizing()
   }
@@ -104,6 +161,14 @@ impl ProjectSidebarState {
 
 impl Default for ProjectSidebarState {
   /// Creates project sidebar state with no workspace root.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// A [`ProjectSidebarState`] with no expanded root.
   fn default() -> Self {
     Self::with_workspace_root(None)
   }
@@ -211,6 +276,13 @@ mod tests {
 
   /// Verifies that drag resize applies cursor delta to the starting width.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if drag width math regresses.
   fn drag_resize_should_apply_delta_from_drag_start() {
     let mut state = ProjectSidebarState::default();
 
@@ -225,6 +297,13 @@ mod tests {
 
   /// Verifies that stopping resize clears active resize state.
   #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if resize state remains active.
   fn stop_resize_should_clear_active_resize_state() {
     let mut state = ProjectSidebarState::default();
 
