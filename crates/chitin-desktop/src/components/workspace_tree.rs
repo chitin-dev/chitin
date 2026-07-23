@@ -14,7 +14,7 @@ use chitin_ui::{
     DEFAULT_TREE_INDENT, DEFAULT_TREE_ROW_HEIGHT, TreeItemRow, TreeMessageRow, TreeRow,
     virtual_tree_rows,
   },
-  themes::UIThemes,
+  themes::{UIThemes, builtins},
 };
 use gpui::{
   Context, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString, Styled, Task,
@@ -813,12 +813,10 @@ fn render_workspace_entry_row(
     .pl(px(depth as f32 * DEFAULT_TREE_INDENT))
     .pr_2()
     .gap_1()
-    .when(selected, |row| {
-      row.border_2().bg(theme.background.selection)
-    })
-    .when(focused, |row| {
-      row.border_2().border_color(theme.border.focus)
-    })
+    .border_2()
+    .border_color(builtins::TRANSPARENT)
+    .when(selected, |row| row.bg(theme.background.selection))
+    .when(focused, |row| row.border_color(theme.border.focus))
     .text_xs()
     .cursor_pointer()
     .text_color(theme.text.secondary)

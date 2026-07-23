@@ -5,6 +5,7 @@
 //! instead of hardcoding colors directly.
 
 use super::{UIAccentColors, UIBackgroundColors, UIBorderColors, UITextColors, UIThemes};
+use gpui::Rgba;
 use vscode_modern::{dark, light};
 
 /// Converts a 24-bit RGB hex value into a GPUI color.
@@ -42,6 +43,8 @@ const fn rgba_const(hex: u32) -> gpui::Rgba {
     a: (hex & 0xff) as f32 / 255.0,
   }
 }
+
+pub const TRANSPARENT: Rgba = rgba_const(0x00000000);
 
 #[allow(dead_code)]
 mod vscode_modern {
