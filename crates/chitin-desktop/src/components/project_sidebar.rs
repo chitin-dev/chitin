@@ -50,14 +50,12 @@ impl ProjectSidebarState {
     }
   }
 
-  /// Selects a workspace tree entry, that's caused by opening the entry, for
-  /// directory node, that means toggling the directory, for file node, that
-  /// means opening the file in richer panel.
+  /// Selects the workspace tree entry that backs the active opened document.
   pub fn select_entry(&mut self, path: &Path) {
     self.selected_path = Some(path.to_path_buf());
   }
 
-  /// Focuses a workspace tree entry, that' caused by keyboard navigation
+  /// Focuses a workspace tree entry for keyboard navigation.
   pub fn focus_entry(&mut self, path: &Path) {
     self.focused_path = Some(path.to_path_buf());
   }

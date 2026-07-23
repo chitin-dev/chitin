@@ -132,6 +132,7 @@ impl ChitinApp {
     path: &Path,
     result: Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError>,
   ) {
+    // no matter how, we remove the path from loading paths
     self.project_sidebar_state.loading_paths.remove(path);
 
     let Ok(children) = result else {
@@ -147,6 +148,8 @@ impl ChitinApp {
       return;
     }
 
+    // we need to find mutable entry, so the passed root path from [`workspace`]
+    // also need to be mutable
     if let Some(workspace) = self.workspace.as_mut()
       && let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path)
       && entry.children.is_empty()
@@ -214,7 +217,7 @@ fn spawn_project_children_load(path: PathBuf, cx: &mut Context<ChitinApp>) -> Ta
   })
 }
 
-/// Finds a mutable project tree entry by filesystem path.
+/// Finds a mutable project tree entry by filesystem path using recursive function
 fn find_project_entry_mut<'a>(
   entry: &'a mut ProjectTreeEntry,
   path: &Path,
@@ -223,13 +226,16 @@ fn find_project_entry_mut<'a>(
     return Some(entry);
   }
 
+  // use recursive function to walk through filesystem tree
+
   entry
     .children
     .iter_mut()
     .find_map(|child| find_project_entry_mut(child, path))
 }
 
-/// Finds an immutable project tree entry by filesystem path.
+/// Finds an immutable project tree entry by filesystem path using recursive
+/// function
 fn find_project_entry<'a>(
   entry: &'a ProjectTreeEntry,
   path: &Path,
