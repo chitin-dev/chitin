@@ -23,7 +23,10 @@ use gpui::{
 
 use crate::{
   app::ChitinApp,
-  components::{document_area::OpenedProjectDocument, project_sidebar::ProjectSidebarState},
+  components::{
+    activity_bar::ActiveActivity, document_area::OpenedProjectDocument,
+    project_sidebar::ProjectSidebarState,
+  },
 };
 
 const TREE_ICON_SIZE_VALUE: f32 = 16.0;
@@ -36,12 +39,161 @@ const LIST_CLOSED_ICON: &str = "icons/workspace/codicon-list-close.svg";
 const LIST_OPEN_ICON: &str = "icons/workspace/codicon-list-open.svg";
 
 impl ChitinApp {
+  /// Applies keyboard navigation to the visible project workspace tree.
+  ///
+  /// Movement actions update only `focused_path`; they do not change the active
+  /// document. Activation reuses the same file-open and directory-toggle logic
+  /// as pointer clicks, so keyboard and pointer behavior stay aligned.
+  ///
+  /// # Parameters
+  ///
+  /// `navigation` identifies the requested keyboard behavior, such as moving to
+  /// the next visible row or activating the focused row.
+  ///
+  /// `cx` is the GPUI context used to spawn lazy directory loading and notify
+  /// the UI after command handling.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()`. It mutates workspace/sidebar state directly
+  /// and schedules background child loading when expansion requires it.
+  pub(crate) fn navigate_project_tree(
+    &mut self,
+    navigation: WorkspaceTreeNavigation,
+    cx: &mut Context<Self>,
+  ) {
+    if let ProjectTreeActivation::LoadChildren(path) = self.navigate_project_tree_state(navigation)
+    {
+      spawn_project_children_load(path, cx).detach();
+    }
+
+    cx.notify();
+  }
+
+  /// Applies project tree keyboard navigation without spawning background work.
+  ///
+  /// This helper computes the state transition for a keyboard navigation
+  /// command. Movement changes focus only. Activation reuses
+  /// [`ChitinApp::activate_project_tree_entry_state`] so keyboard and pointer
+  /// activation stay aligned.
+  ///
+  /// # Parameters
+  ///
+  /// `navigation` identifies the tree navigation behavior to apply.
+  ///
+  /// # Returns
+  ///
+  /// A [`ProjectTreeActivation`] describing whether the state transition
+  /// opened a file, requested lazy directory loading, or produced no activation.
+  ///
+  /// # Notes
+  ///
+  /// This function performs no filesystem I/O and does not call `cx.notify()`;
+  /// callers are responsible for follow-up work.
+  fn navigate_project_tree_state(
+    &mut self,
+    navigation: WorkspaceTreeNavigation,
+  ) -> ProjectTreeActivation {
+    if !self.project_tree_navigation_enabled() {
+      return ProjectTreeActivation::None;
+    }
+
+    match navigation {
+      WorkspaceTreeNavigation::FocusPrevious => {
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::Previous);
+        ProjectTreeActivation::None
+      }
+      WorkspaceTreeNavigation::FocusNext => {
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::Next);
+        ProjectTreeActivation::None
+      }
+      WorkspaceTreeNavigation::ActivateFocused => {
+        let Some(path) = self.project_sidebar_state.focused_path.clone() else {
+          return ProjectTreeActivation::None;
+        };
+
+        self.activate_project_tree_entry_state(&path)
+      }
+      WorkspaceTreeNavigation::FocusFirst => {
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::First);
+        ProjectTreeActivation::None
+      }
+      WorkspaceTreeNavigation::FocusLast => {
+        self.focus_project_tree_entry(ProjectTreeFocusTarget::Last);
+        ProjectTreeActivation::None
+      }
+    }
+  }
+
+  /// Returns whether project-tree key actions may affect current app state.
+  ///
+  /// Keyboard navigation is only enabled when the user is actively viewing
+  /// the file explorer and a workspace is currently open.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`, including `active_activity` and `workspace`.
+  ///
+  /// # Returns
+  ///
+  /// `true` if the file explorer is visible and a workspace exists; `false`
+  /// otherwise.
+  fn project_tree_navigation_enabled(&self) -> bool {
+    self.active_activity == ActiveActivity::Files && self.workspace.is_some()
+  }
+
+  /// Moves keyboard focus to a visible project tree entry.
+  ///
+  /// The current focused path is used first. If no focused path exists, the
+  /// selected path is used as the starting point. If neither path is visible,
+  /// movement starts at the first visible row.
+  ///
+  /// # Parameters
+  ///
+  /// `target` describes whether focus should move relatively
+  /// (`Previous`/`Next`) or jump absolutely (`First`/`Last`).
+  ///
+  /// # Returns
+  ///
+  /// `true` when focus was moved to a visible path; `false` when no workspace
+  /// or visible tree row exists.
+  fn focus_project_tree_entry(&mut self, target: ProjectTreeFocusTarget) -> bool {
+    let Some(workspace) = self.workspace.as_ref() else {
+      return false;
+    };
+
+    let paths = visible_workspace_entry_paths(&workspace.tree.root, &self.project_sidebar_state);
+    let Some(target_index) = project_tree_focus_target_index(
+      &paths,
+      self.project_sidebar_state.focused_path.as_deref(),
+      self.project_sidebar_state.selected_path.as_deref(),
+      target,
+    ) else {
+      return false;
+    };
+
+    self.project_sidebar_state.focus_entry(&paths[target_index]);
+    true
+  }
+
   /// Activates a project tree entry from pointer or keyboard input.
   ///
   /// Directory activation toggles expansion and may schedule lazy child loading.
   /// File activation opens the file in the main document area. Both paths
   /// update sidebar focus, but only files update sidebar selection because
   /// selection tracks the active document.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the original filesystem path of the tree entry to activate.
+  ///
+  /// `cx` is the GPUI context used to spawn directory loading when the
+  /// activated entry is an unloaded directory.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()`. It mutates app state directly and detaches any
+  /// required lazy-loading task.
   pub(crate) fn activate_project_tree_entry(&mut self, path: &Path, cx: &mut Context<Self>) {
     if let ProjectTreeActivation::LoadChildren(path) = self.activate_project_tree_entry_state(path)
     {
@@ -50,6 +202,19 @@ impl ChitinApp {
   }
 
   /// Applies tree activation without spawning follow-up asynchronous work.
+  ///
+  /// This helper performs the synchronous part of row activation. It focuses
+  /// the row, opens files, and toggles directories, but returns any loading
+  /// request to the caller instead of spawning it directly.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the filesystem path of the tree entry to activate.
+  ///
+  /// # Returns
+  ///
+  /// A [`ProjectTreeActivation`] describing the state change caused by
+  /// activation.
   fn activate_project_tree_entry_state(&mut self, path: &Path) -> ProjectTreeActivation {
     let Some(kind) = self.project_tree_entry_kind(path) else {
       return ProjectTreeActivation::None;
@@ -67,12 +232,33 @@ impl ChitinApp {
   }
 
   /// Opens a workspace file in the main document area.
+  ///
+  /// File opening selects the tree entry and replaces the current placeholder
+  /// document state with a new [`OpenedProjectDocument`].
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the filesystem path of the file to show in the document area.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()`. It mutates sidebar selection and active
+  /// document state.
   fn open_project_file(&mut self, path: &Path) {
     self.project_sidebar_state.select_entry(path);
     self.active_document = Some(OpenedProjectDocument::new(path));
   }
 
   /// Finds the project tree entry kind for a filesystem path.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the filesystem path to locate in the current project tree.
+  ///
+  /// # Returns
+  ///
+  /// `Some(ProjectTreeEntryKind)` when the path exists in the loaded tree, or
+  /// `None` when there is no workspace or the path is not currently loaded.
   fn project_tree_entry_kind(&self, path: &Path) -> Option<ProjectTreeEntryKind> {
     self
       .workspace
@@ -82,12 +268,25 @@ impl ChitinApp {
   }
 
   /// Toggles directory expansion state for one project tree entry.
+  ///
+  /// Collapsed directories become expanded. Expanded directories become
+  /// collapsed. If the directory has no loaded children yet, the returned value
+  /// asks the caller to load them asynchronously.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the filesystem path of the directory entry to toggle.
+  ///
+  /// # Returns
+  ///
+  /// [`ProjectTreeToggle::LoadChildren`] when the directory was expanded and
+  /// requires lazy child loading. [`ProjectTreeToggle::None`] is returned for
+  /// collapse, missing paths, file paths, or already-loaded directories.
   fn toggle_project_tree_entry_state(&mut self, path: &Path) -> ProjectTreeToggle {
     let Some(workspace) = self.workspace.as_mut() else {
       return ProjectTreeToggle::None;
     };
 
-    // find the entry that matches the path
     let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path) else {
       return ProjectTreeToggle::None;
     };
@@ -97,8 +296,6 @@ impl ChitinApp {
     }
 
     if self.project_sidebar_state.expanded_paths.remove(path) {
-      // if move the paths from expanded paths successfully, then it means we
-      // toggle the paths from expanded to collapsed.
       return ProjectTreeToggle::None;
     }
 
@@ -106,7 +303,6 @@ impl ChitinApp {
       .project_sidebar_state
       .expanded_paths
       .insert(path.to_path_buf());
-    // insert the toggled path into expanded path hash set
     log::debug!("Newly expanded path: {:?}", path);
 
     if entry.children.is_empty()
@@ -127,12 +323,23 @@ impl ChitinApp {
   /// inserted when the directory is still expanded and does not already have
   /// loaded children, which prevents stale async results from re-opening a
   /// collapsed directory or duplicating children after repeated toggles.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the directory path whose children were requested.
+  ///
+  /// `result` is the outcome of loading direct children on the background
+  /// executor.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()`. It mutates loading state and, on success,
+  /// stores loaded children in the matching tree entry.
   fn apply_project_children_load(
     &mut self,
     path: &Path,
     result: Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError>,
   ) {
-    // no matter how, we remove the path from loading paths
     self.project_sidebar_state.loading_paths.remove(path);
 
     let Ok(children) = result else {
@@ -148,8 +355,6 @@ impl ChitinApp {
       return;
     }
 
-    // we need to find mutable entry, so the passed root path from [`workspace`]
-    // also need to be mutable
     if let Some(workspace) = self.workspace.as_mut()
       && let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path)
       && entry.children.is_empty()
@@ -158,6 +363,34 @@ impl ChitinApp {
       entry.children = children;
     }
   }
+}
+
+/// Keyboard navigation command for the project workspace tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkspaceTreeNavigation {
+  /// Focus the previous visible tree entry.
+  FocusPrevious,
+  /// Focus the next visible tree entry.
+  FocusNext,
+  /// Open a focused file or toggle a focused directory.
+  ActivateFocused,
+  /// Focus the first visible tree entry.
+  FocusFirst,
+  /// Focus the last visible tree entry.
+  FocusLast,
+}
+
+/// Relative or absolute destination for a keyboard focus movement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectTreeFocusTarget {
+  /// Move to the previous visible row.
+  Previous,
+  /// Move to the next visible row.
+  Next,
+  /// Move to the first visible row.
+  First,
+  /// Move to the last visible row.
+  Last,
 }
 
 /// Result of applying directory expansion state.
@@ -300,6 +533,79 @@ fn visible_workspace_tree_rows(
   let mut rows = Vec::new();
   collect_visible_workspace_tree_rows(entry, state, 0, &mut rows);
   rows
+}
+
+/// Returns visible filesystem paths in the same order as rendered tree rows.
+///
+/// Message rows such as loading placeholders are discarded because keyboard
+/// focus can only land on real filesystem entries.
+///
+/// # Parameters
+///
+/// `entry` is the root tree entry used to build the visible row list.
+///
+/// `state` contains expansion and loading state that determines which
+/// descendants are visible.
+///
+/// # Returns
+///
+/// A `Vec<PathBuf>` containing the path of each visible entry in render order.
+fn visible_workspace_entry_paths(
+  entry: &ProjectTreeEntry,
+  state: &ProjectSidebarState,
+) -> Vec<PathBuf> {
+  visible_workspace_tree_rows(entry, state)
+    .into_iter()
+    .filter_map(|row| match row {
+      TreeRow::Item(row) => Some(row.data.path),
+      TreeRow::Message(_) => None,
+    })
+    .collect()
+}
+
+/// Resolves a keyboard focus movement into a visible row index.
+///
+/// The focused path takes precedence over the selected path when both are
+/// present. If neither path is visible, `Previous` and `Next` start from the
+/// first row, while `First` and `Last` jump to the corresponding boundary.
+///
+/// # Parameters
+///
+/// `paths` is the ordered list of visible, focusable tree entry paths.
+///
+/// `focused_path` is the current keyboard focus path, if any.
+///
+/// `selected_path` is the current selected/opened file path, used as a fallback
+/// navigation anchor when no focused path exists.
+///
+/// `target` is the relative or absolute focus movement to resolve.
+///
+/// # Returns
+///
+/// `Some(index)` for the resolved visible-row index, or `None` when `paths` is
+/// empty.
+fn project_tree_focus_target_index(
+  paths: &[PathBuf],
+  focused_path: Option<&Path>,
+  selected_path: Option<&Path>,
+  target: ProjectTreeFocusTarget,
+) -> Option<usize> {
+  if paths.is_empty() {
+    return None;
+  }
+
+  let current_index = focused_path
+    .or(selected_path)
+    .and_then(|path| paths.iter().position(|visible_path| visible_path == path));
+
+  Some(match target {
+    ProjectTreeFocusTarget::First => 0,
+    ProjectTreeFocusTarget::Last => paths.len() - 1,
+    ProjectTreeFocusTarget::Previous => current_index.unwrap_or(0).saturating_sub(1),
+    ProjectTreeFocusTarget::Next => current_index
+      .map(|index| (index + 1).min(paths.len() - 1))
+      .unwrap_or(0),
+  })
 }
 
 /// Collects only rows that are visible under the current expansion state.
@@ -589,6 +895,145 @@ mod tests {
     let ProjectTreeActivation::OpenFile = activation else {
       return Err("file activation should open a document".into());
     };
+
+    Ok(())
+  }
+
+  /// Verifies that next and previous navigation move focus through visible rows.
+  #[test]
+  fn navigate_project_tree_should_move_focus_between_visible_rows() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("tree-keyboard-next-prev")?;
+    let first_file = project.path().join("a.txt");
+    let second_file = project.path().join("b.txt");
+    fs::write(&first_file, "")?;
+    fs::write(&second_file, "")?;
+
+    let mut app = ChitinApp::new(Some(project.path().to_path_buf()));
+    let workspace = app.workspace.as_ref().ok_or("workspace should open")?;
+    let root_path = workspace.tree.root.path.clone();
+    let rows = visible_workspace_entry_paths(&workspace.tree.root, &app.project_sidebar_state);
+
+    assert_eq!(rows.len(), 3);
+
+    app.navigate_project_tree_state(WorkspaceTreeNavigation::FocusNext);
+    assert_eq!(
+      app.project_sidebar_state.focused_path.as_deref(),
+      Some(root_path.as_path())
+    );
+
+    app.navigate_project_tree_state(WorkspaceTreeNavigation::FocusNext);
+    assert_eq!(
+      app.project_sidebar_state.focused_path.as_deref(),
+      Some(rows[1].as_path())
+    );
+
+    app.navigate_project_tree_state(WorkspaceTreeNavigation::FocusPrevious);
+    assert_eq!(
+      app.project_sidebar_state.focused_path.as_deref(),
+      Some(root_path.as_path())
+    );
+
+    Ok(())
+  }
+
+  /// Verifies that Home and End jump to the first and last visible rows.
+  #[test]
+  fn navigate_project_tree_should_jump_to_visible_bounds() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("tree-keyboard-bounds")?;
+    fs::write(project.path().join("a.txt"), "")?;
+    fs::write(project.path().join("b.txt"), "")?;
+
+    let mut app = ChitinApp::new(Some(project.path().to_path_buf()));
+    let workspace = app.workspace.as_ref().ok_or("workspace should open")?;
+    let rows = visible_workspace_entry_paths(&workspace.tree.root, &app.project_sidebar_state);
+
+    app.navigate_project_tree_state(WorkspaceTreeNavigation::FocusLast);
+    assert_eq!(
+      app.project_sidebar_state.focused_path.as_deref(),
+      rows.last().map(PathBuf::as_path)
+    );
+
+    app.navigate_project_tree_state(WorkspaceTreeNavigation::FocusFirst);
+    assert_eq!(
+      app.project_sidebar_state.focused_path.as_deref(),
+      rows.first().map(PathBuf::as_path)
+    );
+
+    Ok(())
+  }
+
+  /// Verifies that Enter opens the currently focused file row.
+  #[test]
+  fn navigate_project_tree_enter_should_open_focused_file() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("tree-keyboard-enter-file")?;
+    let file_path = project.path().join("focused.txt");
+    fs::write(&file_path, "")?;
+
+    let mut app = ChitinApp::new(Some(project.path().to_path_buf()));
+    let workspace = app.workspace.as_ref().ok_or("workspace should open")?;
+    let entry_path = workspace
+      .tree
+      .root
+      .children
+      .iter()
+      .find(|entry| entry.path == file_path)
+      .map(|entry| entry.path.clone())
+      .ok_or("focused file should be present")?;
+
+    app.project_sidebar_state.focus_entry(&entry_path);
+    let activation = app.navigate_project_tree_state(WorkspaceTreeNavigation::ActivateFocused);
+
+    assert_eq!(
+      app.project_sidebar_state.selected_path.as_deref(),
+      Some(entry_path.as_path())
+    );
+    assert_eq!(
+      app
+        .active_document
+        .as_ref()
+        .map(|document| document.path.as_path()),
+      Some(entry_path.as_path())
+    );
+
+    let ProjectTreeActivation::OpenFile = activation else {
+      return Err("focused file should open from keyboard activation".into());
+    };
+
+    Ok(())
+  }
+
+  /// Verifies that Enter toggles the currently focused directory row.
+  #[test]
+  fn navigate_project_tree_enter_should_toggle_focused_directory() -> Result<(), Box<dyn Error>> {
+    let project = TestProject::new("tree-keyboard-enter-directory")?;
+    let child_dir = project.path().join("child");
+    fs::create_dir(&child_dir)?;
+
+    let mut app = ChitinApp::new(Some(project.path().to_path_buf()));
+    let workspace = app.workspace.as_ref().ok_or("workspace should open")?;
+    let entry_path = workspace
+      .tree
+      .root
+      .children
+      .iter()
+      .find(|entry| entry.path == child_dir)
+      .map(|entry| entry.path.clone())
+      .ok_or("focused directory should be present")?;
+
+    app.project_sidebar_state.focus_entry(&entry_path);
+    let activation = app.navigate_project_tree_state(WorkspaceTreeNavigation::ActivateFocused);
+
+    assert!(
+      app
+        .project_sidebar_state
+        .expanded_paths
+        .contains(&entry_path)
+    );
+
+    let ProjectTreeActivation::LoadChildren(load_path) = activation else {
+      return Err("focused directory should request lazy child loading".into());
+    };
+    assert_eq!(load_path, entry_path);
 
     Ok(())
   }

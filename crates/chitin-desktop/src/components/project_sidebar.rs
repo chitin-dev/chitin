@@ -16,9 +16,19 @@ use chitin_ui::{
   },
   themes::UIThemes,
 };
-use gpui::{Context, IntoElement, Pixels, div, prelude::*};
+use gpui::{Context, FocusHandle, IntoElement, Pixels, div, prelude::*};
 
-use crate::{app::ChitinApp, components::workspace_tree::render_workspace_tree};
+use crate::{
+  app::ChitinApp,
+  commands::{
+    WorkspaceCommand,
+    workspace::{
+      ActivateFocusedEntry, FocusFirstEntry, FocusLastEntry, FocusNextEntry, FocusPreviousEntry,
+      PROJECT_TREE_KEY_CONTEXT,
+    },
+  },
+  components::workspace_tree::render_workspace_tree,
+};
 
 /// Default title shown at the top of the project workspace sidebar.
 pub const DEFAULT_PROJECT_WORKSPACE_TITLE: &str = "EXPLORER";
@@ -68,7 +78,10 @@ impl ProjectSidebarState {
 
   /// Starts a sidebar resize drag at the current cursor position.
   pub fn start_resize(&mut self, start_x: Pixels) {
-    log::debug!("Project sidebar: start width resizing from width {:?}", start_x);
+    log::debug!(
+      "Project sidebar: start width resizing from width {:?}",
+      start_x
+    );
     self.resize.start_resize(start_x);
   }
 
@@ -96,54 +109,97 @@ impl Default for ProjectSidebarState {
   }
 }
 
-/// Renders the project workspace sidebar.
+/// Renders the project workspace sidebar and its command action boundary.
 ///
 /// The sidebar itself is generic composition, while the file tree inside it is
 /// desktop-specific because it uses Chitin's workspace SVG icon assets and
-/// dispatches expansion events to [`ChitinApp`].
+/// dispatches expansion events to [`ChitinApp`]. The outer wrapper tracks a
+/// GPUI focus handle and registers workspace command actions so keybindings can
+/// invoke the same command dispatcher future command palette entries will use.
+///
+/// # Parameters
+///
+/// `workspace` is the currently opened project workspace. When `None`, the
+/// sidebar renders an empty-workspace message instead of a tree.
+///
+/// `state` contains expansion, loading, selection, focus, and resize state used
+/// by the sidebar and tree.
+///
+/// `focus_handle` is the GPUI focus handle associated with the `"ProjectTree"`
+/// key context.
+///
+/// `theme` supplies the UI colors and spacing used by the sidebar shell.
+///
+/// `cx` is the GPUI context used to create command action listeners and obtain
+/// a weak app entity for resize callbacks.
+///
+/// # Returns
+///
+/// A GPUI element that renders the resizable project sidebar.
 pub fn render_project_sidebar(
   workspace: Option<&ProjectWorkspace>,
   state: &ProjectSidebarState,
+  focus_handle: &FocusHandle,
   theme: UIThemes,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
   let app = cx.weak_entity();
 
-  Sidebar::new()
-    .width(state.resize.width())
-    .resizable(SidebarResizeConfig::new(move |start_x, _, cx| {
-      let _ = app.update(cx, |this, cx| {
-        this.project_sidebar_state.start_resize(start_x);
-        cx.notify();
-      });
+  div()
+    .track_focus(focus_handle)
+    .key_context(PROJECT_TREE_KEY_CONTEXT)
+    .on_action(cx.listener(|this, _: &FocusPreviousEntry, _, cx| {
+      this.dispatch_command(WorkspaceCommand::FocusPrevious.into(), cx);
     }))
-    .theme(theme)
+    .on_action(cx.listener(|this, _: &FocusNextEntry, _, cx| {
+      this.dispatch_command(WorkspaceCommand::FocusNext.into(), cx);
+    }))
+    .on_action(cx.listener(|this, _: &ActivateFocusedEntry, _, cx| {
+      this.dispatch_command(WorkspaceCommand::ActivateFocused.into(), cx);
+    }))
+    .on_action(cx.listener(|this, _: &FocusFirstEntry, _, cx| {
+      this.dispatch_command(WorkspaceCommand::FocusFirst.into(), cx);
+    }))
+    .on_action(cx.listener(|this, _: &FocusLastEntry, _, cx| {
+      this.dispatch_command(WorkspaceCommand::FocusLast.into(), cx);
+    }))
     .child(
-      SidebarHeader::new()
+      Sidebar::new()
+        .width(state.resize.width())
+        .resizable(SidebarResizeConfig::new(move |start_x, _, cx| {
+          let _ = app.update(cx, |this, cx| {
+            this.project_sidebar_state.start_resize(start_x);
+            cx.notify();
+          });
+        }))
         .theme(theme)
-        .child(SidebarTitle::new(DEFAULT_PROJECT_WORKSPACE_TITLE).theme(theme)),
-    )
-    .child(
-      SidebarBody::new().theme(theme).child(match workspace {
-        Some(workspace) => {
-          SidebarSection::new()
+        .child(
+          SidebarHeader::new()
             .theme(theme)
-            .fill(true)
-            .child(render_workspace_tree(
-              &workspace.tree.root,
-              state,
-              theme,
-              cx,
-            ))
-        }
-        None => SidebarSection::new().theme(theme).child(
-          div()
-            .p_3()
-            .text_xs()
-            .text_color(theme.text.secondary)
-            .child("Open a project path to show files."),
+            .child(SidebarTitle::new(DEFAULT_PROJECT_WORKSPACE_TITLE).theme(theme)),
+        )
+        .child(
+          SidebarBody::new().theme(theme).child(match workspace {
+            Some(workspace) => {
+              SidebarSection::new()
+                .theme(theme)
+                .fill(true)
+                .child(render_workspace_tree(
+                  &workspace.tree.root,
+                  state,
+                  theme,
+                  cx,
+                ))
+            }
+            None => SidebarSection::new().theme(theme).child(
+              div()
+                .p_3()
+                .text_xs()
+                .text_color(theme.text.secondary)
+                .child("Open a project path to show files."),
+            ),
+          }),
         ),
-      }),
     )
 }
 
