@@ -68,6 +68,7 @@ impl ProjectSidebarState {
 
   /// Starts a sidebar resize drag at the current cursor position.
   pub fn start_resize(&mut self, start_x: Pixels) {
+    log::debug!("Project sidebar: start width resizing from width {:?}", start_x);
     self.resize.start_resize(start_x);
   }
 
@@ -78,6 +79,7 @@ impl ProjectSidebarState {
 
   /// Stops the current sidebar resize drag.
   pub fn stop_resize(&mut self) -> bool {
+    log::debug!("Project sidebar: stop width resizing from");
     self.resize.stop_resize()
   }
 
