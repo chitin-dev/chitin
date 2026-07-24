@@ -297,6 +297,7 @@ impl Render for ChitinApp {
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
+    let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
 
     div()
       .flex()
@@ -308,12 +309,16 @@ impl Render for ChitinApp {
       .on_action(cx.listener(|this, _: &ToggleWorkspace, window, cx| {
         this.toggle_workspace_with_focus(window, cx);
       }))
-      .when(self.project_sidebar_state.is_resizing(), |layout| {
+      .when(project_sidebar_is_resizing, |layout| {
         layout.cursor(CursorStyle::ResizeLeftRight)
       })
       .on_mouse_move({
         let app = app.clone();
         move |event, _, cx| {
+          if !project_sidebar_is_resizing {
+            return;
+          }
+
           let _ = app.update(cx, |this, cx| {
             if this.project_sidebar_state.drag_resize(event.position.x) {
               cx.notify();
