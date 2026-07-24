@@ -24,6 +24,8 @@ actions!(
     FocusFirstEntry,
     /// Move project tree focus to the last visible entry.
     FocusLastEntry,
+    /// Show or hide the project workspace sidebar.
+    ToggleWorkspace,
   ]
 );
 
@@ -40,6 +42,8 @@ pub(crate) enum WorkspaceCommand {
   FocusFirst,
   /// Move project tree focus to the last visible entry.
   FocusLast,
+  /// Show or hide the project workspace sidebar.
+  ToggleWorkspace,
 }
 
 impl WorkspaceCommand {
@@ -63,15 +67,16 @@ impl WorkspaceCommand {
       Self::ActivateFocused => "workspace.activate_focused_entry",
       Self::FocusFirst => "workspace.focus_first_entry",
       Self::FocusLast => "workspace.focus_last_entry",
+      Self::ToggleWorkspace => "workspace.toggle_workspace",
     }
   }
 
-  /// Converts this command into the workspace tree navigation it drives.
+  /// Converts this command into workspace tree navigation when applicable.
   ///
   /// Workspace commands are the command-bus representation, while
   /// [`WorkspaceTreeNavigation`] is the tree renderer's local behavior model.
-  /// This conversion keeps those layers separate without duplicating the actual
-  /// navigation implementation.
+  /// Commands that affect broader workbench state, such as toggling the
+  /// sidebar shell, return `None` because they are not tree navigation.
   ///
   /// # Parameters
   ///
@@ -79,14 +84,16 @@ impl WorkspaceCommand {
   ///
   /// # Returns
   ///
-  /// The matching [`WorkspaceTreeNavigation`] variant.
-  pub(crate) fn tree_navigation(&self) -> WorkspaceTreeNavigation {
+  /// `Some(WorkspaceTreeNavigation)` for tree commands, or `None` for
+  /// workspace commands handled by the broader app state.
+  pub(crate) fn tree_navigation(&self) -> Option<WorkspaceTreeNavigation> {
     match self {
-      Self::FocusPrevious => WorkspaceTreeNavigation::FocusPrevious,
-      Self::FocusNext => WorkspaceTreeNavigation::FocusNext,
-      Self::ActivateFocused => WorkspaceTreeNavigation::ActivateFocused,
-      Self::FocusFirst => WorkspaceTreeNavigation::FocusFirst,
-      Self::FocusLast => WorkspaceTreeNavigation::FocusLast,
+      Self::FocusPrevious => Some(WorkspaceTreeNavigation::FocusPrevious),
+      Self::FocusNext => Some(WorkspaceTreeNavigation::FocusNext),
+      Self::ActivateFocused => Some(WorkspaceTreeNavigation::ActivateFocused),
+      Self::FocusFirst => Some(WorkspaceTreeNavigation::FocusFirst),
+      Self::FocusLast => Some(WorkspaceTreeNavigation::FocusLast),
+      Self::ToggleWorkspace => None,
     }
   }
 }
@@ -114,7 +121,11 @@ impl ChitinApp {
     command: WorkspaceCommand,
     cx: &mut gpui::Context<Self>,
   ) {
-    self.navigate_project_tree(command.tree_navigation(), cx);
+    if let Some(navigation) = command.tree_navigation() {
+      self.navigate_project_tree(navigation, cx);
+    } else {
+      self.toggle_workspace(cx);
+    }
   }
 }
 
@@ -132,8 +143,8 @@ impl ChitinApp {
 ///
 /// # Returns
 ///
-/// Nine GPUI keybindings for the current workspace tree navigation commands.
-pub(crate) fn default_key_bindings() -> [KeyBinding; 9] {
+/// Ten GPUI keybindings for the current workspace tree navigation commands.
+pub(crate) fn default_key_bindings() -> [KeyBinding; 10] {
   [
     KeyBinding::new("up", FocusPreviousEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("k", FocusPreviousEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
@@ -148,6 +159,7 @@ pub(crate) fn default_key_bindings() -> [KeyBinding; 9] {
     KeyBinding::new("end", FocusLastEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("g g", FocusFirstEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("G", FocusLastEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
+    KeyBinding::new("shift-e", ToggleWorkspace, None),
   ]
 }
 
@@ -166,8 +178,8 @@ mod tests {
   /// This test returns `()` and panics if command IDs change unexpectedly.
   fn workspace_command_id_should_match_config_name() {
     assert_eq!(
-      WorkspaceCommand::ActivateFocused.id(),
-      "workspace.activate_focused_entry"
+      WorkspaceCommand::ToggleWorkspace.id(),
+      "workspace.toggle_workspace"
     );
   }
 
@@ -183,8 +195,21 @@ mod tests {
   fn default_key_bindings_should_use_project_tree_context() {
     let bindings = default_key_bindings();
 
-    assert_eq!(bindings.len(), 9);
-    assert!(bindings.iter().all(|binding| binding.predicate().is_some()));
+    assert_eq!(bindings.len(), 10);
+    assert_eq!(
+      bindings
+        .iter()
+        .filter(|binding| binding.predicate().is_some())
+        .count(),
+      9
+    );
+    assert_eq!(
+      bindings
+        .iter()
+        .filter(|binding| binding.predicate().is_none())
+        .count(),
+      1
+    );
   }
 
   /// Verifies that Vim-style tree navigation bindings are registered.
@@ -216,6 +241,28 @@ mod tests {
     }));
   }
 
+  /// Verifies that the workspace toggle has a global Shift+E binding.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if the workspace toggle shortcut is not
+  /// registered as a global shifted `e` binding.
+  fn default_key_bindings_should_include_global_workspace_toggle() {
+    let bindings = default_key_bindings();
+
+    assert!(bindings.iter().any(|binding| {
+      let keystrokes = binding.keystrokes();
+      binding.predicate().is_none()
+        && keystrokes.len() == 1
+        && keystrokes[0].key() == "e"
+        && keystrokes[0].modifiers().shift
+    }));
+  }
+
   /// Verifies that workspace commands map onto workspace tree navigation.
   #[test]
   /// # Parameters
@@ -228,7 +275,8 @@ mod tests {
   fn workspace_command_should_map_to_tree_navigation() {
     assert_eq!(
       WorkspaceCommand::FocusPrevious.tree_navigation(),
-      WorkspaceTreeNavigation::FocusPrevious
+      Some(WorkspaceTreeNavigation::FocusPrevious)
     );
+    assert_eq!(WorkspaceCommand::ToggleWorkspace.tree_navigation(), None);
   }
 }

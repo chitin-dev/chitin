@@ -10,7 +10,7 @@ use chitin_ui::{
 };
 use gpui::{Context, IntoElement};
 
-use crate::app::ChitinApp;
+use crate::{app::ChitinApp, commands::WorkspaceCommand};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Top-level workbench area selected from the activity bar.
@@ -112,6 +112,34 @@ fn activity_item(
   ))
 }
 
+/// Builds the Workspace activity item and routes clicks through commands.
+///
+/// # Parameters
+///
+/// `cx` is the GPUI context used to create an app-state listener.
+///
+/// `icon_path` is the asset-relative SVG path rendered by the item.
+///
+/// # Returns
+///
+/// An [`ActivityBarItem`] that toggles the project workspace sidebar through
+/// the same command used by keyboard shortcuts.
+fn workspace_activity_item(
+  cx: &mut Context<ChitinApp>,
+  icon_path: &'static str,
+) -> ActivityBarItem {
+  ActivityBarItem::new(
+    ActiveActivity::Workspace.id(),
+    ActiveActivity::Workspace.title(),
+    icon_path,
+  )
+  .on_click(cx.listener(move |this, _, window, cx| {
+    this.dispatch_command(WorkspaceCommand::ToggleWorkspace.into(), cx);
+    let focus = this.workspace_toggle_focus_target(cx);
+    window.focus(&focus);
+  }))
+}
+
 /// Renders the desktop activity bar and wires item clicks to app state.
 ///
 /// # Parameters
@@ -133,9 +161,8 @@ pub fn render_activity_bar(
   ActivityBar::new()
     .theme(theme)
     .active_item(active_activity.id())
-    .item(activity_item(
+    .item(workspace_activity_item(
       cx,
-      ActiveActivity::Workspace,
       "icons/activity-bar/codicon-workspace.svg",
     ))
     .item(activity_item(

@@ -12,11 +12,14 @@ use gpui::{
   prelude::*,
 };
 
-use crate::components::{
-  activity_bar::{ActiveActivity, render_activity_bar},
-  document_area::{OpenedProjectDocument, render_document_area},
-  project_sidebar::{ProjectSidebarState, render_project_sidebar},
-  window_bar::render_window_bar,
+use crate::{
+  commands::workspace::ToggleWorkspace,
+  components::{
+    activity_bar::{ActiveActivity, render_activity_bar},
+    document_area::{OpenedProjectDocument, render_document_area},
+    project_sidebar::{ProjectSidebarState, render_project_sidebar},
+    window_bar::render_window_bar,
+  },
 };
 
 /// Root state object rendered into the main GPUI window.
@@ -29,10 +32,14 @@ pub struct ChitinApp {
   pub(crate) project_sidebar_state: ProjectSidebarState,
   /// Focus handle used by project tree keyboard navigation.
   pub(crate) project_sidebar_focus: Option<FocusHandle>,
+  /// Focus handle used by global workbench keyboard shortcuts.
+  pub(crate) workbench_focus: Option<FocusHandle>,
   /// File currently opened in the main document area.
   pub(crate) active_document: Option<OpenedProjectDocument>,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
+  /// Whether the project workspace sidebar is visible when Workspace is active.
+  pub(crate) project_sidebar_visible: bool,
 }
 
 impl ChitinApp {
@@ -103,8 +110,10 @@ impl ChitinApp {
       workspace,
       project_sidebar_state,
       project_sidebar_focus: None,
+      workbench_focus: None,
       active_document: None,
       active_activity: ActiveActivity::Workspace,
+      project_sidebar_visible: true,
     }
   }
 
@@ -152,6 +161,116 @@ impl ChitinApp {
       .get_or_insert_with(|| cx.focus_handle())
       .clone()
   }
+
+  /// Returns the stable focus handle used by global workbench shortcuts.
+  ///
+  /// This focus handle is tracked on the always-rendered root layout. It gives
+  /// global keybindings a dispatch path even when optional panels such as the
+  /// project sidebar are hidden.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is the GPUI context used to allocate a focus handle when none exists.
+  ///
+  /// # Returns
+  ///
+  /// A cloned [`FocusHandle`] for the root workbench layout.
+  pub(crate) fn workbench_focus(&mut self, cx: &mut Context<Self>) -> FocusHandle {
+    self
+      .workbench_focus
+      .get_or_insert_with(|| cx.focus_handle())
+      .clone()
+  }
+
+  /// Shows or hides the project workspace sidebar.
+  ///
+  /// When another workbench activity is active, toggling the workspace first
+  /// switches back to [`ActiveActivity::Workspace`] and shows the sidebar. When
+  /// Workspace is already active, toggling flips only sidebar visibility.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is the GPUI context notified after the workbench state changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` and mutates workbench activity/sidebar state.
+  pub(crate) fn toggle_workspace(&mut self, cx: &mut Context<Self>) {
+    self.toggle_workspace_state();
+    cx.notify();
+  }
+
+  /// Toggles the workspace sidebar and moves focus to a rendered target.
+  ///
+  /// Keyboard shortcuts need this variant because hiding the sidebar removes
+  /// the project tree focus target from the dispatch tree. After the state
+  /// transition, focus moves to the project tree when it is visible, otherwise
+  /// it moves to the always-rendered workbench root.
+  ///
+  /// # Parameters
+  ///
+  /// `window` is the GPUI window whose keyboard focus should be updated.
+  ///
+  /// `cx` is the GPUI context notified after the workbench state changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` and mutates sidebar visibility plus keyboard
+  /// focus.
+  pub(crate) fn toggle_workspace_with_focus(
+    &mut self,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    self.toggle_workspace_state();
+    let focus = self.workspace_toggle_focus_target(cx);
+
+    window.focus(&focus);
+    cx.notify();
+  }
+
+  /// Returns the focus target that should receive focus after Workspace toggle.
+  ///
+  /// Visible project sidebars should receive project-tree focus so keyboard
+  /// navigation works immediately. Hidden sidebars should return focus to the
+  /// persistent workbench root so global shortcuts remain reachable.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is the GPUI context used to lazily allocate focus handles.
+  ///
+  /// # Returns
+  ///
+  /// A [`FocusHandle`] for either the project sidebar or the workbench root.
+  pub(crate) fn workspace_toggle_focus_target(&mut self, cx: &mut Context<Self>) -> FocusHandle {
+    if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
+      self.project_sidebar_focus(cx)
+    } else {
+      self.workbench_focus(cx)
+    }
+  }
+
+  /// Applies the workspace-sidebar toggle state transition.
+  ///
+  /// This helper contains only synchronous state mutation so it can be tested
+  /// without constructing a GPUI window. Use [`ChitinApp::toggle_workspace`]
+  /// from UI actions so the app is notified after the transition.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after mutating activity/sidebar visibility.
+  fn toggle_workspace_state(&mut self) {
+    if self.active_activity == ActiveActivity::Workspace {
+      self.project_sidebar_visible = !self.project_sidebar_visible;
+    } else {
+      self.active_activity = ActiveActivity::Workspace;
+      self.project_sidebar_visible = true;
+    }
+  }
 }
 
 impl Render for ChitinApp {
@@ -176,14 +295,19 @@ impl Render for ChitinApp {
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
     let theme = builtins::dark();
     let app = cx.weak_entity();
+    let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
 
     div()
       .flex()
       .flex_col()
       .size_full()
+      .track_focus(&workbench_focus)
       .bg(theme.background.primary)
       .text_color(theme.text.primary)
+      .on_action(cx.listener(|this, _: &ToggleWorkspace, window, cx| {
+        this.toggle_workspace_with_focus(window, cx);
+      }))
       .when(self.project_sidebar_state.is_resizing(), |layout| {
         layout.cursor(CursorStyle::ResizeLeftRight)
       })
@@ -212,7 +336,7 @@ impl Render for ChitinApp {
           .min_h_0()
           .child(render_activity_bar(self.active_activity, theme, cx))
           .when(
-            self.active_activity == ActiveActivity::Workspace,
+            self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible,
             |layout| {
               layout.child(render_project_sidebar(
                 self.workspace.as_ref(),
@@ -230,5 +354,50 @@ impl Render for ChitinApp {
             theme,
           )),
       )
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Verifies that toggling Workspace hides its sidebar when it is active.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if toggling Workspace does not hide the
+  /// visible project sidebar.
+  fn toggle_workspace_state_should_hide_active_workspace_sidebar() {
+    let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
+
+    app.toggle_workspace_state();
+
+    assert_eq!(app.active_activity, ActiveActivity::Workspace);
+    assert!(!app.project_sidebar_visible);
+  }
+
+  /// Verifies that toggling Workspace reopens it from another activity.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if toggling from another activity fails
+  /// to select Workspace and show its sidebar.
+  fn toggle_workspace_state_should_show_workspace_from_other_activity() {
+    let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
+    app.active_activity = ActiveActivity::Search;
+    app.project_sidebar_visible = false;
+
+    app.toggle_workspace_state();
+
+    assert_eq!(app.active_activity, ActiveActivity::Workspace);
+    assert!(app.project_sidebar_visible);
   }
 }
