@@ -12,6 +12,17 @@ use gpui::{Context, IntoElement};
 use crate::app::ChitinApp;
 
 /// Renders the top window bar with app title and platform window controls.
+///
+/// # Parameters
+///
+/// `theme` supplies colors for the generic window bar component.
+///
+/// `_cx` is the GPUI context for parity with other desktop render helpers. The
+/// current implementation does not need it directly.
+///
+/// # Returns
+///
+/// A GPUI element containing Chitin's title bar and window controls.
 pub fn render_window_bar(theme: UIThemes, _cx: &mut Context<ChitinApp>) -> impl IntoElement {
   WindowBar::new("Chitin", "logo-app.svg", WindowBarSubtitlePosition::Right)
     .theme(theme)

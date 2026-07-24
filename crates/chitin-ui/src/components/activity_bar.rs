@@ -60,6 +60,18 @@ impl ActivityBarItem {
   /// comparison. `label` should be human-readable and suitable for future
   /// tooltip or accessibility use. `icon_path` is resolved by GPUI's asset
   /// source and should point to an SVG that can be painted with `currentColor`.
+  ///
+  /// # Parameters
+  ///
+  /// `id` is the stable item identifier used for selection and command routing.
+  ///
+  /// `label` is the human-readable item name.
+  ///
+  /// `icon_path` is the asset-relative SVG path rendered by this item.
+  ///
+  /// # Returns
+  ///
+  /// An [`ActivityBarItem`] with default theme, enabled state, and no badge.
   pub fn new(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
@@ -78,6 +90,14 @@ impl ActivityBarItem {
   }
 
   /// Returns this item's stable id.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A borrowed stable item identifier.
   pub fn id(&self) -> &SharedString {
     &self.id
   }
@@ -87,6 +107,14 @@ impl ActivityBarItem {
   /// The label is separate from the icon because compact activity bars often
   /// render only an icon while still needing descriptive text for tooltips,
   /// accessibility, command routing, and tests.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A borrowed human-readable label.
   pub fn label(&self) -> &SharedString {
     &self.label
   }
@@ -96,6 +124,14 @@ impl ActivityBarItem {
   /// Badges are intended for small counts or state markers, such as pending
   /// tasks, warnings, or background jobs. Keep badge text short so the activity
   /// bar remains narrow.
+  ///
+  /// # Parameters
+  ///
+  /// `badge` is the short badge text to render over the activity item.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn badge(mut self, badge: impl Into<SharedString>) -> Self {
     self.badge = Some(badge.into());
     self
@@ -105,6 +141,14 @@ impl ActivityBarItem {
   ///
   /// This is usually set by [`ActivityBar`] while it renders its children. It is
   /// public so callers can render individual activity items directly.
+  ///
+  /// # Parameters
+  ///
+  /// `theme` is the UI theme used for colors in this item.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
     self
@@ -115,6 +159,14 @@ impl ActivityBarItem {
   /// Most callers should prefer [`ActivityBar::active_item`] over setting this
   /// manually. This method is public for direct rendering and advanced
   /// composition cases.
+  ///
+  /// # Parameters
+  ///
+  /// `selected` controls whether selected styling is applied.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
     self
@@ -124,6 +176,14 @@ impl ActivityBarItem {
   ///
   /// Disabled items are rendered with muted styling and do not attach click
   /// handlers.
+  ///
+  /// # Parameters
+  ///
+  /// `disabled` controls whether the item can be clicked or hovered.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn disabled(mut self, disabled: bool) -> Self {
     self.disabled = disabled;
     self
@@ -134,6 +194,14 @@ impl ActivityBarItem {
   /// The callback receives GPUI's mouse-up event, window, and app context. The
   /// callback should update application state outside `chitin-ui`; for example,
   /// switching the active panel in `chitin-desktop`.
+  ///
+  /// # Parameters
+  ///
+  /// `listener` is invoked when the item receives a left mouse-up event.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn on_click(
     mut self,
     listener: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
@@ -142,6 +210,16 @@ impl ActivityBarItem {
     self
   }
 
+  /// Returns the text/icon color for the current item state.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`, including theme, selected state, and disabled
+  /// state.
+  ///
+  /// # Returns
+  ///
+  /// The [`Rgba`] color to use for the item icon and related text.
   fn text_color(&self) -> Rgba {
     if self.disabled {
       self.theme.text.disabled
@@ -156,6 +234,16 @@ impl ActivityBarItem {
 impl IntoElement for ActivityBarItem {
   type Element = gpui::Div;
 
+  /// Converts this item into a GPUI element.
+  ///
+  /// # Parameters
+  ///
+  /// This method consumes `self`, including its click listener.
+  ///
+  /// # Returns
+  ///
+  /// A GPUI `Div` containing the activity item icon, optional badge, selected
+  /// indicator, hover styling, and click handling.
   fn into_element(self) -> Self::Element {
     let selected = self.selected;
     let disabled = self.disabled;
@@ -278,6 +366,14 @@ pub struct ActivityBar {
 
 impl ActivityBar {
   /// Creates an empty activity bar with the default IDE-style width.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// An empty [`ActivityBar`] using the built-in dark theme.
   pub fn new() -> Self {
     Self {
       width: DEFAULT_ACTIVITY_BAR_WIDTH,
@@ -292,6 +388,14 @@ impl ActivityBar {
   ///
   /// Use this sparingly. A consistent activity bar width helps the surrounding
   /// application shell feel stable as panels open, close, and resize.
+  ///
+  /// # Parameters
+  ///
+  /// `width` is the desired fixed bar width.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBar`] for builder chaining.
   pub fn width(mut self, width: Pixels) -> Self {
     self.width = width;
     self
@@ -301,6 +405,14 @@ impl ActivityBar {
   ///
   /// Components default to [`builtins::dark`], but callers can pass another
   /// [`UIThemes`] value to keep an application-wide theme consistent.
+  ///
+  /// # Parameters
+  ///
+  /// `theme` supplies colors used by the bar and all contained items.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBar`] for builder chaining.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
     self
@@ -311,30 +423,71 @@ impl ActivityBar {
   /// The active item receives selected styling. The id is compared against
   /// [`ActivityBarItem::id`]. Selection state is deliberately passed in from the
   /// application so this component remains stateless and reusable.
+  ///
+  /// # Parameters
+  ///
+  /// `id` is the item identifier that should receive selected styling.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBar`] for builder chaining.
   pub fn active_item(mut self, id: impl Into<SharedString>) -> Self {
     self.active_item_id = Some(id.into());
     self
   }
 
   /// Adds an item to the primary, top-aligned section.
+  ///
+  /// # Parameters
+  ///
+  /// `item` is the activity item appended to the top section.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBar`] for builder chaining.
   pub fn item(mut self, item: ActivityBarItem) -> Self {
     self.items.push(item);
     self
   }
 
   /// Adds multiple items to the primary, top-aligned section.
+  ///
+  /// # Parameters
+  ///
+  /// `items` is the collection of activity items appended to the top section.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBar`] for builder chaining.
   pub fn items(mut self, items: impl IntoIterator<Item = ActivityBarItem>) -> Self {
     self.items.extend(items);
     self
   }
 
   /// Adds an item to the secondary, bottom-aligned section.
+  ///
+  /// # Parameters
+  ///
+  /// `item` is the activity item appended to the bottom section.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBar`] for builder chaining.
   pub fn bottom_item(mut self, item: ActivityBarItem) -> Self {
     self.bottom_items.push(item);
     self
   }
 
   /// Adds multiple items to the secondary, bottom-aligned section.
+  ///
+  /// # Parameters
+  ///
+  /// `items` is the collection of activity items appended to the bottom
+  /// section.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`ActivityBar`] for builder chaining.
   pub fn bottom_items(mut self, items: impl IntoIterator<Item = ActivityBarItem>) -> Self {
     self.bottom_items.extend(items);
     self
@@ -342,6 +495,15 @@ impl ActivityBar {
 }
 
 impl Default for ActivityBar {
+  /// Creates the default empty activity bar.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// The same value as [`ActivityBar::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -350,6 +512,15 @@ impl Default for ActivityBar {
 impl IntoElement for ActivityBar {
   type Element = gpui::Div;
 
+  /// Converts this activity bar into a GPUI element.
+  ///
+  /// # Parameters
+  ///
+  /// This method consumes `self` and all configured items.
+  ///
+  /// # Returns
+  ///
+  /// A GPUI `Div` containing top-aligned and bottom-aligned activity items.
   fn into_element(self) -> Self::Element {
     let active_item_id = self.active_item_id;
     let theme = self.theme;

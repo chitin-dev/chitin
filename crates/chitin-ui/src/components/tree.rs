@@ -1,345 +1,202 @@
-//! Reusable tree and tree items building blocks.
+//! Reusable virtual tree row primitives.
 //!
-//! Tree and tree items should be generic to represent different tree-structure
-//! data like workspace, json etc. So every function and property in this component
-//! should not be related to behaviors of specific tree-structure data.
+//! This module deliberately does not define a domain tree model. Application
+//! crates provide their own data payloads, expansion state, icons, and event
+//! behavior, then use [`TreeRow`] and [`virtual_tree_rows`] for shared
+//! viewport-bounded rendering.
 
 use std::rc::Rc;
 
 use gpui::{
-  App, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString, Styled, Window,
-  div, px, uniform_list,
+  App, ElementId, IntoElement, ParentElement, Styled, UniformListScrollHandle, Window, div, px,
+  uniform_list,
 };
 
-use crate::themes::{UIThemes, builtins};
-
-/// Default indent of tree items between levels
+/// Default indent of tree items between levels.
 pub const DEFAULT_TREE_INDENT: f32 = 12.0;
-/// Default height of tree items
+/// Default height of tree rows.
 pub const DEFAULT_TREE_ROW_HEIGHT: gpui::Pixels = px(24.0);
 
-type TreeItemClickListener = Rc<dyn Fn(&TreeItemClickEvent, &mut Window, &mut App)>;
-
-/// One row in a flattened visible tree.
+/// One item row in a flattened tree.
 ///
-/// `Tree` converts expanded hierarchical data into this linear form before
-/// handing rows to GPUI's virtual list renderer.
+/// `data` is caller-owned payload. Desktop workspace trees use this to keep
+/// non-lossy filesystem paths, while other callers can store JSON paths,
+/// command ids, or domain object identifiers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VisibleTreeItem {
-  /// Stable id of the item rendered on this row.
-  pub id: SharedString,
-  /// Display text shown on this row.
-  pub label: SharedString,
-  /// Semantic classification of the row item.
-  pub kind: TreeItemKind,
+pub struct TreeItemRow<T> {
+  /// Caller-owned item payload.
+  pub data: T,
   /// Whether this row's node is expanded.
   pub expanded: bool,
   /// Zero-based nesting level used for indentation.
   pub depth: usize,
 }
 
-/// Event emitted when a tree row is clicked.
+/// One non-interactive row in a flattened tree.
+///
+/// Message rows are useful for loading, empty, or error states that should
+/// participate in virtual scrolling without pretending to be real tree items.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeItemClickEvent {
-  /// Stable id of the clicked tree item.
-  pub id: SharedString,
+pub struct TreeMessageRow {
+  /// Status text shown on this row.
+  pub label: gpui::SharedString,
+  /// Zero-based nesting level used for indentation.
+  pub depth: usize,
 }
 
-/// Semantic kind for a tree item.
+/// One row in a virtualized tree.
 ///
-/// Semantic token of tree item enumeration still should be abstract. So we use
-/// Node and Leaf to distinguish them
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TreeItemKind {
-  /// An item that can contain child items.
-  ///
-  /// Nodes are typically expandable/collapsible in the tree view and may
-  /// have nested children. They often represent directories, containers,
-  /// or grouping elements.
-  Node,
-  /// An item that cannot contain child items.
-  ///
-  /// Leaves are terminal items in the tree hierarchy. They represent
-  /// individual files, entries, or actionable elements that cannot be
-  /// expanded further.
-  Leaf,
-}
-
-/// Immutable input model for a tree row.
-///
-/// `TreeItem` is owned UI state, not a filesystem model. This keeps `chitin-ui`
-/// independent from `chitin-core`, while desktop crates can still adapt
-/// `ProjectTreeEntry` or any other hierarchical data into a reusable tree.
+/// This enum is intentionally generic so applications can share Chitin's
+/// virtual-list infrastructure without forcing their domain data into string
+/// identifiers or a fixed tree node type.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeItem {
-  /// Unique identifier for this tree item.
-  ///
-  /// Used for item lookup, equality comparison, and state tracking across
-  /// tree updates. Should remain stable across re-renders.
-  id: SharedString,
-  /// Display text shown in the tree view.
-  label: SharedString,
-  /// Semantic classification of the item as either a node or leaf.
-  kind: TreeItemKind,
-  /// Child items contained by this node.
-  ///
-  /// Only relevant when `kind` is `TreeItemKind::Node`. Leaf items typically
-  /// have an empty vector.
-  children: Vec<TreeItem>,
-  /// Whether this node's children are visible in the tree view.
-  ///
-  /// Only meaningful for nodes with children. Determines if the expand/collapse
-  /// toggle is shown and whether descendants are rendered.
-  expanded: bool,
+pub enum TreeRow<T> {
+  /// A real tree item row.
+  Item(TreeItemRow<T>),
+  /// A non-interactive status row.
+  Message(TreeMessageRow),
 }
 
-impl TreeItem {
-  /// Creates a tree item with no children.
-  ///
-  /// Items are collapsed by default so large trees can render cheaply before
-  /// the caller wires persisted expansion state.
-  pub fn new(
-    id: impl Into<SharedString>,
-    label: impl Into<SharedString>,
-    kind: TreeItemKind,
-  ) -> Self {
-    Self {
-      id: id.into(),
-      label: label.into(),
-      kind,
-      children: Vec::new(),
-      expanded: false,
-    }
-  }
-
-  /// Replaces this item's children.
-  pub fn children(mut self, children: impl IntoIterator<Item = TreeItem>) -> Self {
-    self.children = children.into_iter().collect();
-    self
-  }
-
-  /// Sets whether the item's children should be rendered.
-  pub fn expanded(mut self, expanded: bool) -> Self {
-    self.expanded = expanded;
-    self
-  }
-
-  /// Returns this item's stable identity.
-  pub fn id(&self) -> &SharedString {
-    &self.id
-  }
-
-  /// Returns this item's visible label.
-  pub fn label(&self) -> &SharedString {
-    &self.label
-  }
-
-  /// Returns this item's kind.
-  pub fn kind(&self) -> TreeItemKind {
-    self.kind
-  }
-}
-
-/// Hierarchical list component for file trees and similar sidebars.
+/// Renders `rows` with GPUI's uniform virtual list.
 ///
-/// `Tree` owns only generic presentation state. It does not read the filesystem,
-/// subscribe to events, or mutate expansion state by itself; those behaviors
-/// should live in the application or domain crate and feed updated `TreeItem`
-/// values back into this component.
-pub struct Tree {
-  /// The root node of the tree hierarchy.
-  ///
-  /// All visible items in the tree are descendants of this root. The root
-  /// itself may or may not be rendered depending on the tree's configuration.
-  root: TreeItem,
-  /// Visual styling applied to all tree items and interactive states.
-  ///
-  /// Determines colors for text, backgrounds, borders, and hover/selection
-  /// states. The theme is applied uniformly across the entire tree.
-  theme: UIThemes,
-  /// Callback invoked when a tree item is clicked.
-  ///
-  /// The callback receives the clicked item's ID and its current state.
-  /// Application logic can use this to navigate, select, or perform actions
-  /// in response to user interaction.
-  on_click: Option<TreeItemClickListener>,
-}
-
-impl Tree {
-  /// Creates a tree rooted at `root`.
-  pub fn new(root: TreeItem) -> Self {
-    Self {
-      root,
-      theme: builtins::dark(),
-      on_click: None,
-    }
-  }
-
-  /// Overrides the theme used to render tree rows.
-  pub fn theme(mut self, theme: UIThemes) -> Self {
-    self.theme = theme;
-    self
-  }
-
-  /// Registers a click listener for every tree row.
-  ///
-  /// The listener receives the row id. Applications can use that id to update
-  /// selection, expand directories, open files, or dispatch commands.
-  pub fn on_click(
-    mut self,
-    listener: impl Fn(&TreeItemClickEvent, &mut Window, &mut App) + 'static,
-  ) -> Self {
-    self.on_click = Some(Rc::new(listener));
-    self
-  }
-}
-
-impl IntoElement for Tree {
-  type Element = gpui::Div;
-
-  fn into_element(self) -> Self::Element {
-    let rows = Rc::new(visible_tree_items(&self.root));
-    let row_count = rows.len();
-    let theme = self.theme;
-    let on_click = self.on_click;
-
-    div()
-      .flex()
-      .flex_1()
-      .min_h_0()
-      .w_full()
-      .text_color(theme.text.primary)
-      .child(
-        uniform_list("tree-rows", row_count, move |range, _, _| {
-          range
-            .filter_map(|index| rows.get(index).cloned())
-            .map(|row| render_tree_row(row, theme, on_click.clone()))
-            .collect()
-        })
-        .size_full(),
-      )
-  }
-}
-
-/// Flattens an expanded tree into rows suitable for virtual list rendering.
+/// The caller provides both the row payload type and the row renderer. This
+/// function owns only shared virtual-list mechanics: stable element id,
+/// viewport-bounded row selection, and full-size list layout.
 ///
-/// Collapsed descendants are skipped, so the returned vector represents the
-/// rows that can appear in the viewport.
-pub fn visible_tree_items(root: &TreeItem) -> Vec<VisibleTreeItem> {
-  let mut rows = Vec::new();
-  collect_visible_tree_items(root, 0, &mut rows);
-  rows
-}
-
-fn collect_visible_tree_items(item: &TreeItem, depth: usize, rows: &mut Vec<VisibleTreeItem>) {
-  rows.push(VisibleTreeItem {
-    id: item.id.clone(),
-    label: item.label.clone(),
-    kind: item.kind,
-    expanded: item.expanded,
-    depth,
-  });
-
-  if item.expanded {
-    for child in &item.children {
-      collect_visible_tree_items(child, depth + 1, rows);
-    }
-  }
-}
-
-/// Renders one virtualized tree row.
+/// # Parameters
 ///
-/// Each row displays a generic leading slot, the item label, and indentation
-/// based on nesting depth. Hover and click interactions are handled with the
-/// provided theme and callback. The row spans the full available width so hover
-/// styling and pointer hitboxes do not shrink to the text content.
+/// `id` is the stable GPUI element identifier used by `uniform_list`.
 ///
-/// # Arguments
-/// * `row` - The flattened row to render
-/// * `theme` - Visual styling for the item and descendants
-/// * `on_click` - Optional callback triggered when the item is clicked
+/// `rows` is the flattened list of visible item and message rows.
+///
+/// `render_row` converts one row into a GPUI element when that row is inside
+/// the requested viewport range.
 ///
 /// # Returns
-/// A `Div` element containing the rendered row.
-fn render_tree_row(
-  row: VisibleTreeItem,
-  theme: UIThemes,
-  on_click: Option<TreeItemClickListener>,
-) -> gpui::Div {
-  let id = row.id;
-  let label = row.label;
+///
+/// A GPUI `Div` that fills its parent and renders only the rows requested by
+/// GPUI's virtual list machinery.
+pub fn virtual_tree_rows<T, R>(
+  id: impl Into<ElementId>,
+  rows: Vec<TreeRow<T>>,
+  render_row: impl Fn(TreeRow<T>, &mut Window, &mut App) -> R + 'static,
+) -> gpui::Div
+where
+  T: Clone + 'static,
+  R: IntoElement,
+{
+  virtual_tree_rows_with_scroll(id, rows, None, render_row)
+}
 
-  let mut row = div()
+/// Renders `rows` with a caller-owned uniform-list scroll handle.
+///
+/// The scroll handle lets application state drive viewport changes, such as
+/// keeping a keyboard-focused row visible while still reusing Chitin UI's
+/// generic tree virtualization. Callers should store the handle in stable view
+/// state and pass the same handle to this function on each render.
+///
+/// # Parameters
+///
+/// `id` is the stable GPUI element identifier used by `uniform_list`.
+///
+/// `rows` is the flattened list of visible item and message rows.
+///
+/// `scroll_handle` is the optional GPUI uniform-list handle used to preserve
+/// and control virtual-list scroll position.
+///
+/// `render_row` converts one row into a GPUI element when that row is inside
+/// the requested viewport range.
+///
+/// # Returns
+///
+/// A GPUI `Div` that fills its parent, tracks optional scroll state, and
+/// renders only rows requested by GPUI's virtual list machinery.
+pub fn virtual_tree_rows_with_scroll<T, R>(
+  id: impl Into<ElementId>,
+  rows: Vec<TreeRow<T>>,
+  scroll_handle: Option<UniformListScrollHandle>,
+  render_row: impl Fn(TreeRow<T>, &mut Window, &mut App) -> R + 'static,
+) -> gpui::Div
+where
+  T: Clone + 'static,
+  R: IntoElement,
+{
+  let id = id.into();
+  let log_id = id.clone();
+  let rows = Rc::new(rows);
+  let row_count = rows.len();
+
+  let list = uniform_list(id, row_count, move |range, window, cx| {
+    log::debug!("Virtual tree rows range is {:?}, from id {}", range, log_id);
+    range
+      .filter_map(|index| rows.get(index).cloned())
+      .map(|row| render_row(row, window, cx))
+      .collect()
+  });
+
+  let list = match scroll_handle {
+    Some(scroll_handle) => list.track_scroll(scroll_handle),
+    None => list,
+  };
+
+  div()
     .flex()
-    .items_center()
-    // Keep hover background and pointer hitbox full-width inside uniform_list.
+    .flex_1()
+    .min_h_0()
     .w_full()
-    .h(DEFAULT_TREE_ROW_HEIGHT)
-    .pl(px(row.depth as f32 * DEFAULT_TREE_INDENT))
-    .pr_2()
-    .gap_1()
-    .text_xs()
-    .cursor_pointer()
-    .text_color(theme.text.secondary)
-    .hover(move |style| {
-      style
-        .bg(theme.background.hover)
-        .text_color(theme.text.primary)
-    })
-    .child(div().flex().items_center().justify_center().w(px(12.0)))
-    .child(
-      div()
-        .flex_1()
-        .min_w_0()
-        .truncate()
-        .text_color(theme.text.primary)
-        .child(label),
-    );
-
-  if let Some(listener) = on_click.clone() {
-    row = row.on_mouse_up(MouseButton::Left, move |_, window, cx| {
-      listener(&TreeItemClickEvent { id: id.clone() }, window, cx);
-    });
-  }
-
-  row
+    .child(list.size_full())
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
 
-  #[test]
-  fn children_should_replace_existing_children() {
-    let item = TreeItem::new("root", "root", TreeItemKind::Node)
-      .children([TreeItem::new("first", "first", TreeItemKind::Leaf)])
-      .children([TreeItem::new("second", "second", TreeItemKind::Leaf)]);
-
-    assert_eq!(item.children.len(), 1);
-    assert_eq!(item.children[0].id(), "second");
+  #[derive(Clone, Debug, PartialEq, Eq)]
+  struct TestPayload {
+    id: &'static str,
   }
 
   #[test]
-  fn visible_tree_items_should_skip_collapsed_descendants() {
-    let tree = TreeItem::new("root", "root", TreeItemKind::Node)
-      .children([
-        TreeItem::new("expanded", "expanded", TreeItemKind::Node)
-          .expanded(true)
-          .children([TreeItem::new("child", "child", TreeItemKind::Leaf)]),
-        TreeItem::new("collapsed", "collapsed", TreeItemKind::Node).children([TreeItem::new(
-          "hidden",
-          "hidden",
-          TreeItemKind::Leaf,
-        )]),
-      ])
-      .expanded(true);
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if item rows lose payload or depth.
+  fn tree_row_should_preserve_payload_and_depth() {
+    let row = TreeRow::Item(TreeItemRow {
+      data: TestPayload { id: "root" },
+      expanded: true,
+      depth: 2,
+    });
 
-    let rows = visible_tree_items(&tree);
+    let TreeRow::Item(row) = row else {
+      panic!("expected item row");
+    };
+    assert_eq!(row.data.id, "root");
+    assert!(row.expanded);
+    assert_eq!(row.depth, 2);
+  }
 
-    let labels = rows
-      .iter()
-      .map(|row| row.label.as_ref())
-      .collect::<Vec<_>>();
-    assert_eq!(labels, ["root", "expanded", "child", "collapsed"]);
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if message row fields are not preserved.
+  fn tree_message_row_should_store_status_text_and_depth() {
+    let row = TreeRow::<TestPayload>::Message(TreeMessageRow {
+      label: "Loading...".into(),
+      depth: 1,
+    });
+
+    let TreeRow::Message(row) = row else {
+      panic!("expected message row");
+    };
+    assert_eq!(row.label.as_ref(), "Loading...");
+    assert_eq!(row.depth, 1);
   }
 }
