@@ -240,9 +240,15 @@ impl SidebarResizeState {
   ///
   /// # Returns
   ///
-  /// `width` constrained to the inclusive `min_width..=max_width` range.
+  /// `width` constrained to the inclusive bounds. Inverted builder bounds are
+  /// normalized before clamping so normal builder use cannot panic.
   fn clamp_width(&self, width: Pixels) -> Pixels {
-    px(f32::from(width).clamp(f32::from(self.min_width), f32::from(self.max_width)))
+    let min_width = f32::from(self.min_width);
+    let max_width = f32::from(self.max_width);
+    let lower_bound = min_width.min(max_width);
+    let upper_bound = min_width.max(max_width);
+
+    px(f32::from(width).clamp(lower_bound, upper_bound))
   }
 }
 
@@ -1317,6 +1323,24 @@ mod tests {
 
     state.resize_width(px(10_000.0));
     assert_eq!(state.width(), DEFAULT_SIDEBAR_MAX_WIDTH);
+  }
+
+  /// Verifies that inverted builder bounds do not panic during reclamping.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if builder methods can trigger
+  /// `f32::clamp` with `min > max`.
+  fn resize_width_should_not_panic_when_builder_bounds_are_inverted() {
+    let min_above_max = SidebarResizeState::default().with_min_width(px(600.0));
+    assert_eq!(min_above_max.width(), DEFAULT_SIDEBAR_MAX_WIDTH);
+
+    let max_below_min = SidebarResizeState::default().with_max_width(px(120.0));
+    assert_eq!(max_below_min.width(), DEFAULT_SIDEBAR_MIN_WIDTH);
   }
 
   /// Verifies that drag resize applies cursor delta to the starting width.
