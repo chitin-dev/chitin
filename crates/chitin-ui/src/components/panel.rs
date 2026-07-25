@@ -22,7 +22,8 @@ pub const MAX_PANEL_SPLIT_RATIO: f32 = 0.9;
 pub const DEFAULT_PANEL_SPLIT_HANDLE_SIZE: Pixels = px(4.0);
 
 /// Callback invoked when a split resize gesture starts.
-pub type PanelResizeStartHandler = dyn Fn(PanelSplitPath, Pixels, &mut Window, &mut App);
+pub type PanelResizeStartHandler =
+  dyn Fn(PanelSplitPath, PanelSplitAxis, Pixels, &mut Window, &mut App);
 /// Callback invoked when a tab is activated.
 pub type PanelTabActivateHandler = dyn Fn(PanelId, PanelTabId, &mut Window, &mut App);
 /// Renderer for caller-owned actions placed at the end of a panel tab strip.
@@ -391,6 +392,7 @@ impl<T> PanelTree<T> {
   ///
   /// `true` when the panel and tab exist; otherwise `false`.
   pub fn activate_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
+    log::trace!("Panel {:?}, tab {:?} is activated", panel_id, tab_id);
     find_leaf_mut(&mut self.root, panel_id)
       .map(|leaf| leaf.activate_tab(tab_id))
       .unwrap_or(false)
@@ -460,6 +462,43 @@ impl<T> PanelTree<T> {
     resize_split_node(&mut self.root, path.branches(), ratio)
   }
 
+  /// Returns the ratio for a split node by path.
+  ///
+  /// # Parameters
+  ///
+  /// `path` identifies the split node to inspect.
+  ///
+  /// # Returns
+  ///
+  /// `Some(f32)` with the current split ratio when the path identifies a split;
+  /// otherwise `None`.
+  pub fn split_ratio(&self, path: &PanelSplitPath) -> Option<f32> {
+    find_split(&self.root, path.branches()).map(|split| split.ratio)
+  }
+
+  /// Returns the available size on a split node's resize axis.
+  ///
+  /// # Parameters
+  ///
+  /// `path` identifies the split node to inspect.
+  ///
+  /// `root_width` is the rendered width available to the root panel node.
+  ///
+  /// `root_height` is the rendered height available to the root panel node.
+  ///
+  /// # Returns
+  ///
+  /// `Some(Pixels)` containing the available size on the target split's axis
+  /// when the path identifies a split; otherwise `None`.
+  pub fn split_axis_size(
+    &self,
+    path: &PanelSplitPath,
+    root_width: Pixels,
+    root_height: Pixels,
+  ) -> Option<Pixels> {
+    split_axis_size_in_node(&self.root, path.branches(), root_width, root_height)
+  }
+
   /// Returns the number of leaf panels in the tree.
   ///
   /// # Parameters
@@ -488,14 +527,14 @@ impl PanelResizeConfig {
   ///
   /// # Parameters
   ///
-  /// `on_resize_start` is invoked with the split path, cursor position on the
-  /// resize axis, window, and app context.
+  /// `on_resize_start` is invoked with the split path, split axis, cursor
+  /// position on the resize axis, window, and app context.
   ///
   /// # Returns
   ///
   /// A [`PanelResizeConfig`] with the default handle size.
   pub fn new(
-    on_resize_start: impl Fn(PanelSplitPath, Pixels, &mut Window, &mut App) + 'static,
+    on_resize_start: impl Fn(PanelSplitPath, PanelSplitAxis, Pixels, &mut Window, &mut App) + 'static,
   ) -> Self {
     Self {
       handle_size: DEFAULT_PANEL_SPLIT_HANDLE_SIZE,
@@ -617,6 +656,89 @@ fn find_leaf_mut<T>(node: &mut PanelNode<T>, panel_id: PanelId) -> Option<&mut P
     PanelNode::Split(split) => find_leaf_mut(&mut split.first, panel_id)
       .or_else(|| find_leaf_mut(&mut split.second, panel_id)),
   }
+}
+
+/// Finds an immutable split node by branch path.
+///
+/// # Parameters
+///
+/// `node` is the current tree node being searched.
+///
+/// `path` is the remaining branch path to the target split.
+///
+/// # Returns
+///
+/// `Some(&PanelSplit<T>)` when `path` identifies a split node; otherwise
+/// `None`.
+fn find_split<'a, T>(
+  node: &'a PanelNode<T>,
+  path: &[PanelSplitBranch],
+) -> Option<&'a PanelSplit<T>> {
+  let PanelNode::Split(split) = node else {
+    return None;
+  };
+
+  let Some((next, rest)) = path.split_first() else {
+    return Some(split);
+  };
+
+  match next {
+    PanelSplitBranch::First => find_split(&split.first, rest),
+    PanelSplitBranch::Second => find_split(&split.second, rest),
+  }
+}
+
+/// Computes the available axis size for one split node.
+///
+/// # Parameters
+///
+/// `node` is the current tree node being searched.
+///
+/// `path` is the remaining branch path to the target split.
+///
+/// `width` is the rendered width available to `node`.
+///
+/// `height` is the rendered height available to `node`.
+///
+/// # Returns
+///
+/// `Some(Pixels)` containing the target split's axis size, or `None` when the
+/// path does not identify a split node.
+fn split_axis_size_in_node<T>(
+  node: &PanelNode<T>,
+  path: &[PanelSplitBranch],
+  width: Pixels,
+  height: Pixels,
+) -> Option<Pixels> {
+  let PanelNode::Split(split) = node else {
+    return None;
+  };
+
+  let Some((next, rest)) = path.split_first() else {
+    return Some(match split.axis {
+      PanelSplitAxis::Horizontal => width,
+      PanelSplitAxis::Vertical => height,
+    });
+  };
+
+  let first_ratio = split.ratio;
+  let second_ratio = 1.0 - split.ratio;
+  let (child, child_width, child_height) = match (split.axis, next) {
+    (PanelSplitAxis::Horizontal, PanelSplitBranch::First) => {
+      (&split.first, px(f32::from(width) * first_ratio), height)
+    }
+    (PanelSplitAxis::Horizontal, PanelSplitBranch::Second) => {
+      (&split.second, px(f32::from(width) * second_ratio), height)
+    }
+    (PanelSplitAxis::Vertical, PanelSplitBranch::First) => {
+      (&split.first, width, px(f32::from(height) * first_ratio))
+    }
+    (PanelSplitAxis::Vertical, PanelSplitBranch::Second) => {
+      (&split.second, width, px(f32::from(height) * second_ratio))
+    }
+  };
+
+  split_axis_size_in_node(child, rest, child_width, child_height)
 }
 
 /// Replaces a matching leaf with a split node.
@@ -893,7 +1015,7 @@ fn render_panel_split_handle(
         PanelSplitAxis::Horizontal => event.position.x,
         PanelSplitAxis::Vertical => event.position.y,
       };
-      on_resize_start(path.clone(), cursor_position, window, cx);
+      on_resize_start(path.clone(), axis, cursor_position, window, cx);
     });
   }
 
@@ -1228,5 +1350,63 @@ mod tests {
         ..
       })
     ));
+  }
+
+  /// Verifies that split ratio lookup returns the target split ratio.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if split ratio lookup does not return
+  /// the ratio stored on the requested split node.
+  fn panel_tree_should_return_split_ratio_by_path() {
+    let tree = PanelTree {
+      root: PanelNode::Split(PanelSplit::new(
+        PanelSplitAxis::Horizontal,
+        0.35,
+        PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(1))),
+        PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(2))),
+      )),
+    };
+
+    assert_eq!(tree.split_ratio(&PanelSplitPath::root()), Some(0.35));
+  }
+
+  /// Verifies that nested split sizing follows split ratios.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if nested split sizing uses the root
+  /// size instead of the target split container size.
+  fn panel_tree_should_return_nested_split_axis_size() {
+    let tree = PanelTree {
+      root: PanelNode::Split(PanelSplit::new(
+        PanelSplitAxis::Horizontal,
+        0.25,
+        PanelNode::Split(PanelSplit::new(
+          PanelSplitAxis::Vertical,
+          0.5,
+          PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(1))),
+          PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(2))),
+        )),
+        PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(3))),
+      )),
+    };
+
+    assert_eq!(
+      tree.split_axis_size(
+        &PanelSplitPath::root().child(PanelSplitBranch::First),
+        px(800.0),
+        px(600.0),
+      ),
+      Some(px(600.0))
+    );
   }
 }

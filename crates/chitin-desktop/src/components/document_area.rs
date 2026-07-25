@@ -12,14 +12,14 @@ use std::{
 use chitin_core::WorkspaceSummary;
 use chitin_ui::{
   components::panel::{
-    PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPlacement, PanelTab, PanelTabActivateHandler,
-    PanelTabId, PanelTree, render_panel_container,
+    PanelId, PanelLeaf, PanelResizeConfig, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement,
+    PanelTab, PanelTabActivateHandler, PanelTabId, PanelTree, render_panel_container,
   },
   themes::UIThemes,
 };
 use gpui::{
-  AnyElement, App, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Styled,
-  WeakEntity, Window, div, px, svg,
+  AnyElement, App, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+  Styled, WeakEntity, Window, div, px, svg,
 };
 
 use crate::{app::ChitinApp, components::activity_bar::ActiveActivity};
@@ -46,6 +46,19 @@ const SPLIT_VERTICAL_ICON_PATH: &str = "icons/panel/codicon-split-vertical.svg";
 /// Size used by tab strip action icons.
 const PANEL_ACTION_ICON_SIZE: gpui::Pixels = px(16.0);
 
+/// Active resize gesture for a document panel split.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DocumentPanelResizeDrag {
+  /// Path to the split node being resized.
+  path: PanelSplitPath,
+  /// Axis of the split node being resized.
+  axis: PanelSplitAxis,
+  /// Cursor position on the resize axis when dragging started.
+  start_position: Pixels,
+  /// Split ratio when dragging started.
+  start_ratio: f32,
+}
+
 /// State for document panels rendered in the main workbench area.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DocumentPanelState {
@@ -53,6 +66,8 @@ pub(crate) struct DocumentPanelState {
   pub(crate) tree: PanelTree<OpenedProjectDocument>,
   /// Next panel identifier to allocate for a split leaf.
   next_panel_id: u64,
+  /// Active split resize drag, if the user is dragging a split handle.
+  resize_drag: Option<DocumentPanelResizeDrag>,
 }
 
 impl OpenedProjectDocument {
@@ -95,6 +110,7 @@ impl DocumentPanelState {
         document,
       ))),
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
+      resize_drag: None,
     }
   }
 
@@ -170,6 +186,109 @@ impl DocumentPanelState {
       .tree
       .split_leaf(panel_id, axis, copied_leaf, PanelSplitPlacement::After, 0.5)
       .then_some(new_panel_id)
+  }
+
+  /// Starts resizing a document panel split.
+  ///
+  /// # Parameters
+  ///
+  /// `path` identifies the split node whose handle was pressed.
+  ///
+  /// `axis` controls whether horizontal or vertical pointer movement is used.
+  ///
+  /// `start_position` is the cursor position on the resize axis where the drag
+  /// began.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the split path exists and resize state was recorded;
+  /// otherwise `false`.
+  pub(crate) fn start_resize(
+    &mut self,
+    path: PanelSplitPath,
+    axis: PanelSplitAxis,
+    start_position: Pixels,
+  ) -> bool {
+    let Some(start_ratio) = self.tree.split_ratio(&path) else {
+      return false;
+    };
+
+    self.resize_drag = Some(DocumentPanelResizeDrag {
+      path,
+      axis,
+      start_position,
+      start_ratio,
+    });
+    true
+  }
+
+  /// Updates a document panel split from the current pointer position.
+  ///
+  /// # Parameters
+  ///
+  /// `current_position` is the latest cursor position on the resize axis.
+  ///
+  /// `root_width` is the rendered width available to the document panel root.
+  ///
+  /// `root_height` is the rendered height available to the document panel root.
+  ///
+  /// # Returns
+  ///
+  /// `true` when an active drag changed a split ratio; otherwise `false`.
+  pub(crate) fn drag_resize(
+    &mut self,
+    current_position: Pixels,
+    root_width: Pixels,
+    root_height: Pixels,
+  ) -> bool {
+    let Some(resize_drag) = &self.resize_drag else {
+      return false;
+    };
+    let Some(available_size) =
+      self
+        .tree
+        .split_axis_size(&resize_drag.path, root_width, root_height)
+    else {
+      return false;
+    };
+    let available_size = f32::from(available_size);
+
+    if available_size <= 0.0 {
+      return false;
+    }
+
+    let delta = f32::from(current_position) - f32::from(resize_drag.start_position);
+    let ratio = resize_drag.start_ratio + delta / available_size;
+    self.tree.resize_split(&resize_drag.path, ratio)
+  }
+
+  /// Stops the active document panel split resize gesture.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self` to clear resize state.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a resize drag was active and removed; otherwise `false`.
+  pub(crate) fn stop_resize(&mut self) -> bool {
+    self.resize_drag.take().is_some()
+  }
+
+  /// Returns the active document panel resize axis.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// `Some(PanelSplitAxis)` when a resize drag is active; otherwise `None`.
+  pub(crate) fn resize_axis(&self) -> Option<PanelSplitAxis> {
+    self
+      .resize_drag
+      .as_ref()
+      .map(|resize_drag| resize_drag.axis)
   }
 
   /// Allocates the next document panel identifier.
@@ -271,6 +390,97 @@ impl ChitinApp {
       .map(|document_panels| document_panels.activate_tab(panel_id, tab_id))
       .unwrap_or(false)
   }
+
+  /// Starts resizing one document panel split.
+  ///
+  /// # Parameters
+  ///
+  /// `path` identifies the split node whose handle was pressed.
+  ///
+  /// `axis` controls whether horizontal or vertical pointer movement is used.
+  ///
+  /// `start_position` is the cursor position on the resize axis where the drag
+  /// began.
+  ///
+  /// # Returns
+  ///
+  /// `true` when document panel state exists and accepted the resize start;
+  /// otherwise `false`.
+  pub(crate) fn start_document_panel_resize(
+    &mut self,
+    path: PanelSplitPath,
+    axis: PanelSplitAxis,
+    start_position: Pixels,
+  ) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(|document_panels| document_panels.start_resize(path, axis, start_position))
+      .unwrap_or(false)
+  }
+
+  /// Updates the active document panel split resize.
+  ///
+  /// # Parameters
+  ///
+  /// `current_position` is the latest cursor position on the active resize
+  /// axis.
+  ///
+  /// `root_width` is the rendered width available to the document panel root.
+  ///
+  /// `root_height` is the rendered height available to the document panel root.
+  ///
+  /// # Returns
+  ///
+  /// `true` when an active document panel drag changed a split ratio; otherwise
+  /// `false`.
+  pub(crate) fn drag_document_panel_resize(
+    &mut self,
+    current_position: Pixels,
+    root_width: Pixels,
+    root_height: Pixels,
+  ) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(|document_panels| document_panels.drag_resize(current_position, root_width, root_height))
+      .unwrap_or(false)
+  }
+
+  /// Stops the active document panel split resize.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self` to clear document panel resize state.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a document panel resize drag was active and removed;
+  /// otherwise `false`.
+  pub(crate) fn stop_document_panel_resize(&mut self) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(DocumentPanelState::stop_resize)
+      .unwrap_or(false)
+  }
+
+  /// Returns the active document panel resize axis.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// `Some(PanelSplitAxis)` when a document panel resize drag is active;
+  /// otherwise `None`.
+  pub(crate) fn document_panel_resize_axis(&self) -> Option<PanelSplitAxis> {
+    self
+      .document_panels
+      .as_ref()
+      .and_then(DocumentPanelState::resize_axis)
+  }
 }
 
 /// Renders the main workbench document area.
@@ -342,11 +552,19 @@ fn render_opened_document_panels(
   let render_tab_strip_actions = Rc::new(move |panel_id| {
     render_panel_tab_strip_actions(panel_id, theme, actions_app.clone()).into_any_element()
   });
+  let resize_app = app.clone();
+  let resize = PanelResizeConfig::new(move |path, axis, start_position, _, cx| {
+    let _ = resize_app.update(cx, |app, cx| {
+      if app.start_document_panel_resize(path, axis, start_position) {
+        cx.notify();
+      }
+    });
+  });
 
   render_panel_container(
     &document_panels.tree,
     theme,
-    None,
+    Some(resize),
     Some(on_activate_tab),
     Some(render_tab_strip_actions),
     &|tab| render_opened_document_body(&tab.payload, theme).into_any_element(),
@@ -594,6 +812,7 @@ mod tests {
           )),
       ),
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
+      resize_drag: None,
     }
   }
 
@@ -655,5 +874,57 @@ mod tests {
 
     assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
     assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(2)));
+  }
+
+  /// Verifies that document panel resize updates the target split ratio.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if dragging a split handle does not
+  /// update the stored split ratio.
+  fn drag_resize_should_update_split_ratio() {
+    let mut state = two_tab_document_panel_state();
+    assert!(
+      state
+        .split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+        .is_some()
+    );
+
+    assert!(state.start_resize(
+      PanelSplitPath::root(),
+      PanelSplitAxis::Horizontal,
+      px(100.0)
+    ));
+    assert!(state.drag_resize(px(150.0), px(500.0), px(300.0)));
+
+    assert_eq!(state.tree.split_ratio(&PanelSplitPath::root()), Some(0.6));
+  }
+
+  /// Verifies that stopping document panel resize clears active drag state.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if resize state remains active after
+  /// stopping the drag.
+  fn stop_resize_should_clear_active_drag_state() {
+    let mut state = two_tab_document_panel_state();
+    assert!(
+      state
+        .split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
+        .is_some()
+    );
+    assert!(state.start_resize(PanelSplitPath::root(), PanelSplitAxis::Vertical, px(100.0)));
+
+    assert!(state.stop_resize());
+
+    assert_eq!(state.resize_axis(), None);
   }
 }

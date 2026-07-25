@@ -6,7 +6,13 @@
 use std::path::PathBuf;
 
 use chitin_core::{WorkspaceSummary, workspace::ProjectWorkspace};
-use chitin_ui::themes::builtins;
+use chitin_ui::{
+  components::{
+    activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH, panel::PanelSplitAxis,
+    window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
+  },
+  themes::builtins,
+};
 use gpui::{
   Context, CursorStyle, FocusHandle, InteractiveElement, MouseButton, Render, Window, div,
   prelude::*,
@@ -271,6 +277,45 @@ impl ChitinApp {
       self.project_sidebar_visible = true;
     }
   }
+
+  /// Calculates the current document panel root width.
+  ///
+  /// # Parameters
+  ///
+  /// `window_width` is the full GPUI window width.
+  ///
+  /// `visible_sidebar_width` is the current width occupied by an open sidebar,
+  /// or zero when no sidebar is visible.
+  ///
+  /// # Returns
+  ///
+  /// The approximate width available to the document panel root after removing
+  /// the activity bar and visible project sidebar.
+  fn document_panel_root_width(
+    window_width: gpui::Pixels,
+    visible_sidebar_width: gpui::Pixels,
+  ) -> gpui::Pixels {
+    gpui::px(
+      (f32::from(window_width)
+        - f32::from(DEFAULT_ACTIVITY_BAR_WIDTH)
+        - f32::from(visible_sidebar_width))
+      .max(0.0),
+    )
+  }
+
+  /// Calculates the current document panel root height.
+  ///
+  /// # Parameters
+  ///
+  /// `window_height` is the full GPUI window height.
+  ///
+  /// # Returns
+  ///
+  /// The approximate height available to the document panel root after removing
+  /// the window bar.
+  fn document_panel_root_height(window_height: gpui::Pixels) -> gpui::Pixels {
+    gpui::px((f32::from(window_height) - f32::from(DEFAULT_WINDOW_BAR_HEIGHT)).max(0.0))
+  }
 }
 
 impl Render for ChitinApp {
@@ -298,6 +343,13 @@ impl Render for ChitinApp {
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
     let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
+    let document_panel_resize_axis = self.document_panel_resize_axis();
+    let visible_sidebar_width =
+      if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
+        self.project_sidebar_state.resize.width()
+      } else {
+        gpui::px(0.0)
+      };
 
     div()
       .flex()
@@ -312,25 +364,59 @@ impl Render for ChitinApp {
       .when(project_sidebar_is_resizing, |layout| {
         layout.cursor(CursorStyle::ResizeLeftRight)
       })
+      .when(
+        document_panel_resize_axis == Some(PanelSplitAxis::Horizontal),
+        |layout| layout.cursor(CursorStyle::ResizeLeftRight),
+      )
+      .when(
+        document_panel_resize_axis == Some(PanelSplitAxis::Vertical),
+        |layout| layout.cursor(CursorStyle::ResizeUpDown),
+      )
       .on_mouse_move({
         let app = app.clone();
-        move |event, _, cx| {
-          if !project_sidebar_is_resizing {
+        move |event, window, cx| {
+          if !project_sidebar_is_resizing && document_panel_resize_axis.is_none() {
             return;
           }
 
-          let _ = app.update(cx, |this, cx| {
-            if this.project_sidebar_state.drag_resize(event.position.x) {
-              cx.notify();
-            }
-          });
+          if project_sidebar_is_resizing {
+            let _ = app.update(cx, |this, cx| {
+              if this.project_sidebar_state.drag_resize(event.position.x) {
+                cx.notify();
+              }
+            });
+          }
+
+          if let Some(axis) = document_panel_resize_axis {
+            let bounds = window.bounds();
+            let document_root_width =
+              Self::document_panel_root_width(bounds.size.width, visible_sidebar_width);
+            let document_root_height = Self::document_panel_root_height(bounds.size.height);
+            let current_position = match axis {
+              PanelSplitAxis::Horizontal => event.position.x,
+              PanelSplitAxis::Vertical => event.position.y,
+            };
+
+            let _ = app.update(cx, |this, cx| {
+              if this.drag_document_panel_resize(
+                current_position,
+                document_root_width,
+                document_root_height,
+              ) {
+                cx.notify();
+              }
+            });
+          }
         }
       })
       .on_mouse_up(MouseButton::Left, {
         let app = app.clone();
         move |_, _, cx| {
           let _ = app.update(cx, |this, cx| {
-            if this.project_sidebar_state.stop_resize() {
+            let sidebar_stopped = this.project_sidebar_state.stop_resize();
+            let document_panel_stopped = this.stop_document_panel_resize();
+
+            if sidebar_stopped || document_panel_stopped {
               cx.notify();
             }
           });
@@ -408,5 +494,39 @@ mod tests {
 
     assert_eq!(app.active_activity, ActiveActivity::Workspace);
     assert!(app.project_sidebar_visible);
+  }
+
+  /// Verifies that document panel width excludes fixed workbench chrome.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if document panel width includes the
+  /// activity bar or visible sidebar.
+  fn document_panel_root_width_should_exclude_activity_bar_and_sidebar() {
+    assert_eq!(
+      ChitinApp::document_panel_root_width(gpui::px(1000.0), gpui::px(260.0)),
+      gpui::px(1000.0 - 48.0 - 260.0)
+    );
+  }
+
+  /// Verifies that document panel height excludes the window bar.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if document panel height includes the
+  /// window bar.
+  fn document_panel_root_height_should_exclude_window_bar() {
+    assert_eq!(
+      ChitinApp::document_panel_root_height(gpui::px(760.0)),
+      gpui::px(730.0)
+    );
   }
 }
