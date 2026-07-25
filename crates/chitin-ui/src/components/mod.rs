@@ -5,6 +5,8 @@
 
 /// Vertical workbench activity bar components.
 pub mod activity_bar;
+/// IDE-style multi-panel container components.
+pub mod panel;
 /// Sidebar shell and subsection components.
 pub mod sidebar;
 /// Generic hierarchical tree components.

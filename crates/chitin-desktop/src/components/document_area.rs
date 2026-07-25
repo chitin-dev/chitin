@@ -7,8 +7,13 @@
 use std::path::{Path, PathBuf};
 
 use chitin_core::WorkspaceSummary;
-use chitin_ui::themes::UIThemes;
-use gpui::{FontWeight, IntoElement, div, prelude::*};
+use chitin_ui::{
+  components::panel::{
+    PanelId, PanelLeaf, PanelTab, PanelTabId, PanelTree, render_panel_container,
+  },
+  themes::UIThemes,
+};
+use gpui::{AnyElement, FontWeight, IntoElement, ParentElement, div, prelude::*};
 
 use crate::components::activity_bar::ActiveActivity;
 
@@ -20,6 +25,11 @@ pub struct OpenedProjectDocument {
   /// Display name shown in the document placeholder.
   pub title: String,
 }
+
+/// Stable panel id used by the initial single document panel.
+const DEFAULT_DOCUMENT_PANEL_ID: PanelId = PanelId::new(1);
+/// Stable tab id used while the desktop owns a single active document.
+const DEFAULT_DOCUMENT_TAB_ID: PanelTabId = PanelTabId::new(1);
 
 impl OpenedProjectDocument {
   /// Creates an opened document descriptor from a filesystem path.
@@ -87,53 +97,50 @@ pub fn render_document_area(
 ///
 /// A GPUI `Div` containing the placeholder opened-document view.
 fn render_opened_document(document: &OpenedProjectDocument, theme: UIThemes) -> gpui::Div {
+  let panel_tree =
+    PanelTree::single_leaf(PanelLeaf::new(DEFAULT_DOCUMENT_PANEL_ID).tab(PanelTab::new(
+      DEFAULT_DOCUMENT_TAB_ID,
+      document.title.clone(),
+      document.clone(),
+    )));
+
+  render_panel_container(&panel_tree, theme, None, None, &|tab| {
+    render_opened_document_body(&tab.payload, theme).into_any_element()
+  })
+}
+
+/// Renders placeholder content for an opened document tab.
+///
+/// # Parameters
+///
+/// `document` is the opened file descriptor to display.
+///
+/// `theme` supplies colors for the document body.
+///
+/// # Returns
+///
+/// A GPUI element containing placeholder document content.
+fn render_opened_document_body(document: &OpenedProjectDocument, theme: UIThemes) -> AnyElement {
   div()
     .flex()
     .flex_col()
     .flex_1()
-    .min_w_0()
-    .h_full()
-    .bg(theme.background.primary)
+    .min_h_0()
+    .p_8()
+    .gap_3()
     .child(
       div()
-        .flex()
-        .items_center()
-        .h_10()
-        .px_4()
-        .border_b_1()
-        .border_color(theme.border.primary)
-        .bg(theme.background.secondary)
-        .child(
-          div()
-            .min_w_0()
-            .truncate()
-            .text_sm()
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(theme.text.primary)
-            .child(document.title.clone()),
-        ),
+        .text_lg()
+        .font_weight(FontWeight::SEMIBOLD)
+        .child("Placeholder document"),
     )
     .child(
       div()
-        .flex()
-        .flex_col()
-        .flex_1()
-        .min_h_0()
-        .p_8()
-        .gap_3()
-        .child(
-          div()
-            .text_lg()
-            .font_weight(FontWeight::SEMIBOLD)
-            .child("Placeholder document"),
-        )
-        .child(
-          div()
-            .text_sm()
-            .text_color(theme.text.secondary)
-            .child(document.path.display().to_string()),
-        ),
+        .text_sm()
+        .text_color(theme.text.secondary)
+        .child(document.path.display().to_string()),
     )
+    .into_any_element()
 }
 
 /// Renders the main area before a workspace file is opened.
