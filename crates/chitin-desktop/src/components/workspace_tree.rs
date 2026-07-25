@@ -262,7 +262,7 @@ impl ChitinApp {
   /// document state.
   fn open_project_file(&mut self, path: &Path) {
     self.project_sidebar_state.select_entry(path);
-    self.active_document = Some(OpenedProjectDocument::new(path));
+    self.open_project_document(OpenedProjectDocument::new(path));
   }
 
   /// Finds the project tree entry kind for a filesystem path.
@@ -1087,8 +1087,9 @@ mod tests {
     );
     assert_eq!(
       app
-        .active_document
+        .document_panels
         .as_ref()
+        .and_then(|document_panels| document_panels.active_document())
         .map(|document| document.path.as_path()),
       Some(entry_path.as_path())
     );
@@ -1211,8 +1212,9 @@ mod tests {
     );
     assert_eq!(
       app
-        .active_document
+        .document_panels
         .as_ref()
+        .and_then(|document_panels| document_panels.active_document())
         .map(|document| document.path.as_path()),
       Some(entry_path.as_path())
     );
@@ -1297,7 +1299,7 @@ mod tests {
     let activation = app.activate_project_tree_entry_state(&entry_path);
 
     assert_eq!(app.project_sidebar_state.selected_path, None);
-    assert_eq!(app.active_document, None);
+    assert_eq!(app.document_panels, None);
     assert_eq!(
       app.project_sidebar_state.focused_path.as_deref(),
       Some(entry_path.as_path())

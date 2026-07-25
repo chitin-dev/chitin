@@ -16,7 +16,7 @@ use crate::{
   commands::workspace::ToggleWorkspace,
   components::{
     activity_bar::{ActiveActivity, render_activity_bar},
-    document_area::{OpenedProjectDocument, render_document_area},
+    document_area::{DocumentPanelState, render_document_area},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::render_window_bar,
   },
@@ -34,8 +34,8 @@ pub struct ChitinApp {
   pub(crate) project_sidebar_focus: Option<FocusHandle>,
   /// Focus handle used by global workbench keyboard shortcuts.
   pub(crate) workbench_focus: Option<FocusHandle>,
-  /// File currently opened in the main document area.
-  pub(crate) active_document: Option<OpenedProjectDocument>,
+  /// Document panel tree currently shown in the main document area.
+  pub(crate) document_panels: Option<DocumentPanelState>,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
   /// Whether the project workspace sidebar is visible when Workspace is active.
@@ -111,7 +111,7 @@ impl ChitinApp {
       project_sidebar_state,
       project_sidebar_focus: None,
       workbench_focus: None,
-      active_document: None,
+      document_panels: None,
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
     }
@@ -326,12 +326,15 @@ impl Render for ChitinApp {
           });
         }
       })
-      .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-        let _ = app.update(cx, |this, cx| {
-          if this.project_sidebar_state.stop_resize() {
-            cx.notify();
-          }
-        });
+      .on_mouse_up(MouseButton::Left, {
+        let app = app.clone();
+        move |_, _, cx| {
+          let _ = app.update(cx, |this, cx| {
+            if this.project_sidebar_state.stop_resize() {
+              cx.notify();
+            }
+          });
+        }
       })
       .child(render_window_bar(theme, cx))
       .child(
@@ -353,10 +356,11 @@ impl Render for ChitinApp {
             },
           )
           .child(render_document_area(
-            self.active_document.as_ref(),
+            self.document_panels.as_ref(),
             &self.summary,
             self.active_activity,
             theme,
+            app.clone(),
           )),
       )
   }

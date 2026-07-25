@@ -25,6 +25,8 @@ pub const DEFAULT_PANEL_SPLIT_HANDLE_SIZE: Pixels = px(4.0);
 pub type PanelResizeStartHandler = dyn Fn(PanelSplitPath, Pixels, &mut Window, &mut App);
 /// Callback invoked when a tab is activated.
 pub type PanelTabActivateHandler = dyn Fn(PanelId, PanelTabId, &mut Window, &mut App);
+/// Renderer for caller-owned actions placed at the end of a panel tab strip.
+pub type PanelTabStripActionsRenderer = dyn Fn(PanelId) -> AnyElement;
 
 /// Stable identifier for a leaf panel.
 ///
@@ -144,7 +146,8 @@ impl PanelSplitPath {
     }
   }
 
-  /// Returns a child path below this path.
+  /// Returns a child path below this path. This function will not modify the
+  /// content of `self.branches`, it returns branch new [`PanelSplitPath`]
   ///
   /// # Parameters
   ///
@@ -179,6 +182,8 @@ pub struct PanelTab<T> {
   /// Stable tab identifier.
   pub id: PanelTabId,
   /// Title shown in the panel tab strip.
+  /// TODO: it can be replaced with any element, because we may need icons / close
+  /// buttons and some modifiers (especially used in git, so the [`PanelTab`])
   pub title: SharedString,
   /// Caller-owned view payload.
   pub payload: T,
@@ -391,6 +396,19 @@ impl<T> PanelTree<T> {
       .unwrap_or(false)
   }
 
+  /// Finds a leaf panel by identifier.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the leaf panel to find.
+  ///
+  /// # Returns
+  ///
+  /// `Some(&PanelLeaf<T>)` when the panel exists; otherwise `None`.
+  pub fn leaf(&self, panel_id: PanelId) -> Option<&PanelLeaf<T>> {
+    find_leaf(&self.root, panel_id)
+  }
+
   /// Splits one leaf panel into two leaves.
   ///
   /// # Parameters
@@ -516,6 +534,9 @@ impl PanelResizeConfig {
 ///
 /// `on_activate_tab` optionally receives tab activation events.
 ///
+/// `render_tab_strip_actions` optionally renders caller-owned controls at the
+/// right end of each leaf panel's tab strip.
+///
 /// `render_body` renders the body for one active tab.
 ///
 /// # Returns
@@ -526,6 +547,7 @@ pub fn render_panel_container<T>(
   theme: UIThemes,
   resize: Option<PanelResizeConfig>,
   on_activate_tab: Option<Rc<PanelTabActivateHandler>>,
+  render_tab_strip_actions: Option<Rc<PanelTabStripActionsRenderer>>,
   render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
 ) -> Div {
   render_panel_node(
@@ -534,6 +556,7 @@ pub fn render_panel_container<T>(
     theme,
     resize.as_ref(),
     on_activate_tab.as_ref(),
+    render_tab_strip_actions.as_ref(),
     render_body,
   )
 }
@@ -552,6 +575,27 @@ fn clamp_split_ratio(ratio: f32) -> f32 {
     ratio.clamp(MIN_PANEL_SPLIT_RATIO, MAX_PANEL_SPLIT_RATIO)
   } else {
     0.5
+  }
+}
+
+/// Finds an immutable leaf panel by identifier.
+///
+/// # Parameters
+///
+/// `node` is the current tree node being searched.
+///
+/// `panel_id` is the leaf panel identifier to find.
+///
+/// # Returns
+///
+/// `Some(&PanelLeaf<T>)` when the leaf exists; otherwise `None`.
+fn find_leaf<T>(node: &PanelNode<T>, panel_id: PanelId) -> Option<&PanelLeaf<T>> {
+  match node {
+    PanelNode::Leaf(leaf) if leaf.id == panel_id => Some(leaf),
+    PanelNode::Leaf(_) => None,
+    PanelNode::Split(split) => {
+      find_leaf(&split.first, panel_id).or_else(|| find_leaf(&split.second, panel_id))
+    }
   }
 }
 
@@ -694,6 +738,8 @@ fn count_leaves<T>(node: &PanelNode<T>) -> usize {
 ///
 /// `on_activate_tab` optionally handles tab activation.
 ///
+/// `render_tab_strip_actions` optionally renders right-side tab strip actions.
+///
 /// `render_body` renders active tab content.
 ///
 /// # Returns
@@ -705,13 +751,26 @@ fn render_panel_node<T>(
   theme: UIThemes,
   resize: Option<&PanelResizeConfig>,
   on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
+  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
   render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
 ) -> Div {
   match node {
-    PanelNode::Leaf(leaf) => render_panel_leaf(leaf, theme, on_activate_tab, render_body),
-    PanelNode::Split(split) => {
-      render_panel_split(split, path, theme, resize, on_activate_tab, render_body)
-    }
+    PanelNode::Leaf(leaf) => render_panel_leaf(
+      leaf,
+      theme,
+      on_activate_tab,
+      render_tab_strip_actions,
+      render_body,
+    ),
+    PanelNode::Split(split) => render_panel_split(
+      split,
+      path,
+      theme,
+      resize,
+      on_activate_tab,
+      render_tab_strip_actions,
+      render_body,
+    ),
   }
 }
 
@@ -729,6 +788,8 @@ fn render_panel_node<T>(
 ///
 /// `on_activate_tab` optionally handles tab activation.
 ///
+/// `render_tab_strip_actions` optionally renders right-side tab strip actions.
+///
 /// `render_body` renders active tab content.
 ///
 /// # Returns
@@ -740,6 +801,7 @@ fn render_panel_split<T>(
   theme: UIThemes,
   resize: Option<&PanelResizeConfig>,
   on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
+  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
   render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
 ) -> Div {
   let first = render_panel_node(
@@ -748,6 +810,7 @@ fn render_panel_split<T>(
     theme,
     resize,
     on_activate_tab,
+    render_tab_strip_actions,
     render_body,
   )
   .flex_basis(relative(split.ratio))
@@ -761,6 +824,7 @@ fn render_panel_split<T>(
     theme,
     resize,
     on_activate_tab,
+    render_tab_strip_actions,
     render_body,
   )
   .flex_basis(relative(1.0 - split.ratio))
@@ -846,6 +910,8 @@ fn render_panel_split_handle(
 ///
 /// `on_activate_tab` optionally handles tab activation.
 ///
+/// `render_tab_strip_actions` optionally renders right-side tab strip actions.
+///
 /// `render_body` renders active tab content.
 ///
 /// # Returns
@@ -855,6 +921,7 @@ fn render_panel_leaf<T>(
   leaf: &PanelLeaf<T>,
   theme: UIThemes,
   on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
+  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
   render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
 ) -> Div {
   div()
@@ -866,7 +933,12 @@ fn render_panel_leaf<T>(
     .border_1()
     .border_color(theme.border.primary)
     .bg(theme.background.primary)
-    .child(render_panel_tab_strip(leaf, theme, on_activate_tab))
+    .child(render_panel_tab_strip(
+      leaf,
+      theme,
+      on_activate_tab,
+      render_tab_strip_actions,
+    ))
     .child(render_panel_body(leaf, theme, render_body))
 }
 
@@ -880,6 +952,10 @@ fn render_panel_leaf<T>(
 ///
 /// `on_activate_tab` optionally handles tab activation.
 ///
+/// `render_tab_strip_actions` optionally renders caller-owned controls at the
+/// end of the tab strip. And this function pointer will render an element of
+/// GPUI, normally it's a list of icon buttons.
+///
 /// # Returns
 ///
 /// A GPUI `Div` containing tab buttons.
@@ -887,8 +963,9 @@ fn render_panel_tab_strip<T>(
   leaf: &PanelLeaf<T>,
   theme: UIThemes,
   on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
+  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
 ) -> Div {
-  div()
+  let mut tab_strip = div()
     .flex()
     .items_center()
     .h(px(32.0))
@@ -897,15 +974,29 @@ fn render_panel_tab_strip<T>(
     .border_b_1()
     .border_color(theme.border.primary)
     .bg(theme.background.primary)
-    .children(leaf.tabs.iter().map(|tab| {
-      render_panel_tab(
-        leaf.id,
-        tab,
-        leaf.active_tab == Some(tab.id),
-        theme,
-        on_activate_tab,
-      )
-    }))
+    .child(
+      div()
+        .flex()
+        .items_center()
+        .flex_1()
+        .min_w_0()
+        .overflow_hidden()
+        .children(leaf.tabs.iter().map(|tab| {
+          render_panel_tab(
+            leaf.id,
+            tab,
+            leaf.active_tab == Some(tab.id),
+            theme,
+            on_activate_tab,
+          )
+        })),
+    );
+
+  if let Some(render_tab_strip_actions) = render_tab_strip_actions {
+    tab_strip = tab_strip.child(render_tab_strip_actions(leaf.id));
+  }
+
+  tab_strip
 }
 
 /// Renders one tab button.
@@ -1058,6 +1149,30 @@ mod tests {
         ..
       })
     ));
+  }
+
+  /// Verifies that immutable leaf lookup returns the requested panel.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if leaf lookup cannot find an existing
+  /// panel.
+  fn panel_tree_should_find_leaf_by_id() {
+    let tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
+      PanelTabId::new(1),
+      "Editor",
+      (),
+    )));
+
+    let Some(leaf) = tree.leaf(PanelId::new(1)) else {
+      panic!("leaf should exist");
+    };
+
+    assert_eq!(leaf.id, PanelId::new(1));
   }
 
   /// Verifies that splitting a leaf creates a binary split node.
