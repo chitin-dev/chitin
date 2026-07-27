@@ -1404,12 +1404,24 @@ fn render_panel_body<T>(
   render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
 ) -> Div {
   let body = div()
+    .relative()
     .flex()
     .flex_col()
     .flex_1()
     .min_h_0()
     .min_w_0()
-    .bg(theme.background.secondary);
+    .bg(theme.background.secondary)
+    .child(
+      // here we use an ui trick, using a child gap at the top of body to fill
+      // the gap
+      div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .top(px(-1.0))
+        .h(px(2.0))
+        .bg(theme.background.secondary),
+    );
 
   match leaf.active_tab() {
     Some(tab) => body.child(render_body(tab)),
