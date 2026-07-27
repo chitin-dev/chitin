@@ -19,7 +19,7 @@ pub const MIN_PANEL_SPLIT_RATIO: f32 = 0.1;
 /// Maximum split ratio accepted by panel resize state.
 pub const MAX_PANEL_SPLIT_RATIO: f32 = 0.9;
 /// Default width of a split resize handle.
-pub const DEFAULT_PANEL_SPLIT_HANDLE_SIZE: Pixels = px(4.0);
+pub const DEFAULT_PANEL_SPLIT_HANDLE_SIZE: Pixels = px(2.0);
 /// Default height of tab strip
 pub const DEFAULT_PANEL_TAB_STRIP_HEIGHT: Pixels = px(34.0);
 /// Default square size reserved for a panel tab close button.
