@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use chitin_core::{WorkspaceSummary, workspace::ProjectWorkspace};
 use chitin_ui::{
   components::{
-    activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH, panel::PanelSplitAxis,
+    activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
+    panel::{PanelSplitAxis, PanelTabDrag},
     window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
   },
   themes::builtins,
@@ -323,8 +324,8 @@ impl Render for ChitinApp {
   ///
   /// The rendered layout contains the window bar, activity bar, optional
   /// project sidebar, and main document area. It also owns top-level pointer
-  /// handling for sidebar resize drags because resize movement can occur
-  /// outside the sidebar bounds after dragging starts.
+  /// handling for resize and tab drags because pointer movement can occur
+  /// outside the originating component after dragging starts.
   ///
   /// # Parameters
   ///
@@ -338,6 +339,10 @@ impl Render for ChitinApp {
   ///
   /// A GPUI element tree for the current Chitin desktop frame.
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    if !cx.has_active_drag() {
+      self.cancel_document_panel_tab_drag();
+    }
+
     let theme = builtins::dark();
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
@@ -409,14 +414,25 @@ impl Render for ChitinApp {
           }
         }
       })
+      .on_drag_move::<PanelTabDrag>({
+        let app = app.clone();
+        move |_, _, cx| {
+          let _ = app.update(cx, |this, cx| {
+            if this.clear_document_panel_tab_drag_target() {
+              cx.notify();
+            }
+          });
+        }
+      })
       .on_mouse_up(MouseButton::Left, {
         let app = app.clone();
         move |_, _, cx| {
           let _ = app.update(cx, |this, cx| {
             let sidebar_stopped = this.project_sidebar_state.stop_resize();
             let document_panel_stopped = this.stop_document_panel_resize();
+            let document_tab_drag_cancelled = this.cancel_document_panel_tab_drag();
 
-            if sidebar_stopped || document_panel_stopped {
+            if sidebar_stopped || document_panel_stopped || document_tab_drag_cancelled {
               cx.notify();
             }
           });

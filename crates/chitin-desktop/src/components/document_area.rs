@@ -14,7 +14,9 @@ use chitin_ui::{
   components::panel::{
     PanelContainerConfig, PanelId, PanelLeaf, PanelResizeConfig, PanelSplitAxis, PanelSplitPath,
     PanelSplitPlacement, PanelTab, PanelTabActivateHandler, PanelTabCloseHandler,
-    PanelTabCloseIconRenderer, PanelTabId, PanelTree, render_panel_container,
+    PanelTabCloseIconRenderer, PanelTabDrag, PanelTabDragConfig, PanelTabDragStartHandler,
+    PanelTabDragState, PanelTabDragTargetHandler, PanelTabDropHandler, PanelTabDropTarget,
+    PanelTabId, PanelTree, render_panel_container,
   },
   themes::UIThemes,
 };
@@ -79,6 +81,8 @@ pub(crate) struct DocumentPanelState {
   next_tab_id: PanelTabId,
   /// Active split resize drag, if the user is dragging a split handle.
   resize_drag: Option<DocumentPanelResizeDrag>,
+  /// Temporary tab drag session kept separate from the persistent panel tree.
+  tab_drag: Option<PanelTabDragState>,
 }
 
 impl OpenedProjectDocument {
@@ -124,6 +128,7 @@ impl DocumentPanelState {
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
       resize_drag: None,
+      tab_drag: None,
     }
   }
 
@@ -259,10 +264,13 @@ impl DocumentPanelState {
   /// `Some(PanelId)` with the new panel id when splitting succeeds; otherwise
   /// `None`.
   pub(crate) fn split_panel(&mut self, panel_id: PanelId, axis: PanelSplitAxis) -> Option<PanelId> {
-    let active_tab = self.tree.leaf(panel_id)?.active_tab().cloned();
+    let mut active_tab = self.tree.leaf(panel_id)?.active_tab().cloned();
     let new_panel_id = self.allocate_panel_id();
     let mut new_leaf = PanelLeaf::new(new_panel_id);
 
+    if let Some(active_tab) = active_tab.as_mut() {
+      active_tab.id = self.allocate_tab_id();
+    }
     if let Some(active_tab) = active_tab {
       new_leaf.add_tab(active_tab);
     }
@@ -277,6 +285,134 @@ impl DocumentPanelState {
     }
 
     split
+  }
+
+  /// Starts a native GPUI tab drag and activates its source tab.
+  ///
+  /// # Parameters
+  ///
+  /// `drag` contains stable source identifiers, the original index, and title.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the source panel and tab still match the payload; otherwise
+  /// `false`.
+  pub(crate) fn start_tab_drag(&mut self, drag: PanelTabDrag) -> bool {
+    let source_matches = self
+      .tree
+      .leaf(drag.source_panel_id)
+      .and_then(|leaf| leaf.tabs.get(drag.source_index))
+      .is_some_and(|tab| tab.id == drag.tab_id);
+    if !source_matches || !self.activate_tab(drag.source_panel_id, drag.tab_id) {
+      return false;
+    }
+
+    self.tab_drag = Some(PanelTabDragState {
+      drag,
+      drop_target: None,
+    });
+    true
+  }
+
+  /// Updates the proposed insertion target for an active tab drag.
+  ///
+  /// # Parameters
+  ///
+  /// `target` identifies the panel and raw visual insertion position under the
+  /// pointer.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a valid target changed; otherwise `false`.
+  pub(crate) fn update_tab_drag_target(&mut self, target: PanelTabDropTarget) -> bool {
+    if self.tree.leaf(target.panel_id).is_none() {
+      return false;
+    }
+    let Some(tab_drag) = self.tab_drag.as_ref() else {
+      return false;
+    };
+    let source_exists = self
+      .tree
+      .leaf(tab_drag.drag.source_panel_id)
+      .is_some_and(|leaf| leaf.tabs.iter().any(|tab| tab.id == tab_drag.drag.tab_id));
+    if !source_exists || tab_drag.drop_target == Some(target) {
+      return false;
+    }
+
+    if let Some(tab_drag) = self.tab_drag.as_mut() {
+      tab_drag.drop_target = Some(target);
+    }
+    true
+  }
+
+  /// Clears the current insertion target while preserving the active drag.
+  ///
+  /// The workbench root invokes this at the start of each native drag-move
+  /// event. A tab strip later in event propagation replaces it with a valid
+  /// target when the pointer is inside that strip.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows the temporary drag session.
+  ///
+  /// # Returns
+  ///
+  /// `true` when an existing target was cleared; otherwise `false`.
+  pub(crate) fn clear_tab_drag_target(&mut self) -> bool {
+    let Some(tab_drag) = self.tab_drag.as_mut() else {
+      return false;
+    };
+
+    tab_drag.drop_target.take().is_some()
+  }
+
+  /// Commits an active tab drag through the panel model's atomic move API.
+  ///
+  /// The temporary drag state is always cleared before validation, so stale or
+  /// invalid payloads cannot leak feedback into a later interaction.
+  ///
+  /// # Parameters
+  ///
+  /// `drag` is GPUI's stable payload for the released tab.
+  ///
+  /// `target_panel_id` identifies the tab strip that accepted the drop.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the payload and current target match and the model accepts the
+  /// move; otherwise `false`.
+  pub(crate) fn drop_tab(&mut self, drag: PanelTabDrag, target_panel_id: PanelId) -> bool {
+    let Some(tab_drag) = self.tab_drag.take() else {
+      return false;
+    };
+    let Some(target) = tab_drag.drop_target else {
+      return false;
+    };
+    if tab_drag.drag != drag || target.panel_id != target_panel_id {
+      return false;
+    }
+    if !self
+      .tree
+      .move_tab(drag.source_panel_id, drag.tab_id, target)
+    {
+      return false;
+    }
+
+    self.focused_panel_id = target.panel_id;
+    true
+  }
+
+  /// Cancels the current tab drag without mutating the panel tree.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self` to clear temporary interaction state.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a drag session existed and was removed; otherwise `false`.
+  pub(crate) fn cancel_tab_drag(&mut self) -> bool {
+    self.tab_drag.take().is_some()
   }
 
   /// Starts resizing a document panel split.
@@ -524,6 +660,101 @@ impl ChitinApp {
       .unwrap_or(false)
   }
 
+  /// Starts a document tab drag after GPUI crosses its movement threshold.
+  ///
+  /// # Parameters
+  ///
+  /// `drag` identifies the source panel, tab, index, and preview title.
+  ///
+  /// # Returns
+  ///
+  /// `true` when document panel state accepts the drag; otherwise `false`.
+  pub(crate) fn start_document_panel_tab_drag(&mut self, drag: PanelTabDrag) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(|document_panels| document_panels.start_tab_drag(drag))
+      .unwrap_or(false)
+  }
+
+  /// Updates the current document tab insertion target.
+  ///
+  /// # Parameters
+  ///
+  /// `target` identifies a valid panel tab strip and raw insertion index.
+  ///
+  /// # Returns
+  ///
+  /// `true` when temporary target state changed; otherwise `false`.
+  pub(crate) fn update_document_panel_tab_drag_target(
+    &mut self,
+    target: PanelTabDropTarget,
+  ) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(|document_panels| document_panels.update_tab_drag_target(target))
+      .unwrap_or(false)
+  }
+
+  /// Clears stale document tab insertion feedback before target hit testing.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows the app's document panel state.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a previous insertion target was removed; otherwise `false`.
+  pub(crate) fn clear_document_panel_tab_drag_target(&mut self) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(DocumentPanelState::clear_tab_drag_target)
+      .unwrap_or(false)
+  }
+
+  /// Commits a dragged document tab released over a valid target strip.
+  ///
+  /// # Parameters
+  ///
+  /// `drag` is the stable GPUI drag payload.
+  ///
+  /// `target_panel_id` identifies the strip accepting the drop.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the tab move succeeds; otherwise `false`.
+  pub(crate) fn drop_document_panel_tab(
+    &mut self,
+    drag: PanelTabDrag,
+    target_panel_id: PanelId,
+  ) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(|document_panels| document_panels.drop_tab(drag, target_panel_id))
+      .unwrap_or(false)
+  }
+
+  /// Cancels any uncommitted document tab drag.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows the app's document panel state.
+  ///
+  /// # Returns
+  ///
+  /// `true` when temporary drag state existed and was cleared; otherwise
+  /// `false`.
+  pub(crate) fn cancel_document_panel_tab_drag(&mut self) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(DocumentPanelState::cancel_tab_drag)
+      .unwrap_or(false)
+  }
+
   /// Starts resizing one document panel split.
   ///
   /// # Parameters
@@ -697,6 +928,34 @@ fn render_opened_document_panels(
       .text_color(theme.text.primary)
       .into_any_element()
   });
+  let drag_start_app = app.clone();
+  let on_tab_drag_start: Rc<PanelTabDragStartHandler> =
+    Rc::new(move |drag, _: &mut Window, cx: &mut App| {
+      let _ = drag_start_app.update(cx, |app, cx| {
+        if app.start_document_panel_tab_drag(drag) {
+          cx.notify();
+        }
+      });
+    });
+  let drag_target_app = app.clone();
+  let on_tab_drag_target: Rc<PanelTabDragTargetHandler> =
+    Rc::new(move |target, _: &mut Window, cx: &mut App| {
+      let _ = drag_target_app.update(cx, |app, cx| {
+        if app.update_document_panel_tab_drag_target(target) {
+          cx.notify();
+        }
+      });
+    });
+  let drop_app = app.clone();
+  let on_tab_drop: Rc<PanelTabDropHandler> =
+    Rc::new(move |drag, panel_id, _: &mut Window, cx: &mut App| {
+      let _ = drop_app.update(cx, |app, cx| {
+        app.drop_document_panel_tab(drag, panel_id);
+        cx.notify();
+      });
+    });
+  let tab_drag = PanelTabDragConfig::new(on_tab_drag_start, on_tab_drag_target, on_tab_drop)
+    .state(document_panels.tab_drag.clone());
 
   let actions_app = app.clone();
   let render_tab_strip_actions = Rc::new(move |panel_id| {
@@ -716,7 +975,8 @@ fn render_opened_document_panels(
     .on_activate_tab(on_activate_tab)
     .on_close_tab(on_close_tab)
     .render_tab_close_icon(render_tab_close_icon)
-    .render_tab_strip_actions(render_tab_strip_actions);
+    .render_tab_strip_actions(render_tab_strip_actions)
+    .tab_drag(tab_drag);
 
   render_panel_container(&document_panels.tree, theme, panel_config, &|tab| {
     render_opened_document_body(&tab.payload, theme).into_any_element()
@@ -967,6 +1227,29 @@ mod tests {
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
       next_tab_id: PanelTabId::new(3),
       resize_drag: None,
+      tab_drag: None,
+    }
+  }
+
+  /// Creates a stable drag payload for one tab in a test panel.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the source panel.
+  ///
+  /// `tab_id` identifies the source tab.
+  ///
+  /// `source_index` is the tab's original position.
+  ///
+  /// # Returns
+  ///
+  /// A [`PanelTabDrag`] with a deterministic preview title.
+  fn test_tab_drag(panel_id: PanelId, tab_id: PanelTabId, source_index: usize) -> PanelTabDrag {
+    PanelTabDrag {
+      source_panel_id: panel_id,
+      tab_id,
+      source_index,
+      title: SharedString::from("dragged"),
     }
   }
 
@@ -991,7 +1274,7 @@ mod tests {
     assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
     assert_eq!(new_leaf.tabs.len(), 1);
     assert_eq!(new_leaf.tabs[0].payload.title, "alpha.rs");
-    assert_eq!(new_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+    assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(3)));
   }
 
   /// Verifies that splitting copies the active tab at split time.
@@ -1010,7 +1293,7 @@ mod tests {
 
     assert_eq!(new_leaf.tabs.len(), 1);
     assert_eq!(new_leaf.tabs[0].payload.title, "beta.rs");
-    assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(2)));
+    assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(3)));
   }
 
   /// Verifies that repeated splits do not copy inactive source tabs.
@@ -1051,7 +1334,7 @@ mod tests {
     };
 
     assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
-    assert!(state.close_tab(new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
+    assert!(state.close_tab(new_panel_id, PanelTabId::new(3)));
 
     let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
       panic!("source panel should still exist");
@@ -1064,9 +1347,9 @@ mod tests {
     assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
   }
 
-  /// Verifies that copied tab identifiers remain valid inside each panel.
+  /// Verifies that split views receive container-unique tab identifiers.
   #[test]
-  fn split_panel_should_preserve_panel_scoped_tab_id_for_copied_active_tab() {
+  fn split_panel_should_allocate_unique_tab_id_for_copied_active_tab() {
     let mut state = two_tab_document_panel_state();
 
     let Some(new_panel_id) =
@@ -1078,8 +1361,8 @@ mod tests {
       panic!("new panel should exist");
     };
 
-    assert_eq!(new_leaf.tabs[0].id, DEFAULT_DOCUMENT_TAB_ID);
-    assert_eq!(new_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+    assert_eq!(new_leaf.tabs[0].id, PanelTabId::new(3));
+    assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(3)));
   }
 
   /// Verifies that splitting an empty panel creates an empty new panel.
@@ -1091,6 +1374,7 @@ mod tests {
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
       resize_drag: None,
+      tab_drag: None,
     };
 
     let Some(new_panel_id) =
@@ -1104,6 +1388,140 @@ mod tests {
 
     assert!(new_leaf.tabs.is_empty());
     assert_eq!(new_leaf.active_tab, None);
+  }
+
+  /// Verifies a drag reorder preserves the moved document and focuses its panel.
+  #[test]
+  fn tab_drag_should_reorder_inside_source_panel() {
+    let mut state = two_tab_document_panel_state();
+    let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
+    assert!(state.start_tab_drag(drag.clone()));
+    assert!(state.update_tab_drag_target(PanelTabDropTarget {
+      panel_id: DEFAULT_DOCUMENT_PANEL_ID,
+      insertion_index: 2,
+    }));
+
+    assert!(state.drop_tab(drag, DEFAULT_DOCUMENT_PANEL_ID));
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("source panel should exist");
+    };
+    assert_eq!(
+      leaf
+        .tabs
+        .iter()
+        .map(|tab| tab.payload.title.as_str())
+        .collect::<Vec<_>>(),
+      vec!["beta.rs", "alpha.rs"]
+    );
+    assert_eq!(leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
+    assert_eq!(state.tab_drag, None);
+  }
+
+  /// Verifies a cross-panel drop transfers focus and preserves tab identity.
+  #[test]
+  fn tab_drag_should_move_existing_tab_to_target_panel() {
+    let mut state = two_tab_document_panel_state();
+    let Some(target_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("target panel should be created");
+    };
+    let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2), 1);
+    assert!(state.start_tab_drag(drag.clone()));
+    assert!(state.update_tab_drag_target(PanelTabDropTarget {
+      panel_id: target_panel_id,
+      insertion_index: 0,
+    }));
+
+    assert!(state.drop_tab(drag, target_panel_id));
+
+    let Some(target) = state.tree.leaf(target_panel_id) else {
+      panic!("target panel should survive");
+    };
+    assert_eq!(target.tabs[0].id, PanelTabId::new(2));
+    assert_eq!(target.tabs[0].payload.title, "beta.rs");
+    assert_eq!(target.active_tab, Some(PanelTabId::new(2)));
+    assert_eq!(state.focused_panel_id, target_panel_id);
+  }
+
+  /// Verifies moving a source panel's final tab collapses around the target.
+  #[test]
+  fn tab_drag_should_focus_target_after_empty_source_panel_is_removed() {
+    let mut state = DocumentPanelState::new(test_document("alpha.rs"));
+    let Some(target_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("target panel should be created");
+    };
+    let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
+    assert!(state.start_tab_drag(drag.clone()));
+    assert!(state.update_tab_drag_target(PanelTabDropTarget {
+      panel_id: target_panel_id,
+      insertion_index: 1,
+    }));
+
+    assert!(state.drop_tab(drag, target_panel_id));
+
+    assert_eq!(state.tree.leaf_count(), 1);
+    assert!(state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID).is_none());
+    assert!(state.tree.leaf(target_panel_id).is_some());
+    assert_eq!(state.focused_panel_id, target_panel_id);
+  }
+
+  /// Verifies cancelling a drag leaves the persistent panel tree unchanged.
+  #[test]
+  fn tab_drag_should_not_mutate_tree_when_cancelled() {
+    let mut state = two_tab_document_panel_state();
+    let before = state.tree.clone();
+    let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
+    assert!(state.start_tab_drag(drag));
+    assert!(state.update_tab_drag_target(PanelTabDropTarget {
+      panel_id: DEFAULT_DOCUMENT_PANEL_ID,
+      insertion_index: 2,
+    }));
+
+    assert!(state.cancel_tab_drag());
+
+    assert_eq!(state.tree, before);
+    assert_eq!(state.tab_drag, None);
+  }
+
+  /// Verifies leaving every strip clears only temporary target feedback.
+  #[test]
+  fn tab_drag_should_clear_target_without_cancelling_session() {
+    let mut state = two_tab_document_panel_state();
+    let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
+    assert!(state.start_tab_drag(drag.clone()));
+    assert!(state.update_tab_drag_target(PanelTabDropTarget {
+      panel_id: DEFAULT_DOCUMENT_PANEL_ID,
+      insertion_index: 2,
+    }));
+
+    assert!(state.clear_tab_drag_target());
+
+    assert_eq!(
+      state.tab_drag,
+      Some(PanelTabDragState {
+        drag,
+        drop_target: None,
+      })
+    );
+  }
+
+  /// Verifies a stale source index cannot begin a tab drag.
+  #[test]
+  fn tab_drag_should_reject_stale_source_without_temporary_state() {
+    let mut state = two_tab_document_panel_state();
+
+    assert!(!state.start_tab_drag(test_tab_drag(
+      DEFAULT_DOCUMENT_PANEL_ID,
+      DEFAULT_DOCUMENT_TAB_ID,
+      1,
+    )));
+
+    assert_eq!(state.tab_drag, None);
   }
 
   /// Verifies that closing a non-final tab keeps its panel in the layout.
@@ -1159,8 +1577,8 @@ mod tests {
       panic!("second split should succeed");
     };
 
-    assert!(state.close_tab(first_new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
-    assert!(state.close_tab(second_new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
+    assert!(state.close_tab(first_new_panel_id, PanelTabId::new(3)));
+    assert!(state.close_tab(second_new_panel_id, PanelTabId::new(4)));
 
     assert_eq!(state.tree.leaf_count(), 1);
     assert!(state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID).is_some());
@@ -1212,7 +1630,7 @@ mod tests {
       panic!("document panel should split");
     };
 
-    assert!(state.activate_tab(new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
+    assert!(state.activate_tab(new_panel_id, PanelTabId::new(3)));
     assert!(state.open_document_as_tab(test_document("gamma.rs")));
 
     let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
@@ -1224,7 +1642,7 @@ mod tests {
 
     assert_eq!(source_leaf.tabs.len(), 2);
     assert_eq!(focused_leaf.tabs.len(), 2);
-    assert_eq!(focused_leaf.active_tab, Some(PanelTabId::new(3)));
+    assert_eq!(focused_leaf.active_tab, Some(PanelTabId::new(4)));
     assert_eq!(focused_leaf.tabs[1].payload.title, "gamma.rs");
   }
 

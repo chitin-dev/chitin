@@ -8,8 +8,8 @@
 use std::rc::Rc;
 
 use gpui::{
-  AnyElement, App, CursorStyle, Div, InteractiveElement, MouseButton, ParentElement, Pixels,
-  SharedString, Styled, Window, div, prelude::*, px, relative,
+  AnyElement, App, Bounds, Context, CursorStyle, Div, InteractiveElement, MouseButton,
+  ParentElement, Pixels, SharedString, Styled, Window, div, prelude::*, px, relative,
 };
 
 use crate::themes::UIThemes;
@@ -34,6 +34,12 @@ pub type PanelResizeStartHandler =
 pub type PanelTabActivateHandler = dyn Fn(PanelId, PanelTabId, &mut Window, &mut App);
 /// Callback invoked when a tab close button is pressed.
 pub type PanelTabCloseHandler = dyn Fn(PanelId, PanelTabId, &mut Window, &mut App);
+/// Callback invoked when GPUI starts a panel-tab drag.
+pub type PanelTabDragStartHandler = dyn Fn(PanelTabDrag, &mut Window, &mut App);
+/// Callback invoked when a panel-tab drag enters a new insertion position.
+pub type PanelTabDragTargetHandler = dyn Fn(PanelTabDropTarget, &mut Window, &mut App);
+/// Callback invoked when a panel tab is dropped on a valid tab strip.
+pub type PanelTabDropHandler = dyn Fn(PanelTabDrag, PanelId, &mut Window, &mut App);
 /// Renderer for the icon shown inside one tab close button.
 pub type PanelTabCloseIconRenderer = dyn Fn(UIThemes) -> AnyElement;
 /// Renderer for caller-owned actions placed at the end of a panel tab strip.
@@ -75,7 +81,10 @@ impl PanelId {
   }
 }
 
-/// Stable identifier for a tab inside a panel.
+/// Stable identifier for a tab inside one panel container.
+///
+/// Applications should keep these identifiers unique across the container so a
+/// drag payload remains unambiguous while a tab moves between panel leaves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PanelTabId(u64);
 
@@ -105,6 +114,37 @@ impl PanelTabId {
   pub const fn value(self) -> u64 {
     self.0
   }
+}
+
+/// Stable payload carried by GPUI while one panel tab is being dragged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanelTabDrag {
+  /// Panel that owns the tab when the drag starts.
+  pub source_panel_id: PanelId,
+  /// Stable identifier of the dragged tab.
+  pub tab_id: PanelTabId,
+  /// Tab position when the drag starts.
+  pub source_index: usize,
+  /// Tab title rendered by the lightweight drag preview.
+  pub title: SharedString,
+}
+
+/// Proposed insertion position in an existing panel tab strip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanelTabDropTarget {
+  /// Panel that will receive the dragged tab.
+  pub panel_id: PanelId,
+  /// Raw insertion position before same-panel removal normalization.
+  pub insertion_index: usize,
+}
+
+/// Temporary presentation state for one active panel-tab drag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanelTabDragState {
+  /// Stable drag payload created when GPUI crosses its drag threshold.
+  pub drag: PanelTabDrag,
+  /// Current valid tab-strip target, if the pointer is over one.
+  pub drop_target: Option<PanelTabDropTarget>,
 }
 
 /// Axis used by one binary split node.
@@ -283,6 +323,24 @@ impl<T> PanelLeaf<T> {
     self.tabs.push(tab);
   }
 
+  /// Inserts a tab at a requested position and activates it.
+  ///
+  /// # Parameters
+  ///
+  /// `index` is clamped to the current tab count, so `usize::MAX` appends.
+  ///
+  /// `tab` is the existing tab object transferred into this panel.
+  ///
+  /// # Returns
+  ///
+  /// The final insertion index.
+  pub fn insert_tab(&mut self, index: usize, tab: PanelTab<T>) -> usize {
+    let index = index.min(self.tabs.len());
+    self.active_tab = Some(tab.id);
+    self.tabs.insert(index, tab);
+    index
+  }
+
   /// Activates a tab in this panel.
   ///
   /// # Parameters
@@ -315,12 +373,27 @@ impl<T> PanelLeaf<T> {
   ///
   /// `true` when the tab existed and was removed; otherwise `false`.
   pub fn close_tab(&mut self, tab_id: PanelTabId) -> bool {
-    let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
-      return false;
-    };
+    self.remove_tab(tab_id).is_some()
+  }
+
+  /// Removes and returns a tab while repairing active-tab selection.
+  ///
+  /// The fallback policy matches ordinary close behavior: when the removed tab
+  /// was active, the tab now at the same index is selected, or the preceding
+  /// tab when the removed tab was last.
+  ///
+  /// # Parameters
+  ///
+  /// `tab_id` identifies the tab whose ownership should leave this panel.
+  ///
+  /// # Returns
+  ///
+  /// `Some(PanelTab<T>)` when the tab existed; otherwise `None`.
+  pub fn remove_tab(&mut self, tab_id: PanelTabId) -> Option<PanelTab<T>> {
+    let index = self.tabs.iter().position(|tab| tab.id == tab_id)?;
     let closed_was_active = self.active_tab == Some(tab_id);
 
-    self.tabs.remove(index);
+    let tab = self.tabs.remove(index);
 
     if closed_was_active {
       self.active_tab = self
@@ -330,7 +403,7 @@ impl<T> PanelLeaf<T> {
         .map(|tab| tab.id);
     }
 
-    true
+    Some(tab)
   }
 
   /// Returns this panel's active tab.
@@ -455,6 +528,93 @@ impl<T> PanelTree<T> {
     find_leaf_mut(&mut self.root, panel_id)
       .map(|leaf| leaf.close_tab(tab_id))
       .unwrap_or(false)
+  }
+
+  /// Moves an existing tab to an insertion position in a panel leaf.
+  ///
+  /// This operation validates the complete move before changing the tree,
+  /// transfers the existing [`PanelTab`] without recreating its payload,
+  /// activates it in the target panel, and reuses [`Self::remove_leaf`] when a
+  /// cross-panel move empties a non-final source panel.
+  ///
+  /// For same-panel moves, `insertion_index` is the raw position in the
+  /// pre-removal tab strip. The method normalizes positions to the right of the
+  /// source tab after removing that tab.
+  ///
+  /// # Parameters
+  ///
+  /// `source_panel_id` identifies the panel that currently owns `tab_id`.
+  ///
+  /// `tab_id` identifies the existing tab object to transfer.
+  ///
+  /// `target` identifies the receiving panel and raw insertion position.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the requested move is valid, including an effective no-op;
+  /// otherwise `false`. Invalid moves leave the panel tree unchanged.
+  pub fn move_tab(
+    &mut self,
+    source_panel_id: PanelId,
+    tab_id: PanelTabId,
+    target: PanelTabDropTarget,
+  ) -> bool {
+    let Some(source_leaf) = self.leaf(source_panel_id) else {
+      return false;
+    };
+    let Some(source_index) = source_leaf.tabs.iter().position(|tab| tab.id == tab_id) else {
+      return false;
+    };
+    let Some(target_leaf) = self.leaf(target.panel_id) else {
+      return false;
+    };
+
+    if source_panel_id == target.panel_id {
+      let insertion_index = normalize_same_panel_insertion_index(
+        source_index,
+        target.insertion_index,
+        source_leaf.tabs.len(),
+      );
+      let Some(leaf) = self.leaf_mut(source_panel_id) else {
+        return false;
+      };
+
+      if insertion_index == source_index {
+        return leaf.activate_tab(tab_id);
+      }
+
+      let Some(tab) = leaf.remove_tab(tab_id) else {
+        return false;
+      };
+      leaf.insert_tab(insertion_index, tab);
+      return true;
+    }
+
+    if target_leaf.tabs.iter().any(|tab| tab.id == tab_id) {
+      return false;
+    }
+
+    let target_index = target.insertion_index.min(target_leaf.tabs.len());
+    let Some(tab) = self
+      .leaf_mut(source_panel_id)
+      .and_then(|leaf| leaf.remove_tab(tab_id))
+    else {
+      return false;
+    };
+    let Some(target_leaf) = self.leaf_mut(target.panel_id) else {
+      return false;
+    };
+    target_leaf.insert_tab(target_index, tab);
+
+    let source_is_empty = self
+      .leaf(source_panel_id)
+      .map(|leaf| leaf.tabs.is_empty())
+      .unwrap_or(false);
+    if source_is_empty && self.leaf_count() > 1 {
+      self.remove_leaf(source_panel_id);
+    }
+
+    true
   }
 
   /// Removes one leaf panel and collapses its parent split.
@@ -648,6 +808,61 @@ impl PanelResizeConfig {
   }
 }
 
+/// Callbacks and temporary presentation state for panel-tab dragging.
+#[derive(Clone)]
+pub struct PanelTabDragConfig {
+  /// Current drag session used to render source and target feedback.
+  state: Option<PanelTabDragState>,
+  /// Callback invoked after GPUI crosses its pointer movement threshold.
+  on_start: Rc<PanelTabDragStartHandler>,
+  /// Callback invoked when actual tab bounds produce a drop target.
+  on_target: Rc<PanelTabDragTargetHandler>,
+  /// Callback invoked when GPUI drops the payload on a valid tab strip.
+  on_drop: Rc<PanelTabDropHandler>,
+}
+
+impl PanelTabDragConfig {
+  /// Creates tab drag configuration from application-owned callbacks.
+  ///
+  /// # Parameters
+  ///
+  /// `on_start` begins the application's temporary drag session.
+  ///
+  /// `on_target` records the current panel and raw insertion position.
+  ///
+  /// `on_drop` commits a payload released over a valid tab strip.
+  ///
+  /// # Returns
+  ///
+  /// A [`PanelTabDragConfig`] without an active presentation state.
+  pub fn new(
+    on_start: Rc<PanelTabDragStartHandler>,
+    on_target: Rc<PanelTabDragTargetHandler>,
+    on_drop: Rc<PanelTabDropHandler>,
+  ) -> Self {
+    Self {
+      state: None,
+      on_start,
+      on_target,
+      on_drop,
+    }
+  }
+
+  /// Sets the current temporary drag state used by panel rendering.
+  ///
+  /// # Parameters
+  ///
+  /// `state` identifies the dragged tab and current valid insertion target.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelTabDragConfig`] for builder chaining.
+  pub fn state(mut self, state: Option<PanelTabDragState>) -> Self {
+    self.state = state;
+    self
+  }
+}
+
 /// Optional chrome behavior for [`render_panel_container`].
 #[derive(Clone, Default)]
 pub struct PanelContainerConfig {
@@ -664,6 +879,8 @@ pub struct PanelContainerConfig {
   render_tab_close_icon: Option<Rc<PanelTabCloseIconRenderer>>,
   /// Optional renderer for caller-owned tab-strip actions.
   render_tab_strip_actions: Option<Rc<PanelTabStripActionsRenderer>>,
+  /// Optional native GPUI tab drag-and-drop behavior.
+  tab_drag: Option<PanelTabDragConfig>,
 }
 
 impl PanelContainerConfig {
@@ -765,6 +982,20 @@ impl PanelContainerConfig {
     self.render_tab_strip_actions = Some(renderer);
     self
   }
+
+  /// Enables native GPUI drag-and-drop for panel tabs.
+  ///
+  /// # Parameters
+  ///
+  /// `tab_drag` supplies temporary state plus start, target, and drop callbacks.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn tab_drag(mut self, tab_drag: PanelTabDragConfig) -> Self {
+    self.tab_drag = Some(tab_drag);
+    self
+  }
 }
 
 /// Shared dependencies used while rendering one panel tree.
@@ -775,6 +1006,44 @@ struct PanelRenderContext<'a, T> {
   config: &'a PanelContainerConfig,
   /// Renderer for active tab body content.
   render_body: &'a dyn Fn(&PanelTab<T>) -> AnyElement,
+}
+
+/// Lightweight GPUI view displayed under the pointer during a tab drag.
+struct PanelTabDragPreview {
+  /// Title copied from the stable drag payload.
+  title: SharedString,
+  /// Theme used to match existing panel chrome.
+  theme: UIThemes,
+}
+
+impl Render for PanelTabDragPreview {
+  /// Renders a compact tab-title preview without duplicating panel content.
+  ///
+  /// # Parameters
+  ///
+  /// `window` is unused because the preview has no window-specific state.
+  ///
+  /// `cx` is unused because the preview has no mutable entity state.
+  ///
+  /// # Returns
+  ///
+  /// A GPUI element styled from the current UI theme.
+  fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+    div()
+      .max_w(px(220.0))
+      .px_3()
+      .h(DEFAULT_PANEL_TAB_STRIP_HEIGHT)
+      .flex()
+      .items_center()
+      .rounded_sm()
+      .border_1()
+      .border_color(self.theme.border.focus)
+      .bg(self.theme.background.secondary)
+      .text_color(self.theme.text.primary)
+      .text_xs()
+      .shadow_md()
+      .child(div().min_w_0().truncate().child(self.title.clone()))
+  }
 }
 
 /// Renders a binary panel tree.
@@ -827,6 +1096,57 @@ fn clamp_split_ratio(ratio: f32) -> f32 {
   } else {
     0.5
   }
+}
+
+/// Normalizes a same-panel raw insertion index after removing the source tab.
+///
+/// # Parameters
+///
+/// `source_index` is the tab position before removal.
+///
+/// `raw_insertion_index` is the visual insertion position in the original
+/// strip.
+///
+/// `tab_count` is the source panel's tab count before removal.
+///
+/// # Returns
+///
+/// The clamped insertion index in the post-removal collection.
+fn normalize_same_panel_insertion_index(
+  source_index: usize,
+  raw_insertion_index: usize,
+  tab_count: usize,
+) -> usize {
+  let raw_insertion_index = raw_insertion_index.min(tab_count);
+  let normalized_index = if source_index < raw_insertion_index {
+    raw_insertion_index.saturating_sub(1)
+  } else {
+    raw_insertion_index
+  };
+
+  normalized_index.min(tab_count.saturating_sub(1))
+}
+
+/// Calculates an insertion position from actual rendered tab bounds.
+///
+/// Bounds must be supplied in visual order. The first tab whose midpoint lies
+/// to the right of `pointer_x` determines the insertion position; a pointer
+/// after every midpoint appends after the final tab.
+///
+/// # Parameters
+///
+/// `tab_bounds` contains actual logical-pixel bounds in strip order.
+///
+/// `pointer_x` is the pointer's horizontal logical-pixel coordinate.
+///
+/// # Returns
+///
+/// An insertion index from `0..=tab_bounds.len()`. Empty bounds return `0`.
+pub fn panel_tab_insertion_index(tab_bounds: &[Bounds<Pixels>], pointer_x: Pixels) -> usize {
+  tab_bounds
+    .iter()
+    .position(|bounds| pointer_x < bounds.origin.x + bounds.size.width / 2.0)
+    .unwrap_or(tab_bounds.len())
 }
 
 /// Finds an immutable leaf panel by identifier.
@@ -1280,6 +1600,76 @@ fn render_panel_leaf<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>
 /// A GPUI `Div` containing tab buttons.
 fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>) -> Div {
   let panel_focused = context.config.focused_panel_id == Some(leaf.id);
+  let active_drop_target = context
+    .config
+    .tab_drag
+    .as_ref()
+    .and_then(|config| config.state.as_ref())
+    .and_then(|state| state.drop_target)
+    .filter(|target| target.panel_id == leaf.id);
+  let mut tab_lane = div()
+    .relative()
+    .flex()
+    .items_center()
+    .flex_1()
+    .min_w_0()
+    .h_full()
+    .overflow_hidden()
+    .children(leaf.tabs.iter().enumerate().map(|(index, tab)| {
+      render_panel_tab(
+        leaf.id,
+        index,
+        tab,
+        panel_focused,
+        leaf.active_tab == Some(tab.id),
+        context,
+      )
+    }))
+    .when(
+      active_drop_target.is_some_and(|target| target.insertion_index >= leaf.tabs.len())
+        && !leaf.tabs.is_empty(),
+      |lane| {
+        lane.child(render_panel_tab_insertion_marker(
+          context.theme.border.focus.into(),
+        ))
+      },
+    )
+    .when(
+      active_drop_target.is_some() && leaf.tabs.is_empty(),
+      |lane| {
+        lane.child(
+          div()
+            .absolute()
+            .inset_0()
+            .border_1()
+            .border_color(context.theme.border.focus),
+        )
+      },
+    );
+
+  if let Some(tab_drag) = context.config.tab_drag.as_ref() {
+    let on_target = tab_drag.on_target.clone();
+    let on_drop = tab_drag.on_drop.clone();
+    let panel_id = leaf.id;
+    let insertion_index = leaf.tabs.len();
+    tab_lane = tab_lane
+      .on_drag_move::<PanelTabDrag>(move |event, window, cx| {
+        if event.bounds.contains(&event.event.position) {
+          on_target(
+            PanelTabDropTarget {
+              panel_id,
+              insertion_index,
+            },
+            window,
+            cx,
+          );
+        }
+      })
+      .on_drop(move |drag: &PanelTabDrag, window, cx| {
+        on_drop(drag.clone(), panel_id, window, cx);
+      });
+  }
+
   let mut tab_strip = div()
     .flex()
     .items_center()
@@ -1287,24 +1677,7 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
     .min_w_0()
     .overflow_hidden()
     .bg(context.theme.background.primary)
-    .child(
-      div()
-        .flex()
-        .items_center()
-        .flex_1()
-        .min_w_0()
-        .h_full()
-        .overflow_hidden()
-        .children(leaf.tabs.iter().map(|tab| {
-          render_panel_tab(
-            leaf.id,
-            tab,
-            panel_focused,
-            leaf.active_tab == Some(tab.id),
-            context,
-          )
-        })),
-    );
+    .child(tab_lane);
 
   if let Some(render_tab_strip_actions) = context.config.render_tab_strip_actions.as_ref()
     && panel_focused
@@ -1332,16 +1705,28 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
 /// A GPUI `Div` for the tab button.
 fn render_panel_tab<T>(
   panel_id: PanelId,
+  tab_index: usize,
   tab: &PanelTab<T>,
   panel_focused: bool,
   active: bool,
   context: &PanelRenderContext<'_, T>,
-) -> Div {
+) -> impl IntoElement {
   let tab_id = tab.id;
   let tab_hover_group =
     SharedString::from(format!("panel-tab-{}-{}", panel_id.value(), tab_id.value()));
   let theme = context.theme;
+  let drag_state = context
+    .config
+    .tab_drag
+    .as_ref()
+    .and_then(|config| config.state.as_ref());
+  let dragged = drag_state
+    .is_some_and(|state| state.drag.source_panel_id == panel_id && state.drag.tab_id == tab_id);
+  let insertion_before = drag_state
+    .and_then(|state| state.drop_target)
+    .is_some_and(|target| target.panel_id == panel_id && target.insertion_index == tab_index);
   let mut tab_element = div()
+    .id(tab_hover_group.clone())
     .relative()
     .group(tab_hover_group.clone())
     .flex()
@@ -1364,6 +1749,7 @@ fn render_panel_tab<T>(
       theme.background.primary
     })
     .hover(move |style| style.bg(theme.background.secondary))
+    .when(dragged, |tab| tab.opacity(0.55))
     .child(
       div()
         .flex()
@@ -1391,6 +1777,10 @@ fn render_panel_tab<T>(
         )),
     );
 
+  if insertion_before {
+    tab_element = tab_element.child(render_panel_tab_insertion_marker(theme.border.focus.into()));
+  }
+
   if panel_focused && active {
     tab_element = tab_element.child(
       div()
@@ -1403,14 +1793,75 @@ fn render_panel_tab<T>(
     );
   }
 
+  if let Some(tab_drag) = context.config.tab_drag.as_ref() {
+    let drag = PanelTabDrag {
+      source_panel_id: panel_id,
+      tab_id,
+      source_index: tab_index,
+      title: tab.title.clone(),
+    };
+    let on_start = tab_drag.on_start.clone();
+    tab_element = tab_element
+      .cursor_move()
+      .on_drag(drag, move |drag, _, window, cx| {
+        on_start(drag.clone(), window, cx);
+        cx.new(|_| PanelTabDragPreview {
+          title: drag.title.clone(),
+          theme,
+        })
+      });
+  }
+
+  if let Some(tab_drag) = context.config.tab_drag.as_ref() {
+    let on_target = tab_drag.on_target.clone();
+    tab_element = tab_element.on_drag_move::<PanelTabDrag>(move |event, window, cx| {
+      if !event.bounds.contains(&event.event.position) {
+        return;
+      }
+
+      let local_index =
+        panel_tab_insertion_index(std::slice::from_ref(&event.bounds), event.event.position.x);
+      on_target(
+        PanelTabDropTarget {
+          panel_id,
+          insertion_index: tab_index + local_index,
+        },
+        window,
+        cx,
+      );
+    });
+  }
+
   if let Some(on_activate_tab) = context.config.on_activate_tab.as_ref() {
     let on_activate_tab = on_activate_tab.clone();
-    tab_element = tab_element.on_mouse_up(MouseButton::Left, move |_, window, cx| {
+    tab_element = tab_element.on_click(move |_, window, cx| {
       on_activate_tab(panel_id, tab_id, window, cx);
     });
   }
 
   tab_element
+}
+
+/// Renders an overlay marker at one tab insertion boundary.
+///
+/// # Parameters
+///
+/// `color` is the theme color painted by the insertion marker.
+///
+/// # Returns
+///
+/// A zero-width relative element whose absolute child paints a two-pixel
+/// vertical marker without changing tab-strip geometry.
+fn render_panel_tab_insertion_marker(color: gpui::Hsla) -> Div {
+  div().relative().w_0().h_full().child(
+    div()
+      .absolute()
+      .left_0()
+      .top_0()
+      .bottom_0()
+      .w(px(2.0))
+      .bg(color),
+  )
 }
 
 /// Renders the reserved close button slot for one panel tab.
@@ -1472,13 +1923,15 @@ fn render_panel_tab_close_button<T>(
 
   if let Some(on_close_tab) = context.config.on_close_tab.as_ref() {
     let on_close_tab = on_close_tab.clone();
-    close_button =
-      close_button
-        .cursor_pointer()
-        .on_mouse_up(MouseButton::Left, move |_, window, cx| {
-          cx.stop_propagation();
-          on_close_tab(panel_id, tab_id, window, cx);
-        });
+    close_button = close_button
+      .cursor_pointer()
+      .on_mouse_down(MouseButton::Left, |_, _, cx| {
+        cx.stop_propagation();
+      })
+      .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+        cx.stop_propagation();
+        on_close_tab(panel_id, tab_id, window, cx);
+      });
   }
 
   close_button
@@ -1541,6 +1994,44 @@ fn render_panel_body<T>(
 mod tests {
   use super::*;
 
+  /// Creates a root panel containing four stable test tabs.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// A [`PanelTree`] containing tabs A through D in one root leaf.
+  fn four_tab_tree() -> PanelTree<&'static str> {
+    PanelTree::single_leaf(
+      PanelLeaf::new(PanelId::new(1))
+        .tab(PanelTab::new(PanelTabId::new(1), "A", "state-a"))
+        .tab(PanelTab::new(PanelTabId::new(2), "B", "state-b"))
+        .tab(PanelTab::new(PanelTabId::new(3), "C", "state-c"))
+        .tab(PanelTab::new(PanelTabId::new(4), "D", "state-d")),
+    )
+  }
+
+  /// Returns tab identifiers from a requested test panel.
+  ///
+  /// # Parameters
+  ///
+  /// `tree` is the test panel tree to inspect.
+  ///
+  /// `panel_id` identifies the leaf whose tab order should be returned.
+  ///
+  /// # Returns
+  ///
+  /// Tab identifiers in their current visual order, or an empty vector when
+  /// the panel does not exist.
+  fn tab_ids(tree: &PanelTree<&'static str>, panel_id: PanelId) -> Vec<PanelTabId> {
+    tree
+      .leaf(panel_id)
+      .map(|leaf| leaf.tabs.iter().map(|tab| tab.id).collect())
+      .unwrap_or_default()
+  }
+
   /// Verifies that a leaf activates its first inserted tab.
   #[test]
   fn panel_leaf_should_activate_first_inserted_tab() {
@@ -1602,6 +2093,385 @@ mod tests {
       panic!("leaf should exist");
     };
     assert_eq!(leaf.active_tab, Some(PanelTabId::new(1)));
+  }
+
+  /// Verifies moving a middle tab to the left uses the raw strip position.
+  #[test]
+  fn panel_tree_should_move_middle_tab_left() {
+    let mut tree = four_tab_tree();
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(3),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(1),
+        insertion_index: 1,
+      },
+    ));
+
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(1)),
+      vec![
+        PanelTabId::new(1),
+        PanelTabId::new(3),
+        PanelTabId::new(2),
+        PanelTabId::new(4)
+      ]
+    );
+  }
+
+  /// Verifies moving a middle tab right normalizes its post-removal index.
+  #[test]
+  fn panel_tree_should_move_middle_tab_right() {
+    let mut tree = four_tab_tree();
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(2),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(1),
+        insertion_index: 4,
+      },
+    ));
+
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(1)),
+      vec![
+        PanelTabId::new(1),
+        PanelTabId::new(3),
+        PanelTabId::new(4),
+        PanelTabId::new(2)
+      ]
+    );
+  }
+
+  /// Verifies the first tab can move to the visual end of its strip.
+  #[test]
+  fn panel_tree_should_move_first_tab_to_end() {
+    let mut tree = four_tab_tree();
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(1),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(1),
+        insertion_index: 4,
+      },
+    ));
+
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(1)),
+      vec![
+        PanelTabId::new(2),
+        PanelTabId::new(3),
+        PanelTabId::new(4),
+        PanelTabId::new(1)
+      ]
+    );
+  }
+
+  /// Verifies the final tab can move to the beginning.
+  #[test]
+  fn panel_tree_should_move_last_tab_to_beginning() {
+    let mut tree = four_tab_tree();
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(4),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(1),
+        insertion_index: 0,
+      },
+    ));
+
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(1)),
+      vec![
+        PanelTabId::new(4),
+        PanelTabId::new(1),
+        PanelTabId::new(2),
+        PanelTabId::new(3)
+      ]
+    );
+  }
+
+  /// Verifies an effective original-position drop does not change order.
+  #[test]
+  fn panel_tree_should_keep_order_for_effective_same_position() {
+    let mut tree = four_tab_tree();
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(2),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(1),
+        insertion_index: 2,
+      },
+    ));
+
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(1)),
+      vec![
+        PanelTabId::new(1),
+        PanelTabId::new(2),
+        PanelTabId::new(3),
+        PanelTabId::new(4)
+      ]
+    );
+  }
+
+  /// Verifies dropping immediately before a tab's original position is a no-op.
+  #[test]
+  fn panel_tree_should_keep_order_when_dropped_before_original_position() {
+    let mut tree = four_tab_tree();
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(2),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(1),
+        insertion_index: 1,
+      },
+    ));
+
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(1)),
+      vec![
+        PanelTabId::new(1),
+        PanelTabId::new(2),
+        PanelTabId::new(3),
+        PanelTabId::new(4)
+      ]
+    );
+  }
+
+  /// Verifies a same-panel move leaves the moved tab active.
+  #[test]
+  fn panel_tree_should_activate_reordered_tab() {
+    let mut tree = four_tab_tree();
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(3),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(1),
+        insertion_index: 0,
+      },
+    ));
+
+    assert_eq!(
+      tree.leaf(PanelId::new(1)).and_then(|leaf| leaf.active_tab),
+      Some(PanelTabId::new(3))
+    );
+  }
+
+  /// Verifies cross-panel movement transfers one owned tab and repairs source focus.
+  #[test]
+  fn panel_tree_should_move_active_tab_between_panels() {
+    let mut tree = four_tab_tree();
+    assert!(tree.activate_tab(PanelId::new(1), PanelTabId::new(2)));
+    assert!(
+      tree.split_leaf(
+        PanelId::new(1),
+        PanelSplitAxis::Horizontal,
+        PanelLeaf::new(PanelId::new(2))
+          .tab(PanelTab::new(PanelTabId::new(5), "E", "state-e"))
+          .tab(PanelTab::new(PanelTabId::new(6), "F", "state-f")),
+        PanelSplitPlacement::After,
+        0.5,
+      )
+    );
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(2),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(2),
+        insertion_index: 1,
+      },
+    ));
+
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(2)),
+      vec![PanelTabId::new(5), PanelTabId::new(2), PanelTabId::new(6)]
+    );
+    assert_eq!(
+      tree.leaf(PanelId::new(1)).and_then(|leaf| leaf.active_tab),
+      Some(PanelTabId::new(3))
+    );
+    assert_eq!(
+      tree.leaf(PanelId::new(2)).and_then(|leaf| leaf.active_tab),
+      Some(PanelTabId::new(2))
+    );
+    assert_eq!(
+      tree
+        .leaf(PanelId::new(2))
+        .and_then(|leaf| leaf.active_tab())
+        .map(|tab| tab.payload),
+      Some("state-b")
+    );
+  }
+
+  /// Verifies an inactive move preserves the source panel's active tab.
+  #[test]
+  fn panel_tree_should_preserve_source_active_tab_when_moving_inactive_tab() {
+    let mut tree = four_tab_tree();
+    assert!(tree.split_leaf(
+      PanelId::new(1),
+      PanelSplitAxis::Horizontal,
+      PanelLeaf::new(PanelId::new(2)),
+      PanelSplitPlacement::After,
+      0.5,
+    ));
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(3),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(2),
+        insertion_index: 0,
+      },
+    ));
+
+    assert_eq!(
+      tree.leaf(PanelId::new(1)).and_then(|leaf| leaf.active_tab),
+      Some(PanelTabId::new(1))
+    );
+  }
+
+  /// Verifies moving into an empty panel activates its only tab.
+  #[test]
+  fn panel_tree_should_move_tab_into_empty_panel() {
+    let mut tree = four_tab_tree();
+    assert!(tree.split_leaf(
+      PanelId::new(1),
+      PanelSplitAxis::Horizontal,
+      PanelLeaf::new(PanelId::new(2)),
+      PanelSplitPlacement::After,
+      0.5,
+    ));
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(4),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(2),
+        insertion_index: 0,
+      },
+    ));
+
+    let Some(target) = tree.leaf(PanelId::new(2)) else {
+      panic!("empty target panel should survive");
+    };
+    assert_eq!(target.tabs.len(), 1);
+    assert_eq!(target.active_tab, Some(PanelTabId::new(4)));
+  }
+
+  /// Verifies moving a final source tab collapses its split around the target.
+  #[test]
+  fn panel_tree_should_remove_empty_source_and_preserve_adjacent_target() {
+    let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
+      PanelTabId::new(1),
+      "A",
+      "state-a",
+    )));
+    assert!(tree.split_leaf(
+      PanelId::new(1),
+      PanelSplitAxis::Horizontal,
+      PanelLeaf::new(PanelId::new(2)).tab(PanelTab::new(PanelTabId::new(2), "B", "state-b",)),
+      PanelSplitPlacement::After,
+      0.5,
+    ));
+
+    assert!(tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(1),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(2),
+        insertion_index: 1,
+      },
+    ));
+
+    assert_eq!(tree.leaf_count(), 1);
+    assert!(tree.leaf(PanelId::new(1)).is_none());
+    assert_eq!(
+      tab_ids(&tree, PanelId::new(2)),
+      vec![PanelTabId::new(2), PanelTabId::new(1)]
+    );
+  }
+
+  /// Verifies duplicate target identities reject a move without mutation.
+  #[test]
+  fn panel_tree_should_reject_duplicate_target_tab_id_atomically() {
+    let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
+      PanelTabId::new(1),
+      "A",
+      (),
+    )));
+    assert!(tree.split_leaf(
+      PanelId::new(1),
+      PanelSplitAxis::Horizontal,
+      PanelLeaf::new(PanelId::new(2)).tab(PanelTab::new(PanelTabId::new(1), "B", ())),
+      PanelSplitPlacement::After,
+      0.5,
+    ));
+    let before = tree.clone();
+
+    assert!(!tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(1),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(2),
+        insertion_index: 0,
+      },
+    ));
+
+    assert_eq!(tree, before);
+  }
+
+  /// Verifies a stale target panel rejects a move without changing the tree.
+  #[test]
+  fn panel_tree_should_reject_stale_target_atomically() {
+    let mut tree = four_tab_tree();
+    let before = tree.clone();
+
+    assert!(!tree.move_tab(
+      PanelId::new(1),
+      PanelTabId::new(2),
+      PanelTabDropTarget {
+        panel_id: PanelId::new(99),
+        insertion_index: 0,
+      },
+    ));
+
+    assert_eq!(tree, before);
+  }
+
+  /// Verifies midpoint hit testing handles variable rendered tab widths.
+  #[test]
+  fn panel_tab_insertion_index_should_use_actual_variable_width_bounds() {
+    let bounds = [
+      Bounds {
+        origin: gpui::point(px(10.0), px(0.0)),
+        size: gpui::size(px(80.0), px(34.0)),
+      },
+      Bounds {
+        origin: gpui::point(px(90.0), px(0.0)),
+        size: gpui::size(px(200.0), px(34.0)),
+      },
+      Bounds {
+        origin: gpui::point(px(290.0), px(0.0)),
+        size: gpui::size(px(72.0), px(34.0)),
+      },
+    ];
+
+    assert_eq!(panel_tab_insertion_index(&bounds, px(49.0)), 0);
+    assert_eq!(panel_tab_insertion_index(&bounds, px(50.0)), 1);
+    assert_eq!(panel_tab_insertion_index(&bounds, px(189.0)), 1);
+    assert_eq!(panel_tab_insertion_index(&bounds, px(190.0)), 2);
+    assert_eq!(panel_tab_insertion_index(&bounds, px(325.0)), 2);
+    assert_eq!(panel_tab_insertion_index(&bounds, px(326.0)), 3);
+    assert_eq!(panel_tab_insertion_index(&[], px(100.0)), 0);
   }
 
   /// Verifies that immutable leaf lookup returns the requested panel.
