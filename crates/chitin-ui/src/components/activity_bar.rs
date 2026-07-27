@@ -528,6 +528,7 @@ impl IntoElement for ActivityBar {
     div()
       .flex()
       .flex_col()
+      .flex_none()
       .justify_between()
       .items_center()
       .h_full()
