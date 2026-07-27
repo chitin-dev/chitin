@@ -12,8 +12,9 @@ use std::{
 use chitin_core::WorkspaceSummary;
 use chitin_ui::{
   components::panel::{
-    PanelId, PanelLeaf, PanelResizeConfig, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement,
-    PanelTab, PanelTabActivateHandler, PanelTabId, PanelTree, render_panel_container,
+    PanelContainerConfig, PanelId, PanelLeaf, PanelResizeConfig, PanelSplitAxis, PanelSplitPath,
+    PanelSplitPlacement, PanelTab, PanelTabActivateHandler, PanelTabCloseHandler,
+    PanelTabCloseIconRenderer, PanelTabId, PanelTree, render_panel_container,
   },
   themes::UIThemes,
 };
@@ -45,8 +46,12 @@ const FIRST_DYNAMIC_DOCUMENT_TAB_ID: PanelTabId = PanelTabId::new(2);
 const SPLIT_HORIZONTAL_ICON_PATH: &str = "icons/panel/codicon-split-horizontal.svg";
 /// Asset path for the vertical split panel action.
 const SPLIT_VERTICAL_ICON_PATH: &str = "icons/panel/codicon-split-vertical.svg";
+/// Asset path for document tab close buttons.
+const TAB_CLOSE_ICON_PATH: &str = "icons/panel/lucide-x.svg";
 /// Size used by tab strip action icons.
-const PANEL_ACTION_ICON_SIZE: gpui::Pixels = px(16.0);
+const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
+/// Size used by close tab button icons.
+const TAB_CLOSE_ICON_SIZE: Pixels = px(12.0);
 
 /// Active resize gesture for a document panel split.
 #[derive(Clone, Debug, PartialEq)]
@@ -175,6 +180,26 @@ impl DocumentPanelState {
   /// `true` when the panel and tab exist; otherwise `false`.
   pub(crate) fn activate_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
     if self.tree.activate_tab(panel_id, tab_id) {
+      self.focused_panel_id = panel_id;
+      return true;
+    }
+    false
+  }
+
+  /// Closes one tab inside one document panel.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the document panel whose tab should close.
+  ///
+  /// `tab_id` identifies the tab to close.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the panel and tab exist and the tab was removed; otherwise
+  /// `false`.
+  pub(crate) fn close_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
+    if self.tree.close_tab(panel_id, tab_id) {
       self.focused_panel_id = panel_id;
       return true;
     }
@@ -458,6 +483,26 @@ impl ChitinApp {
       .unwrap_or(false)
   }
 
+  /// Closes a tab inside a document panel.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the document panel that owns the tab.
+  ///
+  /// `tab_id` identifies the tab to close.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the panel and tab exist and the tab was removed; otherwise
+  /// `false`.
+  pub(crate) fn close_document_panel_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(|document_panels| document_panels.close_tab(panel_id, tab_id))
+      .unwrap_or(false)
+  }
+
   /// Starts resizing one document panel split.
   ///
   /// # Parameters
@@ -614,6 +659,23 @@ fn render_opened_document_panels(
       });
     },
   );
+  let close_app = app.clone();
+  let on_close_tab: Rc<PanelTabCloseHandler> = Rc::new(
+    move |panel_id: PanelId, tab_id: PanelTabId, _: &mut Window, cx: &mut App| {
+      let _ = close_app.update(cx, |app, cx| {
+        if app.close_document_panel_tab(panel_id, tab_id) {
+          cx.notify();
+        }
+      });
+    },
+  );
+  let render_tab_close_icon: Rc<PanelTabCloseIconRenderer> = Rc::new(move |theme| {
+    svg()
+      .path(TAB_CLOSE_ICON_PATH)
+      .size(TAB_CLOSE_ICON_SIZE)
+      .text_color(theme.text.primary)
+      .into_any_element()
+  });
 
   let actions_app = app.clone();
   let render_tab_strip_actions = Rc::new(move |panel_id| {
@@ -627,15 +689,16 @@ fn render_opened_document_panels(
       }
     });
   });
+  let panel_config = PanelContainerConfig::new()
+    .resize(resize)
+    .on_activate_tab(on_activate_tab)
+    .on_close_tab(on_close_tab)
+    .render_tab_close_icon(render_tab_close_icon)
+    .render_tab_strip_actions(render_tab_strip_actions);
 
-  render_panel_container(
-    &document_panels.tree,
-    theme,
-    Some(resize),
-    Some(on_activate_tab),
-    Some(render_tab_strip_actions),
-    &|tab| render_opened_document_body(&tab.payload, theme).into_any_element(),
-  )
+  render_panel_container(&document_panels.tree, theme, panel_config, &|tab| {
+    render_opened_document_body(&tab.payload, theme).into_any_element()
+  })
 }
 
 /// Renders split controls at the right end of one document panel tab strip.

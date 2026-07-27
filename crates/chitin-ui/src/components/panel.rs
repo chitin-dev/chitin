@@ -22,12 +22,20 @@ pub const MAX_PANEL_SPLIT_RATIO: f32 = 0.9;
 pub const DEFAULT_PANEL_SPLIT_HANDLE_SIZE: Pixels = px(4.0);
 /// Default height of tab strip
 pub const DEFAULT_PANEL_TAB_STRIP_HEIGHT: Pixels = px(34.0);
+/// Default square size reserved for a panel tab close button.
+pub const DEFAULT_PANEL_TAB_CLOSE_BUTTON_SIZE: Pixels = px(18.0);
+/// Default width reserved for trailing tab actions.
+pub const DEFAULT_PANEL_TAB_TRAILING_ACTION_WIDTH: Pixels = DEFAULT_PANEL_TAB_STRIP_HEIGHT;
 
 /// Callback invoked when a split resize gesture starts.
 pub type PanelResizeStartHandler =
   dyn Fn(PanelSplitPath, PanelSplitAxis, Pixels, &mut Window, &mut App);
 /// Callback invoked when a tab is activated.
 pub type PanelTabActivateHandler = dyn Fn(PanelId, PanelTabId, &mut Window, &mut App);
+/// Callback invoked when a tab close button is pressed.
+pub type PanelTabCloseHandler = dyn Fn(PanelId, PanelTabId, &mut Window, &mut App);
+/// Renderer for the icon shown inside one tab close button.
+pub type PanelTabCloseIconRenderer = dyn Fn(UIThemes) -> AnyElement;
 /// Renderer for caller-owned actions placed at the end of a panel tab strip.
 pub type PanelTabStripActionsRenderer = dyn Fn(PanelId) -> AnyElement;
 
@@ -185,8 +193,6 @@ pub struct PanelTab<T> {
   /// Stable tab identifier.
   pub id: PanelTabId,
   /// Title shown in the panel tab strip.
-  /// TODO: it can be replaced with any element, because we may need icons / close
-  /// buttons and some modifiers (especially used in git, so the [`PanelTab`])
   pub title: SharedString,
   /// Caller-owned view payload.
   pub payload: T,
@@ -295,6 +301,38 @@ impl<T> PanelLeaf<T> {
     false
   }
 
+  /// Closes a tab in this panel.
+  ///
+  /// If the closed tab was active, the next tab at the same index becomes
+  /// active. When there is no following tab, the previous tab becomes active.
+  /// Closing the last tab leaves the panel without an active tab.
+  ///
+  /// # Parameters
+  ///
+  /// `tab_id` is the tab identifier to remove.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the tab existed and was removed; otherwise `false`.
+  pub fn close_tab(&mut self, tab_id: PanelTabId) -> bool {
+    let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+      return false;
+    };
+    let closed_was_active = self.active_tab == Some(tab_id);
+
+    self.tabs.remove(index);
+
+    if closed_was_active {
+      self.active_tab = self
+        .tabs
+        .get(index)
+        .or_else(|| index.checked_sub(1).and_then(|index| self.tabs.get(index)))
+        .map(|tab| tab.id);
+    }
+
+    true
+  }
+
   /// Returns this panel's active tab.
   ///
   /// # Parameters
@@ -397,6 +435,25 @@ impl<T> PanelTree<T> {
     log::trace!("Panel {:?}, tab {:?} is activated", panel_id, tab_id);
     find_leaf_mut(&mut self.root, panel_id)
       .map(|leaf| leaf.activate_tab(tab_id))
+      .unwrap_or(false)
+  }
+
+  /// Closes a tab inside one panel leaf.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the leaf panel that owns the tab.
+  ///
+  /// `tab_id` identifies the tab to close.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the panel and tab exist and the tab was removed; otherwise
+  /// `false`.
+  pub fn close_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
+    log::trace!("Panel {:?}, tab {:?} is closed", panel_id, tab_id);
+    find_leaf_mut(&mut self.root, panel_id)
+      .map(|leaf| leaf.close_tab(tab_id))
       .unwrap_or(false)
   }
 
@@ -572,6 +629,117 @@ impl PanelResizeConfig {
   }
 }
 
+/// Optional chrome behavior for [`render_panel_container`].
+#[derive(Clone, Default)]
+pub struct PanelContainerConfig {
+  /// Optional resize configuration used by split handles.
+  resize: Option<PanelResizeConfig>,
+  /// Optional callback invoked when a tab is activated.
+  on_activate_tab: Option<Rc<PanelTabActivateHandler>>,
+  /// Optional callback invoked when a tab close button is pressed.
+  on_close_tab: Option<Rc<PanelTabCloseHandler>>,
+  /// Optional renderer for the tab close icon.
+  render_tab_close_icon: Option<Rc<PanelTabCloseIconRenderer>>,
+  /// Optional renderer for caller-owned tab-strip actions.
+  render_tab_strip_actions: Option<Rc<PanelTabStripActionsRenderer>>,
+}
+
+impl PanelContainerConfig {
+  /// Creates an empty panel container configuration.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// A [`PanelContainerConfig`] with optional behaviors disabled.
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// Enables split resize handles.
+  ///
+  /// # Parameters
+  ///
+  /// `resize` configures resize handle size and resize-start callbacks.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn resize(mut self, resize: PanelResizeConfig) -> Self {
+    self.resize = Some(resize);
+    self
+  }
+
+  /// Sets the tab activation callback.
+  ///
+  /// # Parameters
+  ///
+  /// `handler` is invoked when a rendered tab is pressed.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn on_activate_tab(mut self, handler: Rc<PanelTabActivateHandler>) -> Self {
+    self.on_activate_tab = Some(handler);
+    self
+  }
+
+  /// Sets the tab close callback.
+  ///
+  /// # Parameters
+  ///
+  /// `handler` is invoked when a rendered tab close button is pressed.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn on_close_tab(mut self, handler: Rc<PanelTabCloseHandler>) -> Self {
+    self.on_close_tab = Some(handler);
+    self
+  }
+
+  /// Sets the tab close icon renderer.
+  ///
+  /// # Parameters
+  ///
+  /// `renderer` produces the visual icon inside the reusable close button slot.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn render_tab_close_icon(mut self, renderer: Rc<PanelTabCloseIconRenderer>) -> Self {
+    self.render_tab_close_icon = Some(renderer);
+    self
+  }
+
+  /// Sets the tab-strip action renderer.
+  ///
+  /// # Parameters
+  ///
+  /// `renderer` produces caller-owned controls at the right end of each panel
+  /// tab strip.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn render_tab_strip_actions(mut self, renderer: Rc<PanelTabStripActionsRenderer>) -> Self {
+    self.render_tab_strip_actions = Some(renderer);
+    self
+  }
+}
+
+/// Shared dependencies used while rendering one panel tree.
+struct PanelRenderContext<'a, T> {
+  /// Theme tokens used by panel chrome.
+  theme: UIThemes,
+  /// Optional chrome behavior used while rendering.
+  config: &'a PanelContainerConfig,
+  /// Renderer for active tab body content.
+  render_body: &'a dyn Fn(&PanelTab<T>) -> AnyElement,
+}
+
 /// Renders a binary panel tree.
 ///
 /// The renderer owns neutral panel chrome: tab strips, active tab styling,
@@ -584,12 +752,8 @@ impl PanelResizeConfig {
 ///
 /// `theme` supplies visual tokens for panel chrome.
 ///
-/// `resize` optionally enables split resize handles.
-///
-/// `on_activate_tab` optionally receives tab activation events.
-///
-/// `render_tab_strip_actions` optionally renders caller-owned controls at the
-/// right end of each leaf panel's tab strip.
+/// `config` contains optional resize, tab activation, close, icon, and
+/// tab-strip action behavior.
 ///
 /// `render_body` renders the body for one active tab.
 ///
@@ -599,20 +763,16 @@ impl PanelResizeConfig {
 pub fn render_panel_container<T>(
   tree: &PanelTree<T>,
   theme: UIThemes,
-  resize: Option<PanelResizeConfig>,
-  on_activate_tab: Option<Rc<PanelTabActivateHandler>>,
-  render_tab_strip_actions: Option<Rc<PanelTabStripActionsRenderer>>,
+  config: PanelContainerConfig,
   render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
 ) -> Div {
-  render_panel_node(
-    &tree.root,
-    &PanelSplitPath::root(),
+  let context = PanelRenderContext {
     theme,
-    resize.as_ref(),
-    on_activate_tab.as_ref(),
-    render_tab_strip_actions.as_ref(),
+    config: &config,
     render_body,
-  )
+  };
+
+  render_panel_node(&tree.root, &PanelSplitPath::root(), &context)
 }
 
 /// Clamps a split ratio to supported panel bounds.
@@ -869,15 +1029,7 @@ fn count_leaves<T>(node: &PanelNode<T>) -> usize {
 ///
 /// `path` is the split path to `node`.
 ///
-/// `theme` supplies visual tokens.
-///
-/// `resize` optionally enables resize handles.
-///
-/// `on_activate_tab` optionally handles tab activation.
-///
-/// `render_tab_strip_actions` optionally renders right-side tab strip actions.
-///
-/// `render_body` renders active tab content.
+/// `context` contains theme tokens, callbacks, and active tab body rendering.
 ///
 /// # Returns
 ///
@@ -885,29 +1037,11 @@ fn count_leaves<T>(node: &PanelNode<T>) -> usize {
 fn render_panel_node<T>(
   node: &PanelNode<T>,
   path: &PanelSplitPath,
-  theme: UIThemes,
-  resize: Option<&PanelResizeConfig>,
-  on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
-  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
-  render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
+  context: &PanelRenderContext<'_, T>,
 ) -> Div {
   match node {
-    PanelNode::Leaf(leaf) => render_panel_leaf(
-      leaf,
-      theme,
-      on_activate_tab,
-      render_tab_strip_actions,
-      render_body,
-    ),
-    PanelNode::Split(split) => render_panel_split(
-      split,
-      path,
-      theme,
-      resize,
-      on_activate_tab,
-      render_tab_strip_actions,
-      render_body,
-    ),
+    PanelNode::Leaf(leaf) => render_panel_leaf(leaf, context),
+    PanelNode::Split(split) => render_panel_split(split, path, context),
   }
 }
 
@@ -919,15 +1053,7 @@ fn render_panel_node<T>(
 ///
 /// `path` identifies `split` for resize callbacks.
 ///
-/// `theme` supplies visual tokens.
-///
-/// `resize` optionally enables resize handles.
-///
-/// `on_activate_tab` optionally handles tab activation.
-///
-/// `render_tab_strip_actions` optionally renders right-side tab strip actions.
-///
-/// `render_body` renders active tab content.
+/// `context` contains theme tokens, callbacks, and active tab body rendering.
 ///
 /// # Returns
 ///
@@ -935,34 +1061,18 @@ fn render_panel_node<T>(
 fn render_panel_split<T>(
   split: &PanelSplit<T>,
   path: &PanelSplitPath,
-  theme: UIThemes,
-  resize: Option<&PanelResizeConfig>,
-  on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
-  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
-  render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
+  context: &PanelRenderContext<'_, T>,
 ) -> Div {
-  let first = render_panel_node(
-    &split.first,
-    &path.child(PanelSplitBranch::First),
-    theme,
-    resize,
-    on_activate_tab,
-    render_tab_strip_actions,
-    render_body,
-  )
-  .flex_basis(relative(split.ratio))
-  .flex_shrink()
-  .min_w_0()
-  .min_h_0();
+  let first = render_panel_node(&split.first, &path.child(PanelSplitBranch::First), context)
+    .flex_basis(relative(split.ratio))
+    .flex_shrink()
+    .min_w_0()
+    .min_h_0();
 
   let second = render_panel_node(
     &split.second,
     &path.child(PanelSplitBranch::Second),
-    theme,
-    resize,
-    on_activate_tab,
-    render_tab_strip_actions,
-    render_body,
+    context,
   )
   .flex_basis(relative(1.0 - split.ratio))
   .flex_shrink()
@@ -978,7 +1088,12 @@ fn render_panel_split<T>(
       panel.flex_col()
     })
     .child(first)
-    .child(render_panel_split_handle(split.axis, path, theme, resize))
+    .child(render_panel_split_handle(
+      split.axis,
+      path,
+      context.theme,
+      context.config.resize.as_ref(),
+    ))
     .child(second)
 }
 
@@ -1043,38 +1158,21 @@ fn render_panel_split_handle(
 ///
 /// `leaf` is the leaf panel to render.
 ///
-/// `theme` supplies visual tokens.
-///
-/// `on_activate_tab` optionally handles tab activation.
-///
-/// `render_tab_strip_actions` optionally renders right-side tab strip actions.
-///
-/// `render_body` renders active tab content.
+/// `context` contains theme tokens, callbacks, and active tab body rendering.
 ///
 /// # Returns
 ///
 /// A GPUI `Div` for the leaf panel.
-fn render_panel_leaf<T>(
-  leaf: &PanelLeaf<T>,
-  theme: UIThemes,
-  on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
-  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
-  render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
-) -> Div {
+fn render_panel_leaf<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>) -> Div {
   div()
     .flex()
     .flex_col()
     .size_full()
     .min_w_0()
     .min_h_0()
-    .bg(theme.background.primary)
-    .child(render_panel_tab_strip(
-      leaf,
-      theme,
-      on_activate_tab,
-      render_tab_strip_actions,
-    ))
-    .child(render_panel_body(leaf, theme, render_body))
+    .bg(context.theme.background.primary)
+    .child(render_panel_tab_strip(leaf, context))
+    .child(render_panel_body(leaf, context.theme, context.render_body))
 }
 
 /// Renders the tab strip for one leaf panel.
@@ -1083,30 +1181,19 @@ fn render_panel_leaf<T>(
 ///
 /// `leaf` is the leaf panel whose tabs are rendered.
 ///
-/// `theme` supplies visual tokens.
-///
-/// `on_activate_tab` optionally handles tab activation.
-///
-/// `render_tab_strip_actions` optionally renders caller-owned controls at the
-/// end of the tab strip. And this function pointer will render an element of
-/// GPUI, normally it's a list of icon buttons.
+/// `context` contains theme tokens, callbacks, and optional tab-strip actions.
 ///
 /// # Returns
 ///
 /// A GPUI `Div` containing tab buttons.
-fn render_panel_tab_strip<T>(
-  leaf: &PanelLeaf<T>,
-  theme: UIThemes,
-  on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
-  render_tab_strip_actions: Option<&Rc<PanelTabStripActionsRenderer>>,
-) -> Div {
+fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>) -> Div {
   let mut tab_strip = div()
     .flex()
     .items_center()
     .h(DEFAULT_PANEL_TAB_STRIP_HEIGHT)
     .min_w_0()
     .overflow_hidden()
-    .bg(theme.background.primary)
+    .bg(context.theme.background.primary)
     .child(
       div()
         .flex()
@@ -1115,18 +1202,15 @@ fn render_panel_tab_strip<T>(
         .min_w_0()
         .h_full()
         .overflow_hidden()
-        .children(leaf.tabs.iter().map(|tab| {
-          render_panel_tab(
-            leaf.id,
-            tab,
-            leaf.active_tab == Some(tab.id),
-            theme,
-            on_activate_tab,
-          )
-        })),
+        .children(
+          leaf
+            .tabs
+            .iter()
+            .map(|tab| render_panel_tab(leaf.id, tab, leaf.active_tab == Some(tab.id), context)),
+        ),
     );
 
-  if let Some(render_tab_strip_actions) = render_tab_strip_actions {
+  if let Some(render_tab_strip_actions) = context.config.render_tab_strip_actions.as_ref() {
     tab_strip = tab_strip.child(render_tab_strip_actions(leaf.id));
   }
 
@@ -1143,9 +1227,7 @@ fn render_panel_tab_strip<T>(
 ///
 /// `active` controls active tab styling.
 ///
-/// `theme` supplies visual tokens.
-///
-/// `on_activate_tab` optionally handles tab activation.
+/// `context` contains theme tokens, callbacks, and optional icon rendering.
 ///
 /// # Returns
 ///
@@ -1154,24 +1236,23 @@ fn render_panel_tab<T>(
   panel_id: PanelId,
   tab: &PanelTab<T>,
   active: bool,
-  theme: UIThemes,
-  on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
+  context: &PanelRenderContext<'_, T>,
 ) -> Div {
   let tab_id = tab.id;
-  let tab_container = div().h_full();
+  let tab_hover_group =
+    SharedString::from(format!("panel-tab-{}-{}", panel_id.value(), tab_id.value()));
+  let theme = context.theme;
   let mut tab_element = div()
     .relative()
+    .group(tab_hover_group.clone())
     .flex()
     .items_center()
     .h_full()
-    .w_full()
     .max_w(px(220.0))
     .min_w(px(72.0))
-    .px_3()
     .border_r_1()
     .border_color(theme.border.primary)
     .text_xs()
-    .truncate()
     .cursor_pointer()
     .text_color(if active {
       theme.text.primary
@@ -1184,7 +1265,32 @@ fn render_panel_tab<T>(
       theme.background.primary
     })
     .hover(move |style| style.bg(theme.background.secondary))
-    .child(tab.title.clone());
+    .child(
+      div()
+        .flex()
+        .items_center()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .pl_3()
+        .child(div().min_w_0().truncate().child(tab.title.clone())),
+    )
+    .child(
+      div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .flex_none()
+        .h_full()
+        .w(DEFAULT_PANEL_TAB_TRAILING_ACTION_WIDTH)
+        .child(render_panel_tab_close_button(
+          panel_id,
+          tab_id,
+          active,
+          tab_hover_group,
+          context,
+        )),
+    );
 
   if active {
     tab_element = tab_element.child(
@@ -1198,14 +1304,85 @@ fn render_panel_tab<T>(
     );
   }
 
-  if let Some(on_activate_tab) = on_activate_tab {
+  if let Some(on_activate_tab) = context.config.on_activate_tab.as_ref() {
     let on_activate_tab = on_activate_tab.clone();
     tab_element = tab_element.on_mouse_up(MouseButton::Left, move |_, window, cx| {
       on_activate_tab(panel_id, tab_id, window, cx);
     });
   }
 
-  tab_container.child(tab_element)
+  tab_element
+}
+
+/// Renders the reserved close button slot for one panel tab.
+///
+/// The slot is always present so tab titles keep a stable width. Inactive tabs
+/// start transparent and become visible when their tab hover group is hovered;
+/// active tabs keep the close affordance visible.
+///
+/// # Parameters
+///
+/// `panel_id` identifies the leaf panel that owns the tab.
+///
+/// `tab_id` identifies the tab that should close when the button is pressed.
+///
+/// `active` controls whether the close glyph is visible by default.
+///
+/// `tab_hover_group` identifies the GPUI hover group shared with the tab.
+///
+/// `context` contains theme tokens, close callbacks, and optional icon
+/// rendering.
+///
+/// # Returns
+///
+/// A GPUI `Div` containing the close button slot.
+fn render_panel_tab_close_button<T>(
+  panel_id: PanelId,
+  tab_id: PanelTabId,
+  active: bool,
+  tab_hover_group: SharedString,
+  context: &PanelRenderContext<'_, T>,
+) -> Div {
+  let theme = context.theme;
+  let close_icon = context
+    .config
+    .render_tab_close_icon
+    .as_ref()
+    .map(|render_icon| render_icon(theme))
+    .unwrap_or_else(|| div().text_xs().child("x").into_any_element());
+  let mut close_button = div()
+    .flex()
+    .items_center()
+    .justify_center()
+    .flex_none()
+    .size(DEFAULT_PANEL_TAB_CLOSE_BUTTON_SIZE)
+    .rounded_sm()
+    .text_color(if active {
+      theme.text.primary
+    } else {
+      theme.text.secondary
+    })
+    .opacity(if active { 1.0 } else { 0.0 })
+    .group_hover(tab_hover_group, |style| style.opacity(1.0))
+    .hover(move |style| {
+      style
+        .bg(theme.background.hover)
+        .text_color(theme.text.primary)
+    })
+    .child(close_icon);
+
+  if let Some(on_close_tab) = context.config.on_close_tab.as_ref() {
+    let on_close_tab = on_close_tab.clone();
+    close_button =
+      close_button
+        .cursor_pointer()
+        .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+          cx.stop_propagation();
+          on_close_tab(panel_id, tab_id, window, cx);
+        });
+  }
+
+  close_button
 }
 
 /// Renders the body region for one leaf panel.
@@ -1278,6 +1455,42 @@ mod tests {
         ..
       })
     ));
+  }
+
+  /// Verifies that closing the active tab activates the next available tab.
+  #[test]
+  fn panel_tree_should_activate_next_tab_when_closing_active_tab() {
+    let mut tree = PanelTree::single_leaf(
+      PanelLeaf::new(PanelId::new(1))
+        .tab(PanelTab::new(PanelTabId::new(1), "Editor", ()))
+        .tab(PanelTab::new(PanelTabId::new(2), "Preview", ()))
+        .tab(PanelTab::new(PanelTabId::new(3), "Structure", ())),
+    );
+    assert!(tree.activate_tab(PanelId::new(1), PanelTabId::new(2)));
+
+    assert!(tree.close_tab(PanelId::new(1), PanelTabId::new(2)));
+
+    let Some(leaf) = tree.leaf(PanelId::new(1)) else {
+      panic!("leaf should exist");
+    };
+    assert_eq!(leaf.active_tab, Some(PanelTabId::new(3)));
+  }
+
+  /// Verifies that closing an inactive tab preserves the active tab.
+  #[test]
+  fn panel_tree_should_preserve_active_tab_when_closing_inactive_tab() {
+    let mut tree = PanelTree::single_leaf(
+      PanelLeaf::new(PanelId::new(1))
+        .tab(PanelTab::new(PanelTabId::new(1), "Editor", ()))
+        .tab(PanelTab::new(PanelTabId::new(2), "Preview", ())),
+    );
+
+    assert!(tree.close_tab(PanelId::new(1), PanelTabId::new(2)));
+
+    let Some(leaf) = tree.leaf(PanelId::new(1)) else {
+      panic!("leaf should exist");
+    };
+    assert_eq!(leaf.active_tab, Some(PanelTabId::new(1)));
   }
 
   /// Verifies that immutable leaf lookup returns the requested panel.
