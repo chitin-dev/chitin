@@ -237,8 +237,8 @@ impl DocumentPanelState {
 
   /// Focuses the previous tab in the focused document panel.
   ///
-  /// Navigation is circular: moving before the first tab activates the final
-  /// tab in the same panel.
+  /// Navigation is circular across every tab in the panel container's visual
+  /// tree order.
   ///
   /// # Parameters
   ///
@@ -248,7 +248,7 @@ impl DocumentPanelState {
   ///
   /// `true` when another tab was activated; otherwise `false`.
   pub(crate) fn focus_previous_tab(&mut self) -> bool {
-    let Some((panel_id, tab_id)) = self.relative_focused_tab(-1) else {
+    let Some((panel_id, tab_id)) = self.relative_container_tab(-1) else {
       return false;
     };
 
@@ -257,8 +257,8 @@ impl DocumentPanelState {
 
   /// Focuses the next tab in the focused document panel.
   ///
-  /// Navigation is circular: moving after the final tab activates the first tab
-  /// in the same panel.
+  /// Navigation is circular across every tab in the panel container's visual
+  /// tree order.
   ///
   /// # Parameters
   ///
@@ -268,7 +268,7 @@ impl DocumentPanelState {
   ///
   /// `true` when another tab was activated; otherwise `false`.
   pub(crate) fn focus_next_tab(&mut self) -> bool {
-    let Some((panel_id, tab_id)) = self.relative_focused_tab(1) else {
+    let Some((panel_id, tab_id)) = self.relative_container_tab(1) else {
       return false;
     };
 
@@ -616,7 +616,7 @@ impl DocumentPanelState {
     tab_id
   }
 
-  /// Returns a tab adjacent to the active tab in the focused panel.
+  /// Returns a tab adjacent to the focused active tab in container order.
   ///
   /// # Parameters
   ///
@@ -624,27 +624,98 @@ impl DocumentPanelState {
   ///
   /// # Returns
   ///
-  /// `Some((PanelId, PanelTabId))` for the circular adjacent tab, or `None`
-  /// when the focused panel has no active tab.
-  fn relative_focused_tab(&self, offset: isize) -> Option<(PanelId, PanelTabId)> {
-    let panel_id = self.focused_panel_id;
-    let leaf = self.tree.leaf(panel_id)?;
-    let tab_count = leaf.tabs.len();
+  /// `Some((PanelId, PanelTabId))` for the circular adjacent tab across all
+  /// panels, or `None` when the container has no tabs.
+  fn relative_container_tab(&self, offset: isize) -> Option<(PanelId, PanelTabId)> {
+    let tabs = container_tab_order(&self.tree.root);
+    let tab_count = tabs.len();
 
     if tab_count == 0 {
       return None;
     }
 
-    let current_index = leaf
-      .active_tab
-      .and_then(|active_tab| leaf.tabs.iter().position(|tab| tab.id == active_tab))?;
+    let current_tab = self
+      .tree
+      .leaf(self.focused_panel_id)
+      .and_then(|leaf| leaf.active_tab)
+      .or_else(|| first_active_container_tab(&self.tree.root).map(|(_, tab_id)| tab_id))?;
+    let current_index = tabs
+      .iter()
+      .position(|(panel_id, tab_id)| *panel_id == self.focused_panel_id && *tab_id == current_tab)
+      .or_else(|| tabs.iter().position(|(_, tab_id)| *tab_id == current_tab))?;
     let next_index = if offset < 0 {
       current_index.checked_sub(1).unwrap_or(tab_count - 1)
     } else {
       (current_index + 1) % tab_count
     };
 
-    Some((panel_id, leaf.tabs[next_index].id))
+    Some(tabs[next_index])
+  }
+}
+
+/// Returns every tab in panel-tree visual order.
+///
+/// # Parameters
+///
+/// `node` is the panel tree node to traverse.
+///
+/// # Returns
+///
+/// A vector of `(PanelId, PanelTabId)` pairs in render order.
+fn container_tab_order(
+  node: &chitin_ui::components::panel::PanelNode<OpenedProjectDocument>,
+) -> Vec<(PanelId, PanelTabId)> {
+  let mut tabs = Vec::new();
+  collect_container_tab_order(node, &mut tabs);
+  tabs
+}
+
+/// Appends every tab below one node to an existing order list.
+///
+/// # Parameters
+///
+/// `node` is the panel tree node to traverse.
+///
+/// `tabs` receives panel and tab identifiers in visual order.
+///
+/// # Returns
+///
+/// This function returns `()` after appending identifiers.
+fn collect_container_tab_order(
+  node: &chitin_ui::components::panel::PanelNode<OpenedProjectDocument>,
+  tabs: &mut Vec<(PanelId, PanelTabId)>,
+) {
+  match node {
+    chitin_ui::components::panel::PanelNode::Leaf(leaf) => {
+      tabs.extend(leaf.tabs.iter().map(|tab| (leaf.id, tab.id)));
+    }
+    chitin_ui::components::panel::PanelNode::Split(split) => {
+      collect_container_tab_order(&split.first, tabs);
+      collect_container_tab_order(&split.second, tabs);
+    }
+  }
+}
+
+/// Finds the first active tab in panel-tree visual order.
+///
+/// # Parameters
+///
+/// `node` is the panel tree node to traverse.
+///
+/// # Returns
+///
+/// `Some((PanelId, PanelTabId))` for the first active tab, or `None` when no
+/// panel has an active tab.
+fn first_active_container_tab(
+  node: &chitin_ui::components::panel::PanelNode<OpenedProjectDocument>,
+) -> Option<(PanelId, PanelTabId)> {
+  match node {
+    chitin_ui::components::panel::PanelNode::Leaf(leaf) => {
+      leaf.active_tab.map(|tab_id| (leaf.id, tab_id))
+    }
+    chitin_ui::components::panel::PanelNode::Split(split) => {
+      first_active_container_tab(&split.first).or_else(|| first_active_container_tab(&split.second))
+    }
   }
 }
 
@@ -1580,6 +1651,86 @@ mod tests {
       panic!("focused panel should exist");
     };
     assert_eq!(leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+  }
+
+  /// Verifies next-tab focus advances from one panel to the next panel.
+  #[test]
+  fn focus_next_tab_should_cross_panel_boundary() {
+    let mut state = two_tab_document_panel_state();
+    let Some(next_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("document panel should split");
+    };
+    assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
+
+    assert!(state.focus_next_tab());
+
+    let Some(next_leaf) = state.tree.leaf(next_panel_id) else {
+      panic!("next panel should exist");
+    };
+    assert_eq!(state.focused_panel_id, next_panel_id);
+    assert_eq!(next_leaf.active_tab, Some(PanelTabId::new(3)));
+  }
+
+  /// Verifies previous-tab focus moves from one panel to the previous panel.
+  #[test]
+  fn focus_previous_tab_should_cross_panel_boundary() {
+    let mut state = two_tab_document_panel_state();
+    let Some(next_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("document panel should split");
+    };
+    assert!(state.activate_tab(next_panel_id, PanelTabId::new(3)));
+
+    assert!(state.focus_previous_tab());
+
+    let Some(previous_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("previous panel should exist");
+    };
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
+    assert_eq!(previous_leaf.active_tab, Some(PanelTabId::new(2)));
+  }
+
+  /// Verifies container navigation wraps from the final panel to the first tab.
+  #[test]
+  fn focus_next_tab_should_wrap_across_panels_to_first_tab() {
+    let mut state = two_tab_document_panel_state();
+    let Some(next_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("document panel should split");
+    };
+    assert!(state.activate_tab(next_panel_id, PanelTabId::new(3)));
+
+    assert!(state.focus_next_tab());
+
+    let Some(first_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("first panel should exist");
+    };
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
+    assert_eq!(first_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+  }
+
+  /// Verifies container navigation wraps from the first tab to the final panel.
+  #[test]
+  fn focus_previous_tab_should_wrap_across_panels_to_last_tab() {
+    let mut state = two_tab_document_panel_state();
+    let Some(next_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("document panel should split");
+    };
+    assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID));
+
+    assert!(state.focus_previous_tab());
+
+    let Some(next_leaf) = state.tree.leaf(next_panel_id) else {
+      panic!("next panel should exist");
+    };
+    assert_eq!(state.focused_panel_id, next_panel_id);
+    assert_eq!(next_leaf.active_tab, Some(PanelTabId::new(3)));
   }
 
   /// Verifies that split views receive container-unique tab identifiers.
