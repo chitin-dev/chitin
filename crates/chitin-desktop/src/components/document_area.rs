@@ -188,6 +188,10 @@ impl DocumentPanelState {
 
   /// Closes one tab inside one document panel.
   ///
+  /// If closing the tab leaves a non-final panel empty, the empty panel is
+  /// removed and its parent split is collapsed. The final remaining panel is
+  /// kept so the document area can render its empty state.
+  ///
   /// # Parameters
   ///
   /// `panel_id` identifies the document panel whose tab should close.
@@ -199,11 +203,24 @@ impl DocumentPanelState {
   /// `true` when the panel and tab exist and the tab was removed; otherwise
   /// `false`.
   pub(crate) fn close_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
-    if self.tree.close_tab(panel_id, tab_id) {
-      self.focused_panel_id = panel_id;
-      return true;
+    if !self.tree.close_tab(panel_id, tab_id) {
+      return false;
     }
-    false
+
+    let panel_is_empty = self
+      .tree
+      .leaf(panel_id)
+      .map(|leaf| leaf.tabs.is_empty())
+      .unwrap_or(false);
+    if panel_is_empty && self.tree.leaf_count() > 1 {
+      if let Some(focused_panel_id) = self.tree.remove_leaf(panel_id) {
+        self.focused_panel_id = focused_panel_id;
+      }
+    } else {
+      self.focused_panel_id = panel_id;
+    }
+
+    true
   }
 
   /// Returns the first active document in panel-tree order.
@@ -1023,9 +1040,9 @@ mod tests {
     assert_eq!(second_new_leaf.tabs.len(), 1);
   }
 
-  /// Verifies that tab actions stay scoped after splitting active-tab copies.
+  /// Verifies that closing a split panel's last tab removes that panel.
   #[test]
-  fn split_panel_should_keep_tab_actions_scoped_to_target_panel() {
+  fn close_tab_should_remove_empty_split_panel_and_keep_source_panel() {
     let mut state = two_tab_document_panel_state();
 
     let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
@@ -1039,14 +1056,12 @@ mod tests {
     let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
       panic!("source panel should still exist");
     };
-    let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
-      panic!("new panel should exist");
-    };
 
+    assert_eq!(state.tree.leaf_count(), 1);
+    assert!(state.tree.leaf(new_panel_id).is_none());
     assert_eq!(source_leaf.tabs.len(), 2);
     assert_eq!(source_leaf.active_tab, Some(PanelTabId::new(2)));
-    assert!(new_leaf.tabs.is_empty());
-    assert_eq!(new_leaf.active_tab, None);
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
   }
 
   /// Verifies that copied tab identifiers remain valid inside each panel.
@@ -1089,6 +1104,67 @@ mod tests {
 
     assert!(new_leaf.tabs.is_empty());
     assert_eq!(new_leaf.active_tab, None);
+  }
+
+  /// Verifies that closing a non-final tab keeps its panel in the layout.
+  #[test]
+  fn close_tab_should_keep_panel_when_tabs_remain() {
+    let mut state = two_tab_document_panel_state();
+    assert!(
+      state
+        .split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+        .is_some()
+    );
+
+    assert!(state.close_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
+
+    let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("source panel should still exist");
+    };
+    assert_eq!(state.tree.leaf_count(), 2);
+    assert_eq!(source_leaf.tabs.len(), 1);
+    assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
+  }
+
+  /// Verifies that closing the final tab in the only panel keeps an empty panel.
+  #[test]
+  fn close_tab_should_keep_empty_state_when_only_panel_remains() {
+    let mut state = DocumentPanelState::new(test_document("alpha.rs"));
+
+    assert!(state.close_tab(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID));
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("final panel should remain");
+    };
+    assert_eq!(state.tree.leaf_count(), 1);
+    assert!(leaf.tabs.is_empty());
+    assert_eq!(leaf.active_tab, None);
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
+  }
+
+  /// Verifies that repeated split closes keep the panel tree valid.
+  #[test]
+  fn close_tab_should_keep_panel_tree_valid_after_repeated_splits_and_closes() {
+    let mut state = two_tab_document_panel_state();
+
+    let Some(first_new_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("first split should succeed");
+    };
+    let Some(second_new_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
+    else {
+      panic!("second split should succeed");
+    };
+
+    assert!(state.close_tab(first_new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
+    assert!(state.close_tab(second_new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
+
+    assert_eq!(state.tree.leaf_count(), 1);
+    assert!(state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID).is_some());
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
   }
 
   /// Verifies that opening another document appends a tab to the focused panel.

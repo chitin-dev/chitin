@@ -457,6 +457,25 @@ impl<T> PanelTree<T> {
       .unwrap_or(false)
   }
 
+  /// Removes one leaf panel and collapses its parent split.
+  ///
+  /// The sibling subtree is promoted into the removed leaf's parent position.
+  /// The root leaf is not removable, so callers can preserve a final empty
+  /// panel when the tree contains only one leaf.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the leaf panel to remove.
+  ///
+  /// # Returns
+  ///
+  /// `Some(PanelId)` with a remaining leaf that can receive focus after the
+  /// removal; otherwise `None` when no matching removable leaf exists.
+  pub fn remove_leaf(&mut self, panel_id: PanelId) -> Option<PanelId> {
+    log::trace!("Panel {:?} is removed", panel_id);
+    remove_leaf_node(&mut self.root, panel_id)
+  }
+
   /// Finds a leaf panel by identifier.
   ///
   /// # Parameters
@@ -991,6 +1010,61 @@ fn split_leaf_node<T>(
         ratio,
       )
     }
+  }
+}
+
+/// Removes a matching leaf below a split and promotes its sibling.
+///
+/// # Parameters
+///
+/// `node` is the current tree node being searched.
+///
+/// `panel_id` identifies the leaf panel to remove.
+///
+/// # Returns
+///
+/// `Some(PanelId)` with the first remaining leaf in the promoted sibling
+/// subtree when a leaf was removed; otherwise `None`.
+fn remove_leaf_node<T>(node: &mut PanelNode<T>, panel_id: PanelId) -> Option<PanelId> {
+  let PanelNode::Split(split) = node else {
+    return None;
+  };
+  let remove_first = matches!(split.first.as_ref(), PanelNode::Leaf(leaf) if leaf.id == panel_id);
+  let remove_second = matches!(split.second.as_ref(), PanelNode::Leaf(leaf) if leaf.id == panel_id);
+
+  if remove_first || remove_second {
+    let old_node = std::mem::replace(node, PanelNode::Leaf(PanelLeaf::new(PanelId::new(0))));
+    let PanelNode::Split(old_split) = old_node else {
+      return None;
+    };
+    let promoted = if remove_first {
+      *old_split.second
+    } else {
+      *old_split.first
+    };
+    let focused_panel_id = first_leaf_id(&promoted);
+
+    *node = promoted;
+    return focused_panel_id;
+  }
+
+  remove_leaf_node(&mut split.first, panel_id)
+    .or_else(|| remove_leaf_node(&mut split.second, panel_id))
+}
+
+/// Returns the first leaf id in tree order.
+///
+/// # Parameters
+///
+/// `node` is the tree node whose first leaf should be found.
+///
+/// # Returns
+///
+/// `Some(PanelId)` for the first leaf under `node`.
+fn first_leaf_id<T>(node: &PanelNode<T>) -> Option<PanelId> {
+  match node {
+    PanelNode::Leaf(leaf) => Some(leaf.id),
+    PanelNode::Split(split) => first_leaf_id(&split.first).or_else(|| first_leaf_id(&split.second)),
   }
 }
 
@@ -1579,6 +1653,63 @@ mod tests {
       0.65,
     ));
     assert_eq!(tree.leaf_count(), 2);
+  }
+
+  /// Verifies that removing a split leaf promotes its sibling.
+  #[test]
+  fn panel_tree_should_collapse_split_when_removing_leaf() {
+    let mut tree = PanelTree {
+      root: PanelNode::Split(PanelSplit::new(
+        PanelSplitAxis::Horizontal,
+        0.5,
+        PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(1))),
+        PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(2))),
+      )),
+    };
+
+    assert_eq!(tree.remove_leaf(PanelId::new(2)), Some(PanelId::new(1)));
+
+    assert_eq!(tree.leaf_count(), 1);
+    assert!(matches!(
+      tree.root,
+      PanelNode::Leaf(PanelLeaf { id: PanelId(1), .. })
+    ));
+  }
+
+  /// Verifies that removing a leaf can promote an entire sibling subtree.
+  #[test]
+  fn panel_tree_should_promote_sibling_subtree_when_removing_leaf() {
+    let mut tree = PanelTree {
+      root: PanelNode::Split(PanelSplit::new(
+        PanelSplitAxis::Horizontal,
+        0.5,
+        PanelNode::Split(PanelSplit::new(
+          PanelSplitAxis::Vertical,
+          0.5,
+          PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(1))),
+          PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(2))),
+        )),
+        PanelNode::Leaf(PanelLeaf::<()>::new(PanelId::new(3))),
+      )),
+    };
+
+    assert_eq!(tree.remove_leaf(PanelId::new(3)), Some(PanelId::new(1)));
+
+    assert_eq!(tree.leaf_count(), 2);
+    assert!(tree.leaf(PanelId::new(1)).is_some());
+    assert!(tree.leaf(PanelId::new(2)).is_some());
+    assert!(tree.leaf(PanelId::new(3)).is_none());
+  }
+
+  /// Verifies that the root leaf is not removable.
+  #[test]
+  fn panel_tree_should_not_remove_only_root_leaf() {
+    let mut tree = PanelTree::single_leaf(PanelLeaf::<()>::new(PanelId::new(1)));
+
+    assert_eq!(tree.remove_leaf(PanelId::new(1)), None);
+
+    assert_eq!(tree.leaf_count(), 1);
+    assert!(tree.leaf(PanelId::new(1)).is_some());
   }
 
   /// Verifies that split resizing clamps ratios to supported bounds.
