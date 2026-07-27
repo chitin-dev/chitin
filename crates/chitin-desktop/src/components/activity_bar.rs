@@ -105,8 +105,10 @@ fn activity_item(
   icon_path: &'static str,
 ) -> ActivityBarItem {
   ActivityBarItem::new(activity.id(), activity.title(), icon_path).on_click(cx.listener(
-    move |this, _, _, cx| {
+    move |this, _, window, cx| {
       this.active_activity = activity;
+      let focus = this.main_workbench_focus_target(cx);
+      window.focus(&focus);
       cx.notify();
     },
   ))

@@ -235,7 +235,7 @@ impl ChitinApp {
   /// Keyboard shortcuts need this variant because hiding the sidebar removes
   /// the project tree focus target from the dispatch tree. After the state
   /// transition, focus moves to the project tree when it is visible, otherwise
-  /// it moves to the always-rendered workbench root.
+  /// it moves to the document panel or always-rendered workbench root.
   ///
   /// # Parameters
   ///
@@ -263,7 +263,8 @@ impl ChitinApp {
   ///
   /// Visible project sidebars should receive project-tree focus so keyboard
   /// navigation works immediately. Hidden sidebars should return focus to the
-  /// persistent workbench root so global shortcuts remain reachable.
+  /// document panel when one is present so panel-container keybindings remain
+  /// active, or to the persistent workbench root otherwise.
   ///
   /// # Parameters
   ///
@@ -275,6 +276,28 @@ impl ChitinApp {
   pub(crate) fn workspace_toggle_focus_target(&mut self, cx: &mut Context<Self>) -> FocusHandle {
     if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
       self.project_sidebar_focus(cx)
+    } else {
+      self.main_workbench_focus_target(cx)
+    }
+  }
+
+  /// Returns the focus target for the main workbench area.
+  ///
+  /// Document panel focus is preferred when document panels exist because it
+  /// keeps panel navigation keybindings active after activity/sidebar chrome
+  /// interactions. The generic workbench root remains the fallback for empty
+  /// main-area placeholders.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is the GPUI context used to lazily allocate focus handles.
+  ///
+  /// # Returns
+  ///
+  /// A [`FocusHandle`] for the document panel container or workbench root.
+  pub(crate) fn main_workbench_focus_target(&mut self, cx: &mut Context<Self>) -> FocusHandle {
+    if self.document_panels.is_some() {
+      self.document_panel_focus(cx)
     } else {
       self.workbench_focus(cx)
     }
@@ -497,6 +520,9 @@ impl Render for ChitinApp {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::path::Path;
+
+  use crate::components::document_area::OpenedProjectDocument;
 
   /// Verifies that toggling Workspace hides its sidebar when it is active.
   #[test]
@@ -520,6 +546,26 @@ mod tests {
 
     assert_eq!(app.active_activity, ActiveActivity::Workspace);
     assert!(app.project_sidebar_visible);
+  }
+
+  /// Verifies that empty main workbench focus uses the generic root fallback.
+  #[test]
+  fn main_workbench_focus_target_should_use_root_when_no_document_panel_exists() {
+    let app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
+
+    assert!(!app.document_panels.is_some());
+  }
+
+  /// Verifies that document panels are preferred for main workbench focus.
+  #[test]
+  fn main_workbench_focus_target_should_prefer_document_panel_when_present() {
+    let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
+
+    app.open_project_document(OpenedProjectDocument::new(Path::new(
+      "/tmp/chitin-focus-target-test.rs",
+    )));
+
+    assert!(app.document_panels.is_some());
   }
 
   /// Verifies that document panel width excludes fixed workbench chrome.
