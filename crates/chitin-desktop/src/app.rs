@@ -41,6 +41,8 @@ pub struct ChitinApp {
   pub(crate) project_sidebar_focus: Option<FocusHandle>,
   /// Focus handle used by global workbench keyboard shortcuts.
   pub(crate) workbench_focus: Option<FocusHandle>,
+  /// Focus handle used by document panel container shortcuts.
+  pub(crate) document_panel_focus: Option<FocusHandle>,
   /// Document panel tree currently shown in the main document area.
   pub(crate) document_panels: Option<DocumentPanelState>,
   /// Currently selected top-level workbench activity.
@@ -118,6 +120,7 @@ impl ChitinApp {
       project_sidebar_state,
       project_sidebar_focus: None,
       workbench_focus: None,
+      document_panel_focus: None,
       document_panels: None,
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
@@ -185,6 +188,26 @@ impl ChitinApp {
   pub(crate) fn workbench_focus(&mut self, cx: &mut Context<Self>) -> FocusHandle {
     self
       .workbench_focus
+      .get_or_insert_with(|| cx.focus_handle())
+      .clone()
+  }
+
+  /// Returns the stable focus handle used by document panel tab shortcuts.
+  ///
+  /// This focus handle is tracked by the rendered panel container wrapper, so
+  /// tab keybindings are active only after the document panel has keyboard
+  /// focus.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is the GPUI context used to allocate a focus handle when none exists.
+  ///
+  /// # Returns
+  ///
+  /// A cloned [`FocusHandle`] for the document panel container.
+  pub(crate) fn document_panel_focus(&mut self, cx: &mut Context<Self>) -> FocusHandle {
+    self
+      .document_panel_focus
       .get_or_insert_with(|| cx.focus_handle())
       .clone()
   }
@@ -347,6 +370,7 @@ impl Render for ChitinApp {
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
+    let document_panel_focus = self.document_panel_focus(cx);
     let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
     let document_panel_resize_axis = self.document_panel_resize_axis();
     let visible_sidebar_width =
@@ -462,7 +486,9 @@ impl Render for ChitinApp {
             &self.summary,
             self.active_activity,
             theme,
+            &document_panel_focus,
             app.clone(),
+            cx,
           )),
       )
   }

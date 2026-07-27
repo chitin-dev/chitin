@@ -21,11 +21,18 @@ use chitin_ui::{
   themes::UIThemes,
 };
 use gpui::{
-  AnyElement, App, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-  Styled, WeakEntity, Window, div, px, svg,
+  AnyElement, App, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, MouseButton,
+  ParentElement, Pixels, Styled, WeakEntity, Window, div, px, svg,
 };
 
-use crate::{app::ChitinApp, components::activity_bar::ActiveActivity};
+use crate::{
+  app::ChitinApp,
+  commands::{
+    PanelTabCommand,
+    tab::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT},
+  },
+  components::activity_bar::ActiveActivity,
+};
 
 /// File document currently opened from the project workspace tree.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -226,6 +233,67 @@ impl DocumentPanelState {
     }
 
     true
+  }
+
+  /// Focuses the previous tab in the focused document panel.
+  ///
+  /// Navigation is circular: moving before the first tab activates the final
+  /// tab in the same panel.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// `true` when another tab was activated; otherwise `false`.
+  pub(crate) fn focus_previous_tab(&mut self) -> bool {
+    let Some((panel_id, tab_id)) = self.relative_focused_tab(-1) else {
+      return false;
+    };
+
+    self.activate_tab(panel_id, tab_id)
+  }
+
+  /// Focuses the next tab in the focused document panel.
+  ///
+  /// Navigation is circular: moving after the final tab activates the first tab
+  /// in the same panel.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// `true` when another tab was activated; otherwise `false`.
+  pub(crate) fn focus_next_tab(&mut self) -> bool {
+    let Some((panel_id, tab_id)) = self.relative_focused_tab(1) else {
+      return false;
+    };
+
+    self.activate_tab(panel_id, tab_id)
+  }
+
+  /// Closes the active tab in the focused document panel.
+  ///
+  /// The underlying panel tree repairs active-tab selection by preferring the
+  /// right neighbor, then the left neighbor when no right neighbor exists.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// `true` when an active tab existed and was closed; otherwise `false`.
+  pub(crate) fn close_focused_tab(&mut self) -> bool {
+    let panel_id = self.focused_panel_id;
+    let Some(tab_id) = self.tree.leaf(panel_id).and_then(|leaf| leaf.active_tab) else {
+      return false;
+    };
+
+    self.close_tab(panel_id, tab_id)
   }
 
   /// Returns the first active document in panel-tree order.
@@ -547,6 +615,37 @@ impl DocumentPanelState {
     self.next_tab_id = PanelTabId::new(tab_id.value() + 1);
     tab_id
   }
+
+  /// Returns a tab adjacent to the active tab in the focused panel.
+  ///
+  /// # Parameters
+  ///
+  /// `offset` is `-1` for previous or `1` for next.
+  ///
+  /// # Returns
+  ///
+  /// `Some((PanelId, PanelTabId))` for the circular adjacent tab, or `None`
+  /// when the focused panel has no active tab.
+  fn relative_focused_tab(&self, offset: isize) -> Option<(PanelId, PanelTabId)> {
+    let panel_id = self.focused_panel_id;
+    let leaf = self.tree.leaf(panel_id)?;
+    let tab_count = leaf.tabs.len();
+
+    if tab_count == 0 {
+      return None;
+    }
+
+    let current_index = leaf
+      .active_tab
+      .and_then(|active_tab| leaf.tabs.iter().position(|tab| tab.id == active_tab))?;
+    let next_index = if offset < 0 {
+      current_index.checked_sub(1).unwrap_or(tab_count - 1)
+    } else {
+      (current_index + 1) % tab_count
+    };
+
+    Some((panel_id, leaf.tabs[next_index].id))
+  }
 }
 
 /// Finds the first active document payload below a panel node.
@@ -657,6 +756,57 @@ impl ChitinApp {
       .document_panels
       .as_mut()
       .map(|document_panels| document_panels.close_tab(panel_id, tab_id))
+      .unwrap_or(false)
+  }
+
+  /// Focuses the previous tab in the focused document panel.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the active tab changed; otherwise `false`.
+  pub(crate) fn focus_previous_document_panel_tab(&mut self) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(DocumentPanelState::focus_previous_tab)
+      .unwrap_or(false)
+  }
+
+  /// Focuses the next tab in the focused document panel.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the active tab changed; otherwise `false`.
+  pub(crate) fn focus_next_document_panel_tab(&mut self) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(DocumentPanelState::focus_next_tab)
+      .unwrap_or(false)
+  }
+
+  /// Closes the active tab in the focused document panel.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// `true` when an active tab was closed; otherwise `false`.
+  pub(crate) fn close_focused_document_panel_tab(&mut self) -> bool {
+    self
+      .document_panels
+      .as_mut()
+      .map(DocumentPanelState::close_focused_tab)
       .unwrap_or(false)
   }
 
@@ -875,10 +1025,14 @@ pub fn render_document_area(
   summary: &WorkspaceSummary,
   active_activity: ActiveActivity,
   theme: UIThemes,
+  focus_handle: &FocusHandle,
   app: WeakEntity<ChitinApp>,
+  cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
   match document_panels {
-    Some(document_panels) => render_opened_document_panels(document_panels, theme, app),
+    Some(document_panels) => {
+      render_opened_document_panels(document_panels, theme, focus_handle, app, cx)
+    }
     None => render_empty_document_area(summary, active_activity, theme),
   }
 }
@@ -899,7 +1053,9 @@ pub fn render_document_area(
 fn render_opened_document_panels(
   document_panels: &DocumentPanelState,
   theme: UIThemes,
+  focus_handle: &FocusHandle,
   app: WeakEntity<ChitinApp>,
+  cx: &mut Context<ChitinApp>,
 ) -> gpui::Div {
   let activate_app = app.clone();
   let on_activate_tab: Rc<PanelTabActivateHandler> = Rc::new(
@@ -978,9 +1134,33 @@ fn render_opened_document_panels(
     .render_tab_strip_actions(render_tab_strip_actions)
     .tab_drag(tab_drag);
 
-  render_panel_container(&document_panels.tree, theme, panel_config, &|tab| {
-    render_opened_document_body(&tab.payload, theme).into_any_element()
-  })
+  let mouse_focus_handle = focus_handle.clone();
+
+  div()
+    .flex()
+    .flex_1()
+    .min_w_0()
+    .min_h_0()
+    .track_focus(focus_handle)
+    .key_context(PANEL_CONTAINER_KEY_CONTEXT)
+    .on_action(cx.listener(|this, _: &FocusPreviousPanelTab, _, cx| {
+      this.dispatch_command(PanelTabCommand::FocusPrevious.into(), cx);
+    }))
+    .on_action(cx.listener(|this, _: &FocusNextPanelTab, _, cx| {
+      this.dispatch_command(PanelTabCommand::FocusNext.into(), cx);
+    }))
+    .on_action(cx.listener(|this, _: &CloseTab, _, cx| {
+      this.dispatch_command(PanelTabCommand::Close.into(), cx);
+    }))
+    .on_mouse_down(MouseButton::Left, move |_, window, _| {
+      window.focus(&mouse_focus_handle);
+    })
+    .child(render_panel_container(
+      &document_panels.tree,
+      theme,
+      panel_config,
+      &|tab| render_opened_document_body(&tab.payload, theme).into_any_element(),
+    ))
 }
 
 /// Renders split controls at the right end of one document panel tab strip.
@@ -1345,6 +1525,61 @@ mod tests {
     assert_eq!(source_leaf.tabs.len(), 2);
     assert_eq!(source_leaf.active_tab, Some(PanelTabId::new(2)));
     assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
+  }
+
+  /// Verifies next-tab focus wraps from the final tab to the first tab.
+  #[test]
+  fn focus_next_tab_should_wrap_to_first_tab() {
+    let mut state = two_tab_document_panel_state();
+    assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
+
+    assert!(state.focus_next_tab());
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("focused panel should exist");
+    };
+    assert_eq!(leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+  }
+
+  /// Verifies previous-tab focus wraps from the first tab to the final tab.
+  #[test]
+  fn focus_previous_tab_should_wrap_to_last_tab() {
+    let mut state = two_tab_document_panel_state();
+
+    assert!(state.focus_previous_tab());
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("focused panel should exist");
+    };
+    assert_eq!(leaf.active_tab, Some(PanelTabId::new(2)));
+  }
+
+  /// Verifies closing the focused active tab selects its right neighbor.
+  #[test]
+  fn close_focused_tab_should_focus_right_neighbor() {
+    let mut state = two_tab_document_panel_state();
+
+    assert!(state.close_focused_tab());
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("focused panel should exist");
+    };
+    assert_eq!(leaf.active_tab, Some(PanelTabId::new(2)));
+    assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
+  }
+
+  /// Verifies closing the final focused tab selects its left neighbor.
+  #[test]
+  fn close_focused_tab_should_fall_back_to_left_neighbor() {
+    let mut state = two_tab_document_panel_state();
+    assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
+
+    assert!(state.close_focused_tab());
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("focused panel should exist");
+    };
+    assert_eq!(leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
   }
 
   /// Verifies that split views receive container-unique tab identifiers.
