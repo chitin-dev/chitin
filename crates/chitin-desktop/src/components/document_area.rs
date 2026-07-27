@@ -256,7 +256,7 @@ impl DocumentPanelState {
       .then_some(new_panel_id);
 
     if split.is_some() {
-      self.focused_panel_id = panel_id;
+      self.focused_panel_id = new_panel_id;
     }
 
     split
