@@ -1044,13 +1044,6 @@ mod tests {
   /// Verifies that display strings are not safe tree identifiers.
   #[cfg(unix)]
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if lossy display paths round-trip safely.
   fn display_path_string_should_not_be_used_as_project_tree_id() {
     let path = PathBuf::from(non_utf8_name());
     let displayed = path.display().to_string();
@@ -1061,13 +1054,6 @@ mod tests {
   /// Verifies that file activation opens and selects a document.
   #[cfg(unix)]
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when file activation opens, selects, and focuses the entry.
   fn activate_project_tree_file_should_open_document_and_select_path() -> Result<(), Box<dyn Error>>
   {
     let project = TestProject::new("open-tree-file")?;
@@ -1103,13 +1089,6 @@ mod tests {
 
   /// Verifies that next and previous navigation move focus through visible rows.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when keyboard focus moves through visible rows correctly.
   fn navigate_project_tree_should_move_focus_between_visible_rows() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-next-prev")?;
     let first_file = project.path().join("a.txt");
@@ -1147,13 +1126,6 @@ mod tests {
 
   /// Verifies that Home and End jump to the first and last visible rows.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when focus jumps to visible tree bounds correctly.
   fn navigate_project_tree_should_jump_to_visible_bounds() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-bounds")?;
     fs::write(project.path().join("a.txt"), "")?;
@@ -1180,13 +1152,6 @@ mod tests {
 
   /// Verifies that Enter opens the currently focused file row.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when keyboard activation opens the focused file.
   fn navigate_project_tree_enter_should_open_focused_file() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-enter-file")?;
     let file_path = project.path().join("focused.txt");
@@ -1228,13 +1193,6 @@ mod tests {
 
   /// Verifies that Enter toggles the currently focused directory row.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when keyboard activation toggles the focused directory.
   fn navigate_project_tree_enter_should_toggle_focused_directory() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("tree-keyboard-enter-directory")?;
     let child_dir = project.path().join("child");
@@ -1272,13 +1230,6 @@ mod tests {
   /// Verifies that directory activation focuses without opening a document.
   #[cfg(unix)]
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when directory activation focuses but does not select a document.
   fn activate_project_tree_directory_should_focus_without_selecting_document()
   -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("activate-tree-directory")?;
@@ -1322,13 +1273,6 @@ mod tests {
   /// Verifies that non-UTF-8 directory paths can be toggled and loaded.
   #[cfg(unix)]
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when non-UTF-8 directory paths toggle and load correctly.
   fn toggle_project_tree_entry_should_support_non_utf8_paths() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("non-utf8-toggle")?;
     let child_dir = project.path().join(non_utf8_name());

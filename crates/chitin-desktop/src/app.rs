@@ -458,14 +458,6 @@ mod tests {
 
   /// Verifies that toggling Workspace hides its sidebar when it is active.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if toggling Workspace does not hide the
-  /// visible project sidebar.
   fn toggle_workspace_state_should_hide_active_workspace_sidebar() {
     let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
 
@@ -477,14 +469,6 @@ mod tests {
 
   /// Verifies that toggling Workspace reopens it from another activity.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if toggling from another activity fails
-  /// to select Workspace and show its sidebar.
   fn toggle_workspace_state_should_show_workspace_from_other_activity() {
     let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
     app.active_activity = ActiveActivity::Search;
@@ -498,14 +482,6 @@ mod tests {
 
   /// Verifies that document panel width excludes fixed workbench chrome.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if document panel width includes the
-  /// activity bar or visible sidebar.
   fn document_panel_root_width_should_exclude_activity_bar_and_sidebar() {
     assert_eq!(
       ChitinApp::document_panel_root_width(gpui::px(1000.0), gpui::px(260.0)),
@@ -515,14 +491,6 @@ mod tests {
 
   /// Verifies that document panel height excludes the window bar.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if document panel height includes the
-  /// window bar.
   fn document_panel_root_height_should_exclude_window_bar() {
     assert_eq!(
       ChitinApp::document_panel_root_height(gpui::px(760.0)),

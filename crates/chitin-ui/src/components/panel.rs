@@ -1255,13 +1255,6 @@ mod tests {
 
   /// Verifies that a leaf activates its first inserted tab.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if the first inserted tab is not active.
   fn panel_leaf_should_activate_first_inserted_tab() {
     let leaf = PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(PanelTabId::new(7), "Code", ()));
 
@@ -1270,13 +1263,6 @@ mod tests {
 
   /// Verifies that tab activation is scoped to the requested panel.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if activation changes the wrong panel.
   fn panel_tree_should_activate_tab_in_target_leaf() {
     let mut tree = PanelTree::single_leaf(
       PanelLeaf::new(PanelId::new(1))
@@ -1296,14 +1282,6 @@ mod tests {
 
   /// Verifies that immutable leaf lookup returns the requested panel.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if leaf lookup cannot find an existing
-  /// panel.
   fn panel_tree_should_find_leaf_by_id() {
     let tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
       PanelTabId::new(1),
@@ -1320,14 +1298,6 @@ mod tests {
 
   /// Verifies that mutable leaf lookup returns the requested panel.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if mutable leaf lookup cannot update an
-  /// existing panel.
   fn panel_tree_should_find_mutable_leaf_by_id() {
     let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)));
 
@@ -1344,13 +1314,6 @@ mod tests {
 
   /// Verifies that splitting a leaf creates a binary split node.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if splitting does not create two leaves.
   fn panel_tree_should_split_leaf_into_binary_node() {
     let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
       PanelTabId::new(1),
@@ -1370,13 +1333,6 @@ mod tests {
 
   /// Verifies that split resizing clamps ratios to supported bounds.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if split ratios exceed bounds.
   fn panel_tree_should_clamp_split_resize_ratio() {
     let mut tree = PanelTree {
       root: PanelNode::Split(PanelSplit::new(
@@ -1399,14 +1355,6 @@ mod tests {
 
   /// Verifies that split ratio lookup returns the target split ratio.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if split ratio lookup does not return
-  /// the ratio stored on the requested split node.
   fn panel_tree_should_return_split_ratio_by_path() {
     let tree = PanelTree {
       root: PanelNode::Split(PanelSplit::new(
@@ -1422,14 +1370,6 @@ mod tests {
 
   /// Verifies that nested split sizing follows split ratios.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if nested split sizing uses the root
-  /// size instead of the target split container size.
   fn panel_tree_should_return_nested_split_axis_size() {
     let tree = PanelTree {
       root: PanelNode::Split(PanelSplit::new(

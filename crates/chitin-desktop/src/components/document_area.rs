@@ -887,14 +887,6 @@ mod tests {
 
   /// Verifies that splitting a document panel copies its tab stack.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if the new panel does not receive the
-  /// same tabs and active tab as the source panel.
   fn split_panel_should_copy_tabs_and_active_tab() {
     let mut state = two_tab_document_panel_state();
 
@@ -916,14 +908,6 @@ mod tests {
 
   /// Verifies that tab activation stays scoped to one split panel.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if activating a tab in one panel changes
-  /// another panel's active tab.
   fn split_panel_should_keep_active_tab_state_independent() {
     let mut state = two_tab_document_panel_state();
 
@@ -947,14 +931,6 @@ mod tests {
 
   /// Verifies that opening another document appends a tab to the focused panel.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if opening a document resets the panel
-  /// tree or replaces the existing tab.
   fn open_document_as_tab_should_append_to_focused_panel() {
     let mut state = DocumentPanelState::new(test_document("alpha.rs"));
 
@@ -972,14 +948,6 @@ mod tests {
 
   /// Verifies that opening an already-open document focuses the existing tab.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if opening the same document appends a
-  /// duplicate tab in the focused panel.
   fn open_document_as_tab_should_focus_existing_tab_in_focused_panel() {
     let mut state = DocumentPanelState::new(test_document("alpha.rs"));
     assert!(state.open_document_as_tab(test_document("beta.rs")));
@@ -998,13 +966,6 @@ mod tests {
 
   /// Verifies that new documents open in the currently focused split panel.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if a new file opens in the wrong panel.
   fn open_document_as_tab_should_target_focused_panel() {
     let mut state = two_tab_document_panel_state();
     let Some(new_panel_id) =
@@ -1031,14 +992,6 @@ mod tests {
 
   /// Verifies that document panel resize updates the target split ratio.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if dragging a split handle does not
-  /// update the stored split ratio.
   fn drag_resize_should_update_split_ratio() {
     let mut state = two_tab_document_panel_state();
     assert!(
@@ -1059,14 +1012,6 @@ mod tests {
 
   /// Verifies that stopping document panel resize clears active drag state.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if resize state remains active after
-  /// stopping the drag.
   fn stop_resize_should_clear_active_drag_state() {
     let mut state = two_tab_document_panel_state();
     assert!(

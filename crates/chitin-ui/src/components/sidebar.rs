@@ -1308,13 +1308,6 @@ mod tests {
 
   /// Verifies that sidebar resize width is clamped to the configured range.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if resize bounds are not enforced.
   fn resize_width_should_clamp_to_sidebar_bounds() {
     let mut state = SidebarResizeState::default();
 
@@ -1327,14 +1320,6 @@ mod tests {
 
   /// Verifies that inverted builder bounds do not panic during reclamping.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if builder methods can trigger
-  /// `f32::clamp` with `min > max`.
   fn resize_width_should_not_panic_when_builder_bounds_are_inverted() {
     let min_above_max = SidebarResizeState::default().with_min_width(px(600.0));
     assert_eq!(min_above_max.width(), DEFAULT_SIDEBAR_MAX_WIDTH);
@@ -1345,13 +1330,6 @@ mod tests {
 
   /// Verifies that drag resize applies cursor delta to the starting width.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if drag width math regresses.
   fn drag_resize_should_apply_delta_from_drag_start() {
     let mut state = SidebarResizeState::default();
 
@@ -1363,13 +1341,6 @@ mod tests {
 
   /// Verifies that stopping resize clears active resize state.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if active resize state remains set.
   fn stop_resize_should_clear_active_resize_state() {
     let mut state = SidebarResizeState::default();
 
