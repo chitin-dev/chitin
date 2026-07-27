@@ -225,11 +225,11 @@ impl DocumentPanelState {
     active_document_in_node(&self.tree.root)
   }
 
-  /// Splits one document panel and copies its current tabs to the new panel.
+  /// Splits one document panel and copies its active tab to the new panel.
   ///
-  /// The new panel receives a fresh panel id, but its tabs and active tab value
-  /// are cloned from the source panel. Because active tab state is stored per
-  /// leaf, each panel can later switch tabs independently.
+  /// The new panel receives a fresh panel id and starts with only the source
+  /// panel's active tab. The source panel keeps its original tab stack and
+  /// active-tab selection.
   ///
   /// # Parameters
   ///
@@ -242,13 +242,17 @@ impl DocumentPanelState {
   /// `Some(PanelId)` with the new panel id when splitting succeeds; otherwise
   /// `None`.
   pub(crate) fn split_panel(&mut self, panel_id: PanelId, axis: PanelSplitAxis) -> Option<PanelId> {
-    let mut copied_leaf = self.tree.leaf(panel_id)?.clone();
+    let active_tab = self.tree.leaf(panel_id)?.active_tab().cloned();
     let new_panel_id = self.allocate_panel_id();
-    copied_leaf.id = new_panel_id;
+    let mut new_leaf = PanelLeaf::new(new_panel_id);
+
+    if let Some(active_tab) = active_tab {
+      new_leaf.add_tab(active_tab);
+    }
 
     let split = self
       .tree
-      .split_leaf(panel_id, axis, copied_leaf, PanelSplitPlacement::After, 0.5)
+      .split_leaf(panel_id, axis, new_leaf, PanelSplitPlacement::After, 0.5)
       .then_some(new_panel_id);
 
     if split.is_some() {
@@ -948,9 +952,9 @@ mod tests {
     }
   }
 
-  /// Verifies that splitting a document panel copies its tab stack.
+  /// Verifies that splitting a document panel copies only its active tab.
   #[test]
-  fn split_panel_should_copy_tabs_and_active_tab() {
+  fn split_panel_should_copy_only_active_tab() {
     let mut state = two_tab_document_panel_state();
 
     let Some(new_panel_id) =
@@ -965,13 +969,62 @@ mod tests {
       panic!("new panel should exist");
     };
 
-    assert_eq!(new_leaf.tabs, source_leaf.tabs);
-    assert_eq!(new_leaf.active_tab, source_leaf.active_tab);
+    assert_eq!(source_leaf.tabs.len(), 2);
+    assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+    assert_eq!(new_leaf.tabs.len(), 1);
+    assert_eq!(new_leaf.tabs[0].payload.title, "alpha.rs");
+    assert_eq!(new_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
   }
 
-  /// Verifies that tab activation stays scoped to one split panel.
+  /// Verifies that splitting copies the active tab at split time.
   #[test]
-  fn split_panel_should_keep_active_tab_state_independent() {
+  fn split_panel_should_copy_changed_active_tab() {
+    let mut state = two_tab_document_panel_state();
+    assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
+
+    let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
+    else {
+      panic!("document panel should split");
+    };
+    let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
+      panic!("new panel should exist");
+    };
+
+    assert_eq!(new_leaf.tabs.len(), 1);
+    assert_eq!(new_leaf.tabs[0].payload.title, "beta.rs");
+    assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(2)));
+  }
+
+  /// Verifies that repeated splits do not copy inactive source tabs.
+  #[test]
+  fn split_panel_should_not_accumulate_all_source_tabs_on_repeated_splits() {
+    let mut state = two_tab_document_panel_state();
+
+    let Some(first_new_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("first split should succeed");
+    };
+    let Some(second_new_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
+    else {
+      panic!("second split should succeed");
+    };
+
+    let Some(first_new_leaf) = state.tree.leaf(first_new_panel_id) else {
+      panic!("first new panel should exist");
+    };
+    let Some(second_new_leaf) = state.tree.leaf(second_new_panel_id) else {
+      panic!("second new panel should exist");
+    };
+
+    assert_eq!(first_new_leaf.tabs.len(), 1);
+    assert_eq!(second_new_leaf.tabs.len(), 1);
+  }
+
+  /// Verifies that tab actions stay scoped after splitting active-tab copies.
+  #[test]
+  fn split_panel_should_keep_tab_actions_scoped_to_target_panel() {
     let mut state = two_tab_document_panel_state();
 
     let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
@@ -979,7 +1032,8 @@ mod tests {
       panic!("document panel should split");
     };
 
-    assert!(state.activate_tab(new_panel_id, PanelTabId::new(2)));
+    assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
+    assert!(state.close_tab(new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
 
     let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
       panic!("source panel should still exist");
@@ -988,8 +1042,52 @@ mod tests {
       panic!("new panel should exist");
     };
 
-    assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
-    assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(2)));
+    assert_eq!(source_leaf.tabs.len(), 2);
+    assert_eq!(source_leaf.active_tab, Some(PanelTabId::new(2)));
+    assert!(new_leaf.tabs.is_empty());
+    assert_eq!(new_leaf.active_tab, None);
+  }
+
+  /// Verifies that copied tab identifiers remain valid inside each panel.
+  #[test]
+  fn split_panel_should_preserve_panel_scoped_tab_id_for_copied_active_tab() {
+    let mut state = two_tab_document_panel_state();
+
+    let Some(new_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("document panel should split");
+    };
+    let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
+      panic!("new panel should exist");
+    };
+
+    assert_eq!(new_leaf.tabs[0].id, DEFAULT_DOCUMENT_TAB_ID);
+    assert_eq!(new_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+  }
+
+  /// Verifies that splitting an empty panel creates an empty new panel.
+  #[test]
+  fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
+    let mut state = DocumentPanelState {
+      tree: PanelTree::single_leaf(PanelLeaf::new(DEFAULT_DOCUMENT_PANEL_ID)),
+      focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
+      next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
+      next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
+      resize_drag: None,
+    };
+
+    let Some(new_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("empty document panel should split");
+    };
+    let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
+      panic!("new panel should exist");
+    };
+
+    assert!(new_leaf.tabs.is_empty());
+    assert_eq!(new_leaf.active_tab, None);
   }
 
   /// Verifies that opening another document appends a tab to the focused panel.
@@ -1048,9 +1146,9 @@ mod tests {
     };
 
     assert_eq!(source_leaf.tabs.len(), 2);
-    assert_eq!(focused_leaf.tabs.len(), 3);
+    assert_eq!(focused_leaf.tabs.len(), 2);
     assert_eq!(focused_leaf.active_tab, Some(PanelTabId::new(3)));
-    assert_eq!(focused_leaf.tabs[2].payload.title, "gamma.rs");
+    assert_eq!(focused_leaf.tabs[1].payload.title, "gamma.rs");
   }
 
   /// Verifies that document panel resize updates the target split ratio.
