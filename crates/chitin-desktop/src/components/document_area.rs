@@ -71,8 +71,8 @@ pub(crate) struct DocumentPanelResizeDrag {
 pub(crate) struct DocumentPanelState {
   /// Binary panel tree containing document tab stacks.
   pub(crate) tree: PanelTree<OpenedProjectDocument>,
-  /// Document panel that receives newly opened tabs.
-  focused_panel_id: PanelId,
+  /// Current focused panel id.
+  pub(crate) focused_panel_id: PanelId,
   /// Next panel identifier to allocate for a split leaf.
   next_panel_id: PanelId,
   /// Next tab identifier to allocate for newly opened document tabs.
@@ -695,6 +695,7 @@ fn render_opened_document_panels(
   });
   let panel_config = PanelContainerConfig::new()
     .resize(resize)
+    .focused_panel_id(document_panels.focused_panel_id)
     .on_activate_tab(on_activate_tab)
     .on_close_tab(on_close_tab)
     .render_tab_close_icon(render_tab_close_icon)

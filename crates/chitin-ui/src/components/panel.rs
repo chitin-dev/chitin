@@ -634,6 +634,9 @@ impl PanelResizeConfig {
 pub struct PanelContainerConfig {
   /// Optional resize configuration used by split handles.
   resize: Option<PanelResizeConfig>,
+  /// Current focused panel id, normally transferred by upper component
+  /// [`DocumentPanelState`]
+  focused_panel_id: Option<PanelId>,
   /// Optional callback invoked when a tab is activated.
   on_activate_tab: Option<Rc<PanelTabActivateHandler>>,
   /// Optional callback invoked when a tab close button is pressed.
@@ -669,6 +672,21 @@ impl PanelContainerConfig {
   /// The updated [`PanelContainerConfig`] for builder chaining.
   pub fn resize(mut self, resize: PanelResizeConfig) -> Self {
     self.resize = Some(resize);
+    self
+  }
+
+  /// Sets current focused panel id used to compare the panel container config
+  /// with it, used to draw activated tab in focused panel differently.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` configures current focused panel id
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn focused_panel_id(mut self, panel_id: PanelId) -> Self {
+    self.focused_panel_id = Some(panel_id);
     self
   }
 
@@ -1187,6 +1205,7 @@ fn render_panel_leaf<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>
 ///
 /// A GPUI `Div` containing tab buttons.
 fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>) -> Div {
+  let panel_focused = context.config.focused_panel_id == Some(leaf.id);
   let mut tab_strip = div()
     .flex()
     .items_center()
@@ -1202,15 +1221,20 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
         .min_w_0()
         .h_full()
         .overflow_hidden()
-        .children(
-          leaf
-            .tabs
-            .iter()
-            .map(|tab| render_panel_tab(leaf.id, tab, leaf.active_tab == Some(tab.id), context)),
-        ),
+        .children(leaf.tabs.iter().map(|tab| {
+          render_panel_tab(
+            leaf.id,
+            tab,
+            panel_focused,
+            leaf.active_tab == Some(tab.id),
+            context,
+          )
+        })),
     );
 
-  if let Some(render_tab_strip_actions) = context.config.render_tab_strip_actions.as_ref() {
+  if let Some(render_tab_strip_actions) = context.config.render_tab_strip_actions.as_ref()
+    && panel_focused
+  {
     tab_strip = tab_strip.child(render_tab_strip_actions(leaf.id));
   }
 
@@ -1235,6 +1259,7 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
 fn render_panel_tab<T>(
   panel_id: PanelId,
   tab: &PanelTab<T>,
+  panel_focused: bool,
   active: bool,
   context: &PanelRenderContext<'_, T>,
 ) -> Div {
@@ -1292,7 +1317,7 @@ fn render_panel_tab<T>(
         )),
     );
 
-  if active {
+  if panel_focused && active {
     tab_element = tab_element.child(
       div()
         .absolute()
