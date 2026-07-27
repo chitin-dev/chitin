@@ -20,6 +20,8 @@ pub const MIN_PANEL_SPLIT_RATIO: f32 = 0.1;
 pub const MAX_PANEL_SPLIT_RATIO: f32 = 0.9;
 /// Default width of a split resize handle.
 pub const DEFAULT_PANEL_SPLIT_HANDLE_SIZE: Pixels = px(4.0);
+/// Default height of tab strip
+pub const DEFAULT_PANEL_TAB_STRIP_HEIGHT: Pixels = px(34.0);
 
 /// Callback invoked when a split resize gesture starts.
 pub type PanelResizeStartHandler =
@@ -409,6 +411,19 @@ impl<T> PanelTree<T> {
   /// `Some(&PanelLeaf<T>)` when the panel exists; otherwise `None`.
   pub fn leaf(&self, panel_id: PanelId) -> Option<&PanelLeaf<T>> {
     find_leaf(&self.root, panel_id)
+  }
+
+  /// Finds a mutable leaf panel by identifier.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the leaf panel to find.
+  ///
+  /// # Returns
+  ///
+  /// `Some(&mut PanelLeaf<T>)` when the panel exists; otherwise `None`.
+  pub fn leaf_mut(&mut self, panel_id: PanelId) -> Option<&mut PanelLeaf<T>> {
+    find_leaf_mut(&mut self.root, panel_id)
   }
 
   /// Splits one leaf panel into two leaves.
@@ -1052,8 +1067,6 @@ fn render_panel_leaf<T>(
     .size_full()
     .min_w_0()
     .min_h_0()
-    .border_1()
-    .border_color(theme.border.primary)
     .bg(theme.background.primary)
     .child(render_panel_tab_strip(
       leaf,
@@ -1090,11 +1103,9 @@ fn render_panel_tab_strip<T>(
   let mut tab_strip = div()
     .flex()
     .items_center()
-    .h(px(32.0))
+    .h(DEFAULT_PANEL_TAB_STRIP_HEIGHT)
     .min_w_0()
     .overflow_hidden()
-    .border_b_1()
-    .border_color(theme.border.primary)
     .bg(theme.background.primary)
     .child(
       div()
@@ -1102,6 +1113,7 @@ fn render_panel_tab_strip<T>(
         .items_center()
         .flex_1()
         .min_w_0()
+        .h_full()
         .overflow_hidden()
         .children(leaf.tabs.iter().map(|tab| {
           render_panel_tab(
@@ -1146,10 +1158,13 @@ fn render_panel_tab<T>(
   on_activate_tab: Option<&Rc<PanelTabActivateHandler>>,
 ) -> Div {
   let tab_id = tab.id;
+  let tab_container = div().h_full();
   let mut tab_element = div()
+    .relative()
     .flex()
     .items_center()
     .h_full()
+    .w_full()
     .max_w(px(220.0))
     .min_w(px(72.0))
     .px_3()
@@ -1168,14 +1183,20 @@ fn render_panel_tab<T>(
     } else {
       theme.background.primary
     })
-    .hover(move |style| {
-      if active {
-        style.bg(theme.background.secondary)
-      } else {
-        style.bg(theme.background.hover)
-      }
-    })
+    .hover(move |style| style.bg(theme.background.secondary))
     .child(tab.title.clone());
+
+  if active {
+    tab_element = tab_element.child(
+      div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .h(px(1.0))
+        .bg(theme.border.focus),
+    );
+  }
 
   if let Some(on_activate_tab) = on_activate_tab {
     let on_activate_tab = on_activate_tab.clone();
@@ -1184,7 +1205,7 @@ fn render_panel_tab<T>(
     });
   }
 
-  tab_element
+  tab_container.child(tab_element)
 }
 
 /// Renders the body region for one leaf panel.
@@ -1295,6 +1316,30 @@ mod tests {
     };
 
     assert_eq!(leaf.id, PanelId::new(1));
+  }
+
+  /// Verifies that mutable leaf lookup returns the requested panel.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if mutable leaf lookup cannot update an
+  /// existing panel.
+  fn panel_tree_should_find_mutable_leaf_by_id() {
+    let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)));
+
+    let Some(leaf) = tree.leaf_mut(PanelId::new(1)) else {
+      panic!("leaf should exist");
+    };
+    leaf.add_tab(PanelTab::new(PanelTabId::new(1), "Editor", ()));
+
+    assert_eq!(
+      tree.leaf(PanelId::new(1)).map(|leaf| leaf.tabs.len()),
+      Some(1)
+    );
   }
 
   /// Verifies that splitting a leaf creates a binary split node.

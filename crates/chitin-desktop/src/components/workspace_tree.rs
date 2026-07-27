@@ -247,10 +247,10 @@ impl ChitinApp {
     }
   }
 
-  /// Opens a workspace file in the main document area.
+  /// Opens a workspace file in the focused document panel.
   ///
-  /// File opening selects the tree entry and replaces the current placeholder
-  /// document state with a new [`OpenedProjectDocument`].
+  /// File opening selects the tree entry and appends the file as a new tab in
+  /// the focused document panel. Existing tabs and splits remain intact.
   ///
   /// # Parameters
   ///
@@ -258,8 +258,8 @@ impl ChitinApp {
   ///
   /// # Returns
   ///
-  /// This function returns `()`. It mutates sidebar selection and active
-  /// document state.
+  /// This function returns `()`. It mutates sidebar selection and document
+  /// panel tab state.
   fn open_project_file(&mut self, path: &Path) {
     self.project_sidebar_state.select_entry(path);
     self.open_project_document(OpenedProjectDocument::new(path));
@@ -319,7 +319,7 @@ impl ChitinApp {
       .project_sidebar_state
       .expanded_paths
       .insert(path.to_path_buf());
-    log::debug!("Newly expanded path: {:?}", path);
+    log::trace!("Newly expanded path: {:?}", path);
 
     if entry.children.is_empty()
       && self
@@ -364,7 +364,7 @@ impl ChitinApp {
     };
 
     if !self.project_sidebar_state.expanded_paths.contains(path) {
-      log::debug!(
+      log::trace!(
         "User collapsed this path before loading completed: {:?}",
         path
       );
@@ -375,7 +375,7 @@ impl ChitinApp {
       && let Some(entry) = find_project_entry_mut(&mut workspace.tree.root, path)
       && entry.children.is_empty()
     {
-      log::debug!("Update the expanded state: {:?}", entry.path);
+      log::trace!("Update the expanded state: {:?}", entry.path);
       entry.children = children;
     }
   }

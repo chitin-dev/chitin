@@ -38,7 +38,9 @@ const DEFAULT_DOCUMENT_PANEL_ID: PanelId = PanelId::new(1);
 /// Stable tab id used while the desktop owns a single active document.
 const DEFAULT_DOCUMENT_TAB_ID: PanelTabId = PanelTabId::new(1);
 /// Next panel id allocated after the default document panel.
-const FIRST_DYNAMIC_DOCUMENT_PANEL_ID: u64 = 2;
+const FIRST_DYNAMIC_DOCUMENT_PANEL_ID: PanelId = PanelId::new(2);
+/// Next tab id allocated after the default document tab.
+const FIRST_DYNAMIC_DOCUMENT_TAB_ID: PanelTabId = PanelTabId::new(2);
 /// Asset path for the horizontal split panel action.
 const SPLIT_HORIZONTAL_ICON_PATH: &str = "icons/panel/codicon-split-horizontal.svg";
 /// Asset path for the vertical split panel action.
@@ -64,8 +66,12 @@ pub(crate) struct DocumentPanelResizeDrag {
 pub(crate) struct DocumentPanelState {
   /// Binary panel tree containing document tab stacks.
   pub(crate) tree: PanelTree<OpenedProjectDocument>,
+  /// Document panel that receives newly opened tabs.
+  focused_panel_id: PanelId,
   /// Next panel identifier to allocate for a split leaf.
-  next_panel_id: u64,
+  next_panel_id: PanelId,
+  /// Next tab identifier to allocate for newly opened document tabs.
+  next_tab_id: PanelTabId,
   /// Active split resize drag, if the user is dragging a split handle.
   resize_drag: Option<DocumentPanelResizeDrag>,
 }
@@ -109,22 +115,51 @@ impl DocumentPanelState {
         document.title.clone(),
         document,
       ))),
+      focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
+      next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
       resize_drag: None,
     }
   }
 
-  /// Replaces the document layout with one panel for a newly opened file.
+  /// Opens a document in the focused panel.
+  ///
+  /// When the focused panel already contains a tab for `document.path`, this
+  /// function activates that existing tab instead of appending a duplicate.
+  /// Otherwise it appends a new tab and activates it.
   ///
   /// # Parameters
   ///
-  /// `document` is the workspace file opened from the project tree.
+  /// `document` is the workspace file descriptor to focus or append.
   ///
   /// # Returns
   ///
-  /// This function returns `()` and resets the document panel tree.
-  pub(crate) fn replace_with_document(&mut self, document: OpenedProjectDocument) {
-    *self = Self::new(document);
+  /// `true` when the document was focused or appended; otherwise `false`.
+  pub(crate) fn open_document_as_tab(&mut self, document: OpenedProjectDocument) -> bool {
+    let panel_id = self.focused_panel_id;
+    let Some(leaf) = self.tree.leaf(panel_id) else {
+      return false;
+    };
+
+    if let Some(tab_id) = leaf
+      .tabs
+      .iter()
+      .find(|tab| tab.payload.path == document.path)
+      .map(|tab| tab.id)
+    {
+      return self.activate_tab(panel_id, tab_id);
+    }
+
+    let tab_id = self.allocate_tab_id();
+    let tab = PanelTab::new(tab_id, document.title.clone(), document);
+    let Some(leaf) = self.tree.leaf_mut(panel_id) else {
+      return false;
+    };
+
+    leaf.add_tab(tab);
+    leaf.activate_tab(tab_id);
+    self.focused_panel_id = panel_id;
+    true
   }
 
   /// Activates one tab inside one document panel.
@@ -139,7 +174,11 @@ impl DocumentPanelState {
   ///
   /// `true` when the panel and tab exist; otherwise `false`.
   pub(crate) fn activate_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
-    self.tree.activate_tab(panel_id, tab_id)
+    if self.tree.activate_tab(panel_id, tab_id) {
+      self.focused_panel_id = panel_id;
+      return true;
+    }
+    false
   }
 
   /// Returns the first active document in panel-tree order.
@@ -182,10 +221,16 @@ impl DocumentPanelState {
     let new_panel_id = self.allocate_panel_id();
     copied_leaf.id = new_panel_id;
 
-    self
+    let split = self
       .tree
       .split_leaf(panel_id, axis, copied_leaf, PanelSplitPlacement::After, 0.5)
-      .then_some(new_panel_id)
+      .then_some(new_panel_id);
+
+    if split.is_some() {
+      self.focused_panel_id = panel_id;
+    }
+
+    split
   }
 
   /// Starts resizing a document panel split.
@@ -301,9 +346,24 @@ impl DocumentPanelState {
   ///
   /// A fresh [`PanelId`] for a document panel leaf.
   fn allocate_panel_id(&mut self) -> PanelId {
-    let panel_id = PanelId::new(self.next_panel_id);
-    self.next_panel_id += 1;
+    let panel_id = self.next_panel_id;
+    self.next_panel_id = PanelId::new(panel_id.value() + 1);
     panel_id
+  }
+
+  /// Allocates the next document tab identifier.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutably borrows `self`.
+  ///
+  /// # Returns
+  ///
+  /// A fresh [`PanelTabId`] for a document tab.
+  fn allocate_tab_id(&mut self) -> PanelTabId {
+    let tab_id = self.next_tab_id;
+    self.next_tab_id = PanelTabId::new(tab_id.value() + 1);
+    tab_id
   }
 }
 
@@ -334,17 +394,24 @@ fn active_document_in_node(
 impl ChitinApp {
   /// Opens a workspace document in the main document panel area.
   ///
+  /// The first opened file creates the document panel tree. Later opened files
+  /// are appended as new tabs in the focused document panel instead of
+  /// replacing the existing panel layout.
+  ///
   /// # Parameters
   ///
   /// `document` is the file descriptor created from a project tree entry.
   ///
   /// # Returns
   ///
-  /// This function returns `()` and creates or replaces the document panel
-  /// state.
+  /// This function returns `()` and mutates document panel state.
   pub(crate) fn open_project_document(&mut self, document: OpenedProjectDocument) {
     match &mut self.document_panels {
-      Some(document_panels) => document_panels.replace_with_document(document),
+      Some(document_panels) => {
+        if !document_panels.open_document_as_tab(document.clone()) {
+          *document_panels = DocumentPanelState::new(document);
+        }
+      }
       None => self.document_panels = Some(DocumentPanelState::new(document)),
     }
   }
@@ -811,7 +878,9 @@ mod tests {
             test_document("beta.rs"),
           )),
       ),
+      focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
+      next_tab_id: PanelTabId::new(3),
       resize_drag: None,
     }
   }
@@ -874,6 +943,90 @@ mod tests {
 
     assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
     assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(2)));
+  }
+
+  /// Verifies that opening another document appends a tab to the focused panel.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if opening a document resets the panel
+  /// tree or replaces the existing tab.
+  fn open_document_as_tab_should_append_to_focused_panel() {
+    let mut state = DocumentPanelState::new(test_document("alpha.rs"));
+
+    assert!(state.open_document_as_tab(test_document("beta.rs")));
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("default panel should exist");
+    };
+
+    assert_eq!(leaf.tabs.len(), 2);
+    assert_eq!(leaf.active_tab, Some(PanelTabId::new(2)));
+    assert_eq!(leaf.tabs[0].payload.title, "alpha.rs");
+    assert_eq!(leaf.tabs[1].payload.title, "beta.rs");
+  }
+
+  /// Verifies that opening an already-open document focuses the existing tab.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if opening the same document appends a
+  /// duplicate tab in the focused panel.
+  fn open_document_as_tab_should_focus_existing_tab_in_focused_panel() {
+    let mut state = DocumentPanelState::new(test_document("alpha.rs"));
+    assert!(state.open_document_as_tab(test_document("beta.rs")));
+    assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID));
+
+    assert!(state.open_document_as_tab(test_document("beta.rs")));
+
+    let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("default panel should exist");
+    };
+
+    assert_eq!(leaf.tabs.len(), 2);
+    assert_eq!(leaf.active_tab, Some(PanelTabId::new(2)));
+    assert_eq!(leaf.tabs[1].payload.title, "beta.rs");
+  }
+
+  /// Verifies that new documents open in the currently focused split panel.
+  #[test]
+  /// # Parameters
+  ///
+  /// This test takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// This test returns `()` and panics if a new file opens in the wrong panel.
+  fn open_document_as_tab_should_target_focused_panel() {
+    let mut state = two_tab_document_panel_state();
+    let Some(new_panel_id) =
+      state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
+    else {
+      panic!("document panel should split");
+    };
+
+    assert!(state.activate_tab(new_panel_id, DEFAULT_DOCUMENT_TAB_ID));
+    assert!(state.open_document_as_tab(test_document("gamma.rs")));
+
+    let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+      panic!("source panel should exist");
+    };
+    let Some(focused_leaf) = state.tree.leaf(new_panel_id) else {
+      panic!("focused panel should exist");
+    };
+
+    assert_eq!(source_leaf.tabs.len(), 2);
+    assert_eq!(focused_leaf.tabs.len(), 3);
+    assert_eq!(focused_leaf.active_tab, Some(PanelTabId::new(3)));
+    assert_eq!(focused_leaf.tabs[2].payload.title, "gamma.rs");
   }
 
   /// Verifies that document panel resize updates the target split ratio.
