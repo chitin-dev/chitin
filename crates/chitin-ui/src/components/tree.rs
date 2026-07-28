@@ -157,13 +157,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if item rows lose payload or depth.
   fn tree_row_should_preserve_payload_and_depth() {
     let row = TreeRow::Item(TreeItemRow {
       data: TestPayload { id: "root" },
@@ -180,13 +173,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if message row fields are not preserved.
   fn tree_message_row_should_store_status_text_and_depth() {
     let row = TreeRow::<TestPayload>::Message(TreeMessageRow {
       label: "Loading...".into(),

@@ -65,6 +65,8 @@ pub struct UIBorderColors {
   pub primary: Rgba,
   /// Muted border color for subtle separators.
   pub muted: Rgba,
+  /// Tertiary border color for low-emphasis chrome indicators.
+  pub tertiary: Rgba,
   /// Focus border color for active keyboard or mouse focus.
   pub focus: Rgba,
 }

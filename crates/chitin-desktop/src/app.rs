@@ -5,8 +5,15 @@
 
 use std::path::PathBuf;
 
-use chitin_core::{WorkspaceSummary, workspace::ProjectWorkspace};
-use chitin_ui::themes::builtins;
+use chitin_core::workspace::ProjectWorkspace;
+use chitin_ui::{
+  components::{
+    activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
+    panel::{PanelSplitAxis, PanelTabDrag},
+    window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
+  },
+  themes::builtins,
+};
 use gpui::{
   Context, CursorStyle, FocusHandle, InteractiveElement, MouseButton, Render, Window, div,
   prelude::*,
@@ -16,7 +23,7 @@ use crate::{
   commands::workspace::ToggleWorkspace,
   components::{
     activity_bar::{ActiveActivity, render_activity_bar},
-    document_area::{OpenedProjectDocument, render_document_area},
+    document_area::{DocumentPanelState, render_document_area},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::render_window_bar,
   },
@@ -24,8 +31,6 @@ use crate::{
 
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
-  /// Static product summary used by the placeholder main panel.
-  summary: WorkspaceSummary,
   /// Currently opened project workspace, if a path was accepted.
   pub(crate) workspace: Option<ProjectWorkspace>,
   /// Project workspace sidebar state owned by the app.
@@ -34,8 +39,10 @@ pub struct ChitinApp {
   pub(crate) project_sidebar_focus: Option<FocusHandle>,
   /// Focus handle used by global workbench keyboard shortcuts.
   pub(crate) workbench_focus: Option<FocusHandle>,
-  /// File currently opened in the main document area.
-  pub(crate) active_document: Option<OpenedProjectDocument>,
+  /// Focus handle used by document panel container shortcuts.
+  pub(crate) document_panel_focus: Option<FocusHandle>,
+  /// Document panel tree currently shown in the main document area.
+  pub(crate) document_panels: DocumentPanelState,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
   /// Whether the project workspace sidebar is visible when Workspace is active.
@@ -106,12 +113,12 @@ impl ChitinApp {
     );
 
     Self {
-      summary: WorkspaceSummary::default(),
       workspace,
       project_sidebar_state,
       project_sidebar_focus: None,
       workbench_focus: None,
-      active_document: None,
+      document_panel_focus: None,
+      document_panels: DocumentPanelState::empty(),
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
     }
@@ -182,6 +189,26 @@ impl ChitinApp {
       .clone()
   }
 
+  /// Returns the stable focus handle used by document panel tab shortcuts.
+  ///
+  /// This focus handle is tracked by the rendered panel container wrapper, so
+  /// tab keybindings are active only after the document panel has keyboard
+  /// focus.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is the GPUI context used to allocate a focus handle when none exists.
+  ///
+  /// # Returns
+  ///
+  /// A cloned [`FocusHandle`] for the document panel container.
+  pub(crate) fn document_panel_focus(&mut self, cx: &mut Context<Self>) -> FocusHandle {
+    self
+      .document_panel_focus
+      .get_or_insert_with(|| cx.focus_handle())
+      .clone()
+  }
+
   /// Shows or hides the project workspace sidebar.
   ///
   /// When another workbench activity is active, toggling the workspace first
@@ -205,7 +232,7 @@ impl ChitinApp {
   /// Keyboard shortcuts need this variant because hiding the sidebar removes
   /// the project tree focus target from the dispatch tree. After the state
   /// transition, focus moves to the project tree when it is visible, otherwise
-  /// it moves to the always-rendered workbench root.
+  /// it moves to the document panel or always-rendered workbench root.
   ///
   /// # Parameters
   ///
@@ -231,9 +258,10 @@ impl ChitinApp {
 
   /// Returns the focus target that should receive focus after Workspace toggle.
   ///
-  /// Visible project sidebars should receive project-tree focus so keyboard
-  /// navigation works immediately. Hidden sidebars should return focus to the
-  /// persistent workbench root so global shortcuts remain reachable.
+  /// Visible project sidebars receive project-tree focus so keyboard
+  /// navigation works immediately. Hidden sidebars return focus to the
+  /// always-rendered document panel so panel-container keybindings remain
+  /// active.
   ///
   /// # Parameters
   ///
@@ -241,12 +269,12 @@ impl ChitinApp {
   ///
   /// # Returns
   ///
-  /// A [`FocusHandle`] for either the project sidebar or the workbench root.
+  /// A [`FocusHandle`] for either the project sidebar or document panel.
   pub(crate) fn workspace_toggle_focus_target(&mut self, cx: &mut Context<Self>) -> FocusHandle {
     if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
       self.project_sidebar_focus(cx)
     } else {
-      self.workbench_focus(cx)
+      self.document_panel_focus(cx)
     }
   }
 
@@ -271,6 +299,45 @@ impl ChitinApp {
       self.project_sidebar_visible = true;
     }
   }
+
+  /// Calculates the current document panel root width.
+  ///
+  /// # Parameters
+  ///
+  /// `window_width` is the full GPUI window width.
+  ///
+  /// `visible_sidebar_width` is the current width occupied by an open sidebar,
+  /// or zero when no sidebar is visible.
+  ///
+  /// # Returns
+  ///
+  /// The approximate width available to the document panel root after removing
+  /// the activity bar and visible project sidebar.
+  fn document_panel_root_width(
+    window_width: gpui::Pixels,
+    visible_sidebar_width: gpui::Pixels,
+  ) -> gpui::Pixels {
+    gpui::px(
+      (f32::from(window_width)
+        - f32::from(DEFAULT_ACTIVITY_BAR_WIDTH)
+        - f32::from(visible_sidebar_width))
+      .max(0.0),
+    )
+  }
+
+  /// Calculates the current document panel root height.
+  ///
+  /// # Parameters
+  ///
+  /// `window_height` is the full GPUI window height.
+  ///
+  /// # Returns
+  ///
+  /// The approximate height available to the document panel root after removing
+  /// the window bar.
+  fn document_panel_root_height(window_height: gpui::Pixels) -> gpui::Pixels {
+    gpui::px((f32::from(window_height) - f32::from(DEFAULT_WINDOW_BAR_HEIGHT)).max(0.0))
+  }
 }
 
 impl Render for ChitinApp {
@@ -278,8 +345,8 @@ impl Render for ChitinApp {
   ///
   /// The rendered layout contains the window bar, activity bar, optional
   /// project sidebar, and main document area. It also owns top-level pointer
-  /// handling for sidebar resize drags because resize movement can occur
-  /// outside the sidebar bounds after dragging starts.
+  /// handling for resize and tab drags because pointer movement can occur
+  /// outside the originating component after dragging starts.
   ///
   /// # Parameters
   ///
@@ -293,11 +360,23 @@ impl Render for ChitinApp {
   ///
   /// A GPUI element tree for the current Chitin desktop frame.
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    if !cx.has_active_drag() {
+      self.cancel_document_panel_tab_drag();
+    }
+
     let theme = builtins::dark();
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
+    let document_panel_focus = self.document_panel_focus(cx);
     let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
+    let document_panel_resize_axis = self.document_panel_resize_axis();
+    let visible_sidebar_width =
+      if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
+        self.project_sidebar_state.resize.width()
+      } else {
+        gpui::px(0.0)
+      };
 
     div()
       .flex()
@@ -312,26 +391,74 @@ impl Render for ChitinApp {
       .when(project_sidebar_is_resizing, |layout| {
         layout.cursor(CursorStyle::ResizeLeftRight)
       })
+      .when(
+        document_panel_resize_axis == Some(PanelSplitAxis::Horizontal),
+        |layout| layout.cursor(CursorStyle::ResizeLeftRight),
+      )
+      .when(
+        document_panel_resize_axis == Some(PanelSplitAxis::Vertical),
+        |layout| layout.cursor(CursorStyle::ResizeUpDown),
+      )
       .on_mouse_move({
         let app = app.clone();
-        move |event, _, cx| {
-          if !project_sidebar_is_resizing {
+        move |event, window, cx| {
+          if !project_sidebar_is_resizing && document_panel_resize_axis.is_none() {
             return;
           }
 
+          if project_sidebar_is_resizing {
+            let _ = app.update(cx, |this, cx| {
+              if this.project_sidebar_state.drag_resize(event.position.x) {
+                cx.notify();
+              }
+            });
+          }
+
+          if let Some(axis) = document_panel_resize_axis {
+            let bounds = window.bounds();
+            let document_root_width =
+              Self::document_panel_root_width(bounds.size.width, visible_sidebar_width);
+            let document_root_height = Self::document_panel_root_height(bounds.size.height);
+            let current_position = match axis {
+              PanelSplitAxis::Horizontal => event.position.x,
+              PanelSplitAxis::Vertical => event.position.y,
+            };
+
+            let _ = app.update(cx, |this, cx| {
+              if this.drag_document_panel_resize(
+                current_position,
+                document_root_width,
+                document_root_height,
+              ) {
+                cx.notify();
+              }
+            });
+          }
+        }
+      })
+      .on_drag_move::<PanelTabDrag>({
+        let app = app.clone();
+        move |_, _, cx| {
           let _ = app.update(cx, |this, cx| {
-            if this.project_sidebar_state.drag_resize(event.position.x) {
+            if this.clear_document_panel_tab_drag_target() {
               cx.notify();
             }
           });
         }
       })
-      .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-        let _ = app.update(cx, |this, cx| {
-          if this.project_sidebar_state.stop_resize() {
-            cx.notify();
-          }
-        });
+      .on_mouse_up(MouseButton::Left, {
+        let app = app.clone();
+        move |_, _, cx| {
+          let _ = app.update(cx, |this, cx| {
+            let sidebar_stopped = this.project_sidebar_state.stop_resize();
+            let document_panel_stopped = this.stop_document_panel_resize();
+            let document_tab_drag_cancelled = this.cancel_document_panel_tab_drag();
+
+            if sidebar_stopped || document_panel_stopped || document_tab_drag_cancelled {
+              cx.notify();
+            }
+          });
+        }
       })
       .child(render_window_bar(theme, cx))
       .child(
@@ -353,10 +480,11 @@ impl Render for ChitinApp {
             },
           )
           .child(render_document_area(
-            self.active_document.as_ref(),
-            &self.summary,
-            self.active_activity,
+            &self.document_panels,
             theme,
+            &document_panel_focus,
+            app.clone(),
+            cx,
           )),
       )
   }
@@ -365,17 +493,8 @@ impl Render for ChitinApp {
 #[cfg(test)]
 mod tests {
   use super::*;
-
   /// Verifies that toggling Workspace hides its sidebar when it is active.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if toggling Workspace does not hide the
-  /// visible project sidebar.
   fn toggle_workspace_state_should_hide_active_workspace_sidebar() {
     let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
 
@@ -387,14 +506,6 @@ mod tests {
 
   /// Verifies that toggling Workspace reopens it from another activity.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if toggling from another activity fails
-  /// to select Workspace and show its sidebar.
   fn toggle_workspace_state_should_show_workspace_from_other_activity() {
     let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
     app.active_activity = ActiveActivity::Search;
@@ -404,5 +515,31 @@ mod tests {
 
     assert_eq!(app.active_activity, ActiveActivity::Workspace);
     assert!(app.project_sidebar_visible);
+  }
+
+  /// Verifies that new app state starts with an empty document panel.
+  #[test]
+  fn new_should_start_with_empty_document_panel() {
+    let app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
+
+    assert!(app.document_panels.active_document().is_none());
+  }
+
+  /// Verifies that document panel width excludes fixed workbench chrome.
+  #[test]
+  fn document_panel_root_width_should_exclude_activity_bar_and_sidebar() {
+    assert_eq!(
+      ChitinApp::document_panel_root_width(gpui::px(1000.0), gpui::px(260.0)),
+      gpui::px(1000.0 - 48.0 - 260.0)
+    );
+  }
+
+  /// Verifies that document panel height excludes the window bar.
+  #[test]
+  fn document_panel_root_height_should_exclude_window_bar() {
+    assert_eq!(
+      ChitinApp::document_panel_root_height(gpui::px(760.0)),
+      gpui::px(730.0)
+    );
   }
 }

@@ -8,8 +8,10 @@ use gpui::Context;
 
 use crate::app::ChitinApp;
 
+pub(crate) mod tab;
 pub(crate) mod workspace;
 
+pub(crate) use tab::PanelTabCommand;
 pub(crate) use workspace::WorkspaceCommand;
 
 /// Top-level command hierarchy for Chitin desktop.
@@ -17,6 +19,8 @@ pub(crate) use workspace::WorkspaceCommand;
 pub(crate) enum ChitinCommand {
   /// Commands owned by the project workspace sidebar and tree.
   Workspace(WorkspaceCommand),
+  /// Commands owned by the focused document panel tab stack.
+  PanelTab(PanelTabCommand),
 }
 
 impl ChitinCommand {
@@ -38,6 +42,7 @@ impl ChitinCommand {
   pub(crate) fn id(&self) -> &'static str {
     match self {
       Self::Workspace(command) => command.id(),
+      Self::PanelTab(command) => command.id(),
     }
   }
 }
@@ -82,6 +87,7 @@ impl ChitinApp {
 
     match command {
       ChitinCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
+      ChitinCommand::PanelTab(command) => self.dispatch_panel_tab_command(command, cx),
     }
   }
 }
@@ -99,25 +105,26 @@ impl ChitinApp {
 ///
 /// A vector of GPUI keybindings ready to pass to [`gpui::App::bind_keys`].
 pub(crate) fn default_key_bindings() -> Vec<gpui::KeyBinding> {
-  workspace::default_key_bindings().into()
+  workspace::default_key_bindings()
+    .into_iter()
+    .chain(tab::default_key_bindings())
+    .collect()
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
 
-  /// Verifies that nested command IDs stay stable for text boundaries.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if hierarchical command IDs change.
   fn command_id_should_include_hierarchy_namespace() {
     let command = ChitinCommand::from(WorkspaceCommand::FocusNext);
 
     assert_eq!(command.id(), "workspace.focus_next_entry");
+  }
+
+  /// Verifies that default keybindings include workspace and panel-tab groups.
+  #[test]
+  fn default_key_bindings_should_include_panel_tab_bindings() {
+    assert_eq!(default_key_bindings().len(), 13);
   }
 }

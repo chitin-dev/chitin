@@ -65,25 +65,6 @@ impl ActiveActivity {
       Self::Settings => "Settings",
     }
   }
-
-  /// Short placeholder description for the main content area.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, the active workbench area.
-  ///
-  /// # Returns
-  ///
-  /// A short description shown while the selected activity has no richer panel.
-  pub fn description(self) -> &'static str {
-    match self {
-      Self::Workspace => "Project workspace file tree will appear here.",
-      Self::Search => "Search across molecules, sequences, workflows, and notes.",
-      Self::Jobs => "Local tool runs and workflow jobs will be tracked here.",
-      Self::Agents => "Agent sessions and scientific task plans will appear here.",
-      Self::Settings => "Workspace and tool configuration will be edited here.",
-    }
-  }
 }
 
 /// Builds one desktop activity bar item and its click behavior.
@@ -105,8 +86,10 @@ fn activity_item(
   icon_path: &'static str,
 ) -> ActivityBarItem {
   ActivityBarItem::new(activity.id(), activity.title(), icon_path).on_click(cx.listener(
-    move |this, _, _, cx| {
+    move |this, _, window, cx| {
       this.active_activity = activity;
+      let focus = this.document_panel_focus(cx);
+      window.focus(&focus);
       cx.notify();
     },
   ))

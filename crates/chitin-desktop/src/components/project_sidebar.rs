@@ -299,13 +299,6 @@ mod tests {
 
   /// Verifies that drag resize applies cursor delta to the starting width.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if drag width math regresses.
   fn drag_resize_should_apply_delta_from_drag_start() {
     let mut state = ProjectSidebarState::default();
 
@@ -320,13 +313,6 @@ mod tests {
 
   /// Verifies that stopping resize clears active resize state.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if resize state remains active.
   fn stop_resize_should_clear_active_resize_state() {
     let mut state = ProjectSidebarState::default();
 

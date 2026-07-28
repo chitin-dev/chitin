@@ -625,51 +625,23 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if the display name is incorrect.
   fn display_name_should_return_final_path_component() {
     let path = Path::new("/home/user/project/Cargo.toml");
     assert_eq!(display_name(path), "Cargo.toml");
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if a root path display fallback fails.
   fn display_name_should_fallback_to_path_display_for_root_path() {
     let path = Path::new("/");
     assert_eq!(display_name(path), "/");
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if `.git` is not hidden.
   fn is_not_displayed_directory_should_hide_git_directory() {
     assert!(is_not_displayed_directory(Path::new("/project/.git")));
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if normal directories are hidden.
   fn is_not_displayed_directory_should_not_hide_regular_or_generated_directory() {
     assert!(!is_not_displayed_directory(Path::new("/project/src")));
     assert!(!is_not_displayed_directory(Path::new("/project/target")));
@@ -679,13 +651,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if directory/file ordering changes.
   fn compare_entries_should_sort_directories_before_files() {
     let directory = entry("src", ProjectTreeEntryKind::Directory);
     let file = entry("Cargo.toml", ProjectTreeEntryKind::File);
@@ -694,13 +659,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if case-insensitive name sorting changes.
   fn compare_entries_should_sort_names_case_insensitively() {
     let left = entry("alpha.rs", ProjectTreeEntryKind::File);
     let right = entry("Beta.rs", ProjectTreeEntryKind::File);
@@ -708,13 +666,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when missing paths are rejected as expected.
   fn project_workspace_open_should_reject_missing_path() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("missing-path")?;
     let missing_path = project.path().join("missing");
@@ -729,13 +680,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when file paths are rejected as non-directories.
   fn project_workspace_open_should_reject_file_path() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("file-path")?;
     project.touch("Cargo.toml")?;
@@ -750,13 +694,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when workspace children are sorted as expected.
   fn project_workspace_open_should_build_sorted_tree() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("sorted-tree")?;
     project.mkdir("src")?;
@@ -773,13 +710,6 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when symlinked files appear in the project tree.
   fn project_workspace_open_should_include_symlinked_file() -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::symlink;
 
@@ -805,13 +735,6 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when symlinked directories appear as shallow directory nodes.
   fn project_workspace_open_should_include_symlinked_directory() -> Result<(), Box<dyn Error>> {
     use std::os::unix::fs::symlink;
 
@@ -837,13 +760,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when nested directories are not loaded recursively on open.
   fn project_workspace_open_should_not_recursively_load_nested_directories()
   -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("shallow-tree")?;
@@ -863,13 +779,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when direct children load on demand for an expanded directory.
   fn project_workspace_load_directory_children_should_load_on_demand() -> Result<(), Box<dyn Error>>
   {
     let project = TestProject::new("lazy-children")?;
@@ -884,13 +793,6 @@ mod tests {
   }
 
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// `Ok(())` when hidden directories are skipped and visible directories stay.
   fn project_workspace_open_should_skip_not_displayed_directories() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("hidden-directories")?;
     project.mkdir(".git")?;

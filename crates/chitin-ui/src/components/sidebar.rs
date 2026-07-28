@@ -12,7 +12,10 @@ use gpui::{
   Pixels, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px,
 };
 
-use crate::themes::{UIThemes, builtins};
+use crate::{
+  components::resize::ResizeGesture,
+  themes::{UIThemes, builtins},
+};
 
 /// Callback invoked when a sidebar resize gesture starts.
 type SidebarResizeStartHandler = dyn Fn(Pixels, &mut Window, &mut App);
@@ -35,15 +38,6 @@ pub const DEFAULT_SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(4.0);
 /// controls while maintaining a compact UI. Commonly used for workspace headers,
 /// panel titles, and toolbar sections.
 pub const DEFAULT_HEADER_HEIGHT: Pixels = px(30.0);
-
-/// Drag state for a sidebar resize interaction.
-#[derive(Clone, Copy, Debug)]
-struct SidebarResizeDrag {
-  /// Cursor x-position when the resize started.
-  start_x: Pixels,
-  /// Sidebar width when the resize started.
-  start_width: Pixels,
-}
 
 /// Reusable state for a resizable sidebar.
 ///
@@ -73,7 +67,7 @@ pub struct SidebarResizeState {
   /// Maximum allowed sidebar width.
   max_width: Pixels,
   /// Active resize drag metadata.
-  resize_drag: Option<SidebarResizeDrag>,
+  resize_drag: Option<ResizeGesture<(), Pixels>>,
 }
 
 impl SidebarResizeState {
@@ -177,10 +171,7 @@ impl SidebarResizeState {
   ///
   /// This function returns `()` and stores active drag metadata.
   pub fn start_resize(&mut self, start_x: Pixels) {
-    self.resize_drag = Some(SidebarResizeDrag {
-      start_x,
-      start_width: self.width,
-    });
+    self.resize_drag = Some(ResizeGesture::new((), start_x, self.width));
   }
 
   /// Updates sidebar width from the current resize cursor x-position.
@@ -198,7 +189,7 @@ impl SidebarResizeState {
     };
 
     self.resize_width(px(
-      f32::from(resize_drag.start_width) + f32::from(current_x) - f32::from(resize_drag.start_x),
+      f32::from(resize_drag.start_value()) + resize_drag.delta(current_x),
     ));
     //    |------------|----------|
     // 0            current_x  start_x
@@ -1308,13 +1299,6 @@ mod tests {
 
   /// Verifies that sidebar resize width is clamped to the configured range.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if resize bounds are not enforced.
   fn resize_width_should_clamp_to_sidebar_bounds() {
     let mut state = SidebarResizeState::default();
 
@@ -1327,14 +1311,6 @@ mod tests {
 
   /// Verifies that inverted builder bounds do not panic during reclamping.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if builder methods can trigger
-  /// `f32::clamp` with `min > max`.
   fn resize_width_should_not_panic_when_builder_bounds_are_inverted() {
     let min_above_max = SidebarResizeState::default().with_min_width(px(600.0));
     assert_eq!(min_above_max.width(), DEFAULT_SIDEBAR_MAX_WIDTH);
@@ -1345,13 +1321,6 @@ mod tests {
 
   /// Verifies that drag resize applies cursor delta to the starting width.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if drag width math regresses.
   fn drag_resize_should_apply_delta_from_drag_start() {
     let mut state = SidebarResizeState::default();
 
@@ -1363,13 +1332,6 @@ mod tests {
 
   /// Verifies that stopping resize clears active resize state.
   #[test]
-  /// # Parameters
-  ///
-  /// This test takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This test returns `()` and panics if active resize state remains set.
   fn stop_resize_should_clear_active_resize_state() {
     let mut state = SidebarResizeState::default();
 
