@@ -88,7 +88,7 @@ fn activity_item(
   ActivityBarItem::new(activity.id(), activity.title(), icon_path).on_click(cx.listener(
     move |this, _, window, cx| {
       this.active_activity = activity;
-      let focus = this.main_workbench_focus_target(cx);
+      let focus = this.document_panel_focus(cx);
       window.focus(&focus);
       cx.notify();
     },
