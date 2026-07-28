@@ -9,7 +9,6 @@ use std::{
   rc::Rc,
 };
 
-use chitin_core::WorkspaceSummary;
 use chitin_ui::{
   components::panel::{
     PanelContainerConfig, PanelId, PanelLeaf, PanelResizeConfig, PanelSplitAxis, PanelSplitPath,
@@ -31,7 +30,6 @@ use crate::{
     PanelTabCommand,
     tab::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT},
   },
-  components::activity_bar::ActiveActivity,
 };
 
 /// File document currently opened from the project workspace tree.
@@ -115,6 +113,27 @@ impl OpenedProjectDocument {
 }
 
 impl DocumentPanelState {
+  /// Creates empty document panel state with one root panel.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no parameters.
+  ///
+  /// # Returns
+  ///
+  /// A [`DocumentPanelState`] with one empty leaf panel that can render the
+  /// main workbench empty state before any project file is opened.
+  pub(crate) fn empty() -> Self {
+    Self {
+      tree: PanelTree::single_leaf(PanelLeaf::new(DEFAULT_DOCUMENT_PANEL_ID)),
+      focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
+      next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
+      next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
+      resize_drag: None,
+      tab_drag: None,
+    }
+  }
+
   /// Creates document panel state with one opened document.
   ///
   /// # Parameters
@@ -125,18 +144,17 @@ impl DocumentPanelState {
   ///
   /// A [`DocumentPanelState`] with a single leaf panel and one active tab.
   pub(crate) fn new(document: OpenedProjectDocument) -> Self {
-    Self {
-      tree: PanelTree::single_leaf(PanelLeaf::new(DEFAULT_DOCUMENT_PANEL_ID).tab(PanelTab::new(
-        DEFAULT_DOCUMENT_TAB_ID,
-        document.title.clone(),
-        document,
-      ))),
-      focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
-      next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
-      next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
-      resize_drag: None,
-      tab_drag: None,
-    }
+    let mut state = Self::empty();
+    let Some(leaf) = state.tree.leaf_mut(DEFAULT_DOCUMENT_PANEL_ID) else {
+      return state;
+    };
+    leaf.add_tab(PanelTab::new(
+      DEFAULT_DOCUMENT_TAB_ID,
+      document.title.clone(),
+      document,
+    ));
+    state.next_tab_id = FIRST_DYNAMIC_DOCUMENT_TAB_ID;
+    state
   }
 
   /// Opens a document in the focused panel.
@@ -758,13 +776,8 @@ impl ChitinApp {
   ///
   /// This function returns `()` and mutates document panel state.
   pub(crate) fn open_project_document(&mut self, document: OpenedProjectDocument) {
-    match &mut self.document_panels {
-      Some(document_panels) => {
-        if !document_panels.open_document_as_tab(document.clone()) {
-          *document_panels = DocumentPanelState::new(document);
-        }
-      }
-      None => self.document_panels = Some(DocumentPanelState::new(document)),
+    if !self.document_panels.open_document_as_tab(document.clone()) {
+      self.document_panels = DocumentPanelState::new(document);
     }
   }
 
@@ -780,11 +793,7 @@ impl ChitinApp {
   ///
   /// `true` when the panel exists and was split; otherwise `false`.
   pub(crate) fn split_document_panel(&mut self, panel_id: PanelId, axis: PanelSplitAxis) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .and_then(|document_panels| document_panels.split_panel(panel_id, axis))
-      .is_some()
+    self.document_panels.split_panel(panel_id, axis).is_some()
   }
 
   /// Activates a tab inside a document panel.
@@ -803,11 +812,7 @@ impl ChitinApp {
     panel_id: PanelId,
     tab_id: PanelTabId,
   ) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(|document_panels| document_panels.activate_tab(panel_id, tab_id))
-      .unwrap_or(false)
+    self.document_panels.activate_tab(panel_id, tab_id)
   }
 
   /// Closes a tab inside a document panel.
@@ -823,11 +828,7 @@ impl ChitinApp {
   /// `true` when the panel and tab exist and the tab was removed; otherwise
   /// `false`.
   pub(crate) fn close_document_panel_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(|document_panels| document_panels.close_tab(panel_id, tab_id))
-      .unwrap_or(false)
+    self.document_panels.close_tab(panel_id, tab_id)
   }
 
   /// Focuses the previous tab in the focused document panel.
@@ -840,11 +841,7 @@ impl ChitinApp {
   ///
   /// `true` when the active tab changed; otherwise `false`.
   pub(crate) fn focus_previous_document_panel_tab(&mut self) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(DocumentPanelState::focus_previous_tab)
-      .unwrap_or(false)
+    self.document_panels.focus_previous_tab()
   }
 
   /// Focuses the next tab in the focused document panel.
@@ -857,11 +854,7 @@ impl ChitinApp {
   ///
   /// `true` when the active tab changed; otherwise `false`.
   pub(crate) fn focus_next_document_panel_tab(&mut self) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(DocumentPanelState::focus_next_tab)
-      .unwrap_or(false)
+    self.document_panels.focus_next_tab()
   }
 
   /// Closes the active tab in the focused document panel.
@@ -874,11 +867,7 @@ impl ChitinApp {
   ///
   /// `true` when an active tab was closed; otherwise `false`.
   pub(crate) fn close_focused_document_panel_tab(&mut self) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(DocumentPanelState::close_focused_tab)
-      .unwrap_or(false)
+    self.document_panels.close_focused_tab()
   }
 
   /// Starts a document tab drag after GPUI crosses its movement threshold.
@@ -891,11 +880,7 @@ impl ChitinApp {
   ///
   /// `true` when document panel state accepts the drag; otherwise `false`.
   pub(crate) fn start_document_panel_tab_drag(&mut self, drag: PanelTabDrag) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(|document_panels| document_panels.start_tab_drag(drag))
-      .unwrap_or(false)
+    self.document_panels.start_tab_drag(drag)
   }
 
   /// Updates the current document tab insertion target.
@@ -911,11 +896,7 @@ impl ChitinApp {
     &mut self,
     target: PanelTabDropTarget,
   ) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(|document_panels| document_panels.update_tab_drag_target(target))
-      .unwrap_or(false)
+    self.document_panels.update_tab_drag_target(target)
   }
 
   /// Clears stale document tab insertion feedback before target hit testing.
@@ -928,11 +909,7 @@ impl ChitinApp {
   ///
   /// `true` when a previous insertion target was removed; otherwise `false`.
   pub(crate) fn clear_document_panel_tab_drag_target(&mut self) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(DocumentPanelState::clear_tab_drag_target)
-      .unwrap_or(false)
+    self.document_panels.clear_tab_drag_target()
   }
 
   /// Commits a dragged document tab released over a valid target strip.
@@ -951,11 +928,7 @@ impl ChitinApp {
     drag: PanelTabDrag,
     target_panel_id: PanelId,
   ) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(|document_panels| document_panels.drop_tab(drag, target_panel_id))
-      .unwrap_or(false)
+    self.document_panels.drop_tab(drag, target_panel_id)
   }
 
   /// Cancels any uncommitted document tab drag.
@@ -969,11 +942,7 @@ impl ChitinApp {
   /// `true` when temporary drag state existed and was cleared; otherwise
   /// `false`.
   pub(crate) fn cancel_document_panel_tab_drag(&mut self) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(DocumentPanelState::cancel_tab_drag)
-      .unwrap_or(false)
+    self.document_panels.cancel_tab_drag()
   }
 
   /// Starts resizing one document panel split.
@@ -999,9 +968,7 @@ impl ChitinApp {
   ) -> bool {
     self
       .document_panels
-      .as_mut()
-      .map(|document_panels| document_panels.start_resize(path, axis, start_position))
-      .unwrap_or(false)
+      .start_resize(path, axis, start_position)
   }
 
   /// Updates the active document panel split resize.
@@ -1027,9 +994,7 @@ impl ChitinApp {
   ) -> bool {
     self
       .document_panels
-      .as_mut()
-      .map(|document_panels| document_panels.drag_resize(current_position, root_width, root_height))
-      .unwrap_or(false)
+      .drag_resize(current_position, root_width, root_height)
   }
 
   /// Stops the active document panel split resize.
@@ -1043,11 +1008,7 @@ impl ChitinApp {
   /// `true` when a document panel resize drag was active and removed;
   /// otherwise `false`.
   pub(crate) fn stop_document_panel_resize(&mut self) -> bool {
-    self
-      .document_panels
-      .as_mut()
-      .map(DocumentPanelState::stop_resize)
-      .unwrap_or(false)
+    self.document_panels.stop_resize()
   }
 
   /// Returns the active document panel resize axis.
@@ -1061,28 +1022,19 @@ impl ChitinApp {
   /// `Some(PanelSplitAxis)` when a document panel resize drag is active;
   /// otherwise `None`.
   pub(crate) fn document_panel_resize_axis(&self) -> Option<PanelSplitAxis> {
-    self
-      .document_panels
-      .as_ref()
-      .and_then(DocumentPanelState::resize_axis)
+    self.document_panels.resize_axis()
   }
 }
 
 /// Renders the main workbench document area.
 ///
-/// When a file is opened from the workspace tree, this renders a minimal
-/// placeholder document. Otherwise it keeps the existing product placeholder so
-/// the main area is still useful before any file is selected.
+/// The document area always renders the panel container. Before any file is
+/// opened, the container shows its empty root panel instead of the legacy
+/// workspace summary placeholder.
 ///
 /// # Parameters
 ///
-/// `document_panels` contains the currently opened document panel layout, if
-/// any.
-///
-/// `summary` provides product placeholder text for empty states.
-///
-/// `active_activity` identifies the selected workbench activity for empty
-/// placeholder copy.
+/// `document_panels` contains the current document panel layout.
 ///
 /// `theme` supplies colors for the document area.
 ///
@@ -1092,20 +1044,13 @@ impl ChitinApp {
 ///
 /// A GPUI element for the main document region.
 pub fn render_document_area(
-  document_panels: Option<&DocumentPanelState>,
-  summary: &WorkspaceSummary,
-  active_activity: ActiveActivity,
+  document_panels: &DocumentPanelState,
   theme: UIThemes,
   focus_handle: &FocusHandle,
   app: WeakEntity<ChitinApp>,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
-  match document_panels {
-    Some(document_panels) => {
-      render_opened_document_panels(document_panels, theme, focus_handle, app, cx)
-    }
-    None => render_empty_document_area(summary, active_activity, theme),
-  }
+  render_opened_document_panels(document_panels, theme, focus_handle, app, cx)
 }
 
 /// Renders document panels for files opened from the workspace tree.
@@ -1359,72 +1304,6 @@ fn render_opened_document_body(document: &OpenedProjectDocument, theme: UIThemes
         .child(document.path.display().to_string()),
     )
     .into_any_element()
-}
-
-/// Renders the main area before a workspace file is opened.
-///
-/// # Parameters
-///
-/// `summary` provides product name and focus text.
-///
-/// `active_activity` selects the placeholder heading and description.
-///
-/// `theme` supplies colors for the empty document area.
-///
-/// # Returns
-///
-/// A GPUI `Div` containing the empty workbench placeholder.
-fn render_empty_document_area(
-  summary: &WorkspaceSummary,
-  active_activity: ActiveActivity,
-  theme: UIThemes,
-) -> gpui::Div {
-  div()
-    .flex()
-    .flex_col()
-    .flex_1()
-    .h_full()
-    .p_8()
-    .gap_4()
-    .child(
-      div()
-        .text_3xl()
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(summary.product_name),
-    )
-    .child(
-      div()
-        .text_lg()
-        .text_color(theme.text.secondary)
-        .child(summary.focus),
-    )
-    .child(
-      div()
-        .mt_6()
-        .p_4()
-        .rounded_md()
-        .border_1()
-        .border_color(theme.border.primary)
-        .bg(theme.background.secondary)
-        .child(
-          div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-              div()
-                .text_lg()
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(active_activity.title()),
-            )
-            .child(
-              div()
-                .text_sm()
-                .text_color(theme.text.secondary)
-                .child(active_activity.description()),
-            ),
-        ),
-    )
 }
 
 #[cfg(test)]

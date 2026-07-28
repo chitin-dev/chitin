@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use chitin_core::{WorkspaceSummary, workspace::ProjectWorkspace};
+use chitin_core::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
@@ -31,8 +31,6 @@ use crate::{
 
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
-  /// Static product summary used by the placeholder main panel.
-  summary: WorkspaceSummary,
   /// Currently opened project workspace, if a path was accepted.
   pub(crate) workspace: Option<ProjectWorkspace>,
   /// Project workspace sidebar state owned by the app.
@@ -44,7 +42,7 @@ pub struct ChitinApp {
   /// Focus handle used by document panel container shortcuts.
   pub(crate) document_panel_focus: Option<FocusHandle>,
   /// Document panel tree currently shown in the main document area.
-  pub(crate) document_panels: Option<DocumentPanelState>,
+  pub(crate) document_panels: DocumentPanelState,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
   /// Whether the project workspace sidebar is visible when Workspace is active.
@@ -115,13 +113,12 @@ impl ChitinApp {
     );
 
     Self {
-      summary: WorkspaceSummary::default(),
       workspace,
       project_sidebar_state,
       project_sidebar_focus: None,
       workbench_focus: None,
       document_panel_focus: None,
-      document_panels: None,
+      document_panels: DocumentPanelState::empty(),
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
     }
@@ -296,11 +293,7 @@ impl ChitinApp {
   ///
   /// A [`FocusHandle`] for the document panel container or workbench root.
   pub(crate) fn main_workbench_focus_target(&mut self, cx: &mut Context<Self>) -> FocusHandle {
-    if self.document_panels.is_some() {
-      self.document_panel_focus(cx)
-    } else {
-      self.workbench_focus(cx)
-    }
+    self.document_panel_focus(cx)
   }
 
   /// Applies the workspace-sidebar toggle state transition.
@@ -505,9 +498,7 @@ impl Render for ChitinApp {
             },
           )
           .child(render_document_area(
-            self.document_panels.as_ref(),
-            &self.summary,
-            self.active_activity,
+            &self.document_panels,
             theme,
             &document_panel_focus,
             app.clone(),
@@ -548,12 +539,12 @@ mod tests {
     assert!(app.project_sidebar_visible);
   }
 
-  /// Verifies that empty main workbench focus uses the generic root fallback.
+  /// Verifies that new app state starts with an empty document panel.
   #[test]
-  fn main_workbench_focus_target_should_use_root_when_no_document_panel_exists() {
+  fn new_should_start_with_empty_document_panel() {
     let app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
 
-    assert!(!app.document_panels.is_some());
+    assert!(app.document_panels.active_document().is_none());
   }
 
   /// Verifies that document panels are preferred for main workbench focus.
@@ -565,7 +556,7 @@ mod tests {
       "/tmp/chitin-focus-target-test.rs",
     )));
 
-    assert!(app.document_panels.is_some());
+    assert!(app.document_panels.active_document().is_some());
   }
 
   /// Verifies that document panel width excludes fixed workbench chrome.
