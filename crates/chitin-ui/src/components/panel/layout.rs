@@ -8,7 +8,7 @@ use super::{
   drag::PanelTabDropTarget,
   model::{
     PanelId, PanelLeaf, PanelNode, PanelSplit, PanelSplitAxis, PanelSplitBranch, PanelSplitPath,
-    PanelSplitPlacement, PanelTabId, PanelTree,
+    PanelSplitPlacement, PanelTab, PanelTabId, PanelTree,
   },
   render::DEFAULT_PANEL_SPLIT_HANDLE_SIZE,
 };
@@ -351,6 +351,67 @@ impl<T> PanelTree<T> {
   pub fn leaf_count(&self) -> usize {
     count_leaves(&self.root)
   }
+
+  /// Returns every tab id in panel-tree visual order.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A vector of `(PanelId, PanelTabId)` pairs in render order.
+  pub fn tabs_in_order(&self) -> Vec<(PanelId, PanelTabId)> {
+    let mut tabs = Vec::new();
+    collect_tab_ids(&self.root, &mut tabs);
+    tabs
+  }
+
+  /// Returns every active tab id in panel-tree visual order.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A vector of `(PanelId, PanelTabId)` pairs for leaves with active tabs.
+  pub fn active_tabs_in_order(&self) -> Vec<(PanelId, PanelTabId)> {
+    let mut tabs = Vec::new();
+    collect_active_tab_ids(&self.root, &mut tabs);
+    tabs
+  }
+
+  /// Finds one tab by panel and tab identifier.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the leaf panel that should contain the tab.
+  ///
+  /// `tab_id` identifies the tab to find.
+  ///
+  /// # Returns
+  ///
+  /// `Some(&PanelTab<T>)` when the panel and tab exist; otherwise `None`.
+  pub fn find_tab(&self, panel_id: PanelId, tab_id: PanelTabId) -> Option<&PanelTab<T>> {
+    self
+      .leaf(panel_id)
+      .and_then(|leaf| leaf.tabs.iter().find(|tab| tab.id == tab_id))
+  }
+
+  /// Returns the first active tab in panel-tree visual order.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// `Some((PanelId, &PanelTab<T>))` for the first active tab, or `None` when no
+  /// panel has an active tab.
+  pub fn first_active_tab(&self) -> Option<(PanelId, &PanelTab<T>)> {
+    first_active_tab_in_node(&self.root)
+  }
 }
 
 /// Clamps a split ratio to supported panel bounds.
@@ -680,5 +741,72 @@ fn count_leaves<T>(node: &PanelNode<T>) -> usize {
   match node {
     PanelNode::Leaf(_) => 1,
     PanelNode::Split(split) => count_leaves(&split.first) + count_leaves(&split.second),
+  }
+}
+
+/// Appends every tab id below one node to an existing order list.
+///
+/// # Parameters
+///
+/// `node` is the panel tree node to traverse.
+///
+/// `tabs` receives panel and tab identifiers in visual order.
+///
+/// # Returns
+///
+/// This function returns `()` after appending identifiers.
+fn collect_tab_ids<T>(node: &PanelNode<T>, tabs: &mut Vec<(PanelId, PanelTabId)>) {
+  match node {
+    PanelNode::Leaf(leaf) => {
+      tabs.extend(leaf.tabs.iter().map(|tab| (leaf.id, tab.id)));
+    }
+    PanelNode::Split(split) => {
+      collect_tab_ids(&split.first, tabs);
+      collect_tab_ids(&split.second, tabs);
+    }
+  }
+}
+
+/// Appends every active tab id below one node to an existing order list.
+///
+/// # Parameters
+///
+/// `node` is the panel tree node to traverse.
+///
+/// `tabs` receives panel and active-tab identifiers in visual order.
+///
+/// # Returns
+///
+/// This function returns `()` after appending identifiers.
+fn collect_active_tab_ids<T>(node: &PanelNode<T>, tabs: &mut Vec<(PanelId, PanelTabId)>) {
+  match node {
+    PanelNode::Leaf(leaf) => {
+      if let Some(tab_id) = leaf.active_tab {
+        tabs.push((leaf.id, tab_id));
+      }
+    }
+    PanelNode::Split(split) => {
+      collect_active_tab_ids(&split.first, tabs);
+      collect_active_tab_ids(&split.second, tabs);
+    }
+  }
+}
+
+/// Finds the first active tab below one node in visual order.
+///
+/// # Parameters
+///
+/// `node` is the panel tree node to traverse.
+///
+/// # Returns
+///
+/// `Some((PanelId, &PanelTab<T>))` for the first active tab, or `None` when no
+/// panel has an active tab.
+fn first_active_tab_in_node<T>(node: &PanelNode<T>) -> Option<(PanelId, &PanelTab<T>)> {
+  match node {
+    PanelNode::Leaf(leaf) => leaf.active_tab().map(|tab| (leaf.id, tab)),
+    PanelNode::Split(split) => {
+      first_active_tab_in_node(&split.first).or_else(|| first_active_tab_in_node(&split.second))
+    }
   }
 }

@@ -296,7 +296,7 @@ impl DocumentPanelState {
   /// otherwise `None`.
   #[cfg(test)]
   pub(crate) fn active_document(&self) -> Option<&OpenedProjectDocument> {
-    active_document_in_node(&self.tree.root)
+    self.tree.first_active_tab().map(|(_, tab)| &tab.payload)
   }
 
   /// Splits one document panel and copies its active tab to the new panel.
@@ -385,8 +385,8 @@ impl DocumentPanelState {
     };
     let source_exists = self
       .tree
-      .leaf(tab_drag.drag.source_panel_id)
-      .is_some_and(|leaf| leaf.tabs.iter().any(|tab| tab.id == tab_drag.drag.tab_id));
+      .find_tab(tab_drag.drag.source_panel_id, tab_drag.drag.tab_id)
+      .is_some();
     if !source_exists || tab_drag.drop_target == Some(target) {
       return false;
     }
@@ -609,7 +609,7 @@ impl DocumentPanelState {
   /// `Some((PanelId, PanelTabId))` for the circular adjacent tab across all
   /// panels, or `None` when the container has no tabs.
   fn relative_container_tab(&self, offset: isize) -> Option<(PanelId, PanelTabId)> {
-    let tabs = container_tab_order(&self.tree.root);
+    let tabs = self.tree.tabs_in_order();
     let tab_count = tabs.len();
 
     if tab_count == 0 {
@@ -620,7 +620,7 @@ impl DocumentPanelState {
       .tree
       .leaf(self.focused_panel_id)
       .and_then(|leaf| leaf.active_tab)
-      .or_else(|| first_active_container_tab(&self.tree.root).map(|(_, tab_id)| tab_id))?;
+      .or_else(|| self.tree.first_active_tab().map(|(_, tab)| tab.id))?;
     let current_index = tabs
       .iter()
       .position(|(panel_id, tab_id)| *panel_id == self.focused_panel_id && *tab_id == current_tab)
@@ -632,95 +632,5 @@ impl DocumentPanelState {
     };
 
     Some(tabs[next_index])
-  }
-}
-
-/// Returns every tab in panel-tree visual order.
-///
-/// # Parameters
-///
-/// `node` is the panel tree node to traverse.
-///
-/// # Returns
-///
-/// A vector of `(PanelId, PanelTabId)` pairs in render order.
-fn container_tab_order(
-  node: &chitin_ui::components::panel::PanelNode<OpenedProjectDocument>,
-) -> Vec<(PanelId, PanelTabId)> {
-  let mut tabs = Vec::new();
-  collect_container_tab_order(node, &mut tabs);
-  tabs
-}
-
-/// Appends every tab below one node to an existing order list.
-///
-/// # Parameters
-///
-/// `node` is the panel tree node to traverse.
-///
-/// `tabs` receives panel and tab identifiers in visual order.
-///
-/// # Returns
-///
-/// This function returns `()` after appending identifiers.
-fn collect_container_tab_order(
-  node: &chitin_ui::components::panel::PanelNode<OpenedProjectDocument>,
-  tabs: &mut Vec<(PanelId, PanelTabId)>,
-) {
-  match node {
-    chitin_ui::components::panel::PanelNode::Leaf(leaf) => {
-      tabs.extend(leaf.tabs.iter().map(|tab| (leaf.id, tab.id)));
-    }
-    chitin_ui::components::panel::PanelNode::Split(split) => {
-      collect_container_tab_order(&split.first, tabs);
-      collect_container_tab_order(&split.second, tabs);
-    }
-  }
-}
-
-/// Finds the first active tab in panel-tree visual order.
-///
-/// # Parameters
-///
-/// `node` is the panel tree node to traverse.
-///
-/// # Returns
-///
-/// `Some((PanelId, PanelTabId))` for the first active tab, or `None` when no
-/// panel has an active tab.
-fn first_active_container_tab(
-  node: &chitin_ui::components::panel::PanelNode<OpenedProjectDocument>,
-) -> Option<(PanelId, PanelTabId)> {
-  match node {
-    chitin_ui::components::panel::PanelNode::Leaf(leaf) => {
-      leaf.active_tab.map(|tab_id| (leaf.id, tab_id))
-    }
-    chitin_ui::components::panel::PanelNode::Split(split) => {
-      first_active_container_tab(&split.first).or_else(|| first_active_container_tab(&split.second))
-    }
-  }
-}
-
-/// Finds the first active document payload below a panel node.
-///
-/// # Parameters
-///
-/// `node` is the panel node to search.
-///
-/// # Returns
-///
-/// `Some(&OpenedProjectDocument)` for the first active document in tree order,
-/// or `None` when no active document exists.
-#[cfg(test)]
-fn active_document_in_node(
-  node: &chitin_ui::components::panel::PanelNode<OpenedProjectDocument>,
-) -> Option<&OpenedProjectDocument> {
-  match node {
-    chitin_ui::components::panel::PanelNode::Leaf(leaf) => {
-      leaf.active_tab().map(|tab| &tab.payload)
-    }
-    chitin_ui::components::panel::PanelNode::Split(split) => {
-      active_document_in_node(&split.first).or_else(|| active_document_in_node(&split.second))
-    }
   }
 }

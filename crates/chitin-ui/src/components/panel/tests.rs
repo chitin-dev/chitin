@@ -510,6 +510,87 @@ fn panel_tree_should_find_mutable_leaf_by_id() {
   );
 }
 
+/// Verifies that tab order follows panel-tree visual order.
+#[test]
+fn panel_tree_should_return_tabs_in_visual_order() {
+  let mut tree = PanelTree::single_leaf(
+    PanelLeaf::new(PanelId::new(1))
+      .tab(PanelTab::new(PanelTabId::new(1), "Editor", ()))
+      .tab(PanelTab::new(PanelTabId::new(2), "Preview", ())),
+  );
+  assert!(tree.split_leaf(
+    PanelId::new(1),
+    PanelSplitAxis::Horizontal,
+    PanelLeaf::new(PanelId::new(2)).tab(PanelTab::new(PanelTabId::new(3), "Structure", ())),
+    PanelSplitPlacement::After,
+    0.5,
+  ));
+
+  assert_eq!(
+    tree.tabs_in_order(),
+    vec![
+      (PanelId::new(1), PanelTabId::new(1)),
+      (PanelId::new(1), PanelTabId::new(2)),
+      (PanelId::new(2), PanelTabId::new(3)),
+    ]
+  );
+}
+
+/// Verifies that active tab order returns one active tab per non-empty leaf.
+#[test]
+fn panel_tree_should_return_active_tabs_in_visual_order() {
+  let mut tree = four_tab_tree();
+  assert!(tree.activate_tab(PanelId::new(1), PanelTabId::new(3)));
+  assert!(tree.split_leaf(
+    PanelId::new(1),
+    PanelSplitAxis::Horizontal,
+    PanelLeaf::new(PanelId::new(2)).tab(PanelTab::new(PanelTabId::new(5), "E", "state-e")),
+    PanelSplitPlacement::After,
+    0.5,
+  ));
+
+  assert_eq!(
+    tree.active_tabs_in_order(),
+    vec![
+      (PanelId::new(1), PanelTabId::new(3)),
+      (PanelId::new(2), PanelTabId::new(5)),
+    ]
+  );
+}
+
+/// Verifies that tab lookup returns the requested tab payload.
+#[test]
+fn panel_tree_should_find_tab_by_panel_and_tab_id() {
+  let tree = four_tab_tree();
+
+  let Some(tab) = tree.find_tab(PanelId::new(1), PanelTabId::new(2)) else {
+    panic!("tab should exist");
+  };
+
+  assert_eq!(tab.payload, "state-b");
+}
+
+/// Verifies that first active tab follows panel-tree visual order.
+#[test]
+fn panel_tree_should_return_first_active_tab_in_visual_order() {
+  let mut tree = four_tab_tree();
+  assert!(tree.activate_tab(PanelId::new(1), PanelTabId::new(3)));
+  assert!(tree.split_leaf(
+    PanelId::new(1),
+    PanelSplitAxis::Horizontal,
+    PanelLeaf::new(PanelId::new(2)).tab(PanelTab::new(PanelTabId::new(5), "E", "state-e")),
+    PanelSplitPlacement::Before,
+    0.5,
+  ));
+
+  let Some((panel_id, tab)) = tree.first_active_tab() else {
+    panic!("active tab should exist");
+  };
+
+  assert_eq!(panel_id, PanelId::new(2));
+  assert_eq!(tab.id, PanelTabId::new(5));
+}
+
 /// Verifies that splitting a leaf creates a binary split node.
 #[test]
 fn panel_tree_should_split_leaf_into_binary_node() {
