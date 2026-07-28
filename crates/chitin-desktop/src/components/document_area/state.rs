@@ -2,9 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
-use chitin_ui::components::panel::{
-  PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag,
-  PanelTabDragState, PanelTabDropTarget, PanelTabId, PanelTree,
+use chitin_ui::components::{
+  panel::{
+    PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab,
+    PanelTabDrag, PanelTabDragState, PanelTabDropTarget, PanelTabId, PanelTree,
+  },
+  resize::ResizeGesture,
 };
 use gpui::Pixels;
 
@@ -26,17 +29,13 @@ pub struct OpenedProjectDocument {
   pub title: String,
 }
 
-/// Active resize gesture for a document panel split.
+/// Resized document panel split target.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct DocumentPanelResizeDrag {
+pub(crate) struct DocumentPanelResizeAnchor {
   /// Path to the split node being resized.
   path: PanelSplitPath,
   /// Axis of the split node being resized.
   axis: PanelSplitAxis,
-  /// Cursor position on the resize axis when dragging started.
-  start_position: Pixels,
-  /// Split ratio when dragging started.
-  start_ratio: f32,
 }
 
 /// State for document panels rendered in the main workbench area.
@@ -51,7 +50,7 @@ pub(crate) struct DocumentPanelState {
   /// Next tab identifier to allocate for newly opened document tabs.
   pub(super) next_tab_id: PanelTabId,
   /// Active split resize drag, if the user is dragging a split handle.
-  pub(super) resize_drag: Option<DocumentPanelResizeDrag>,
+  pub(super) resize_drag: Option<ResizeGesture<DocumentPanelResizeAnchor, f32>>,
   /// Temporary tab drag session kept separate from the persistent panel tree.
   pub(super) tab_drag: Option<PanelTabDragState>,
 }
@@ -493,12 +492,11 @@ impl DocumentPanelState {
       return false;
     };
 
-    self.resize_drag = Some(DocumentPanelResizeDrag {
-      path,
-      axis,
+    self.resize_drag = Some(ResizeGesture::new(
+      DocumentPanelResizeAnchor { path, axis },
       start_position,
       start_ratio,
-    });
+    ));
     true
   }
 
@@ -527,7 +525,7 @@ impl DocumentPanelState {
     let Some(available_size) =
       self
         .tree
-        .split_axis_size(&resize_drag.path, root_width, root_height)
+        .split_axis_size(&resize_drag.anchor().path, root_width, root_height)
     else {
       return false;
     };
@@ -537,9 +535,8 @@ impl DocumentPanelState {
       return false;
     }
 
-    let delta = f32::from(current_position) - f32::from(resize_drag.start_position);
-    let ratio = resize_drag.start_ratio + delta / available_size;
-    self.tree.resize_split(&resize_drag.path, ratio)
+    let ratio = resize_drag.start_value() + resize_drag.delta(current_position) / available_size;
+    self.tree.resize_split(&resize_drag.anchor().path, ratio)
   }
 
   /// Stops the active document panel split resize gesture.
@@ -568,7 +565,7 @@ impl DocumentPanelState {
     self
       .resize_drag
       .as_ref()
-      .map(|resize_drag| resize_drag.axis)
+      .map(|resize_drag| resize_drag.anchor().axis)
   }
 
   /// Allocates the next document panel identifier.

@@ -12,7 +12,10 @@ use gpui::{
   Pixels, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px,
 };
 
-use crate::themes::{UIThemes, builtins};
+use crate::{
+  components::resize::ResizeGesture,
+  themes::{UIThemes, builtins},
+};
 
 /// Callback invoked when a sidebar resize gesture starts.
 type SidebarResizeStartHandler = dyn Fn(Pixels, &mut Window, &mut App);
@@ -35,15 +38,6 @@ pub const DEFAULT_SIDEBAR_RESIZE_HANDLE_WIDTH: Pixels = px(4.0);
 /// controls while maintaining a compact UI. Commonly used for workspace headers,
 /// panel titles, and toolbar sections.
 pub const DEFAULT_HEADER_HEIGHT: Pixels = px(30.0);
-
-/// Drag state for a sidebar resize interaction.
-#[derive(Clone, Copy, Debug)]
-struct SidebarResizeDrag {
-  /// Cursor x-position when the resize started.
-  start_x: Pixels,
-  /// Sidebar width when the resize started.
-  start_width: Pixels,
-}
 
 /// Reusable state for a resizable sidebar.
 ///
@@ -73,7 +67,7 @@ pub struct SidebarResizeState {
   /// Maximum allowed sidebar width.
   max_width: Pixels,
   /// Active resize drag metadata.
-  resize_drag: Option<SidebarResizeDrag>,
+  resize_drag: Option<ResizeGesture<(), Pixels>>,
 }
 
 impl SidebarResizeState {
@@ -177,10 +171,7 @@ impl SidebarResizeState {
   ///
   /// This function returns `()` and stores active drag metadata.
   pub fn start_resize(&mut self, start_x: Pixels) {
-    self.resize_drag = Some(SidebarResizeDrag {
-      start_x,
-      start_width: self.width,
-    });
+    self.resize_drag = Some(ResizeGesture::new((), start_x, self.width));
   }
 
   /// Updates sidebar width from the current resize cursor x-position.
@@ -198,7 +189,7 @@ impl SidebarResizeState {
     };
 
     self.resize_width(px(
-      f32::from(resize_drag.start_width) + f32::from(current_x) - f32::from(resize_drag.start_x),
+      f32::from(resize_drag.start_value()) + resize_drag.delta(current_x),
     ));
     //    |------------|----------|
     // 0            current_x  start_x
