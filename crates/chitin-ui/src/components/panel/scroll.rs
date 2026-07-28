@@ -114,6 +114,24 @@ impl PanelTabScrollState {
     handle
   }
 
+  /// Removes scroll state for panels that are no longer live.
+  ///
+  /// # Parameters
+  ///
+  /// `live_panel_ids` contains the panel identifiers present in the current
+  /// panel tree.
+  ///
+  /// # Returns
+  ///
+  /// This function does not return a value.
+  pub fn retain_panels(&self, live_panel_ids: impl IntoIterator<Item = PanelId>) {
+    let live_panel_ids = live_panel_ids.into_iter().collect::<Vec<_>>();
+    self
+      .entries
+      .borrow_mut()
+      .retain(|entry| live_panel_ids.contains(&entry.panel_id));
+  }
+
   /// Queues a scroll request that reveals one tab in its panel tab bar.
   ///
   /// # Parameters
@@ -357,6 +375,32 @@ mod tests {
     scroll_state.scroll_handle(PanelId::new(2));
 
     assert_eq!(scroll_state.tracked_panel_count(), 2);
+  }
+
+  #[test]
+  fn retain_panels_should_remove_closed_panel_state() {
+    let scroll_state = PanelTabScrollState::new();
+
+    scroll_state.scroll_handle(PanelId::new(1));
+    scroll_state.scroll_handle(PanelId::new(2));
+    scroll_state.retain_panels([PanelId::new(2)]);
+
+    assert_eq!(scroll_state.tracked_panel_count(), 1);
+    scroll_state.scroll_handle(PanelId::new(1));
+    assert_eq!(scroll_state.tracked_panel_count(), 2);
+  }
+
+  #[test]
+  fn retain_panels_should_drop_reveal_history_for_reused_panel_id() {
+    let scroll_state = PanelTabScrollState::new();
+    let now = Instant::now();
+
+    scroll_state.reveal_tab(PanelId::new(1), 0, now);
+    scroll_state.reveal_tab(PanelId::new(1), 1, now);
+    scroll_state.retain_panels([PanelId::new(2)]);
+
+    assert_eq!(scroll_state.reveal_tab(PanelId::new(1), 1, now), None);
+    assert!(!scroll_state.indicator_visible(PanelId::new(1), now));
   }
 
   #[test]

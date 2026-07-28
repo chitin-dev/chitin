@@ -283,6 +283,12 @@ pub fn render_panel_container<T>(
   config: PanelContainerConfig,
   render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
 ) -> Div {
+  if let Some(tab_scroll) = config.tab_scroll.as_ref() {
+    let mut panel_ids = Vec::new();
+    collect_panel_ids(&tree.root, &mut panel_ids);
+    tab_scroll.retain_panels(panel_ids);
+  }
+
   let context = PanelRenderContext {
     theme,
     config: &config,
@@ -290,6 +296,27 @@ pub fn render_panel_container<T>(
   };
 
   render_panel_node(&tree.root, &PanelSplitPath::root(), &context)
+}
+
+/// Collects leaf panel identifiers from a panel node.
+///
+/// # Parameters
+///
+/// `node` is the panel node to traverse.
+///
+/// `panel_ids` receives leaf panel identifiers in visual order.
+///
+/// # Returns
+///
+/// This function does not return a value.
+fn collect_panel_ids<T>(node: &PanelNode<T>, panel_ids: &mut Vec<PanelId>) {
+  match node {
+    PanelNode::Leaf(leaf) => panel_ids.push(leaf.id),
+    PanelNode::Split(split) => {
+      collect_panel_ids(&split.first, panel_ids);
+      collect_panel_ids(&split.second, panel_ids);
+    }
+  }
 }
 
 /// Renders one panel tree node.
