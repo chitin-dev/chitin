@@ -48,7 +48,13 @@ const TAB_CLOSE_ICON_SIZE: Pixels = px(12.0);
 ///
 /// `theme` supplies colors for the document area.
 ///
+/// `focus_handle` is the focus handle used to track and direct keyboard focus
+/// for the document area element.
+///
 /// `app` is the weak app entity used by document panel callbacks.
+///
+/// `cx` is the GPUI context used by action listeners and callbacks to update
+/// application state.
 ///
 /// # Returns
 ///
@@ -71,7 +77,13 @@ pub fn render_document_area(
 ///
 /// `theme` supplies colors for the placeholder document surface.
 ///
+/// `focus_handle` is the focus handle used to track and direct keyboard focus
+/// for the panel container element.
+///
 /// `app` is the weak app entity used by tab and split button callbacks.
+///
+/// `cx` is the GPUI context used by action listeners and callbacks to update
+/// application state.
 ///
 /// # Returns
 ///
