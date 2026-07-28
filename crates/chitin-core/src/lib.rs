@@ -7,35 +7,3 @@
 
 /// Workspace discovery and project file tree models.
 pub mod workspace;
-
-/// Small product summary used by early application surfaces.
-///
-/// This is deliberately lightweight until Chitin has a richer project metadata
-/// model. UI crates can use it for placeholder titles and status text without
-/// depending on desktop-specific state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceSummary {
-  /// Product name shown in top-level UI.
-  pub product_name: &'static str,
-  /// Short product focus line shown in placeholder surfaces.
-  pub focus: &'static str,
-}
-
-impl Default for WorkspaceSummary {
-  /// Creates the default lightweight workspace summary.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`WorkspaceSummary`] with Chitin's product name and current high-level
-  /// product focus string.
-  fn default() -> Self {
-    Self {
-      product_name: "Chitin",
-      focus: "Computational chemistry and bioinformatics",
-    }
-  }
-}
