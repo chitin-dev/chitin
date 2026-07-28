@@ -2,7 +2,7 @@ use std::path::Path;
 
 use chitin_ui::components::panel::{
   PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelTab, PanelTabDrag, PanelTabDragState,
-  PanelTabDropTarget, PanelTabId, PanelTree,
+  PanelTabDropTarget, PanelTabId, PanelTabScrollState, PanelTree,
 };
 use gpui::{SharedString, px};
 
@@ -61,6 +61,7 @@ fn two_tab_document_panel_state() -> DocumentPanelState {
     next_tab_id: PanelTabId::new(3),
     resize_drag: None,
     tab_drag: None,
+    tab_scroll: PanelTabScrollState::new(),
   }
 }
 
@@ -341,6 +342,7 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
     next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
     resize_drag: None,
     tab_drag: None,
+    tab_scroll: PanelTabScrollState::new(),
   };
 
   let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)

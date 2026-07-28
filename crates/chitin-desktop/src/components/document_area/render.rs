@@ -170,7 +170,8 @@ fn render_opened_document_panels(
     .on_close_tab(on_close_tab)
     .render_tab_close_icon(render_tab_close_icon)
     .render_tab_strip_actions(render_tab_strip_actions)
-    .tab_drag(tab_drag);
+    .tab_drag(tab_drag)
+    .tab_scroll(document_panels.tab_scroll.clone());
 
   let mouse_focus_handle = focus_handle.clone();
 

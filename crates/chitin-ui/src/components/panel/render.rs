@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gpui::{
   AnyElement, App, Context, CursorStyle, Div, InteractiveElement, MouseButton, ParentElement,
-  Pixels, SharedString, Styled, Window, div, prelude::*, px, relative,
+  Pixels, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px, relative,
 };
 
 use crate::themes::UIThemes;
@@ -16,6 +16,7 @@ use super::{
     PanelId, PanelLeaf, PanelNode, PanelSplit, PanelSplitAxis, PanelSplitBranch, PanelSplitPath,
     PanelTab, PanelTabId, PanelTree,
   },
+  scroll::PanelTabScrollState,
 };
 
 /// Default width of a split resize handle.
@@ -54,6 +55,8 @@ pub struct PanelContainerConfig {
   render_tab_strip_actions: Option<Rc<PanelTabStripActionsRenderer>>,
   /// Optional native GPUI tab drag-and-drop behavior.
   tab_drag: Option<PanelTabDragConfig>,
+  /// Optional persistent scroll handles for panel tab bars.
+  tab_scroll: Option<PanelTabScrollState>,
 }
 
 impl PanelContainerConfig {
@@ -167,6 +170,20 @@ impl PanelContainerConfig {
   /// The updated [`PanelContainerConfig`] for builder chaining.
   pub fn tab_drag(mut self, tab_drag: PanelTabDragConfig) -> Self {
     self.tab_drag = Some(tab_drag);
+    self
+  }
+
+  /// Enables persistent horizontal tab-bar scrolling.
+  ///
+  /// # Parameters
+  ///
+  /// `tab_scroll` owns per-panel scroll handles reused across render passes.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn tab_scroll(mut self, tab_scroll: PanelTabScrollState) -> Self {
+    self.tab_scroll = Some(tab_scroll);
     self
   }
 }
@@ -421,6 +438,16 @@ fn render_panel_leaf<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>
 /// A GPUI `Div` containing tab buttons.
 fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>) -> Div {
   let panel_focused = context.config.focused_panel_id == Some(leaf.id);
+  let active_tab_index = leaf
+    .active_tab
+    .and_then(|active_tab_id| leaf.tabs.iter().position(|tab| tab.id == active_tab_id));
+  let tab_scroll_handle = context.config.tab_scroll.as_ref().map(|tab_scroll| {
+    if let Some(active_tab_index) = active_tab_index {
+      tab_scroll.reveal_tab(leaf.id, active_tab_index);
+    }
+
+    tab_scroll.scroll_handle(leaf.id)
+  });
   let active_drop_target = context
     .config
     .tab_drag
@@ -428,14 +455,17 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
     .and_then(|config| config.state.as_ref())
     .and_then(|state| state.drop_target)
     .filter(|target| target.panel_id == leaf.id);
+  let tab_lane_id = SharedString::from(format!("panel-tab-lane-{}", leaf.id.value()));
   let mut tab_lane = div()
+    .id(tab_lane_id)
     .relative()
     .flex()
     .items_center()
     .flex_1()
     .min_w_0()
     .h_full()
-    .overflow_hidden()
+    .overflow_x_scroll()
+    .scrollbar_width(px(0.0))
     .children(leaf.tabs.iter().enumerate().map(|(index, tab)| {
       render_panel_tab(
         leaf.id,
@@ -467,6 +497,10 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
         )
       },
     );
+
+  if let Some(tab_scroll_handle) = tab_scroll_handle.as_ref() {
+    tab_lane = tab_lane.track_scroll(tab_scroll_handle);
+  }
 
   if let Some(tab_drag) = context.config.tab_drag.as_ref() {
     let on_target = tab_drag.on_target.clone();
@@ -553,6 +587,7 @@ fn render_panel_tab<T>(
     .flex()
     .items_center()
     .h_full()
+    .flex_none()
     .max_w(px(220.0))
     .min_w(px(72.0))
     .border_r_1()

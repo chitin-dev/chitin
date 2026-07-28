@@ -9,6 +9,7 @@ mod drag;
 mod layout;
 mod model;
 mod render;
+mod scroll;
 
 #[cfg(test)]
 mod tests;
@@ -30,3 +31,4 @@ pub use render::{
   PanelTabActivateHandler, PanelTabCloseHandler, PanelTabCloseIconRenderer,
   PanelTabStripActionsRenderer, render_panel_container,
 };
+pub use scroll::PanelTabScrollState;

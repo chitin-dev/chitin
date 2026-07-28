@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use chitin_ui::components::{
   panel::{
     PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab,
-    PanelTabDrag, PanelTabDragState, PanelTabDropTarget, PanelTabId, PanelTree,
+    PanelTabDrag, PanelTabDragState, PanelTabDropTarget, PanelTabId, PanelTabScrollState,
+    PanelTree,
   },
   resize::ResizeGesture,
 };
@@ -53,6 +54,8 @@ pub(crate) struct DocumentPanelState {
   pub(super) resize_drag: Option<ResizeGesture<DocumentPanelResizeAnchor, f32>>,
   /// Temporary tab drag session kept separate from the persistent panel tree.
   pub(super) tab_drag: Option<PanelTabDragState>,
+  /// Presentation-only scroll state for panel tab bars.
+  pub(super) tab_scroll: PanelTabScrollState,
 }
 
 impl OpenedProjectDocument {
@@ -96,6 +99,7 @@ impl DocumentPanelState {
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
       resize_drag: None,
       tab_drag: None,
+      tab_scroll: PanelTabScrollState::new(),
     }
   }
 
@@ -120,6 +124,7 @@ impl DocumentPanelState {
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
       resize_drag: None,
       tab_drag: None,
+      tab_scroll: PanelTabScrollState::new(),
     }
   }
 
