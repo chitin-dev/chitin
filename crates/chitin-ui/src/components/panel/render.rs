@@ -753,7 +753,9 @@ fn render_panel_tab<T>(
     );
 
   if insertion_before {
-    tab_element = tab_element.child(render_panel_tab_insertion_marker(theme.border.focus.into()));
+    tab_element = tab_element.child(render_panel_tab_leading_insertion_marker(
+      theme.border.focus.into(),
+    ));
   }
 
   if panel_focused && active {
@@ -837,6 +839,26 @@ fn render_panel_tab_insertion_marker(color: gpui::Hsla) -> Div {
       .w(px(2.0))
       .bg(color),
   )
+}
+
+/// Renders an absolute insertion marker at a tab's leading edge.
+///
+/// # Parameters
+///
+/// `color` is the theme color painted by the insertion marker.
+///
+/// # Returns
+///
+/// A GPUI `Div` that overlays the tab's left boundary without affecting tab
+/// layout.
+fn render_panel_tab_leading_insertion_marker(color: gpui::Hsla) -> Div {
+  div()
+    .absolute()
+    .left_0()
+    .top_0()
+    .bottom_0()
+    .w(px(2.0))
+    .bg(color)
 }
 
 /// Renders the reserved close button slot for one panel tab.
