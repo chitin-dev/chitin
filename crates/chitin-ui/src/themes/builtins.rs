@@ -161,6 +161,7 @@ pub fn dark() -> UIThemes {
     border: UIBorderColors {
       primary: dark::GRAY_2B,
       muted: dark::WHITE_09,
+      tertiary: dark::GRAY_61,
       focus: dark::BLUE_HARD,
     },
     accent: UIAccentColors {
@@ -210,6 +211,7 @@ pub fn light() -> UIThemes {
     border: UIBorderColors {
       primary: light::GRAY_E5,
       muted: light::GRAY_E5,
+      tertiary: light::GRAY_CE,
       focus: light::BLUE_HARD,
     },
     accent: UIAccentColors {

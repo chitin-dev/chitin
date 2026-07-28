@@ -1,6 +1,6 @@
 //! GPUI rendering for the document panel area.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Instant};
 
 use chitin_ui::{
   components::panel::{
@@ -11,8 +11,8 @@ use chitin_ui::{
   themes::UIThemes,
 };
 use gpui::{
-  AnyElement, App, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, MouseButton,
-  ParentElement, Pixels, Styled, WeakEntity, Window, div, px, svg,
+  AnyElement, App, AsyncApp, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+  MouseButton, ParentElement, Pixels, Styled, WeakEntity, Window, div, px, svg,
 };
 
 use crate::{
@@ -163,6 +163,7 @@ fn render_opened_document_panels(
       }
     });
   });
+  let now = Instant::now();
   let panel_config = PanelContainerConfig::new()
     .resize(resize)
     .focused_panel_id(document_panels.focused_panel_id)
@@ -171,9 +172,15 @@ fn render_opened_document_panels(
     .render_tab_close_icon(render_tab_close_icon)
     .render_tab_strip_actions(render_tab_strip_actions)
     .tab_drag(tab_drag)
-    .tab_scroll(document_panels.tab_scroll.clone());
+    .tab_scroll(document_panels.tab_scroll.clone())
+    .now(now);
 
   let mouse_focus_handle = focus_handle.clone();
+  let panel_container =
+    render_panel_container(&document_panels.tree, theme, panel_config, &|tab| {
+      render_opened_document_body(&tab.payload, theme).into_any_element()
+    });
+  schedule_tab_scroll_indicator_hide(document_panels, now, cx);
 
   div()
     .flex()
@@ -194,12 +201,44 @@ fn render_opened_document_panels(
     .on_mouse_down(MouseButton::Left, move |_, window, _| {
       window.focus(&mouse_focus_handle);
     })
-    .child(render_panel_container(
-      &document_panels.tree,
-      theme,
-      panel_config,
-      &|tab| render_opened_document_body(&tab.payload, theme).into_any_element(),
-    ))
+    .child(panel_container)
+}
+
+/// Schedules redraws for expiring tab-scroll indicators.
+///
+/// # Parameters
+///
+/// `document_panels` owns the presentation-only scroll indicator state.
+///
+/// `now` is the current UI clock timestamp.
+///
+/// `cx` schedules the wake-up task and receives the redraw notification.
+///
+/// # Returns
+///
+/// This function has no return value.
+fn schedule_tab_scroll_indicator_hide(
+  document_panels: &DocumentPanelState,
+  now: Instant,
+  cx: &mut Context<ChitinApp>,
+) {
+  for expires_at in document_panels
+    .tab_scroll
+    .indicator_redraws_to_schedule(now)
+  {
+    let delay = expires_at.saturating_duration_since(now);
+    cx.spawn(
+      move |this: WeakEntity<ChitinApp>, async_cx: &mut AsyncApp| {
+        let mut async_cx = async_cx.clone();
+        async move {
+          let timer = async_cx.background_executor().timer(delay);
+          timer.await;
+          let _ = this.update(&mut async_cx, |_, cx| cx.notify());
+        }
+      },
+    )
+    .detach();
+  }
 }
 
 /// Renders split controls at the right end of one document panel tab strip.

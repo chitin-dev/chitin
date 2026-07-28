@@ -1,10 +1,11 @@
 //! GPUI rendering for panel containers.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Instant};
 
 use gpui::{
   AnyElement, App, Context, CursorStyle, Div, InteractiveElement, MouseButton, ParentElement,
-  Pixels, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px, relative,
+  Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*,
+  px, relative,
 };
 
 use crate::themes::UIThemes;
@@ -27,6 +28,10 @@ pub const DEFAULT_PANEL_TAB_STRIP_HEIGHT: Pixels = px(34.0);
 pub const DEFAULT_PANEL_TAB_CLOSE_BUTTON_SIZE: Pixels = px(18.0);
 /// Default width reserved for trailing tab actions.
 pub const DEFAULT_PANEL_TAB_TRAILING_ACTION_WIDTH: Pixels = DEFAULT_PANEL_TAB_STRIP_HEIGHT;
+/// Default height of the horizontal tab-scroll progress indicator.
+pub const DEFAULT_PANEL_TAB_SCROLL_PROGRESS_HEIGHT: Pixels = px(3.0);
+/// Default opacity of the horizontal tab-scroll progress indicator.
+pub const DEFAULT_PANEL_TAB_SCROLL_PROGRESS_OPACITY: f32 = 0.6;
 
 /// Callback invoked when a tab is activated.
 pub type PanelTabActivateHandler = dyn Fn(PanelId, PanelTabId, &mut Window, &mut App);
@@ -57,6 +62,8 @@ pub struct PanelContainerConfig {
   tab_drag: Option<PanelTabDragConfig>,
   /// Optional persistent scroll handles for panel tab bars.
   tab_scroll: Option<PanelTabScrollState>,
+  /// Current UI clock timestamp used for transient chrome state.
+  now: Option<Instant>,
 }
 
 impl PanelContainerConfig {
@@ -184,6 +191,20 @@ impl PanelContainerConfig {
   /// The updated [`PanelContainerConfig`] for builder chaining.
   pub fn tab_scroll(mut self, tab_scroll: PanelTabScrollState) -> Self {
     self.tab_scroll = Some(tab_scroll);
+    self
+  }
+
+  /// Sets the current UI clock timestamp for transient render state.
+  ///
+  /// # Parameters
+  ///
+  /// `now` is the timestamp used to evaluate temporary chrome visibility.
+  ///
+  /// # Returns
+  ///
+  /// The updated [`PanelContainerConfig`] for builder chaining.
+  pub fn now(mut self, now: Instant) -> Self {
+    self.now = Some(now);
     self
   }
 }
@@ -442,8 +463,10 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
     .active_tab
     .and_then(|active_tab_id| leaf.tabs.iter().position(|tab| tab.id == active_tab_id));
   let tab_scroll_handle = context.config.tab_scroll.as_ref().map(|tab_scroll| {
-    if let Some(active_tab_index) = active_tab_index {
-      tab_scroll.reveal_tab(leaf.id, active_tab_index);
+    if let Some(active_tab_index) = active_tab_index
+      && let Some(now) = context.config.now
+    {
+      tab_scroll.reveal_tab(leaf.id, active_tab_index, now);
     }
 
     tab_scroll.scroll_handle(leaf.id)
@@ -500,6 +523,11 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
 
   if let Some(tab_scroll_handle) = tab_scroll_handle.as_ref() {
     tab_lane = tab_lane.track_scroll(tab_scroll_handle);
+    if let Some(tab_scroll) = context.config.tab_scroll.as_ref()
+      && let Some(now) = context.config.now
+    {
+      tab_scroll.observe_scroll_position(leaf.id, tab_scroll_handle, now);
+    }
   }
 
   if let Some(tab_drag) = context.config.tab_drag.as_ref() {
@@ -525,6 +553,27 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
       });
   }
 
+  let mut tab_lane_wrapper = div()
+    .relative()
+    .flex()
+    .items_center()
+    .flex_1()
+    .min_w_0()
+    .h_full()
+    .overflow_hidden()
+    .child(tab_lane);
+
+  if let Some(tab_scroll_handle) = tab_scroll_handle.as_ref()
+    && let Some(tab_scroll) = context.config.tab_scroll.as_ref()
+    && let Some(now) = context.config.now
+    && let Some(opacity) =
+      tab_scroll.indicator_opacity(leaf.id, now, DEFAULT_PANEL_TAB_SCROLL_PROGRESS_OPACITY)
+    && let Some(scroll_progress) =
+      render_panel_tab_scroll_progress(tab_scroll_handle, context.theme, opacity)
+  {
+    tab_lane_wrapper = tab_lane_wrapper.child(scroll_progress);
+  }
+
   let mut tab_strip = div()
     .flex()
     .items_center()
@@ -532,7 +581,7 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
     .min_w_0()
     .overflow_hidden()
     .bg(context.theme.background.primary)
-    .child(tab_lane);
+    .child(tab_lane_wrapper);
 
   if let Some(render_tab_strip_actions) = context.config.render_tab_strip_actions.as_ref()
     && panel_focused
@@ -541,6 +590,49 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
   }
 
   tab_strip
+}
+
+/// Renders a horizontal progress indicator for an overflowing tab lane.
+///
+/// # Parameters
+///
+/// `scroll_handle` provides the scroll position and maximum horizontal offset.
+///
+/// `theme` supplies the semantic low-emphasis indicator color.
+///
+/// # Returns
+///
+/// A GPUI `Div` for the indicator when horizontal overflow exists.
+fn render_panel_tab_scroll_progress(
+  scroll_handle: &ScrollHandle,
+  theme: UIThemes,
+  opacity: f32,
+) -> Option<Div> {
+  let max_offset_x = scroll_handle.max_offset().width;
+  if max_offset_x <= Pixels::ZERO {
+    return None;
+  }
+
+  let viewport_width = scroll_handle.bounds().size.width;
+  let content_width = viewport_width + max_offset_x;
+  if viewport_width <= Pixels::ZERO || content_width <= Pixels::ZERO {
+    return None;
+  }
+
+  let thumb_width = (viewport_width / content_width).clamp(0.05, 1.0);
+  let scroll_progress = ((Pixels::ZERO - scroll_handle.offset().x) / max_offset_x).clamp(0.0, 1.0);
+  let thumb_left = scroll_progress * (1.0 - thumb_width);
+  let indicator_color: gpui::Hsla = theme.border.tertiary.into();
+
+  Some(
+    div()
+      .absolute()
+      .left(relative(thumb_left))
+      .bottom_0()
+      .h(DEFAULT_PANEL_TAB_SCROLL_PROGRESS_HEIGHT)
+      .w(relative(thumb_width))
+      .bg(indicator_color.opacity(opacity)),
+  )
 }
 
 /// Renders one tab button.
