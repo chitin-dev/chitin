@@ -42,7 +42,7 @@ pub struct PanelContainerConfig {
   /// Optional resize configuration used by split handles.
   resize: Option<PanelResizeConfig>,
   /// Current focused panel id, normally transferred by upper component
-  /// [`DocumentPanelState`]
+  /// `DocumentPanelState`
   focused_panel_id: Option<PanelId>,
   /// Optional callback invoked when a tab is activated.
   on_activate_tab: Option<Rc<PanelTabActivateHandler>>,
