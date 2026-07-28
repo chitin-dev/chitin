@@ -35,7 +35,7 @@ and scientific/domain logic stays outside GPUI crates. Use snake_case for
 functions/modules, PascalCase for types, and descriptive enum variants.
 
 Avoid `unwrap`, `expect`, `dbg!`, and `todo!`; workspace Clippy denies them.
-Prefer builder-style component methods such as `.theme/theme()` and
+Prefer builder-style component methods such as `.theme(theme)` and
 `.child(element)` over broad getter/setter APIs.
 
 Use summary-parameters-returns style doc comments for private helper functions
