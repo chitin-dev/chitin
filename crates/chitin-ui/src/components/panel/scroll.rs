@@ -156,10 +156,10 @@ impl PanelTabScrollState {
         entries.len() - 1
       });
     let entry = &mut entries[entry_index];
-    entry.handle.scroll_to_item(tab_index);
 
     if entry.last_revealed_tab_index.is_none() {
       entry.last_revealed_tab_index = Some(tab_index);
+      entry.handle.scroll_to_item(tab_index);
       return None;
     }
 
@@ -168,6 +168,7 @@ impl PanelTabScrollState {
     }
 
     entry.last_revealed_tab_index = Some(tab_index);
+    entry.handle.scroll_to_item(tab_index);
     Some(entry.mark_scroll_activity(now))
   }
 
