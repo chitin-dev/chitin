@@ -1,17 +1,11 @@
 #![forbid(unsafe_code)]
 //! Chitin desktop binary entry point.
 
-mod app;
-mod commands;
-mod components;
-
 use std::{borrow::Cow, fs, path::PathBuf};
 
-use app::ChitinApp;
-use commands::default_key_bindings;
+use chitin_desktop::{app::ChitinApp, commands::default_key_bindings};
 use gpui::{
-  App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds,
-  WindowOptions, px, size,
+  App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
 
 /// GPUI asset source backed by the repository's `assets/` directory.

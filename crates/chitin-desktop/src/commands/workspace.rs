@@ -116,11 +116,7 @@ impl ChitinApp {
   ///
   /// This function returns `()`. The command mutates [`ChitinApp`] state
   /// directly through the workspace tree behavior.
-  pub(crate) fn dispatch_workspace_command(
-    &mut self,
-    command: WorkspaceCommand,
-    cx: &mut gpui::Context<Self>,
-  ) {
+  pub(crate) fn dispatch_workspace_command(&mut self, command: WorkspaceCommand, cx: &mut gpui::Context<Self>) {
     if let Some(navigation) = command.tree_navigation() {
       self.navigate_project_tree(navigation, cx);
     } else {
@@ -150,11 +146,7 @@ pub(crate) fn default_key_bindings() -> [KeyBinding; 10] {
     KeyBinding::new("k", FocusPreviousEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("down", FocusNextEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("j", FocusNextEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new(
-      "enter",
-      ActivateFocusedEntry,
-      Some(PROJECT_TREE_KEY_CONTEXT),
-    ),
+    KeyBinding::new("enter", ActivateFocusedEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("home", FocusFirstEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("end", FocusLastEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
     KeyBinding::new("g g", FocusFirstEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
@@ -170,10 +162,7 @@ mod tests {
   /// Verifies that workspace command IDs use stable dotted names.
   #[test]
   fn workspace_command_id_should_match_config_name() {
-    assert_eq!(
-      WorkspaceCommand::ToggleWorkspace.id(),
-      "workspace.toggle_workspace"
-    );
+    assert_eq!(WorkspaceCommand::ToggleWorkspace.id(), "workspace.toggle_workspace");
   }
 
   /// Verifies that key bindings stay scoped to project tree focus.
@@ -183,17 +172,11 @@ mod tests {
 
     assert_eq!(bindings.len(), 10);
     assert_eq!(
-      bindings
-        .iter()
-        .filter(|binding| binding.predicate().is_some())
-        .count(),
+      bindings.iter().filter(|binding| binding.predicate().is_some()).count(),
       9
     );
     assert_eq!(
-      bindings
-        .iter()
-        .filter(|binding| binding.predicate().is_none())
-        .count(),
+      bindings.iter().filter(|binding| binding.predicate().is_none()).count(),
       1
     );
   }

@@ -3,6 +3,7 @@ members = [
   "crates/chitin-core",
   "crates/chitin-desktop",
   "crates/chitin-ui",
+  "crates/chitin-wgpu",
 ]
 resolver = "2"
 

@@ -3,9 +3,8 @@
 use std::{rc::Rc, time::Instant};
 
 use gpui::{
-  AnyElement, App, Context, CursorStyle, Div, InteractiveElement, MouseButton, ParentElement,
-  Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*,
-  px, relative,
+  AnyElement, App, Context, CursorStyle, Div, InteractiveElement, MouseButton, ParentElement, Pixels, ScrollHandle,
+  SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px, relative,
 };
 
 use crate::themes::UIThemes;
@@ -14,8 +13,8 @@ use super::{
   drag::{PanelTabDrag, PanelTabDragConfig, PanelTabDropTarget, panel_tab_insertion_index},
   layout::PanelResizeConfig,
   model::{
-    PanelId, PanelLeaf, PanelNode, PanelSplit, PanelSplitAxis, PanelSplitBranch, PanelSplitPath,
-    PanelTab, PanelTabId, PanelTree,
+    PanelId, PanelLeaf, PanelNode, PanelSplit, PanelSplitAxis, PanelSplitBranch, PanelSplitPath, PanelTab, PanelTabId,
+    PanelTree,
   },
   scroll::PanelTabScrollState,
 };
@@ -332,11 +331,7 @@ fn collect_panel_ids<T>(node: &PanelNode<T>, panel_ids: &mut Vec<PanelId>) {
 /// # Returns
 ///
 /// A GPUI `Div` for the rendered node.
-fn render_panel_node<T>(
-  node: &PanelNode<T>,
-  path: &PanelSplitPath,
-  context: &PanelRenderContext<'_, T>,
-) -> Div {
+fn render_panel_node<T>(node: &PanelNode<T>, path: &PanelSplitPath, context: &PanelRenderContext<'_, T>) -> Div {
   match node {
     PanelNode::Leaf(leaf) => render_panel_leaf(leaf, context),
     PanelNode::Split(split) => render_panel_split(split, path, context),
@@ -356,35 +351,25 @@ fn render_panel_node<T>(
 /// # Returns
 ///
 /// A GPUI `Div` for the split node.
-fn render_panel_split<T>(
-  split: &PanelSplit<T>,
-  path: &PanelSplitPath,
-  context: &PanelRenderContext<'_, T>,
-) -> Div {
+fn render_panel_split<T>(split: &PanelSplit<T>, path: &PanelSplitPath, context: &PanelRenderContext<'_, T>) -> Div {
   let first = render_panel_node(&split.first, &path.child(PanelSplitBranch::First), context)
     .flex_basis(relative(split.ratio))
     .flex_shrink()
     .min_w_0()
     .min_h_0();
 
-  let second = render_panel_node(
-    &split.second,
-    &path.child(PanelSplitBranch::Second),
-    context,
-  )
-  .flex_basis(relative(1.0 - split.ratio))
-  .flex_shrink()
-  .min_w_0()
-  .min_h_0();
+  let second = render_panel_node(&split.second, &path.child(PanelSplitBranch::Second), context)
+    .flex_basis(relative(1.0 - split.ratio))
+    .flex_shrink()
+    .min_w_0()
+    .min_h_0();
 
   div()
     .flex()
     .size_full()
     .min_w_0()
     .min_h_0()
-    .when(split.axis == PanelSplitAxis::Vertical, |panel| {
-      panel.flex_col()
-    })
+    .when(split.axis == PanelSplitAxis::Vertical, |panel| panel.flex_col())
     .child(first)
     .child(render_panel_split_handle(
       split.axis,
@@ -425,14 +410,8 @@ fn render_panel_split_handle(
     .hover(move |style| style.bg(theme.border.focus));
 
   handle = match axis {
-    PanelSplitAxis::Horizontal => handle
-      .w(handle_size)
-      .h_full()
-      .cursor(CursorStyle::ResizeLeftRight),
-    PanelSplitAxis::Vertical => handle
-      .h(handle_size)
-      .w_full()
-      .cursor(CursorStyle::ResizeUpDown),
+    PanelSplitAxis::Horizontal => handle.w(handle_size).h_full().cursor(CursorStyle::ResizeLeftRight),
+    PanelSplitAxis::Vertical => handle.h(handle_size).w_full().cursor(CursorStyle::ResizeUpDown),
   };
 
   if let Some(resize) = resize {
@@ -529,26 +508,18 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
     )
   }))
   .when(
-    active_drop_target.is_some_and(|target| target.insertion_index >= leaf.tabs.len())
-      && !leaf.tabs.is_empty(),
-    |lane| {
-      lane.child(render_panel_tab_insertion_marker(
-        context.theme.border.focus.into(),
-      ))
-    },
+    active_drop_target.is_some_and(|target| target.insertion_index >= leaf.tabs.len()) && !leaf.tabs.is_empty(),
+    |lane| lane.child(render_panel_tab_insertion_marker(context.theme.border.focus.into())),
   )
-  .when(
-    active_drop_target.is_some() && leaf.tabs.is_empty(),
-    |lane| {
-      lane.child(
-        div()
-          .absolute()
-          .inset_0()
-          .border_1()
-          .border_color(context.theme.border.focus),
-      )
-    },
-  );
+  .when(active_drop_target.is_some() && leaf.tabs.is_empty(), |lane| {
+    lane.child(
+      div()
+        .absolute()
+        .inset_0()
+        .border_1()
+        .border_color(context.theme.border.focus),
+    )
+  });
 
   if let Some(tab_scroll_handle) = tab_scroll_handle.as_ref() {
     tab_lane = tab_lane.track_scroll(tab_scroll_handle);
@@ -595,10 +566,8 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
   if let Some(tab_scroll_handle) = tab_scroll_handle.as_ref()
     && let Some(tab_scroll) = context.config.tab_scroll.as_ref()
     && let Some(now) = context.config.now
-    && let Some(opacity) =
-      tab_scroll.indicator_opacity(leaf.id, now, DEFAULT_PANEL_TAB_SCROLL_PROGRESS_OPACITY)
-    && let Some(scroll_progress) =
-      render_panel_tab_scroll_progress(tab_scroll_handle, context.theme, opacity)
+    && let Some(opacity) = tab_scroll.indicator_opacity(leaf.id, now, DEFAULT_PANEL_TAB_SCROLL_PROGRESS_OPACITY)
+    && let Some(scroll_progress) = render_panel_tab_scroll_progress(tab_scroll_handle, context.theme, opacity)
   {
     tab_lane_wrapper = tab_lane_wrapper.child(scroll_progress);
   }
@@ -632,11 +601,7 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
 /// # Returns
 ///
 /// A GPUI `Div` for the indicator when horizontal overflow exists.
-fn render_panel_tab_scroll_progress(
-  scroll_handle: &ScrollHandle,
-  theme: UIThemes,
-  opacity: f32,
-) -> Option<Div> {
+fn render_panel_tab_scroll_progress(scroll_handle: &ScrollHandle, theme: UIThemes, opacity: f32) -> Option<Div> {
   let max_offset_x = scroll_handle.max_offset().width;
   if max_offset_x <= Pixels::ZERO {
     return None;
@@ -688,16 +653,14 @@ fn render_panel_tab<T>(
   context: &PanelRenderContext<'_, T>,
 ) -> impl IntoElement {
   let tab_id = tab.id;
-  let tab_hover_group =
-    SharedString::from(format!("panel-tab-{}-{}", panel_id.value(), tab_id.value()));
+  let tab_hover_group = SharedString::from(format!("panel-tab-{}-{}", panel_id.value(), tab_id.value()));
   let theme = context.theme;
   let drag_state = context
     .config
     .tab_drag
     .as_ref()
     .and_then(|config| config.state.as_ref());
-  let dragged = drag_state
-    .is_some_and(|state| state.drag.source_panel_id == panel_id && state.drag.tab_id == tab_id);
+  let dragged = drag_state.is_some_and(|state| state.drag.source_panel_id == panel_id && state.drag.tab_id == tab_id);
   let insertion_before = drag_state
     .and_then(|state| state.drop_target)
     .is_some_and(|target| target.panel_id == panel_id && target.insertion_index == tab_index);
@@ -755,9 +718,7 @@ fn render_panel_tab<T>(
     );
 
   if insertion_before {
-    tab_element = tab_element.child(render_panel_tab_leading_insertion_marker(
-      theme.border.focus.into(),
-    ));
+    tab_element = tab_element.child(render_panel_tab_leading_insertion_marker(theme.border.focus.into()));
   }
 
   if panel_focused && active {
@@ -780,15 +741,13 @@ fn render_panel_tab<T>(
       title: tab.title.clone(),
     };
     let on_start = tab_drag.on_start.clone();
-    tab_element = tab_element
-      .cursor_move()
-      .on_drag(drag, move |drag, _, window, cx| {
-        on_start(drag.clone(), window, cx);
-        cx.new(|_| PanelTabDragPreview {
-          title: drag.title.clone(),
-          theme,
-        })
-      });
+    tab_element = tab_element.cursor_move().on_drag(drag, move |drag, _, window, cx| {
+      on_start(drag.clone(), window, cx);
+      cx.new(|_| PanelTabDragPreview {
+        title: drag.title.clone(),
+        theme,
+      })
+    });
   }
 
   if let Some(tab_drag) = context.config.tab_drag.as_ref() {
@@ -798,8 +757,7 @@ fn render_panel_tab<T>(
         return;
       }
 
-      let local_index =
-        panel_tab_insertion_index(std::slice::from_ref(&event.bounds), event.event.position.x);
+      let local_index = panel_tab_insertion_index(std::slice::from_ref(&event.bounds), event.event.position.x);
       on_target(
         PanelTabDropTarget {
           panel_id,
@@ -832,15 +790,11 @@ fn render_panel_tab<T>(
 /// A zero-width relative element whose absolute child paints a two-pixel
 /// vertical marker without changing tab-strip geometry.
 fn render_panel_tab_insertion_marker(color: gpui::Hsla) -> Div {
-  div().relative().w_0().h_full().child(
-    div()
-      .absolute()
-      .left_0()
-      .top_0()
-      .bottom_0()
-      .w(px(2.0))
-      .bg(color),
-  )
+  div()
+    .relative()
+    .w_0()
+    .h_full()
+    .child(div().absolute().left_0().top_0().bottom_0().w(px(2.0)).bg(color))
 }
 
 /// Renders an absolute insertion marker at a tab's leading edge.
@@ -854,13 +808,7 @@ fn render_panel_tab_insertion_marker(color: gpui::Hsla) -> Div {
 /// A GPUI `Div` that overlays the tab's left boundary without affecting tab
 /// layout.
 fn render_panel_tab_leading_insertion_marker(color: gpui::Hsla) -> Div {
-  div()
-    .absolute()
-    .left_0()
-    .top_0()
-    .bottom_0()
-    .w(px(2.0))
-    .bg(color)
+  div().absolute().left_0().top_0().bottom_0().w(px(2.0)).bg(color)
 }
 
 /// Renders the reserved close button slot for one panel tab.
@@ -913,11 +861,7 @@ fn render_panel_tab_close_button<T>(
     })
     .opacity(if active { 1.0 } else { 0.0 })
     .group_hover(tab_hover_group, |style| style.opacity(1.0))
-    .hover(move |style| {
-      style
-        .bg(theme.background.hover)
-        .text_color(theme.text.primary)
-    })
+    .hover(move |style| style.bg(theme.background.hover).text_color(theme.text.primary))
     .child(close_icon);
 
   if let Some(on_close_tab) = context.config.on_close_tab.as_ref() {
@@ -949,11 +893,7 @@ fn render_panel_tab_close_button<T>(
 /// # Returns
 ///
 /// A GPUI `Div` for the panel body.
-fn render_panel_body<T>(
-  leaf: &PanelLeaf<T>,
-  theme: UIThemes,
-  render_body: &dyn Fn(&PanelTab<T>) -> AnyElement,
-) -> Div {
+fn render_panel_body<T>(leaf: &PanelLeaf<T>, theme: UIThemes, render_body: &dyn Fn(&PanelTab<T>) -> AnyElement) -> Div {
   let body = div()
     .relative()
     .flex()

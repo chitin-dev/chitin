@@ -4,13 +4,12 @@ use std::path::{Path, PathBuf};
 
 use chitin_ui::components::{
   panel::{
-    PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab,
-    PanelTabDrag, PanelTabDragState, PanelTabDropTarget, PanelTabId, PanelTabScrollState,
-    PanelTree,
+    PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag, PanelTabDragState,
+    PanelTabDropTarget, PanelTabId, PanelTabScrollState, PanelTree,
   },
   resize::ResizeGesture,
 };
-use gpui::Pixels;
+use gpui::{AnyView, Pixels};
 
 /// Stable panel id used by the initial single document panel.
 pub(super) const DEFAULT_DOCUMENT_PANEL_ID: PanelId = PanelId::new(1);
@@ -30,6 +29,21 @@ pub struct OpenedProjectDocument {
   pub title: String,
 }
 
+/// Content shown by one tab in the desktop document panel tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DocumentPanelContent {
+  /// File document opened from the project workspace tree.
+  ProjectDocument(OpenedProjectDocument),
+  /// Experimental WGPU viewport hosted as a document-area panel.
+  #[allow(dead_code)]
+  WgpuInteractive {
+    /// Display title shown in the document tab strip.
+    title: String,
+    /// GPUI entity that owns the WGPU surface and interaction state.
+    view: AnyView,
+  },
+}
+
 /// Resized document panel split target.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DocumentPanelResizeAnchor {
@@ -43,7 +57,7 @@ pub(crate) struct DocumentPanelResizeAnchor {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DocumentPanelState {
   /// Binary panel tree containing document tab stacks.
-  pub(crate) tree: PanelTree<OpenedProjectDocument>,
+  pub(crate) tree: PanelTree<DocumentPanelContent>,
   /// Current focused panel id.
   pub(crate) focused_panel_id: PanelId,
   /// Next panel identifier to allocate for a split leaf.
@@ -76,6 +90,90 @@ impl OpenedProjectDocument {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string()),
+    }
+  }
+}
+
+impl DocumentPanelContent {
+  /// Creates document-panel content for a workspace file.
+  ///
+  /// # Parameters
+  ///
+  /// `document` is the opened project file descriptor.
+  ///
+  /// # Returns
+  ///
+  /// A [`DocumentPanelContent`] value that renders with the project document
+  /// placeholder until a real editor is available.
+  pub(crate) fn project(document: OpenedProjectDocument) -> Self {
+    Self::ProjectDocument(document)
+  }
+
+  /// Creates document-panel content for the experimental WGPU viewport.
+  ///
+  /// # Parameters
+  ///
+  /// `title` is the tab-strip label for the WGPU panel.
+  ///
+  /// `view` is the GPUI entity that renders and owns WGPU interaction state.
+  ///
+  /// # Returns
+  ///
+  /// A [`DocumentPanelContent`] value that can be inserted into the panel tree.
+  #[allow(dead_code)]
+  pub(crate) fn wgpu_interactive(title: impl Into<String>, view: AnyView) -> Self {
+    Self::WgpuInteractive {
+      title: title.into(),
+      view,
+    }
+  }
+
+  /// Returns the tab title for this document-panel content.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A string slice suitable for the document panel tab strip.
+  pub(crate) fn title(&self) -> &str {
+    match self {
+      Self::ProjectDocument(document) => document.title.as_str(),
+      Self::WgpuInteractive { title, .. } => title.as_str(),
+    }
+  }
+
+  /// Returns the project document payload when this tab holds one.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// `Some(&OpenedProjectDocument)` for project-file tabs; otherwise `None`.
+  #[cfg(test)]
+  fn project_document(&self) -> Option<&OpenedProjectDocument> {
+    match self {
+      Self::ProjectDocument(document) => Some(document),
+      Self::WgpuInteractive { .. } => None,
+    }
+  }
+
+  /// Reports whether this content is a project document with the given path.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the project path being opened or focused.
+  ///
+  /// # Returns
+  ///
+  /// `true` when this tab already represents `path`; otherwise `false`.
+  fn matches_project_path(&self, path: &Path) -> bool {
+    match self {
+      Self::ProjectDocument(document) => document.path == path,
+      Self::WgpuInteractive { .. } => false,
     }
   }
 }
@@ -113,11 +211,25 @@ impl DocumentPanelState {
   ///
   /// A [`DocumentPanelState`] with a single leaf panel and one active tab.
   pub(crate) fn new(document: OpenedProjectDocument) -> Self {
+    Self::with_content(DocumentPanelContent::project(document))
+  }
+
+  /// Creates document panel state with one arbitrary content tab.
+  ///
+  /// # Parameters
+  ///
+  /// `content` is the first document-area payload to show in the root panel.
+  ///
+  /// # Returns
+  ///
+  /// A [`DocumentPanelState`] with a single leaf panel and one active tab.
+  pub(crate) fn with_content(content: DocumentPanelContent) -> Self {
+    let title = content.title().to_string();
     Self {
       tree: PanelTree::single_leaf(PanelLeaf::new(DEFAULT_DOCUMENT_PANEL_ID).tab(PanelTab::new(
         DEFAULT_DOCUMENT_TAB_ID,
-        document.title.clone(),
-        document,
+        title,
+        content,
       ))),
       focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
@@ -150,14 +262,16 @@ impl DocumentPanelState {
     if let Some(tab_id) = leaf
       .tabs
       .iter()
-      .find(|tab| tab.payload.path == document.path)
+      .find(|tab| tab.payload.matches_project_path(&document.path))
       .map(|tab| tab.id)
     {
       return self.activate_tab(panel_id, tab_id);
     }
 
     let tab_id = self.allocate_tab_id();
-    let tab = PanelTab::new(tab_id, document.title.clone(), document);
+    let content = DocumentPanelContent::project(document);
+    let title = content.title().to_string();
+    let tab = PanelTab::new(tab_id, title, content);
     let Some(leaf) = self.tree.leaf_mut(panel_id) else {
       return false;
     };
@@ -301,7 +415,10 @@ impl DocumentPanelState {
   /// otherwise `None`.
   #[cfg(test)]
   pub(crate) fn active_document(&self) -> Option<&OpenedProjectDocument> {
-    self.tree.first_active_tab().map(|(_, tab)| &tab.payload)
+    self
+      .tree
+      .first_active_tab()
+      .and_then(|(_, tab)| tab.payload.project_document())
   }
 
   /// Splits one document panel and copies its active tab to the new panel.
@@ -448,10 +565,7 @@ impl DocumentPanelState {
     if tab_drag.drag != drag || target.panel_id != target_panel_id {
       return false;
     }
-    if !self
-      .tree
-      .move_tab(drag.source_panel_id, drag.tab_id, target)
-    {
+    if !self.tree.move_tab(drag.source_panel_id, drag.tab_id, target) {
       return false;
     }
 
@@ -487,12 +601,7 @@ impl DocumentPanelState {
   ///
   /// `true` when the split path exists and resize state was recorded;
   /// otherwise `false`.
-  pub(crate) fn start_resize(
-    &mut self,
-    path: PanelSplitPath,
-    axis: PanelSplitAxis,
-    start_position: Pixels,
-  ) -> bool {
+  pub(crate) fn start_resize(&mut self, path: PanelSplitPath, axis: PanelSplitAxis, start_position: Pixels) -> bool {
     let Some(start_ratio) = self.tree.split_ratio(&path) else {
       return false;
     };
@@ -518,19 +627,13 @@ impl DocumentPanelState {
   /// # Returns
   ///
   /// `true` when an active drag changed a split ratio; otherwise `false`.
-  pub(crate) fn drag_resize(
-    &mut self,
-    current_position: Pixels,
-    root_width: Pixels,
-    root_height: Pixels,
-  ) -> bool {
+  pub(crate) fn drag_resize(&mut self, current_position: Pixels, root_width: Pixels, root_height: Pixels) -> bool {
     let Some(resize_drag) = &self.resize_drag else {
       return false;
     };
-    let Some(available_size) =
-      self
-        .tree
-        .split_axis_size(&resize_drag.anchor().path, root_width, root_height)
+    let Some(available_size) = self
+      .tree
+      .split_axis_size(&resize_drag.anchor().path, root_width, root_height)
     else {
       return false;
     };
@@ -567,10 +670,7 @@ impl DocumentPanelState {
   ///
   /// `Some(PanelSplitAxis)` when a resize drag is active; otherwise `None`.
   pub(crate) fn resize_axis(&self) -> Option<PanelSplitAxis> {
-    self
-      .resize_drag
-      .as_ref()
-      .map(|resize_drag| resize_drag.anchor().axis)
+    self.resize_drag.as_ref().map(|resize_drag| resize_drag.anchor().axis)
   }
 
   /// Allocates the next document panel identifier.

@@ -7,8 +7,8 @@
 //! [`WindowBarItem`](crate::components::window_bar::WindowBarItem).
 
 use gpui::{
-  App, InteractiveElement, IntoElement, MouseButton, MouseUpEvent, ParentElement, Pixels,
-  SharedString, Styled, Window, div, px, svg,
+  App, InteractiveElement, IntoElement, MouseButton, MouseUpEvent, ParentElement, Pixels, SharedString, Styled, Window,
+  div, px, svg,
 };
 
 use crate::themes::{UIThemes, builtins};
@@ -82,11 +82,7 @@ impl WindowBarItem {
   /// # Returns
   ///
   /// A [`WindowBarItem`] with the built-in dark theme and no click handler.
-  pub fn new(
-    id: impl Into<SharedString>,
-    label: impl Into<SharedString>,
-    icon_path: impl Into<SharedString>,
-  ) -> Self {
+  pub fn new(id: impl Into<SharedString>, label: impl Into<SharedString>, icon_path: impl Into<SharedString>) -> Self {
     Self {
       id: id.into(),
       label: label.into(),
@@ -156,10 +152,7 @@ impl WindowBarItem {
   /// # Returns
   ///
   /// The updated [`WindowBarItem`] for builder chaining.
-  pub fn on_click(
-    mut self,
-    listener: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
-  ) -> Self {
+  pub fn on_click(mut self, listener: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static) -> Self {
     self.on_click = Some(Box::new(listener));
     self
   }
@@ -185,11 +178,7 @@ impl IntoElement for WindowBarItem {
       .justify_center()
       .size(DEFAULT_WINDOW_BAR_BUTTON_SIZE)
       .text_color(theme.text.secondary)
-      .hover(move |style| {
-        style
-          .bg(theme.background.hover)
-          .text_color(theme.text.primary)
-      })
+      .hover(move |style| style.bg(theme.background.hover).text_color(theme.text.primary))
       .cursor_pointer()
       .child(
         svg()
@@ -400,19 +389,13 @@ impl IntoElement for WindowBar {
       self.title
     };
 
-    let center = div()
-      .flex()
-      .flex_1()
-      .items_center()
-      .justify_center()
-      .min_w_0()
-      .child(
-        div()
-          .text_xs()
-          .text_color(theme.text.secondary)
-          .truncate()
-          .child(concat_title),
-      );
+    let center = div().flex().flex_1().items_center().justify_center().min_w_0().child(
+      div()
+        .text_xs()
+        .text_color(theme.text.secondary)
+        .truncate()
+        .child(concat_title),
+    );
 
     div()
       .flex()

@@ -374,11 +374,8 @@ fn panel_tree_should_move_tab_into_empty_panel() {
 /// Verifies moving a final source tab collapses its split around the target.
 #[test]
 fn panel_tree_should_remove_empty_source_and_preserve_adjacent_target() {
-  let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
-    PanelTabId::new(1),
-    "A",
-    "state-a",
-  )));
+  let mut tree =
+    PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(PanelTabId::new(1), "A", "state-a")));
   assert!(tree.split_leaf(
     PanelId::new(1),
     PanelSplitAxis::Horizontal,
@@ -407,11 +404,8 @@ fn panel_tree_should_remove_empty_source_and_preserve_adjacent_target() {
 /// Verifies duplicate target identities reject a move without mutation.
 #[test]
 fn panel_tree_should_reject_duplicate_target_tab_id_atomically() {
-  let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
-    PanelTabId::new(1),
-    "A",
-    (),
-  )));
+  let mut tree =
+    PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(PanelTabId::new(1), "A", ())));
   assert!(tree.split_leaf(
     PanelId::new(1),
     PanelSplitAxis::Horizontal,
@@ -481,11 +475,8 @@ fn panel_tab_insertion_index_should_use_actual_variable_width_bounds() {
 /// Verifies that immutable leaf lookup returns the requested panel.
 #[test]
 fn panel_tree_should_find_leaf_by_id() {
-  let tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
-    PanelTabId::new(1),
-    "Editor",
-    (),
-  )));
+  let tree =
+    PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(PanelTabId::new(1), "Editor", ())));
 
   let Some(leaf) = tree.leaf(PanelId::new(1)) else {
     panic!("leaf should exist");
@@ -504,10 +495,7 @@ fn panel_tree_should_find_mutable_leaf_by_id() {
   };
   leaf.add_tab(PanelTab::new(PanelTabId::new(1), "Editor", ()));
 
-  assert_eq!(
-    tree.leaf(PanelId::new(1)).map(|leaf| leaf.tabs.len()),
-    Some(1)
-  );
+  assert_eq!(tree.leaf(PanelId::new(1)).map(|leaf| leaf.tabs.len()), Some(1));
 }
 
 /// Verifies that tab order follows panel-tree visual order.
@@ -594,11 +582,8 @@ fn panel_tree_should_return_first_active_tab_in_visual_order() {
 /// Verifies that splitting a leaf creates a binary split node.
 #[test]
 fn panel_tree_should_split_leaf_into_binary_node() {
-  let mut tree = PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(
-    PanelTabId::new(1),
-    "Editor",
-    (),
-  )));
+  let mut tree =
+    PanelTree::single_leaf(PanelLeaf::new(PanelId::new(1)).tab(PanelTab::new(PanelTabId::new(1), "Editor", ())));
 
   assert!(tree.split_leaf(
     PanelId::new(1),

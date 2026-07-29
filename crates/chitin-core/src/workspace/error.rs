@@ -191,35 +191,19 @@ impl fmt::Display for ProjectWorkspaceError {
         write!(formatter, "project path doesn't exist: {}", path.display())
       }
       Self::NotDirectory(path) => {
-        write!(
-          formatter,
-          "project path is not a directory: {}",
-          path.display()
-        )
+        write!(formatter, "project path is not a directory: {}", path.display())
       }
       Self::Canonicalize { path, .. } => {
-        write!(
-          formatter,
-          "failed to canonicalize project path: {}",
-          path.display()
-        )
+        write!(formatter, "failed to canonicalize project path: {}", path.display())
       }
       Self::ReadDir { path, .. } => {
         write!(formatter, "failed to read directory: {}", path.display())
       }
       Self::ReadEntry { path, .. } => {
-        write!(
-          formatter,
-          "failed to read directory entry under: {}",
-          path.display()
-        )
+        write!(formatter, "failed to read directory entry under: {}", path.display())
       }
       Self::FileType { path, .. } => {
-        write!(
-          formatter,
-          "failed to read file type for: {}",
-          path.display()
-        )
+        write!(formatter, "failed to read file type for: {}", path.display())
       }
     }
   }

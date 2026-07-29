@@ -64,11 +64,7 @@ impl ChitinApp {
   ///
   /// This function returns `()` after routing the command to document panel
   /// state.
-  pub(crate) fn dispatch_panel_tab_command(
-    &mut self,
-    command: PanelTabCommand,
-    cx: &mut gpui::Context<Self>,
-  ) {
+  pub(crate) fn dispatch_panel_tab_command(&mut self, command: PanelTabCommand, cx: &mut gpui::Context<Self>) {
     let changed = match command {
       PanelTabCommand::FocusPrevious => self.focus_previous_document_panel_tab(),
       PanelTabCommand::FocusNext => self.focus_next_document_panel_tab(),
@@ -97,16 +93,8 @@ impl ChitinApp {
 /// Three GPUI keybindings for document panel tab navigation and close.
 pub(crate) fn default_key_bindings() -> [KeyBinding; 3] {
   [
-    KeyBinding::new(
-      "shift-j",
-      FocusPreviousPanelTab,
-      Some(PANEL_CONTAINER_KEY_CONTEXT),
-    ),
-    KeyBinding::new(
-      "shift-k",
-      FocusNextPanelTab,
-      Some(PANEL_CONTAINER_KEY_CONTEXT),
-    ),
+    KeyBinding::new("shift-j", FocusPreviousPanelTab, Some(PANEL_CONTAINER_KEY_CONTEXT)),
+    KeyBinding::new("shift-k", FocusNextPanelTab, Some(PANEL_CONTAINER_KEY_CONTEXT)),
     KeyBinding::new("shift-x", CloseTab, Some(PANEL_CONTAINER_KEY_CONTEXT)),
   ]
 }

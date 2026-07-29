@@ -4,15 +4,15 @@ use std::{rc::Rc, time::Instant};
 
 use chitin_ui::{
   components::panel::{
-    PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler,
-    PanelTabCloseHandler, PanelTabCloseIconRenderer, PanelTabDragConfig, PanelTabDragStartHandler,
-    PanelTabDragTargetHandler, PanelTabDropHandler, render_panel_container,
+    PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
+    PanelTabCloseIconRenderer, PanelTabDragConfig, PanelTabDragStartHandler, PanelTabDragTargetHandler,
+    PanelTabDropHandler, render_panel_container,
   },
   themes::UIThemes,
 };
 use gpui::{
-  AnyElement, App, AsyncApp, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-  MouseButton, ParentElement, Pixels, Styled, WeakEntity, Window, div, px, svg,
+  AnyElement, App, AsyncApp, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, MouseButton,
+  ParentElement, Pixels, Styled, WeakEntity, Window, div, px, svg,
 };
 
 use crate::{
@@ -23,7 +23,7 @@ use crate::{
   },
 };
 
-use super::state::{DocumentPanelState, OpenedProjectDocument};
+use super::state::{DocumentPanelContent, DocumentPanelState, OpenedProjectDocument};
 
 /// Asset path for the horizontal split panel action.
 const SPLIT_HORIZONTAL_ICON_PATH: &str = "icons/panel/codicon-split-horizontal.svg";
@@ -96,25 +96,23 @@ fn render_opened_document_panels(
   cx: &mut Context<ChitinApp>,
 ) -> gpui::Div {
   let activate_app = app.clone();
-  let on_activate_tab: Rc<PanelTabActivateHandler> = Rc::new(
-    move |panel_id: PanelId, tab_id, _: &mut Window, cx: &mut App| {
+  let on_activate_tab: Rc<PanelTabActivateHandler> =
+    Rc::new(move |panel_id: PanelId, tab_id, _: &mut Window, cx: &mut App| {
       let _ = activate_app.update(cx, |app, cx| {
         if app.activate_document_panel_tab(panel_id, tab_id) {
           cx.notify();
         }
       });
-    },
-  );
+    });
   let close_app = app.clone();
-  let on_close_tab: Rc<PanelTabCloseHandler> = Rc::new(
-    move |panel_id: PanelId, tab_id, _: &mut Window, cx: &mut App| {
+  let on_close_tab: Rc<PanelTabCloseHandler> =
+    Rc::new(move |panel_id: PanelId, tab_id, _: &mut Window, cx: &mut App| {
       let _ = close_app.update(cx, |app, cx| {
         if app.close_document_panel_tab(panel_id, tab_id) {
           cx.notify();
         }
       });
-    },
-  );
+    });
   let render_tab_close_icon: Rc<PanelTabCloseIconRenderer> = Rc::new(move |theme| {
     svg()
       .path(TAB_CLOSE_ICON_PATH)
@@ -123,38 +121,34 @@ fn render_opened_document_panels(
       .into_any_element()
   });
   let drag_start_app = app.clone();
-  let on_tab_drag_start: Rc<PanelTabDragStartHandler> =
-    Rc::new(move |drag, _: &mut Window, cx: &mut App| {
-      let _ = drag_start_app.update(cx, |app, cx| {
-        if app.start_document_panel_tab_drag(drag) {
-          cx.notify();
-        }
-      });
-    });
-  let drag_target_app = app.clone();
-  let on_tab_drag_target: Rc<PanelTabDragTargetHandler> =
-    Rc::new(move |target, _: &mut Window, cx: &mut App| {
-      let _ = drag_target_app.update(cx, |app, cx| {
-        if app.update_document_panel_tab_drag_target(target) {
-          cx.notify();
-        }
-      });
-    });
-  let drop_app = app.clone();
-  let on_tab_drop: Rc<PanelTabDropHandler> =
-    Rc::new(move |drag, panel_id, _: &mut Window, cx: &mut App| {
-      let _ = drop_app.update(cx, |app, cx| {
-        app.drop_document_panel_tab(drag, panel_id);
+  let on_tab_drag_start: Rc<PanelTabDragStartHandler> = Rc::new(move |drag, _: &mut Window, cx: &mut App| {
+    let _ = drag_start_app.update(cx, |app, cx| {
+      if app.start_document_panel_tab_drag(drag) {
         cx.notify();
-      });
+      }
     });
-  let tab_drag = PanelTabDragConfig::new(on_tab_drag_start, on_tab_drag_target, on_tab_drop)
-    .state(document_panels.tab_drag.clone());
+  });
+  let drag_target_app = app.clone();
+  let on_tab_drag_target: Rc<PanelTabDragTargetHandler> = Rc::new(move |target, _: &mut Window, cx: &mut App| {
+    let _ = drag_target_app.update(cx, |app, cx| {
+      if app.update_document_panel_tab_drag_target(target) {
+        cx.notify();
+      }
+    });
+  });
+  let drop_app = app.clone();
+  let on_tab_drop: Rc<PanelTabDropHandler> = Rc::new(move |drag, panel_id, _: &mut Window, cx: &mut App| {
+    let _ = drop_app.update(cx, |app, cx| {
+      app.drop_document_panel_tab(drag, panel_id);
+      cx.notify();
+    });
+  });
+  let tab_drag =
+    PanelTabDragConfig::new(on_tab_drag_start, on_tab_drag_target, on_tab_drop).state(document_panels.tab_drag.clone());
 
   let actions_app = app.clone();
-  let render_tab_strip_actions = Rc::new(move |panel_id| {
-    render_panel_tab_strip_actions(panel_id, theme, actions_app.clone()).into_any_element()
-  });
+  let render_tab_strip_actions =
+    Rc::new(move |panel_id| render_panel_tab_strip_actions(panel_id, theme, actions_app.clone()).into_any_element());
   let resize_app = app.clone();
   let resize = PanelResizeConfig::new(move |path, axis, start_position, _, cx| {
     let _ = resize_app.update(cx, |app, cx| {
@@ -176,10 +170,9 @@ fn render_opened_document_panels(
     .now(now);
 
   let mouse_focus_handle = focus_handle.clone();
-  let panel_container =
-    render_panel_container(&document_panels.tree, theme, panel_config, &|tab| {
-      render_opened_document_body(&tab.payload, theme).into_any_element()
-    });
+  let panel_container = render_panel_container(&document_panels.tree, theme, panel_config, &|tab| {
+    render_document_panel_content(&tab.payload, theme).into_any_element()
+  });
   schedule_tab_scroll_indicator_hide(document_panels, now, cx);
 
   div()
@@ -217,26 +210,17 @@ fn render_opened_document_panels(
 /// # Returns
 ///
 /// This function has no return value.
-fn schedule_tab_scroll_indicator_hide(
-  document_panels: &DocumentPanelState,
-  now: Instant,
-  cx: &mut Context<ChitinApp>,
-) {
-  for expires_at in document_panels
-    .tab_scroll
-    .indicator_redraws_to_schedule(now)
-  {
+fn schedule_tab_scroll_indicator_hide(document_panels: &DocumentPanelState, now: Instant, cx: &mut Context<ChitinApp>) {
+  for expires_at in document_panels.tab_scroll.indicator_redraws_to_schedule(now) {
     let delay = expires_at.saturating_duration_since(now);
-    cx.spawn(
-      move |this: WeakEntity<ChitinApp>, async_cx: &mut AsyncApp| {
-        let mut async_cx = async_cx.clone();
-        async move {
-          let timer = async_cx.background_executor().timer(delay);
-          timer.await;
-          let _ = this.update(&mut async_cx, |_, cx| cx.notify());
-        }
-      },
-    )
+    cx.spawn(move |this: WeakEntity<ChitinApp>, async_cx: &mut AsyncApp| {
+      let mut async_cx = async_cx.clone();
+      async move {
+        let timer = async_cx.background_executor().timer(delay);
+        timer.await;
+        let _ = this.update(&mut async_cx, |_, cx| cx.notify());
+      }
+    })
     .detach();
   }
 }
@@ -254,11 +238,7 @@ fn schedule_tab_scroll_indicator_hide(
 /// # Returns
 ///
 /// A GPUI element containing horizontal and vertical split buttons.
-fn render_panel_tab_strip_actions(
-  panel_id: PanelId,
-  theme: UIThemes,
-  app: WeakEntity<ChitinApp>,
-) -> gpui::Div {
+fn render_panel_tab_strip_actions(panel_id: PanelId, theme: UIThemes, app: WeakEntity<ChitinApp>) -> gpui::Div {
   div()
     .flex()
     .items_center()
@@ -314,11 +294,7 @@ fn render_panel_split_button(
     .size(px(30.0))
     .cursor_pointer()
     .text_color(theme.text.secondary)
-    .hover(move |style| {
-      style
-        .bg(theme.background.hover)
-        .text_color(theme.text.primary)
-    })
+    .hover(move |style| style.bg(theme.background.hover).text_color(theme.text.primary))
     .on_mouse_up(MouseButton::Left, move |_, _, cx| {
       let _ = app.update(cx, |app, cx| {
         if app.split_document_panel(panel_id, axis) {
@@ -332,6 +308,24 @@ fn render_panel_split_button(
         .size(PANEL_ACTION_ICON_SIZE)
         .text_color(theme.text.secondary),
     )
+}
+
+/// Renders the body for one document-panel tab payload.
+///
+/// # Parameters
+///
+/// `content` is the tab payload selected by the panel container.
+///
+/// `theme` supplies colors for placeholder project-document content.
+///
+/// # Returns
+///
+/// A GPUI element for either a project document placeholder or WGPU viewport.
+fn render_document_panel_content(content: &DocumentPanelContent, theme: UIThemes) -> AnyElement {
+  match content {
+    DocumentPanelContent::ProjectDocument(document) => render_opened_document_body(document, theme),
+    DocumentPanelContent::WgpuInteractive { view, .. } => view.clone().into_any_element(),
+  }
 }
 
 /// Renders placeholder content for an opened document tab.

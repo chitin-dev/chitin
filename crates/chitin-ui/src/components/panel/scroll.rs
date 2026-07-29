@@ -99,12 +99,7 @@ impl PanelTabScrollState {
   ///
   /// A persistent [`ScrollHandle`] reused across render passes for `panel_id`.
   pub fn scroll_handle(&self, panel_id: PanelId) -> ScrollHandle {
-    if let Some(entry) = self
-      .entries
-      .borrow()
-      .iter()
-      .find(|entry| entry.panel_id == panel_id)
-    {
+    if let Some(entry) = self.entries.borrow().iter().find(|entry| entry.panel_id == panel_id) {
       return entry.handle.clone();
     }
 
@@ -255,12 +250,7 @@ impl PanelTabScrollState {
   /// # Returns
   ///
   /// The current opacity when the indicator is inside its visibility window.
-  pub fn indicator_opacity(
-    &self,
-    panel_id: PanelId,
-    now: Instant,
-    base_opacity: f32,
-  ) -> Option<f32> {
+  pub fn indicator_opacity(&self, panel_id: PanelId, now: Instant, base_opacity: f32) -> Option<f32> {
     let visible_until = self
       .entries
       .borrow()
@@ -277,8 +267,7 @@ impl PanelTabScrollState {
       return Some(base_opacity);
     }
 
-    let fade_progress =
-      remaining.as_secs_f32() / PANEL_TAB_SCROLL_INDICATOR_FADE_DURATION.as_secs_f32();
+    let fade_progress = remaining.as_secs_f32() / PANEL_TAB_SCROLL_INDICATOR_FADE_DURATION.as_secs_f32();
     Some(base_opacity * fade_progress.clamp(0.0, 1.0))
   }
 
@@ -423,10 +412,7 @@ mod tests {
     scroll_state.reveal_tab(PanelId::new(1), 0, now);
     scroll_state.reveal_tab(PanelId::new(1), 1, now);
 
-    assert!(!scroll_state.indicator_visible(
-      PanelId::new(1),
-      now + PANEL_TAB_SCROLL_INDICATOR_VISIBLE_DURATION
-    ));
+    assert!(!scroll_state.indicator_visible(PanelId::new(1), now + PANEL_TAB_SCROLL_INDICATOR_VISIBLE_DURATION));
   }
 
   #[test]
@@ -437,10 +423,7 @@ mod tests {
     scroll_state.reveal_tab(PanelId::new(1), 0, now);
     scroll_state.reveal_tab(PanelId::new(1), 1, now);
 
-    assert_eq!(
-      scroll_state.indicator_opacity(PanelId::new(1), now, 0.6),
-      Some(0.6)
-    );
+    assert_eq!(scroll_state.indicator_opacity(PanelId::new(1), now, 0.6), Some(0.6));
   }
 
   #[test]

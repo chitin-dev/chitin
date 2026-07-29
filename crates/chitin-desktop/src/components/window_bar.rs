@@ -32,7 +32,6 @@ pub fn render_window_bar(theme: UIThemes, _cx: &mut Context<ChitinApp>) -> impl 
         .on_click(|_, window, _| window.minimize_window()),
       WindowBarItem::new("maximize", "Maximize", "icons/window-bar/lucide-square.svg")
         .on_click(|_, window, _| window.zoom_window()),
-      WindowBarItem::new("close", "Close", "icons/window-bar/lucide-x.svg")
-        .on_click(|_, _, cx| cx.quit()),
+      WindowBarItem::new("close", "Close", "icons/window-bar/lucide-x.svg").on_click(|_, _, cx| cx.quit()),
     ])
 }

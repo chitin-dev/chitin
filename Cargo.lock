@@ -649,6 +649,7 @@ dependencies = [
  "bytemuck",
  "chitin-core",
  "chitin-ui",
+ "chitin-wgpu",
  "env_logger",
  "glam",
  "gpui-ce",
@@ -663,6 +664,14 @@ dependencies = [
  "criterion",
  "gpui-ce",
  "log",
+]
+
+[[package]]
+name = "chitin-wgpu"
+version = "0.1.0"
+dependencies = [
+ "glam",
+ "wgpu",
 ]
 
 [[package]]
