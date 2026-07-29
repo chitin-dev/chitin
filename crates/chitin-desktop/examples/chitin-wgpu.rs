@@ -1,369 +1,27 @@
 #![forbid(unsafe_code)]
-//! Experimental GPUI panel that renders directly into a WGPU surface.
+//! Minimal GPUI panel that renders directly into a WGPU surface.
 //!
 //! Run with `cargo run --example chitin-wgpu`.
 //!
-//! The example demonstrates the integration pattern Chitin needs for structure
-//! visualization: GPUI owns the panel layout, while raw `wgpu` draws into a
-//! `WgpuSurfaceHandle` texture that GPUI composites like any other element.
+//! This example is intentionally non-interactive. It demonstrates the smallest
+//! useful WGPUI integration path: GPUI owns layout and composition, while raw
+//! `wgpu` renders one animated cube into a `WgpuSurfaceHandle`.
+
+#[path = "chitin-wgpu/common.rs"]
+mod common;
 
 use std::{sync::Arc, time};
 
+use common::{
+  CubeRenderer, INITIAL_SURFACE_HEIGHT, INITIAL_SURFACE_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
+  spinning_cube_mvp,
+};
 use gpui::{
   App, Application, Bounds, Context, IntoElement, Render, WgpuSurfaceHandle, Window, WindowBounds,
   WindowOptions, div, prelude::*, px, rgb, size, wgpu_surface,
 };
-use wgpu::util::DeviceExt;
 
-/// Initial backing texture width used before GPUI lays out the panel.
-const INITIAL_SURFACE_WIDTH: u32 = 960;
-/// Initial backing texture height used before GPUI lays out the panel.
-const INITIAL_SURFACE_HEIGHT: u32 = 540;
-/// Logical window width for the standalone example.
-const WINDOW_WIDTH: f32 = 1180.0;
-/// Logical window height for the standalone example.
-const WINDOW_HEIGHT: f32 = 760.0;
-/// WGSL shader compiled by the example's render pipeline.
-const SHADER: &str = include_str!("shaders/chitin_wgpu_cube.wgsl");
-
-/// A colored cube mesh with duplicated vertices per face.
-///
-/// Each vertex is `[x, y, z, r, g, b]`. Duplicating vertices keeps the example
-/// simple: each face can carry its own color without introducing normals,
-/// materials, or a molecule-specific mesh format yet.
-#[rustfmt::skip]
-const VERTICES: &[[f32; 6]] = &[
-  [-0.5, -0.5,  0.5, 0.95, 0.22, 0.22],
-  [ 0.5, -0.5,  0.5, 0.95, 0.22, 0.22],
-  [ 0.5,  0.5,  0.5, 1.00, 0.56, 0.56],
-  [-0.5,  0.5,  0.5, 1.00, 0.56, 0.56],
-  [ 0.5, -0.5, -0.5, 0.18, 0.78, 0.36],
-  [-0.5, -0.5, -0.5, 0.18, 0.78, 0.36],
-  [-0.5,  0.5, -0.5, 0.50, 1.00, 0.64],
-  [ 0.5,  0.5, -0.5, 0.50, 1.00, 0.64],
-  [-0.5, -0.5, -0.5, 0.24, 0.38, 0.95],
-  [-0.5, -0.5,  0.5, 0.24, 0.38, 0.95],
-  [-0.5,  0.5,  0.5, 0.55, 0.68, 1.00],
-  [-0.5,  0.5, -0.5, 0.55, 0.68, 1.00],
-  [ 0.5, -0.5,  0.5, 0.95, 0.82, 0.20],
-  [ 0.5, -0.5, -0.5, 0.95, 0.82, 0.20],
-  [ 0.5,  0.5, -0.5, 1.00, 0.94, 0.55],
-  [ 0.5,  0.5,  0.5, 1.00, 0.94, 0.55],
-  [-0.5,  0.5,  0.5, 0.20, 0.86, 0.88],
-  [ 0.5,  0.5,  0.5, 0.20, 0.86, 0.88],
-  [ 0.5,  0.5, -0.5, 0.55, 1.00, 1.00],
-  [-0.5,  0.5, -0.5, 0.55, 1.00, 1.00],
-  [-0.5, -0.5, -0.5, 0.88, 0.28, 0.88],
-  [ 0.5, -0.5, -0.5, 0.88, 0.28, 0.88],
-  [ 0.5, -0.5,  0.5, 1.00, 0.55, 1.00],
-  [-0.5, -0.5,  0.5, 1.00, 0.55, 1.00],
-];
-
-/// Cube index buffer expressed as two triangles per face.
-#[rustfmt::skip]
-const INDICES: &[u16] = &[
-   0,  1,  2,   0,  2,  3,
-   4,  5,  6,   4,  6,  7,
-   8,  9, 10,   8, 10, 11,
-  12, 13, 14,  12, 14, 15,
-  16, 17, 18,  16, 18, 19,
-  20, 21, 22,  20, 22, 23,
-];
-
-/// Minimal renderer state for drawing one cube into a GPUI-owned WGPU surface.
-///
-/// This type deliberately owns only GPU objects that are independent of GPUI
-/// layout. The panel view owns the `WgpuSurfaceHandle` and asks this renderer
-/// to draw whenever GPUI schedules a frame.
-struct CubeRenderer {
-  /// Render pipeline compiled from `shaders/chitin_wgpu_cube.wgsl`.
-  pipeline: wgpu::RenderPipeline,
-  /// Vertex buffer for the static cube mesh.
-  vertex_buffer: wgpu::Buffer,
-  /// Index buffer for drawing the cube faces.
-  index_buffer: wgpu::Buffer,
-  /// Uniform buffer containing the current model-view-projection matrix.
-  uniform_buffer: wgpu::Buffer,
-  /// Bind group exposing `uniform_buffer` to the vertex shader.
-  bind_group: wgpu::BindGroup,
-  /// Depth target matching the current surface size.
-  depth_view: wgpu::TextureView,
-  /// Shared WGPU device cloned from the GPUI surface handle.
-  device: Arc<wgpu::Device>,
-  /// Shared WGPU queue cloned from the GPUI surface handle.
-  queue: Arc<wgpu::Queue>,
-  /// Start time used to animate the cube deterministically.
-  started_at: time::Instant,
-  /// Current render target width in physical pixels.
-  width: u32,
-  /// Current render target height in physical pixels.
-  height: u32,
-}
-
-impl CubeRenderer {
-  /// Creates GPU buffers, pipeline state, and depth resources.
-  ///
-  /// # Parameters
-  ///
-  /// `device` and `queue` come from `WgpuSurfaceHandle`; using the same device
-  /// avoids any cross-device texture sharing.
-  ///
-  /// `width` and `height` are the initial physical pixel size of the surface.
-  ///
-  /// `color_format` is the texture format selected by the GPUI surface.
-  ///
-  /// # Returns
-  ///
-  /// A renderer ready to draw into a matching `WgpuSurfaceHandle` back buffer.
-  fn new(
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
-    width: u32,
-    height: u32,
-    color_format: wgpu::TextureFormat,
-  ) -> Self {
-    // The shader is external so the Rust file teaches the integration flow
-    // without hiding pipeline setup inside a long string literal.
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-      label: Some("chitin_wgpu_cube_shader"),
-      source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-    });
-    // A single MVP matrix is enough for this probe. A real structure viewer
-    // will replace this with camera, lighting, and representation uniforms.
-    let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-      label: Some("chitin_wgpu_cube_uniforms"),
-      size: 64,
-      usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-      mapped_at_creation: false,
-    });
-    let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-      label: Some("chitin_wgpu_cube_bind_group_layout"),
-      entries: &[wgpu::BindGroupLayoutEntry {
-        binding: 0,
-        visibility: wgpu::ShaderStages::VERTEX,
-        ty: wgpu::BindingType::Buffer {
-          ty: wgpu::BufferBindingType::Uniform,
-          has_dynamic_offset: false,
-          min_binding_size: None,
-        },
-        count: None,
-      }],
-    });
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-      label: Some("chitin_wgpu_cube_bind_group"),
-      layout: &bind_group_layout,
-      entries: &[wgpu::BindGroupEntry {
-        binding: 0,
-        resource: uniform_buffer.as_entire_binding(),
-      }],
-    });
-    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-      label: Some("chitin_wgpu_cube_pipeline_layout"),
-      bind_group_layouts: &[Some(&bind_group_layout)],
-      immediate_size: 0,
-    });
-    // Keep the pipeline deliberately conventional: triangle list, back-face
-    // culling, and depth testing. This is the baseline Chitin can extend.
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-      label: Some("chitin_wgpu_cube_pipeline"),
-      layout: Some(&pipeline_layout),
-      vertex: wgpu::VertexState {
-        module: &shader,
-        entry_point: Some("vs_main"),
-        buffers: &[Some(wgpu::VertexBufferLayout {
-          array_stride: 24,
-          step_mode: wgpu::VertexStepMode::Vertex,
-          attributes: &[
-            wgpu::VertexAttribute {
-              offset: 0,
-              shader_location: 0,
-              format: wgpu::VertexFormat::Float32x3,
-            },
-            wgpu::VertexAttribute {
-              offset: 12,
-              shader_location: 1,
-              format: wgpu::VertexFormat::Float32x3,
-            },
-          ],
-        })],
-        compilation_options: Default::default(),
-      },
-      fragment: Some(wgpu::FragmentState {
-        module: &shader,
-        entry_point: Some("fs_main"),
-        targets: &[Some(wgpu::ColorTargetState {
-          format: color_format,
-          blend: None,
-          write_mask: wgpu::ColorWrites::ALL,
-        })],
-        compilation_options: Default::default(),
-      }),
-      primitive: wgpu::PrimitiveState {
-        topology: wgpu::PrimitiveTopology::TriangleList,
-        front_face: wgpu::FrontFace::Ccw,
-        cull_mode: Some(wgpu::Face::Back),
-        ..Default::default()
-      },
-      depth_stencil: Some(wgpu::DepthStencilState {
-        format: wgpu::TextureFormat::Depth32Float,
-        depth_write_enabled: Some(true),
-        depth_compare: Some(wgpu::CompareFunction::Less),
-        stencil: Default::default(),
-        bias: Default::default(),
-      }),
-      multisample: wgpu::MultisampleState::default(),
-      multiview_mask: None,
-      cache: None,
-    });
-    let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-      label: Some("chitin_wgpu_cube_vertices"),
-      contents: bytemuck::cast_slice(VERTICES),
-      usage: wgpu::BufferUsages::VERTEX,
-    });
-    let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-      label: Some("chitin_wgpu_cube_indices"),
-      contents: bytemuck::cast_slice(INDICES),
-      usage: wgpu::BufferUsages::INDEX,
-    });
-    let depth_view = Self::depth_view(&device, width, height);
-
-    Self {
-      pipeline,
-      vertex_buffer,
-      index_buffer,
-      uniform_buffer,
-      bind_group,
-      depth_view,
-      device,
-      queue,
-      started_at: time::Instant::now(),
-      width,
-      height,
-    }
-  }
-
-  /// Recreates size-dependent GPU resources.
-  ///
-  /// # Parameters
-  ///
-  /// `width` and `height` are the new physical pixel dimensions reported by
-  /// `WgpuSurfaceHandle::back_view_with_size`.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after refreshing the depth texture.
-  fn resize(&mut self, width: u32, height: u32) {
-    self.width = width;
-    self.height = height;
-    self.depth_view = Self::depth_view(&self.device, width, height);
-  }
-
-  /// Draws the current cube frame into a WGPU texture view.
-  ///
-  /// # Parameters
-  ///
-  /// `view` is the back-buffer view obtained from `WgpuSurfaceHandle`.
-  ///
-  /// # Returns
-  ///
-  /// The queue submission index passed back to the surface for synchronized
-  /// presentation.
-  fn render(&mut self, view: &wgpu::TextureView) -> wgpu::SubmissionIndex {
-    let elapsed = self.started_at.elapsed().as_secs_f32();
-    let aspect = self.width as f32 / self.height.max(1) as f32;
-    // WGPU uses a DirectX-style depth range, so use glam's matching helper.
-    let projection = glam::camera::rh::proj::directx::perspective(0.70, aspect, 0.1, 100.0);
-    let camera = glam::camera::rh::view::look_at_mat4(
-      glam::Vec3::new(0.0, 0.8, 2.8),
-      glam::Vec3::ZERO,
-      glam::Vec3::Y,
-    );
-    let model =
-      glam::Mat4::from_rotation_y(elapsed * 1.15) * glam::Mat4::from_rotation_x(elapsed * 0.55);
-    let mvp: [[f32; 4]; 4] = (projection * camera * model).to_cols_array_2d();
-
-    self
-      .queue
-      .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&mvp));
-
-    let mut encoder = self
-      .device
-      .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("chitin_wgpu_cube_encoder"),
-      });
-    {
-      let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("chitin_wgpu_cube_pass"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-          view,
-          resolve_target: None,
-          depth_slice: None,
-          ops: wgpu::Operations {
-            load: wgpu::LoadOp::Clear(wgpu::Color {
-              r: 0.025,
-              g: 0.030,
-              b: 0.045,
-              a: 1.0,
-            }),
-            store: wgpu::StoreOp::Store,
-          },
-        })],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-          view: &self.depth_view,
-          depth_ops: Some(wgpu::Operations {
-            load: wgpu::LoadOp::Clear(1.0),
-            store: wgpu::StoreOp::Discard,
-          }),
-          stencil_ops: None,
-        }),
-        timestamp_writes: None,
-        occlusion_query_set: None,
-        multiview_mask: None,
-      });
-      pass.set_pipeline(&self.pipeline);
-      pass.set_bind_group(0, &self.bind_group, &[]);
-      pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-      pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-      pass.draw_indexed(0..INDICES.len() as u32, 0, 0..1);
-    }
-
-    self.queue.submit(std::iter::once(encoder.finish()))
-  }
-
-  /// Creates a depth texture view for the current surface size.
-  ///
-  /// # Parameters
-  ///
-  /// `device` creates the texture. `width` and `height` are physical pixels.
-  ///
-  /// # Returns
-  ///
-  /// A `Depth32Float` texture view suitable for one render pass.
-  fn depth_view(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-      label: Some("chitin_wgpu_cube_depth"),
-      size: wgpu::Extent3d {
-        width,
-        height,
-        depth_or_array_layers: 1,
-      },
-      mip_level_count: 1,
-      sample_count: 1,
-      dimension: wgpu::TextureDimension::D2,
-      format: wgpu::TextureFormat::Depth32Float,
-      usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-      view_formats: &[],
-    });
-
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
-  }
-}
-
-/// GPUI view state for the experimental WGPU panel.
-///
-/// The panel owns the surface handle and lazily creates `CubeRenderer` after
-/// GPUI has produced a real back buffer. This mirrors the future structure
-/// viewer: panel state stays in GPUI, render resources stay in a renderer.
+/// GPUI view state for the minimal WGPU panel.
 struct ChitinWgpuPanel {
   /// GPUI surface handle, absent only if the backend cannot create WGPU surfaces.
   surface: Option<WgpuSurfaceHandle>,
@@ -375,6 +33,8 @@ struct ChitinWgpuPanel {
   last_fps_update: time::Instant,
   /// Last computed frames-per-second value displayed in the panel.
   display_fps: f64,
+  /// Start time used to animate the cube deterministically.
+  started_at: time::Instant,
 }
 
 impl ChitinWgpuPanel {
@@ -408,11 +68,9 @@ impl ChitinWgpuPanel {
       )
     });
 
-    if renderer.width != width || renderer.height != height {
-      renderer.resize(width, height);
-    }
-
-    let submission_index = renderer.render(&view);
+    renderer.resize_if_needed(width, height);
+    let mvp = spinning_cube_mvp(self.started_at.elapsed().as_secs_f32(), renderer.aspect());
+    let submission_index = renderer.render_mvp(&view, mvp);
     drop(view);
     // GPUI drives the repaint below via request_animation_frame, so use the
     // silent present path and avoid scheduling an extra full-window refresh.
@@ -514,7 +172,7 @@ impl Render for ChitinWgpuPanel {
                 div()
                   .text_sm()
                   .text_color(rgb(0x93a4ba))
-                  .child("GPUI + WGPU surface"),
+                  .child("Minimal GPUI + WGPU surface"),
               ),
           )
           .child(panel_body),
@@ -522,7 +180,7 @@ impl Render for ChitinWgpuPanel {
   }
 }
 
-/// Starts the standalone Chitin WGPU example.
+/// Starts the standalone minimal Chitin WGPU example.
 ///
 /// # Parameters
 ///
@@ -555,6 +213,7 @@ fn main() {
           frame_count: 0,
           last_fps_update: time::Instant::now(),
           display_fps: 0.0,
+          started_at: time::Instant::now(),
         })
       },
     );
