@@ -1,0 +1,4 @@
+interface:
+  display_name: "WGPUI"
+  short_description: "Use gpui-wgpu surfaces inside Chitin GPUI panels."
+  default_prompt: "Use WGPUI to add or debug a GPUI panel that renders with wgpu."
