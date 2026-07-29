@@ -330,9 +330,11 @@ impl Render for ChitinWgpuDocumentPanel {
   ///
   /// A GPUI element tree containing the WGPU surface and a small FPS overlay.
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    self.render_surface();
-    window.request_animation_frame();
-    cx.notify();
+    if self.surface.is_some() {
+      self.render_surface();
+      window.request_animation_frame();
+      cx.notify();
+    }
 
     match self.surface.clone() {
       Some(surface) => div()
