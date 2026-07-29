@@ -7,12 +7,13 @@
 //! document tabs, splits, and side panels while WGPU renders an interactive
 //! viewport inside one document tab.
 
-mod chitin_wgpu_desktop;
+#[path = "./chitin-wgpu/cube.rs"]
+mod cube;
 
 use std::{borrow::Cow, fs, path::PathBuf};
 
 use chitin_desktop::{app::ChitinApp, commands::default_key_bindings, wgpu_panel::ChitinWgpuDocumentPanel};
-use chitin_wgpu_desktop::cube::ExampleCubeScene;
+use cube::ExampleCubeScene;
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
