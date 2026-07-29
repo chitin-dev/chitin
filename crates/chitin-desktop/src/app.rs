@@ -28,6 +28,8 @@ use crate::{
   },
 };
 
+pub use crate::components::document_area::state::WgpuDocumentViewFactory;
+
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
   /// Currently opened project workspace, if a path was accepted.
@@ -154,6 +156,8 @@ impl ChitinApp {
   ///
   /// `wgpu_panel` is the GPUI view that renders WGPU content.
   ///
+  /// `clone_wgpu_panel` creates independent WGPU views for split panels.
+  ///
   /// # Returns
   ///
   /// A [`ChitinApp`] initialized with the WGPU panel in the document area.
@@ -162,10 +166,14 @@ impl ChitinApp {
     project_sidebar_focus: FocusHandle,
     title: impl Into<String>,
     wgpu_panel: impl Into<AnyView>,
+    clone_wgpu_panel: WgpuDocumentViewFactory,
   ) -> Self {
     let mut app = Self::new_with_project_sidebar_focus(project_path, project_sidebar_focus);
-    app.document_panels =
-      DocumentPanelState::with_content(DocumentPanelContent::wgpu_interactive(title, wgpu_panel.into()));
+    app.document_panels = DocumentPanelState::with_content(DocumentPanelContent::wgpu_interactive(
+      title,
+      wgpu_panel.into(),
+      clone_wgpu_panel,
+    ));
     app
   }
 

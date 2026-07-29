@@ -295,9 +295,9 @@ fn render_panel_split_button(
     .cursor_pointer()
     .text_color(theme.text.secondary)
     .hover(move |style| style.bg(theme.background.hover).text_color(theme.text.primary))
-    .on_mouse_up(MouseButton::Left, move |_, _, cx| {
+    .on_mouse_up(MouseButton::Left, move |_, window, cx| {
       let _ = app.update(cx, |app, cx| {
-        if app.split_document_panel(panel_id, axis) {
+        if app.split_document_panel(panel_id, axis, window, cx) {
           cx.notify();
         }
       });

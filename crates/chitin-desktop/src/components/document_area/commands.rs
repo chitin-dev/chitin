@@ -3,7 +3,7 @@
 use chitin_ui::components::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
-use gpui::Pixels;
+use gpui::{Context, Pixels, Window};
 
 use crate::{app::ChitinApp, components::document_area::state::OpenedProjectDocument};
 
@@ -38,8 +38,21 @@ impl ChitinApp {
   /// # Returns
   ///
   /// `true` when the panel exists and was split; otherwise `false`.
-  pub(crate) fn split_document_panel(&mut self, panel_id: PanelId, axis: PanelSplitAxis) -> bool {
-    self.document_panels.split_panel(panel_id, axis).is_some()
+  pub(crate) fn split_document_panel(
+    &mut self,
+    panel_id: PanelId,
+    axis: PanelSplitAxis,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> bool {
+    let active_content = self
+      .document_panels
+      .active_tab_payload(panel_id)
+      .map(|content| content.clone_for_split(window, cx));
+    self
+      .document_panels
+      .split_panel_with_content(panel_id, axis, active_content)
+      .is_some()
   }
 
   /// Activates a tab inside a document panel.

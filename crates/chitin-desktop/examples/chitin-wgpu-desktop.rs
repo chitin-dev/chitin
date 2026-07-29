@@ -12,7 +12,11 @@ mod cube;
 
 use std::{borrow::Cow, fs, path::PathBuf};
 
-use chitin_desktop::{app::ChitinApp, commands::default_key_bindings, wgpu_panel::ChitinWgpuDocumentPanel};
+use chitin_desktop::{
+  app::{ChitinApp, WgpuDocumentViewFactory},
+  commands::default_key_bindings,
+  wgpu_panel::ChitinWgpuDocumentPanel,
+};
 use cube::ExampleCubeScene;
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
@@ -97,8 +101,12 @@ fn main() {
           window.focus(&project_sidebar_focus, cx);
           window.activate_window();
 
-          let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
-          let wgpu_panel = cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, ExampleCubeScene::new()));
+          let wgpu_panel_factory = WgpuDocumentViewFactory::new(|window, cx| {
+            let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
+            cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, ExampleCubeScene::new()))
+              .into()
+          });
+          let wgpu_panel = wgpu_panel_factory.build(window, cx);
 
           cx.new(|_| {
             ChitinApp::new_with_wgpu_document_panel(
@@ -106,6 +114,7 @@ fn main() {
               project_sidebar_focus,
               "WGPU example cube",
               wgpu_panel,
+              wgpu_panel_factory,
             )
           })
         },

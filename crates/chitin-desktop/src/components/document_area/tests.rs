@@ -349,6 +349,34 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
   assert_eq!(new_leaf.active_tab, None);
 }
 
+/// Verifies that split callers can provide an independent payload for the new leaf.
+#[test]
+fn split_panel_with_content_should_use_caller_payload() {
+  let mut state = DocumentPanelState::with_content(test_content("alpha.rs"));
+  let split_content = test_content("independent.rs");
+
+  let Some(new_panel_id) = state.split_panel_with_content(
+    DEFAULT_DOCUMENT_PANEL_ID,
+    PanelSplitAxis::Horizontal,
+    Some(split_content),
+  ) else {
+    panic!("document panel should split");
+  };
+  let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+    panic!("source panel should still exist");
+  };
+  let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
+    panic!("new panel should exist");
+  };
+
+  assert_eq!(source_leaf.tabs.len(), 1);
+  assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+  assert_eq!(source_leaf.tabs[0].payload.title(), "alpha.rs");
+  assert_eq!(new_leaf.tabs.len(), 1);
+  assert_eq!(new_leaf.tabs[0].payload.title(), "independent.rs");
+  assert_eq!(new_leaf.active_tab, Some(FIRST_DYNAMIC_DOCUMENT_TAB_ID));
+}
+
 /// Verifies a drag reorder preserves the moved document and focuses its panel.
 #[test]
 fn tab_drag_should_reorder_inside_source_panel() {
