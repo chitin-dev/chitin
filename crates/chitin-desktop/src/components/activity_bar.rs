@@ -89,7 +89,7 @@ fn activity_item(
     move |this, _, window, cx| {
       this.active_activity = activity;
       let focus = this.document_panel_focus(cx);
-      window.focus(&focus);
+      window.focus(&focus, cx);
       cx.notify();
     },
   ))
@@ -119,7 +119,7 @@ fn workspace_activity_item(
   .on_click(cx.listener(move |this, _, window, cx| {
     this.dispatch_command(WorkspaceCommand::ToggleWorkspace.into(), cx);
     let focus = this.workspace_toggle_focus_target(cx);
-    window.focus(&focus);
+    window.focus(&focus, cx);
   }))
 }
 

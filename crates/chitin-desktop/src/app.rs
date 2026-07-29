@@ -252,7 +252,7 @@ impl ChitinApp {
     self.toggle_workspace_state();
     let focus = self.workspace_toggle_focus_target(cx);
 
-    window.focus(&focus);
+    window.focus(&focus, cx);
     cx.notify();
   }
 

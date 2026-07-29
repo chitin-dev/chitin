@@ -10,7 +10,10 @@ log = "0.4.33"
 env_logger = "0.10"
 chitin-core = { path = "../chitin-core" }
 chitin-ui = { path = "../chitin-ui" }
-gpui = "0.2.2"
+gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu" }
+bytemuck = "1.24"
+glam = "0.33"
+wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
 
 [lints]
 workspace = true

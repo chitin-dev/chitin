@@ -135,7 +135,7 @@ where
   });
 
   let list = match scroll_handle {
-    Some(scroll_handle) => list.track_scroll(scroll_handle),
+    Some(scroll_handle) => list.track_scroll(&scroll_handle),
     None => list,
   };
 

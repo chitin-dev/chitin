@@ -98,7 +98,7 @@ fn main() {
         },
         |window, cx| {
           let project_sidebar_focus = cx.focus_handle();
-          window.focus(&project_sidebar_focus);
+          window.focus(&project_sidebar_focus, cx);
           window.activate_window();
           cx.new(|_| ChitinApp::new_with_project_sidebar_focus(project_path, project_sidebar_focus))
         },

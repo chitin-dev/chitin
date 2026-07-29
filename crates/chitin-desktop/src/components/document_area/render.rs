@@ -198,8 +198,8 @@ fn render_opened_document_panels(
     .on_action(cx.listener(|this, _: &CloseTab, _, cx| {
       this.dispatch_command(PanelTabCommand::Close.into(), cx);
     }))
-    .on_mouse_down(MouseButton::Left, move |_, window, _| {
-      window.focus(&mouse_focus_handle);
+    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+      window.focus(&mouse_focus_handle, cx);
     })
     .child(panel_container)
 }

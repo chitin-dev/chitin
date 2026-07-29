@@ -506,47 +506,49 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
     .and_then(|state| state.drop_target)
     .filter(|target| target.panel_id == leaf.id);
   let tab_lane_id = SharedString::from(format!("panel-tab-lane-{}", leaf.id.value()));
-  let mut tab_lane = div()
-    .id(tab_lane_id)
-    .relative()
-    .flex()
-    .items_center()
-    .flex_1()
-    .min_w_0()
-    .h_full()
-    .overflow_x_scroll()
-    .scrollbar_width(px(0.0))
-    .children(leaf.tabs.iter().enumerate().map(|(index, tab)| {
-      render_panel_tab(
-        leaf.id,
-        index,
-        tab,
-        panel_focused,
-        leaf.active_tab == Some(tab.id),
-        context,
-      )
-    }))
-    .when(
-      active_drop_target.is_some_and(|target| target.insertion_index >= leaf.tabs.len())
-        && !leaf.tabs.is_empty(),
-      |lane| {
-        lane.child(render_panel_tab_insertion_marker(
-          context.theme.border.focus.into(),
-        ))
-      },
+  let mut tab_lane = gpui::Styled::scrollbar_width(
+    div()
+      .id(tab_lane_id)
+      .relative()
+      .flex()
+      .items_center()
+      .flex_1()
+      .min_w_0()
+      .h_full()
+      .overflow_x_scroll(),
+    px(0.0),
+  )
+  .children(leaf.tabs.iter().enumerate().map(|(index, tab)| {
+    render_panel_tab(
+      leaf.id,
+      index,
+      tab,
+      panel_focused,
+      leaf.active_tab == Some(tab.id),
+      context,
     )
-    .when(
-      active_drop_target.is_some() && leaf.tabs.is_empty(),
-      |lane| {
-        lane.child(
-          div()
-            .absolute()
-            .inset_0()
-            .border_1()
-            .border_color(context.theme.border.focus),
-        )
-      },
-    );
+  }))
+  .when(
+    active_drop_target.is_some_and(|target| target.insertion_index >= leaf.tabs.len())
+      && !leaf.tabs.is_empty(),
+    |lane| {
+      lane.child(render_panel_tab_insertion_marker(
+        context.theme.border.focus.into(),
+      ))
+    },
+  )
+  .when(
+    active_drop_target.is_some() && leaf.tabs.is_empty(),
+    |lane| {
+      lane.child(
+        div()
+          .absolute()
+          .inset_0()
+          .border_1()
+          .border_color(context.theme.border.focus),
+      )
+    },
+  );
 
   if let Some(tab_scroll_handle) = tab_scroll_handle.as_ref() {
     tab_lane = tab_lane.track_scroll(tab_scroll_handle);
