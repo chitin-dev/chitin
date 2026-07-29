@@ -12,12 +12,12 @@ use gpui::{
 };
 
 /// Default fps info postfix used in wgpu panel
-pub(crate) const DEFAULT_FPS_POSTFIX: &'static str = "fps";
+pub(crate) const DEFAULT_FPS_POSTFIX: &str = "fps";
 /// Default interaction hint showed at the bottom-right corner of wgpu panel
-pub(crate) const DEFAULT_INTERACTION_HINT: &'static str =
+pub(crate) const DEFAULT_INTERACTION_HINT: &str =
   "L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom | Double-click reset";
 /// Default unavailable message show when wgpu backend is not supported
-pub(crate) const DEFAULT_UNAVAILABLE_MESSAGE: &'static str = "WGPU surface is not supported by this GPUI backend";
+pub(crate) const DEFAULT_UNAVAILABLE_MESSAGE: &str = "WGPU surface is not supported by this GPUI backend";
 
 /// Per-frame data passed from the GPUI panel host into a WGPU scene.
 pub struct WgpuPanelFrame<'a> {
