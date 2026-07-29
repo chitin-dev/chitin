@@ -15,11 +15,13 @@ use chitin_ui::components::{
 };
 use gpui::{AnyView, App, Pixels, Window};
 
+pub type FreshWgpuSurfaceCallback = Rc<dyn Fn(&mut Window, &mut App) -> AnyView>;
+
 /// Factory used to create independent WGPU document views for split panels.
 #[derive(Clone)]
 pub struct WgpuDocumentViewFactory {
   /// Shared callback that creates a fresh WGPU surface-backed view.
-  build: Rc<dyn Fn(&mut Window, &mut App) -> AnyView>,
+  build: FreshWgpuSurfaceCallback,
 }
 
 /// Stable panel id used by the initial single document panel.
@@ -558,9 +560,9 @@ impl DocumentPanelState {
     axis: PanelSplitAxis,
     active_content: Option<DocumentPanelContent>,
   ) -> Option<PanelId> {
-    if self.tree.leaf(panel_id).is_none() {
-      return None;
-    }
+    self.tree.leaf(panel_id)?;
+    // this equals to if self.tree.leaf(panel_id).is_none() { return None; }
+
     let new_panel_id = self.allocate_panel_id();
     let mut new_leaf = PanelLeaf::new(new_panel_id);
 
