@@ -11,15 +11,11 @@ use std::{
 use chitin_core::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::sidebar::{
-    Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection,
-    SidebarTitle,
+    Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
   },
   themes::UIThemes,
 };
-use gpui::{
-  Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, UniformListScrollHandle, div,
-  prelude::*,
-};
+use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, UniformListScrollHandle, div, prelude::*};
 
 use crate::{
   app::ChitinApp,
@@ -70,9 +66,7 @@ impl ProjectSidebarState {
   /// resize state.
   pub fn with_workspace_root(root: Option<&Path>) -> Self {
     Self {
-      expanded_paths: root
-        .map(|root| HashSet::from([root.to_path_buf()]))
-        .unwrap_or_default(),
+      expanded_paths: root.map(|root| HashSet::from([root.to_path_buf()])).unwrap_or_default(),
       loading_paths: HashSet::new(),
       selected_path: None,
       focused_path: None,
@@ -134,10 +128,7 @@ impl ProjectSidebarState {
   ///
   /// This function returns `()` and records the active resize drag.
   pub fn start_resize(&mut self, start_x: Pixels) {
-    log::debug!(
-      "Project sidebar: start width resizing from width {:?}",
-      start_x
-    );
+    log::debug!("Project sidebar: start width resizing from width {:?}", start_x);
     self.resize.start_resize(start_x);
   }
 
@@ -268,17 +259,10 @@ pub fn render_project_sidebar(
         )
         .child(
           SidebarBody::new().theme(theme).child(match workspace {
-            Some(workspace) => {
-              SidebarSection::new()
-                .theme(theme)
-                .fill(true)
-                .child(render_workspace_tree(
-                  &workspace.tree.root,
-                  state,
-                  theme,
-                  cx,
-                ))
-            }
+            Some(workspace) => SidebarSection::new()
+              .theme(theme)
+              .fill(true)
+              .child(render_workspace_tree(&workspace.tree.root, state, theme, cx)),
             None => SidebarSection::new().theme(theme).child(
               div()
                 .p_3()
@@ -305,10 +289,7 @@ mod tests {
     state.start_resize(gpui::px(100.0));
     assert!(state.drag_resize(gpui::px(140.0)));
 
-    assert_eq!(
-      state.resize.width(),
-      gpui::px(f32::from(DEFAULT_SIDEBAR_WIDTH) + 40.0)
-    );
+    assert_eq!(state.resize.width(), gpui::px(f32::from(DEFAULT_SIDEBAR_WIDTH) + 40.0));
   }
 
   /// Verifies that stopping resize clears active resize state.

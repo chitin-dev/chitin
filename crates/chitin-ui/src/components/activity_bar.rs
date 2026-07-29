@@ -11,10 +11,7 @@
 //! [`ActivityBarItem`](crate::components::activity_bar::ActivityBarItem) values and keep selection,
 //! routing, permissions, and persistence outside this crate.
 
-use gpui::{
-  App, IntoElement, MouseButton, MouseUpEvent, Pixels, Rgba, SharedString, Window, div, prelude::*,
-  px, svg,
-};
+use gpui::{App, IntoElement, MouseButton, MouseUpEvent, Pixels, Rgba, SharedString, Window, div, prelude::*, px, svg};
 
 use crate::themes::{UIThemes, builtins};
 
@@ -72,11 +69,7 @@ impl ActivityBarItem {
   /// # Returns
   ///
   /// An [`ActivityBarItem`] with default theme, enabled state, and no badge.
-  pub fn new(
-    id: impl Into<SharedString>,
-    label: impl Into<SharedString>,
-    icon_path: impl Into<SharedString>,
-  ) -> Self {
+  pub fn new(id: impl Into<SharedString>, label: impl Into<SharedString>, icon_path: impl Into<SharedString>) -> Self {
     Self {
       id: id.into(),
       label: label.into(),
@@ -202,10 +195,7 @@ impl ActivityBarItem {
   /// # Returns
   ///
   /// The updated [`ActivityBarItem`] for builder chaining.
-  pub fn on_click(
-    mut self,
-    listener: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static,
-  ) -> Self {
+  pub fn on_click(mut self, listener: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static) -> Self {
     self.on_click = Some(Box::new(listener));
     self
   }
@@ -544,19 +534,20 @@ impl IntoElement for ActivityBar {
           .items_center()
           .gap_1()
           .children(self.items.into_iter().map(|item| {
-            let selected = active_item_id
-              .as_ref()
-              .is_some_and(|active_id| active_id == &item.id);
+            let selected = active_item_id.as_ref().is_some_and(|active_id| active_id == &item.id);
             item.theme(theme).selected(selected)
           })),
       )
-      .child(div().flex().flex_col().items_center().gap_1().children(
-        self.bottom_items.into_iter().map(|item| {
-          let selected = active_item_id
-            .as_ref()
-            .is_some_and(|active_id| active_id == &item.id);
-          item.theme(theme).selected(selected)
-        }),
-      ))
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .items_center()
+          .gap_1()
+          .children(self.bottom_items.into_iter().map(|item| {
+            let selected = active_item_id.as_ref().is_some_and(|active_id| active_id == &item.id);
+            item.theme(theme).selected(selected)
+          })),
+      )
   }
 }

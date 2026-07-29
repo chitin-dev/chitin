@@ -7,8 +7,8 @@ use gpui::{App, Pixels, Window, px};
 use super::{
   drag::PanelTabDropTarget,
   model::{
-    PanelId, PanelLeaf, PanelNode, PanelSplit, PanelSplitAxis, PanelSplitBranch, PanelSplitPath,
-    PanelSplitPlacement, PanelTab, PanelTabId, PanelTree,
+    PanelId, PanelLeaf, PanelNode, PanelSplit, PanelSplitAxis, PanelSplitBranch, PanelSplitPath, PanelSplitPlacement,
+    PanelTab, PanelTabId, PanelTree,
   },
   render::DEFAULT_PANEL_SPLIT_HANDLE_SIZE,
 };
@@ -19,8 +19,7 @@ pub const MIN_PANEL_SPLIT_RATIO: f32 = 0.1;
 pub const MAX_PANEL_SPLIT_RATIO: f32 = 0.9;
 
 /// Callback invoked when a split resize gesture starts.
-pub type PanelResizeStartHandler =
-  dyn Fn(PanelSplitPath, PanelSplitAxis, Pixels, &mut Window, &mut App);
+pub type PanelResizeStartHandler = dyn Fn(PanelSplitPath, PanelSplitAxis, Pixels, &mut Window, &mut App);
 
 /// Configuration for panel split resize handles.
 #[derive(Clone)]
@@ -142,12 +141,7 @@ impl<T> PanelTree<T> {
   ///
   /// `true` when the requested move is valid, including an effective no-op;
   /// otherwise `false`. Invalid moves leave the panel tree unchanged.
-  pub fn move_tab(
-    &mut self,
-    source_panel_id: PanelId,
-    tab_id: PanelTabId,
-    target: PanelTabDropTarget,
-  ) -> bool {
+  pub fn move_tab(&mut self, source_panel_id: PanelId, tab_id: PanelTabId, target: PanelTabDropTarget) -> bool {
     let Some(source_leaf) = self.leaf(source_panel_id) else {
       return false;
     };
@@ -159,11 +153,8 @@ impl<T> PanelTree<T> {
     };
 
     if source_panel_id == target.panel_id {
-      let insertion_index = normalize_same_panel_insertion_index(
-        source_index,
-        target.insertion_index,
-        source_leaf.tabs.len(),
-      );
+      let insertion_index =
+        normalize_same_panel_insertion_index(source_index, target.insertion_index, source_leaf.tabs.len());
       let Some(leaf) = self.leaf_mut(source_panel_id) else {
         return false;
       };
@@ -184,10 +175,7 @@ impl<T> PanelTree<T> {
     }
 
     let target_index = target.insertion_index.min(target_leaf.tabs.len());
-    let Some(tab) = self
-      .leaf_mut(source_panel_id)
-      .and_then(|leaf| leaf.remove_tab(tab_id))
-    else {
+    let Some(tab) = self.leaf_mut(source_panel_id).and_then(|leaf| leaf.remove_tab(tab_id)) else {
       return false;
     };
     let Some(target_leaf) = self.leaf_mut(target.panel_id) else {
@@ -277,14 +265,7 @@ impl<T> PanelTree<T> {
     ratio: f32,
   ) -> bool {
     let mut new_leaf = Some(new_leaf);
-    split_leaf_node(
-      &mut self.root,
-      panel_id,
-      axis,
-      &mut new_leaf,
-      placement,
-      ratio,
-    )
+    split_leaf_node(&mut self.root, panel_id, axis, &mut new_leaf, placement, ratio)
   }
 
   /// Resizes a split node by path.
@@ -330,12 +311,7 @@ impl<T> PanelTree<T> {
   ///
   /// `Some(Pixels)` containing the available size on the target split's axis
   /// when the path identifies a split; otherwise `None`.
-  pub fn split_axis_size(
-    &self,
-    path: &PanelSplitPath,
-    root_width: Pixels,
-    root_height: Pixels,
-  ) -> Option<Pixels> {
+  pub fn split_axis_size(&self, path: &PanelSplitPath, root_width: Pixels, root_height: Pixels) -> Option<Pixels> {
     split_axis_size_in_node(&self.root, path.branches(), root_width, root_height)
   }
 
@@ -445,11 +421,7 @@ pub(super) fn clamp_split_ratio(ratio: f32) -> f32 {
 /// # Returns
 ///
 /// The clamped insertion index in the post-removal collection.
-fn normalize_same_panel_insertion_index(
-  source_index: usize,
-  raw_insertion_index: usize,
-  tab_count: usize,
-) -> usize {
+fn normalize_same_panel_insertion_index(source_index: usize, raw_insertion_index: usize, tab_count: usize) -> usize {
   let raw_insertion_index = raw_insertion_index.min(tab_count);
   let normalized_index = if source_index < raw_insertion_index {
     raw_insertion_index.saturating_sub(1)
@@ -475,9 +447,7 @@ fn find_leaf<T>(node: &PanelNode<T>, panel_id: PanelId) -> Option<&PanelLeaf<T>>
   match node {
     PanelNode::Leaf(leaf) if leaf.id == panel_id => Some(leaf),
     PanelNode::Leaf(_) => None,
-    PanelNode::Split(split) => {
-      find_leaf(&split.first, panel_id).or_else(|| find_leaf(&split.second, panel_id))
-    }
+    PanelNode::Split(split) => find_leaf(&split.first, panel_id).or_else(|| find_leaf(&split.second, panel_id)),
   }
 }
 
@@ -496,8 +466,9 @@ fn find_leaf_mut<T>(node: &mut PanelNode<T>, panel_id: PanelId) -> Option<&mut P
   match node {
     PanelNode::Leaf(leaf) if leaf.id == panel_id => Some(leaf),
     PanelNode::Leaf(_) => None,
-    PanelNode::Split(split) => find_leaf_mut(&mut split.first, panel_id)
-      .or_else(|| find_leaf_mut(&mut split.second, panel_id)),
+    PanelNode::Split(split) => {
+      find_leaf_mut(&mut split.first, panel_id).or_else(|| find_leaf_mut(&mut split.second, panel_id))
+    }
   }
 }
 
@@ -513,10 +484,7 @@ fn find_leaf_mut<T>(node: &mut PanelNode<T>, panel_id: PanelId) -> Option<&mut P
 ///
 /// `Some(&PanelSplit<T>)` when `path` identifies a split node; otherwise
 /// `None`.
-fn find_split<'a, T>(
-  node: &'a PanelNode<T>,
-  path: &[PanelSplitBranch],
-) -> Option<&'a PanelSplit<T>> {
+fn find_split<'a, T>(node: &'a PanelNode<T>, path: &[PanelSplitBranch]) -> Option<&'a PanelSplit<T>> {
   let PanelNode::Split(split) = node else {
     return None;
   };
@@ -567,15 +535,11 @@ fn split_axis_size_in_node<T>(
   let first_ratio = split.ratio;
   let second_ratio = 1.0 - split.ratio;
   let (child, child_width, child_height) = match (split.axis, next) {
-    (PanelSplitAxis::Horizontal, PanelSplitBranch::First) => {
-      (&split.first, px(f32::from(width) * first_ratio), height)
-    }
+    (PanelSplitAxis::Horizontal, PanelSplitBranch::First) => (&split.first, px(f32::from(width) * first_ratio), height),
     (PanelSplitAxis::Horizontal, PanelSplitBranch::Second) => {
       (&split.second, px(f32::from(width) * second_ratio), height)
     }
-    (PanelSplitAxis::Vertical, PanelSplitBranch::First) => {
-      (&split.first, width, px(f32::from(height) * first_ratio))
-    }
+    (PanelSplitAxis::Vertical, PanelSplitBranch::First) => (&split.first, width, px(f32::from(height) * first_ratio)),
     (PanelSplitAxis::Vertical, PanelSplitBranch::Second) => {
       (&split.second, width, px(f32::from(height) * second_ratio))
     }
@@ -632,14 +596,7 @@ fn split_leaf_node<T>(
         return true;
       }
 
-      split_leaf_node(
-        &mut split.second,
-        panel_id,
-        axis,
-        new_leaf,
-        placement,
-        ratio,
-      )
+      split_leaf_node(&mut split.second, panel_id, axis, new_leaf, placement, ratio)
     }
   }
 }
@@ -679,8 +636,7 @@ fn remove_leaf_node<T>(node: &mut PanelNode<T>, panel_id: PanelId) -> Option<Pan
     return focused_panel_id;
   }
 
-  remove_leaf_node(&mut split.first, panel_id)
-    .or_else(|| remove_leaf_node(&mut split.second, panel_id))
+  remove_leaf_node(&mut split.first, panel_id).or_else(|| remove_leaf_node(&mut split.second, panel_id))
 }
 
 /// Returns the first leaf id in tree order.

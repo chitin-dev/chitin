@@ -8,8 +8,7 @@
 use std::rc::Rc;
 
 use gpui::{
-  App, ElementId, IntoElement, ParentElement, Styled, UniformListScrollHandle, Window, div, px,
-  uniform_list,
+  App, ElementId, IntoElement, ParentElement, Styled, UniformListScrollHandle, Window, div, px, uniform_list,
 };
 
 /// Default indent of tree items between levels.
@@ -135,16 +134,11 @@ where
   });
 
   let list = match scroll_handle {
-    Some(scroll_handle) => list.track_scroll(scroll_handle),
+    Some(scroll_handle) => list.track_scroll(&scroll_handle),
     None => list,
   };
 
-  div()
-    .flex()
-    .flex_1()
-    .min_h_0()
-    .w_full()
-    .child(list.size_full())
+  div().flex().flex_1().min_h_0().w_full().child(list.size_full())
 }
 
 #[cfg(test)]

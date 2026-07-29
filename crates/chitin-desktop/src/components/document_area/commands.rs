@@ -3,7 +3,7 @@
 use chitin_ui::components::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
-use gpui::Pixels;
+use gpui::{Context, Pixels, Window};
 
 use crate::{app::ChitinApp, components::document_area::state::OpenedProjectDocument};
 
@@ -38,8 +38,21 @@ impl ChitinApp {
   /// # Returns
   ///
   /// `true` when the panel exists and was split; otherwise `false`.
-  pub(crate) fn split_document_panel(&mut self, panel_id: PanelId, axis: PanelSplitAxis) -> bool {
-    self.document_panels.split_panel(panel_id, axis).is_some()
+  pub(crate) fn split_document_panel(
+    &mut self,
+    panel_id: PanelId,
+    axis: PanelSplitAxis,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> bool {
+    let active_content = self
+      .document_panels
+      .active_tab_payload(panel_id)
+      .map(|content| content.clone_for_split(window, cx));
+    self
+      .document_panels
+      .split_panel_with_content(panel_id, axis, active_content)
+      .is_some()
   }
 
   /// Activates a tab inside a document panel.
@@ -53,11 +66,7 @@ impl ChitinApp {
   /// # Returns
   ///
   /// `true` when the panel and tab exist; otherwise `false`.
-  pub(crate) fn activate_document_panel_tab(
-    &mut self,
-    panel_id: PanelId,
-    tab_id: PanelTabId,
-  ) -> bool {
+  pub(crate) fn activate_document_panel_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
     self.document_panels.activate_tab(panel_id, tab_id)
   }
 
@@ -138,10 +147,7 @@ impl ChitinApp {
   /// # Returns
   ///
   /// `true` when temporary target state changed; otherwise `false`.
-  pub(crate) fn update_document_panel_tab_drag_target(
-    &mut self,
-    target: PanelTabDropTarget,
-  ) -> bool {
+  pub(crate) fn update_document_panel_tab_drag_target(&mut self, target: PanelTabDropTarget) -> bool {
     self.document_panels.update_tab_drag_target(target)
   }
 
@@ -169,11 +175,7 @@ impl ChitinApp {
   /// # Returns
   ///
   /// `true` when the tab move succeeds; otherwise `false`.
-  pub(crate) fn drop_document_panel_tab(
-    &mut self,
-    drag: PanelTabDrag,
-    target_panel_id: PanelId,
-  ) -> bool {
+  pub(crate) fn drop_document_panel_tab(&mut self, drag: PanelTabDrag, target_panel_id: PanelId) -> bool {
     self.document_panels.drop_tab(drag, target_panel_id)
   }
 
@@ -212,9 +214,7 @@ impl ChitinApp {
     axis: PanelSplitAxis,
     start_position: Pixels,
   ) -> bool {
-    self
-      .document_panels
-      .start_resize(path, axis, start_position)
+    self.document_panels.start_resize(path, axis, start_position)
   }
 
   /// Updates the active document panel split resize.

@@ -15,19 +15,20 @@ use chitin_ui::{
   themes::builtins,
 };
 use gpui::{
-  Context, CursorStyle, FocusHandle, InteractiveElement, MouseButton, Render, Window, div,
-  prelude::*,
+  AnyView, Context, CursorStyle, FocusHandle, InteractiveElement, MouseButton, Render, Window, div, prelude::*,
 };
 
 use crate::{
   commands::workspace::ToggleWorkspace,
   components::{
     activity_bar::{ActiveActivity, render_activity_bar},
-    document_area::{DocumentPanelState, render_document_area},
+    document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::render_window_bar,
   },
 };
+
+pub use crate::components::document_area::state::WgpuDocumentViewFactory;
 
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
@@ -94,10 +95,7 @@ impl ChitinApp {
             }
           },
           Err(err) => {
-            eprintln!(
-              "Failed to determine current directory for workspace: {}",
-              err
-            );
+            eprintln!("Failed to determine current directory for workspace: {}", err);
             (None, None)
           }
         }
@@ -106,11 +104,8 @@ impl ChitinApp {
 
     // The workspace root starts expanded so first-level entries are visible
     // immediately after opening the desktop.
-    let project_sidebar_state = ProjectSidebarState::with_workspace_root(
-      workspace
-        .as_ref()
-        .map(|workspace| workspace.tree.root.path.as_path()),
-    );
+    let project_sidebar_state =
+      ProjectSidebarState::with_workspace_root(workspace.as_ref().map(|workspace| workspace.tree.root.path.as_path()));
 
     Self {
       workspace,
@@ -141,12 +136,44 @@ impl ChitinApp {
   ///
   /// A [`ChitinApp`] initialized like [`ChitinApp::new`], but with
   /// `project_sidebar_focus` stored for subsequent renders.
-  pub(crate) fn new_with_project_sidebar_focus(
-    project_path: Option<PathBuf>,
-    project_sidebar_focus: FocusHandle,
-  ) -> Self {
+  pub fn new_with_project_sidebar_focus(project_path: Option<PathBuf>, project_sidebar_focus: FocusHandle) -> Self {
     let mut app = Self::new(project_path);
     app.project_sidebar_focus = Some(project_sidebar_focus);
+    app
+  }
+
+  /// Creates app state with an experimental WGPU document tab.
+  ///
+  /// # Parameters
+  ///
+  /// `project_path` is forwarded to [`ChitinApp::new`] as the initial
+  /// workspace path.
+  ///
+  /// `project_sidebar_focus` is the GPUI focus handle tracked by the project
+  /// sidebar key context.
+  ///
+  /// `title` is the document tab title used for the WGPU viewport.
+  ///
+  /// `wgpu_panel` is the GPUI view that renders WGPU content.
+  ///
+  /// `clone_wgpu_panel` creates independent WGPU views for split panels.
+  ///
+  /// # Returns
+  ///
+  /// A [`ChitinApp`] initialized with the WGPU panel in the document area.
+  pub fn new_with_wgpu_document_panel(
+    project_path: Option<PathBuf>,
+    project_sidebar_focus: FocusHandle,
+    title: impl Into<String>,
+    wgpu_panel: impl Into<AnyView>,
+    clone_wgpu_panel: WgpuDocumentViewFactory,
+  ) -> Self {
+    let mut app = Self::new_with_project_sidebar_focus(project_path, project_sidebar_focus);
+    app.document_panels = DocumentPanelState::with_content(DocumentPanelContent::wgpu_interactive(
+      title,
+      wgpu_panel.into(),
+      clone_wgpu_panel,
+    ));
     app
   }
 
@@ -183,10 +210,7 @@ impl ChitinApp {
   ///
   /// A cloned [`FocusHandle`] for the root workbench layout.
   pub(crate) fn workbench_focus(&mut self, cx: &mut Context<Self>) -> FocusHandle {
-    self
-      .workbench_focus
-      .get_or_insert_with(|| cx.focus_handle())
-      .clone()
+    self.workbench_focus.get_or_insert_with(|| cx.focus_handle()).clone()
   }
 
   /// Returns the stable focus handle used by document panel tab shortcuts.
@@ -244,15 +268,11 @@ impl ChitinApp {
   ///
   /// This function returns `()` and mutates sidebar visibility plus keyboard
   /// focus.
-  pub(crate) fn toggle_workspace_with_focus(
-    &mut self,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) {
+  pub(crate) fn toggle_workspace_with_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.toggle_workspace_state();
     let focus = self.workspace_toggle_focus_target(cx);
 
-    window.focus(&focus);
+    window.focus(&focus, cx);
     cx.notify();
   }
 
@@ -313,15 +333,9 @@ impl ChitinApp {
   ///
   /// The approximate width available to the document panel root after removing
   /// the activity bar and visible project sidebar.
-  fn document_panel_root_width(
-    window_width: gpui::Pixels,
-    visible_sidebar_width: gpui::Pixels,
-  ) -> gpui::Pixels {
+  fn document_panel_root_width(window_width: gpui::Pixels, visible_sidebar_width: gpui::Pixels) -> gpui::Pixels {
     gpui::px(
-      (f32::from(window_width)
-        - f32::from(DEFAULT_ACTIVITY_BAR_WIDTH)
-        - f32::from(visible_sidebar_width))
-      .max(0.0),
+      (f32::from(window_width) - f32::from(DEFAULT_ACTIVITY_BAR_WIDTH) - f32::from(visible_sidebar_width)).max(0.0),
     )
   }
 
@@ -371,12 +385,11 @@ impl Render for ChitinApp {
     let document_panel_focus = self.document_panel_focus(cx);
     let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
     let document_panel_resize_axis = self.document_panel_resize_axis();
-    let visible_sidebar_width =
-      if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
-        self.project_sidebar_state.resize.width()
-      } else {
-        gpui::px(0.0)
-      };
+    let visible_sidebar_width = if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
+      self.project_sidebar_state.resize.width()
+    } else {
+      gpui::px(0.0)
+    };
 
     div()
       .flex()
@@ -395,10 +408,9 @@ impl Render for ChitinApp {
         document_panel_resize_axis == Some(PanelSplitAxis::Horizontal),
         |layout| layout.cursor(CursorStyle::ResizeLeftRight),
       )
-      .when(
-        document_panel_resize_axis == Some(PanelSplitAxis::Vertical),
-        |layout| layout.cursor(CursorStyle::ResizeUpDown),
-      )
+      .when(document_panel_resize_axis == Some(PanelSplitAxis::Vertical), |layout| {
+        layout.cursor(CursorStyle::ResizeUpDown)
+      })
       .on_mouse_move({
         let app = app.clone();
         move |event, window, cx| {
@@ -416,8 +428,7 @@ impl Render for ChitinApp {
 
           if let Some(axis) = document_panel_resize_axis {
             let bounds = window.bounds();
-            let document_root_width =
-              Self::document_panel_root_width(bounds.size.width, visible_sidebar_width);
+            let document_root_width = Self::document_panel_root_width(bounds.size.width, visible_sidebar_width);
             let document_root_height = Self::document_panel_root_height(bounds.size.height);
             let current_position = match axis {
               PanelSplitAxis::Horizontal => event.position.x,
@@ -425,11 +436,7 @@ impl Render for ChitinApp {
             };
 
             let _ = app.update(cx, |this, cx| {
-              if this.drag_document_panel_resize(
-                current_position,
-                document_root_width,
-                document_root_height,
-              ) {
+              if this.drag_document_panel_resize(current_position, document_root_width, document_root_height) {
                 cx.notify();
               }
             });
@@ -537,9 +544,6 @@ mod tests {
   /// Verifies that document panel height excludes the window bar.
   #[test]
   fn document_panel_root_height_should_exclude_window_bar() {
-    assert_eq!(
-      ChitinApp::document_panel_root_height(gpui::px(760.0)),
-      gpui::px(730.0)
-    );
+    assert_eq!(ChitinApp::document_panel_root_height(gpui::px(760.0)), gpui::px(730.0));
   }
 }

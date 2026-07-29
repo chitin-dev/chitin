@@ -6,7 +6,7 @@
 
 mod commands;
 mod render;
-mod state;
+pub(crate) mod state;
 
 #[cfg(test)]
 mod tests;

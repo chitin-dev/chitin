@@ -8,8 +8,8 @@
 use std::rc::Rc;
 
 use gpui::{
-  AnyElement, App, CursorStyle, Div, InteractiveElement, IntoElement, MouseButton, ParentElement,
-  Pixels, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*, px,
+  AnyElement, App, CursorStyle, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString,
+  StatefulInteractiveElement, Styled, Window, div, prelude::*, px,
 };
 
 use crate::{
@@ -188,9 +188,7 @@ impl SidebarResizeState {
       return false;
     };
 
-    self.resize_width(px(
-      f32::from(resize_drag.start_value()) + resize_drag.delta(current_x),
-    ));
+    self.resize_width(px(f32::from(resize_drag.start_value()) + resize_drag.delta(current_x)));
     //    |------------|----------|
     // 0            current_x  start_x
     // so the current_width = start_width + (current_x - start_x)

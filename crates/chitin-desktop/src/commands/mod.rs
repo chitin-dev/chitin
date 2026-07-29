@@ -104,7 +104,7 @@ impl ChitinApp {
 /// # Returns
 ///
 /// A vector of GPUI keybindings ready to pass to [`gpui::App::bind_keys`].
-pub(crate) fn default_key_bindings() -> Vec<gpui::KeyBinding> {
+pub fn default_key_bindings() -> Vec<gpui::KeyBinding> {
   workspace::default_key_bindings()
     .into_iter()
     .chain(tab::default_key_bindings())

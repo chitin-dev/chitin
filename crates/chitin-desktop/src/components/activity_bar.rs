@@ -80,19 +80,13 @@ impl ActiveActivity {
 /// # Returns
 ///
 /// An [`ActivityBarItem`] configured for Chitin desktop state updates.
-fn activity_item(
-  cx: &mut Context<ChitinApp>,
-  activity: ActiveActivity,
-  icon_path: &'static str,
-) -> ActivityBarItem {
-  ActivityBarItem::new(activity.id(), activity.title(), icon_path).on_click(cx.listener(
-    move |this, _, window, cx| {
-      this.active_activity = activity;
-      let focus = this.document_panel_focus(cx);
-      window.focus(&focus);
-      cx.notify();
-    },
-  ))
+fn activity_item(cx: &mut Context<ChitinApp>, activity: ActiveActivity, icon_path: &'static str) -> ActivityBarItem {
+  ActivityBarItem::new(activity.id(), activity.title(), icon_path).on_click(cx.listener(move |this, _, window, cx| {
+    this.active_activity = activity;
+    let focus = this.document_panel_focus(cx);
+    window.focus(&focus, cx);
+    cx.notify();
+  }))
 }
 
 /// Builds the Workspace activity item and routes clicks through commands.
@@ -107,10 +101,7 @@ fn activity_item(
 ///
 /// An [`ActivityBarItem`] that toggles the project workspace sidebar through
 /// the same command used by keyboard shortcuts.
-fn workspace_activity_item(
-  cx: &mut Context<ChitinApp>,
-  icon_path: &'static str,
-) -> ActivityBarItem {
+fn workspace_activity_item(cx: &mut Context<ChitinApp>, icon_path: &'static str) -> ActivityBarItem {
   ActivityBarItem::new(
     ActiveActivity::Workspace.id(),
     ActiveActivity::Workspace.title(),
@@ -119,7 +110,7 @@ fn workspace_activity_item(
   .on_click(cx.listener(move |this, _, window, cx| {
     this.dispatch_command(WorkspaceCommand::ToggleWorkspace.into(), cx);
     let focus = this.workspace_toggle_focus_target(cx);
-    window.focus(&focus);
+    window.focus(&focus, cx);
   }))
 }
 
@@ -144,10 +135,7 @@ pub fn render_activity_bar(
   ActivityBar::new()
     .theme(theme)
     .active_item(active_activity.id())
-    .item(workspace_activity_item(
-      cx,
-      "icons/activity-bar/codicon-workspace.svg",
-    ))
+    .item(workspace_activity_item(cx, "icons/activity-bar/codicon-workspace.svg"))
     .item(activity_item(
       cx,
       ActiveActivity::Search,

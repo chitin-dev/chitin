@@ -1,16 +1,28 @@
 //! Document panel state and transition logic.
 
-use std::path::{Path, PathBuf};
+use std::{
+  fmt,
+  path::{Path, PathBuf},
+  rc::Rc,
+};
 
 use chitin_ui::components::{
   panel::{
-    PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab,
-    PanelTabDrag, PanelTabDragState, PanelTabDropTarget, PanelTabId, PanelTabScrollState,
-    PanelTree,
+    PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag, PanelTabDragState,
+    PanelTabDropTarget, PanelTabId, PanelTabScrollState, PanelTree,
   },
   resize::ResizeGesture,
 };
-use gpui::Pixels;
+use gpui::{AnyView, App, Pixels, Window};
+
+pub type FreshWgpuSurfaceCallback = Rc<dyn Fn(&mut Window, &mut App) -> AnyView>;
+
+/// Factory used to create independent WGPU document views for split panels.
+#[derive(Clone)]
+pub struct WgpuDocumentViewFactory {
+  /// Shared callback that creates a fresh WGPU surface-backed view.
+  build: FreshWgpuSurfaceCallback,
+}
 
 /// Stable panel id used by the initial single document panel.
 pub(super) const DEFAULT_DOCUMENT_PANEL_ID: PanelId = PanelId::new(1);
@@ -30,6 +42,23 @@ pub struct OpenedProjectDocument {
   pub title: String,
 }
 
+/// Content shown by one tab in the desktop document panel tree.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DocumentPanelContent {
+  /// File document opened from the project workspace tree.
+  ProjectDocument(OpenedProjectDocument),
+  /// Experimental WGPU viewport hosted as a document-area panel.
+  #[allow(dead_code)]
+  WgpuInteractive {
+    /// Display title shown in the document tab strip.
+    title: String,
+    /// GPUI entity that owns the WGPU surface and interaction state.
+    view: AnyView,
+    /// Callback that creates an independent view for split-panel clones.
+    clone_view: WgpuDocumentViewFactory,
+  },
+}
+
 /// Resized document panel split target.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DocumentPanelResizeAnchor {
@@ -43,7 +72,7 @@ pub(crate) struct DocumentPanelResizeAnchor {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DocumentPanelState {
   /// Binary panel tree containing document tab stacks.
-  pub(crate) tree: PanelTree<OpenedProjectDocument>,
+  pub(crate) tree: PanelTree<DocumentPanelContent>,
   /// Current focused panel id.
   pub(crate) focused_panel_id: PanelId,
   /// Next panel identifier to allocate for a split leaf.
@@ -76,6 +105,159 @@ impl OpenedProjectDocument {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string()),
+    }
+  }
+}
+
+impl WgpuDocumentViewFactory {
+  /// Creates a factory for independent WGPU document views.
+  ///
+  /// # Parameters
+  ///
+  /// `build` creates a fresh GPUI view from the current window and app context.
+  ///
+  /// # Returns
+  ///
+  /// A cloneable factory handle suitable for storing in tab payloads.
+  pub fn new(build: impl Fn(&mut Window, &mut App) -> AnyView + 'static) -> Self {
+    Self { build: Rc::new(build) }
+  }
+
+  /// Builds a fresh WGPU document view.
+  ///
+  /// # Parameters
+  ///
+  /// `window` owns the GPUI surface allocation API.
+  ///
+  /// `cx` creates the GPUI entity that renders the surface.
+  ///
+  /// # Returns
+  ///
+  /// A new [`AnyView`] with independent surface and entity state.
+  pub fn build(&self, window: &mut Window, cx: &mut App) -> AnyView {
+    (self.build)(window, cx)
+  }
+}
+
+impl fmt::Debug for WgpuDocumentViewFactory {
+  /// Formats the opaque factory for debug output.
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.write_str("WgpuDocumentViewFactory")
+  }
+}
+
+impl PartialEq for WgpuDocumentViewFactory {
+  /// Compares factory identity by shared callback allocation.
+  fn eq(&self, other: &Self) -> bool {
+    Rc::ptr_eq(&self.build, &other.build)
+  }
+}
+
+impl Eq for WgpuDocumentViewFactory {}
+
+impl DocumentPanelContent {
+  /// Creates document-panel content for a workspace file.
+  ///
+  /// # Parameters
+  ///
+  /// `document` is the opened project file descriptor.
+  ///
+  /// # Returns
+  ///
+  /// A [`DocumentPanelContent`] value that renders with the project document
+  /// placeholder until a real editor is available.
+  pub(crate) fn project(document: OpenedProjectDocument) -> Self {
+    Self::ProjectDocument(document)
+  }
+
+  /// Creates document-panel content for the experimental WGPU viewport.
+  ///
+  /// # Parameters
+  ///
+  /// `title` is the tab-strip label for the WGPU panel.
+  ///
+  /// `view` is the GPUI entity that renders and owns WGPU interaction state.
+  ///
+  /// # Returns
+  ///
+  /// A [`DocumentPanelContent`] value that can be inserted into the panel tree.
+  #[allow(dead_code)]
+  pub(crate) fn wgpu_interactive(title: impl Into<String>, view: AnyView, clone_view: WgpuDocumentViewFactory) -> Self {
+    Self::WgpuInteractive {
+      title: title.into(),
+      view,
+      clone_view,
+    }
+  }
+
+  /// Returns the tab title for this document-panel content.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// A string slice suitable for the document panel tab strip.
+  pub(crate) fn title(&self) -> &str {
+    match self {
+      Self::ProjectDocument(document) => document.title.as_str(),
+      Self::WgpuInteractive { title, .. } => title.as_str(),
+    }
+  }
+
+  /// Returns the project document payload when this tab holds one.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads `self`.
+  ///
+  /// # Returns
+  ///
+  /// `Some(&OpenedProjectDocument)` for project-file tabs; otherwise `None`.
+  #[cfg(test)]
+  fn project_document(&self) -> Option<&OpenedProjectDocument> {
+    match self {
+      Self::ProjectDocument(document) => Some(document),
+      Self::WgpuInteractive { .. } => None,
+    }
+  }
+
+  /// Reports whether this content is a project document with the given path.
+  ///
+  /// # Parameters
+  ///
+  /// `path` is the project path being opened or focused.
+  ///
+  /// # Returns
+  ///
+  /// `true` when this tab already represents `path`; otherwise `false`.
+  fn matches_project_path(&self, path: &Path) -> bool {
+    match self {
+      Self::ProjectDocument(document) => document.path == path,
+      Self::WgpuInteractive { .. } => false,
+    }
+  }
+
+  /// Creates an independent payload for a split panel.
+  ///
+  /// # Parameters
+  ///
+  /// `window` owns any surface allocation required by WGPU payloads.
+  ///
+  /// `cx` creates any GPUI entities required by cloned payloads.
+  ///
+  /// # Returns
+  ///
+  /// A payload that can be inserted into the newly split panel.
+  pub(crate) fn clone_for_split(&self, window: &mut Window, cx: &mut App) -> Self {
+    match self {
+      Self::ProjectDocument(document) => Self::ProjectDocument(document.clone()),
+      Self::WgpuInteractive { title, clone_view, .. } => Self::WgpuInteractive {
+        title: title.clone(),
+        view: clone_view.build(window, cx),
+        clone_view: clone_view.clone(),
+      },
     }
   }
 }
@@ -113,11 +295,25 @@ impl DocumentPanelState {
   ///
   /// A [`DocumentPanelState`] with a single leaf panel and one active tab.
   pub(crate) fn new(document: OpenedProjectDocument) -> Self {
+    Self::with_content(DocumentPanelContent::project(document))
+  }
+
+  /// Creates document panel state with one arbitrary content tab.
+  ///
+  /// # Parameters
+  ///
+  /// `content` is the first document-area payload to show in the root panel.
+  ///
+  /// # Returns
+  ///
+  /// A [`DocumentPanelState`] with a single leaf panel and one active tab.
+  pub(crate) fn with_content(content: DocumentPanelContent) -> Self {
+    let title = content.title().to_string();
     Self {
       tree: PanelTree::single_leaf(PanelLeaf::new(DEFAULT_DOCUMENT_PANEL_ID).tab(PanelTab::new(
         DEFAULT_DOCUMENT_TAB_ID,
-        document.title.clone(),
-        document,
+        title,
+        content,
       ))),
       focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
@@ -150,14 +346,16 @@ impl DocumentPanelState {
     if let Some(tab_id) = leaf
       .tabs
       .iter()
-      .find(|tab| tab.payload.path == document.path)
+      .find(|tab| tab.payload.matches_project_path(&document.path))
       .map(|tab| tab.id)
     {
       return self.activate_tab(panel_id, tab_id);
     }
 
     let tab_id = self.allocate_tab_id();
-    let tab = PanelTab::new(tab_id, document.title.clone(), document);
+    let content = DocumentPanelContent::project(document);
+    let title = content.title().to_string();
+    let tab = PanelTab::new(tab_id, title, content);
     let Some(leaf) = self.tree.leaf_mut(panel_id) else {
       return false;
     };
@@ -301,7 +499,23 @@ impl DocumentPanelState {
   /// otherwise `None`.
   #[cfg(test)]
   pub(crate) fn active_document(&self) -> Option<&OpenedProjectDocument> {
-    self.tree.first_active_tab().map(|(_, tab)| &tab.payload)
+    self
+      .tree
+      .first_active_tab()
+      .and_then(|(_, tab)| tab.payload.project_document())
+  }
+
+  /// Returns the active tab payload for one document panel.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the panel whose active tab should be read.
+  ///
+  /// # Returns
+  ///
+  /// `Some(&DocumentPanelContent)` when the panel has an active tab.
+  pub(crate) fn active_tab_payload(&self, panel_id: PanelId) -> Option<&DocumentPanelContent> {
+    self.tree.leaf(panel_id)?.active_tab().map(|tab| &tab.payload)
   }
 
   /// Splits one document panel and copies its active tab to the new panel.
@@ -320,16 +534,42 @@ impl DocumentPanelState {
   ///
   /// `Some(PanelId)` with the new panel id when splitting succeeds; otherwise
   /// `None`.
+  #[cfg(test)]
   pub(crate) fn split_panel(&mut self, panel_id: PanelId, axis: PanelSplitAxis) -> Option<PanelId> {
-    let mut active_tab = self.tree.leaf(panel_id)?.active_tab().cloned();
+    let active_content = self.tree.leaf(panel_id)?.active_tab().map(|tab| tab.payload.clone());
+    self.split_panel_with_content(panel_id, axis, active_content)
+  }
+
+  /// Splits one document panel with a caller-provided active-tab payload copy.
+  ///
+  /// # Parameters
+  ///
+  /// `panel_id` identifies the source panel to split.
+  ///
+  /// `axis` controls whether the new split is horizontal or vertical.
+  ///
+  /// `active_content` is the independent payload to install in the new panel.
+  ///
+  /// # Returns
+  ///
+  /// `Some(PanelId)` with the new panel id when splitting succeeds; otherwise
+  /// `None`.
+  pub(crate) fn split_panel_with_content(
+    &mut self,
+    panel_id: PanelId,
+    axis: PanelSplitAxis,
+    active_content: Option<DocumentPanelContent>,
+  ) -> Option<PanelId> {
+    self.tree.leaf(panel_id)?;
+    // this equals to if self.tree.leaf(panel_id).is_none() { return None; }
+
     let new_panel_id = self.allocate_panel_id();
     let mut new_leaf = PanelLeaf::new(new_panel_id);
 
-    if let Some(active_tab) = active_tab.as_mut() {
-      active_tab.id = self.allocate_tab_id();
-    }
-    if let Some(active_tab) = active_tab {
-      new_leaf.add_tab(active_tab);
+    if let Some(active_content) = active_content {
+      let title = active_content.title().to_string();
+      let tab = PanelTab::new(self.allocate_tab_id(), title, active_content);
+      new_leaf.add_tab(tab);
     }
 
     let split = self
@@ -448,10 +688,7 @@ impl DocumentPanelState {
     if tab_drag.drag != drag || target.panel_id != target_panel_id {
       return false;
     }
-    if !self
-      .tree
-      .move_tab(drag.source_panel_id, drag.tab_id, target)
-    {
+    if !self.tree.move_tab(drag.source_panel_id, drag.tab_id, target) {
       return false;
     }
 
@@ -487,12 +724,7 @@ impl DocumentPanelState {
   ///
   /// `true` when the split path exists and resize state was recorded;
   /// otherwise `false`.
-  pub(crate) fn start_resize(
-    &mut self,
-    path: PanelSplitPath,
-    axis: PanelSplitAxis,
-    start_position: Pixels,
-  ) -> bool {
+  pub(crate) fn start_resize(&mut self, path: PanelSplitPath, axis: PanelSplitAxis, start_position: Pixels) -> bool {
     let Some(start_ratio) = self.tree.split_ratio(&path) else {
       return false;
     };
@@ -518,19 +750,13 @@ impl DocumentPanelState {
   /// # Returns
   ///
   /// `true` when an active drag changed a split ratio; otherwise `false`.
-  pub(crate) fn drag_resize(
-    &mut self,
-    current_position: Pixels,
-    root_width: Pixels,
-    root_height: Pixels,
-  ) -> bool {
+  pub(crate) fn drag_resize(&mut self, current_position: Pixels, root_width: Pixels, root_height: Pixels) -> bool {
     let Some(resize_drag) = &self.resize_drag else {
       return false;
     };
-    let Some(available_size) =
-      self
-        .tree
-        .split_axis_size(&resize_drag.anchor().path, root_width, root_height)
+    let Some(available_size) = self
+      .tree
+      .split_axis_size(&resize_drag.anchor().path, root_width, root_height)
     else {
       return false;
     };
@@ -567,10 +793,7 @@ impl DocumentPanelState {
   ///
   /// `Some(PanelSplitAxis)` when a resize drag is active; otherwise `None`.
   pub(crate) fn resize_axis(&self) -> Option<PanelSplitAxis> {
-    self
-      .resize_drag
-      .as_ref()
-      .map(|resize_drag| resize_drag.anchor().axis)
+    self.resize_drag.as_ref().map(|resize_drag| resize_drag.anchor().axis)
   }
 
   /// Allocates the next document panel identifier.

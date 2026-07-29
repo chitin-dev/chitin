@@ -238,27 +238,15 @@ fn bench_virtual_viewport_selection(c: &mut Criterion) {
     let end_start = rows.len().saturating_sub(VIEWPORT_ROW_COUNT);
 
     group.throughput(Throughput::Elements(VIEWPORT_ROW_COUNT as u64));
-    group.bench_with_input(
-      BenchmarkId::new("first_viewport", row_count),
-      &rows,
-      |b, rows| {
-        b.iter(|| collect_viewport_rows(black_box(rows), 0, VIEWPORT_ROW_COUNT));
-      },
-    );
-    group.bench_with_input(
-      BenchmarkId::new("middle_viewport", row_count),
-      &rows,
-      |b, rows| {
-        b.iter(|| collect_viewport_rows(black_box(rows), middle_start, VIEWPORT_ROW_COUNT));
-      },
-    );
-    group.bench_with_input(
-      BenchmarkId::new("last_viewport", row_count),
-      &rows,
-      |b, rows| {
-        b.iter(|| collect_viewport_rows(black_box(rows), end_start, VIEWPORT_ROW_COUNT));
-      },
-    );
+    group.bench_with_input(BenchmarkId::new("first_viewport", row_count), &rows, |b, rows| {
+      b.iter(|| collect_viewport_rows(black_box(rows), 0, VIEWPORT_ROW_COUNT));
+    });
+    group.bench_with_input(BenchmarkId::new("middle_viewport", row_count), &rows, |b, rows| {
+      b.iter(|| collect_viewport_rows(black_box(rows), middle_start, VIEWPORT_ROW_COUNT));
+    });
+    group.bench_with_input(BenchmarkId::new("last_viewport", row_count), &rows, |b, rows| {
+      b.iter(|| collect_viewport_rows(black_box(rows), end_start, VIEWPORT_ROW_COUNT));
+    });
   }
 
   group.finish();

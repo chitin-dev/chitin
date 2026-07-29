@@ -442,9 +442,7 @@ impl ProjectWorkspace {
   pub fn open(path: impl AsRef<Path>) -> Result<Self, ProjectWorkspaceError> {
     let path_reference = path.as_ref();
     if !path_reference.exists() {
-      return Err(ProjectWorkspaceError::NotFound(
-        path_reference.to_path_buf(),
-      ));
+      return Err(ProjectWorkspaceError::NotFound(path_reference.to_path_buf()));
     }
 
     let root = path_reference
@@ -481,9 +479,7 @@ impl ProjectWorkspace {
   ///
   /// Returns [`ProjectWorkspaceError`] when the directory cannot be read or a
   /// child entry cannot be classified.
-  pub fn load_directory_children(
-    path: impl AsRef<Path>,
-  ) -> Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError> {
+  pub fn load_directory_children(path: impl AsRef<Path>) -> Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError> {
     Ok(build_directory_entry(path.as_ref())?.children)
   }
 }
@@ -515,8 +511,7 @@ mod tests {
     /// `Ok(TestProject)` when the temporary directory was created.
     fn new(name: &str) -> Result<Self, Box<dyn Error>> {
       let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-      let root =
-        std::env::temp_dir().join(format!("chitin-{name}-{}-{timestamp}", std::process::id()));
+      let root = std::env::temp_dir().join(format!("chitin-{name}-{}-{timestamp}", std::process::id()));
 
       fs::create_dir(&root)?;
 
@@ -617,11 +612,7 @@ mod tests {
   ///
   /// Child names in their current vector order.
   fn child_names(entry: &ProjectTreeEntry) -> Vec<&str> {
-    entry
-      .children
-      .iter()
-      .map(|child| child.name.as_str())
-      .collect()
+    entry.children.iter().map(|child| child.name.as_str()).collect()
   }
 
   #[test]
@@ -645,9 +636,7 @@ mod tests {
   fn is_not_displayed_directory_should_not_hide_regular_or_generated_directory() {
     assert!(!is_not_displayed_directory(Path::new("/project/src")));
     assert!(!is_not_displayed_directory(Path::new("/project/target")));
-    assert!(!is_not_displayed_directory(Path::new(
-      "/project/node_modules"
-    )));
+    assert!(!is_not_displayed_directory(Path::new("/project/node_modules")));
   }
 
   #[test]
@@ -740,10 +729,7 @@ mod tests {
 
     let project = TestProject::new("symlinked-directory")?;
     project.touch("external-data/sample.pdb")?;
-    symlink(
-      project.path().join("external-data"),
-      project.path().join("linked-data"),
-    )?;
+    symlink(project.path().join("external-data"), project.path().join("linked-data"))?;
 
     let workspace = ProjectWorkspace::open(project.path())?;
     let linked = workspace
@@ -760,8 +746,7 @@ mod tests {
   }
 
   #[test]
-  fn project_workspace_open_should_not_recursively_load_nested_directories()
-  -> Result<(), Box<dyn Error>> {
+  fn project_workspace_open_should_not_recursively_load_nested_directories() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("shallow-tree")?;
     project.touch("src/main.rs")?;
 
@@ -779,8 +764,7 @@ mod tests {
   }
 
   #[test]
-  fn project_workspace_load_directory_children_should_load_on_demand() -> Result<(), Box<dyn Error>>
-  {
+  fn project_workspace_load_directory_children_should_load_on_demand() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("lazy-children")?;
     project.touch("target/debug/chitin-desktop")?;
 

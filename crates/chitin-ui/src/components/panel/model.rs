@@ -120,9 +120,7 @@ impl PanelSplitPath {
   ///
   /// A [`PanelSplitPath`] that identifies the root node when it is a split.
   pub fn root() -> Self {
-    Self {
-      branches: Vec::new(),
-    }
+    Self { branches: Vec::new() }
   }
 
   /// Returns a child path below this path. This function will not modify the

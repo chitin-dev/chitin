@@ -6,26 +6,22 @@
 
 use std::path::{Path, PathBuf};
 
-use chitin_core::workspace::{
-  ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace, ProjectWorkspaceError,
-};
+use chitin_core::workspace::{ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace, ProjectWorkspaceError};
 use chitin_ui::{
   components::tree::{
-    DEFAULT_TREE_INDENT, DEFAULT_TREE_ROW_HEIGHT, TreeItemRow, TreeMessageRow, TreeRow,
-    virtual_tree_rows_with_scroll,
+    DEFAULT_TREE_INDENT, DEFAULT_TREE_ROW_HEIGHT, TreeItemRow, TreeMessageRow, TreeRow, virtual_tree_rows_with_scroll,
   },
   themes::{UIThemes, builtins},
 };
 use gpui::{
-  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, ScrollStrategy,
-  SharedString, Styled, Task, WeakEntity, div, prelude::*, px, svg,
+  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, ScrollStrategy, SharedString, Styled, Task,
+  WeakEntity, div, prelude::*, px, svg,
 };
 
 use crate::{
   app::ChitinApp,
   components::{
-    activity_bar::ActiveActivity, document_area::OpenedProjectDocument,
-    project_sidebar::ProjectSidebarState,
+    activity_bar::ActiveActivity, document_area::OpenedProjectDocument, project_sidebar::ProjectSidebarState,
   },
 };
 
@@ -57,13 +53,8 @@ impl ChitinApp {
   ///
   /// This function returns `()`. It mutates workspace/sidebar state directly
   /// and schedules background child loading when expansion requires it.
-  pub(crate) fn navigate_project_tree(
-    &mut self,
-    navigation: WorkspaceTreeNavigation,
-    cx: &mut Context<Self>,
-  ) {
-    if let ProjectTreeActivation::LoadChildren(path) = self.navigate_project_tree_state(navigation)
-    {
+  pub(crate) fn navigate_project_tree(&mut self, navigation: WorkspaceTreeNavigation, cx: &mut Context<Self>) {
+    if let ProjectTreeActivation::LoadChildren(path) = self.navigate_project_tree_state(navigation) {
       spawn_project_children_load(path, cx).detach();
     }
 
@@ -90,10 +81,7 @@ impl ChitinApp {
   ///
   /// This function performs no filesystem I/O and does not call `cx.notify()`;
   /// callers are responsible for follow-up work.
-  fn navigate_project_tree_state(
-    &mut self,
-    navigation: WorkspaceTreeNavigation,
-  ) -> ProjectTreeActivation {
+  fn navigate_project_tree_state(&mut self, navigation: WorkspaceTreeNavigation) -> ProjectTreeActivation {
     if !self.project_tree_navigation_enabled() {
       return ProjectTreeActivation::None;
     }
@@ -160,21 +148,14 @@ impl ChitinApp {
   ///
   /// `true` when focus was moved to a visible path; `false` when no workspace
   /// or visible tree row exists.
-  fn focus_project_tree_entry(
-    &mut self,
-    target: ProjectTreeFocusTarget,
-    scroll_strategy: ScrollStrategy,
-  ) -> bool {
+  fn focus_project_tree_entry(&mut self, target: ProjectTreeFocusTarget, scroll_strategy: ScrollStrategy) -> bool {
     let Some(workspace) = self.workspace.as_ref() else {
       return false;
     };
 
     let rows = visible_workspace_tree_rows(&workspace.tree.root, &self.project_sidebar_state);
     let focusable_rows = focusable_workspace_tree_rows(&rows);
-    let paths = focusable_rows
-      .iter()
-      .map(|(_, path)| path.clone())
-      .collect::<Vec<_>>();
+    let paths = focusable_rows.iter().map(|(_, path)| path.clone()).collect::<Vec<_>>();
     let Some(target_index) = project_tree_focus_target_index(
       &paths,
       self.project_sidebar_state.focused_path.as_deref(),
@@ -186,9 +167,7 @@ impl ChitinApp {
 
     let (row_index, path) = focusable_rows[target_index].clone();
     self.project_sidebar_state.focus_entry(&path);
-    self
-      .project_sidebar_state
-      .reveal_tree_row(row_index, scroll_strategy);
+    self.project_sidebar_state.reveal_tree_row(row_index, scroll_strategy);
     true
   }
 
@@ -211,8 +190,7 @@ impl ChitinApp {
   /// This function returns `()`. It mutates app state directly and detaches any
   /// required lazy-loading task.
   pub(crate) fn activate_project_tree_entry(&mut self, path: &Path, cx: &mut Context<Self>) {
-    if let ProjectTreeActivation::LoadChildren(path) = self.activate_project_tree_entry_state(path)
-    {
+    if let ProjectTreeActivation::LoadChildren(path) = self.activate_project_tree_entry_state(path) {
       spawn_project_children_load(path, cx).detach();
     }
   }
@@ -315,18 +293,10 @@ impl ChitinApp {
       return ProjectTreeToggle::None;
     }
 
-    self
-      .project_sidebar_state
-      .expanded_paths
-      .insert(path.to_path_buf());
+    self.project_sidebar_state.expanded_paths.insert(path.to_path_buf());
     log::trace!("Newly expanded path: {:?}", path);
 
-    if entry.children.is_empty()
-      && self
-        .project_sidebar_state
-        .loading_paths
-        .insert(path.to_path_buf())
-    {
+    if entry.children.is_empty() && self.project_sidebar_state.loading_paths.insert(path.to_path_buf()) {
       return ProjectTreeToggle::LoadChildren(path.to_path_buf());
     }
 
@@ -351,11 +321,7 @@ impl ChitinApp {
   ///
   /// This function returns `()`. It mutates loading state and, on success,
   /// stores loaded children in the matching tree entry.
-  fn apply_project_children_load(
-    &mut self,
-    path: &Path,
-    result: Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError>,
-  ) {
+  fn apply_project_children_load(&mut self, path: &Path, result: Result<Vec<ProjectTreeEntry>, ProjectWorkspaceError>) {
     self.project_sidebar_state.loading_paths.remove(path);
 
     let Ok(children) = result else {
@@ -364,10 +330,7 @@ impl ChitinApp {
     };
 
     if !self.project_sidebar_state.expanded_paths.contains(path) {
-      log::trace!(
-        "User collapsed this path before loading completed: {:?}",
-        path
-      );
+      log::trace!("User collapsed this path before loading completed: {:?}", path);
       return;
     }
 
@@ -499,10 +462,7 @@ fn spawn_project_children_load(path: PathBuf, cx: &mut Context<ChitinApp>) -> Ta
 ///
 /// `Some(&mut ProjectTreeEntry)` for the matching entry, or `None` when the
 /// path is not present in the loaded tree.
-fn find_project_entry_mut<'a>(
-  entry: &'a mut ProjectTreeEntry,
-  path: &Path,
-) -> Option<&'a mut ProjectTreeEntry> {
+fn find_project_entry_mut<'a>(entry: &'a mut ProjectTreeEntry, path: &Path) -> Option<&'a mut ProjectTreeEntry> {
   if entry.path == path {
     return Some(entry);
   }
@@ -525,18 +485,12 @@ fn find_project_entry_mut<'a>(
 ///
 /// `Some(&ProjectTreeEntry)` for the matching entry, or `None` when the path is
 /// not present in the loaded tree.
-fn find_project_entry<'a>(
-  entry: &'a ProjectTreeEntry,
-  path: &Path,
-) -> Option<&'a ProjectTreeEntry> {
+fn find_project_entry<'a>(entry: &'a ProjectTreeEntry, path: &Path) -> Option<&'a ProjectTreeEntry> {
   if entry.path == path {
     return Some(entry);
   }
 
-  entry
-    .children
-    .iter()
-    .find_map(|child| find_project_entry(child, path))
+  entry.children.iter().find_map(|child| find_project_entry(child, path))
 }
 
 /// Desktop-specific payload for one workspace tree item row.
@@ -633,10 +587,7 @@ fn visible_workspace_tree_rows(
 ///
 /// A `Vec<PathBuf>` containing the path of each visible entry in render order.
 #[cfg(test)]
-fn visible_workspace_entry_paths(
-  entry: &ProjectTreeEntry,
-  state: &ProjectSidebarState,
-) -> Vec<PathBuf> {
+fn visible_workspace_entry_paths(entry: &ProjectTreeEntry, state: &ProjectSidebarState) -> Vec<PathBuf> {
   let rows = visible_workspace_tree_rows(entry, state);
   focusable_workspace_tree_rows(&rows)
     .into_iter()
@@ -708,9 +659,7 @@ fn project_tree_focus_target_index(
     ProjectTreeFocusTarget::First => 0,
     ProjectTreeFocusTarget::Last => paths.len() - 1,
     ProjectTreeFocusTarget::Previous => current_index.unwrap_or(0).saturating_sub(1),
-    ProjectTreeFocusTarget::Next => current_index
-      .map(|index| (index + 1).min(paths.len() - 1))
-      .unwrap_or(0),
+    ProjectTreeFocusTarget::Next => current_index.map(|index| (index + 1).min(paths.len() - 1)).unwrap_or(0),
   })
 }
 
@@ -786,16 +735,10 @@ fn collect_visible_workspace_tree_rows(
 /// # Returns
 ///
 /// A GPUI `Div` for the rendered row.
-fn render_workspace_row(
-  row: TreeRow<WorkspaceEntryRow>,
-  theme: UIThemes,
-  app: &WeakEntity<ChitinApp>,
-) -> gpui::Div {
+fn render_workspace_row(row: TreeRow<WorkspaceEntryRow>, theme: UIThemes, app: &WeakEntity<ChitinApp>) -> gpui::Div {
   match row {
     TreeRow::Item(row) => render_workspace_entry_row(row, theme, app),
-    TreeRow::Message(TreeMessageRow { label, depth }) => {
-      render_workspace_tree_message(label, theme, depth)
-    }
+    TreeRow::Message(TreeMessageRow { label, depth }) => render_workspace_tree_message(label, theme, depth),
   }
 }
 
@@ -831,19 +774,11 @@ fn render_workspace_entry_row(
 
   let is_dir = kind == ProjectTreeEntryKind::Directory;
   let item_icon = if is_dir {
-    if expanded {
-      FOLDER_OPEN_ICON
-    } else {
-      FOLDER_CLOSED_ICON
-    }
+    if expanded { FOLDER_OPEN_ICON } else { FOLDER_CLOSED_ICON }
   } else {
     FILE_ICON
   };
-  let list_icon = if expanded {
-    LIST_OPEN_ICON
-  } else {
-    LIST_CLOSED_ICON
-  };
+  let list_icon = if expanded { LIST_OPEN_ICON } else { LIST_CLOSED_ICON };
 
   let mut row = div()
     .flex()
@@ -863,13 +798,9 @@ fn render_workspace_entry_row(
     .text_color(theme.text.secondary)
     .hover(move |style| {
       if selected {
-        style
-          .bg(theme.background.selection)
-          .text_color(theme.text.primary)
+        style.bg(theme.background.selection).text_color(theme.text.primary)
       } else {
-        style
-          .bg(theme.background.hover)
-          .text_color(theme.text.primary)
+        style.bg(theme.background.hover).text_color(theme.text.primary)
       }
     })
     .child(
@@ -888,17 +819,12 @@ fn render_workspace_entry_row(
         }),
     )
     .child(
-      div()
-        .flex()
-        .items_center()
-        .justify_center()
-        .size(TREE_ICON_SIZE)
-        .child(
-          svg()
-            .path(item_icon)
-            .size(TREE_ICON_SIZE)
-            .text_color(theme.text.secondary),
-        ),
+      div().flex().items_center().justify_center().size(TREE_ICON_SIZE).child(
+        svg()
+          .path(item_icon)
+          .size(TREE_ICON_SIZE)
+          .text_color(theme.text.secondary),
+      ),
     )
     .child(
       div()
@@ -938,20 +864,14 @@ fn render_workspace_entry_row(
 /// # Returns
 ///
 /// A GPUI `Div` for the non-interactive message row.
-fn render_workspace_tree_message(
-  message: impl Into<SharedString>,
-  theme: UIThemes,
-  depth: usize,
-) -> gpui::Div {
+fn render_workspace_tree_message(message: impl Into<SharedString>, theme: UIThemes, depth: usize) -> gpui::Div {
   div()
     .flex()
     .items_center()
     // Match entry row width so status-row backgrounds align with tree rows.
     .w_full()
     .h(DEFAULT_TREE_ROW_HEIGHT)
-    .pl(px(
-      depth as f32 * DEFAULT_TREE_INDENT + TREE_ICON_SIZE_VALUE * 2.0,
-    ))
+    .pl(px(depth as f32 * DEFAULT_TREE_INDENT + TREE_ICON_SIZE_VALUE * 2.0))
     .pr_2()
     .text_xs()
     .text_color(theme.text.disabled)
@@ -988,8 +908,7 @@ mod tests {
     /// `Ok(TestProject)` when the temporary directory was created.
     fn new(name: &str) -> Result<Self, Box<dyn Error>> {
       let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-      let root =
-        std::env::temp_dir().join(format!("chitin-{name}-{}-{timestamp}", std::process::id()));
+      let root = std::env::temp_dir().join(format!("chitin-{name}-{}-{timestamp}", std::process::id()));
 
       fs::create_dir(&root)?;
 
@@ -1054,8 +973,7 @@ mod tests {
   /// Verifies that file activation opens and selects a document.
   #[cfg(unix)]
   #[test]
-  fn activate_project_tree_file_should_open_document_and_select_path() -> Result<(), Box<dyn Error>>
-  {
+  fn activate_project_tree_file_should_open_document_and_select_path() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("open-tree-file")?;
     let entry_path = project.path().join(non_utf8_name());
     fs::write(&entry_path, "")?;
@@ -1210,12 +1128,7 @@ mod tests {
     app.project_sidebar_state.focus_entry(&entry_path);
     let activation = app.navigate_project_tree_state(WorkspaceTreeNavigation::ActivateFocused);
 
-    assert!(
-      app
-        .project_sidebar_state
-        .expanded_paths
-        .contains(&entry_path)
-    );
+    assert!(app.project_sidebar_state.expanded_paths.contains(&entry_path));
 
     let ProjectTreeActivation::LoadChildren(load_path) = activation else {
       return Err("focused directory should request lazy child loading".into());
@@ -1228,8 +1141,7 @@ mod tests {
   /// Verifies that directory activation focuses without opening a document.
   #[cfg(unix)]
   #[test]
-  fn activate_project_tree_directory_should_focus_without_selecting_document()
-  -> Result<(), Box<dyn Error>> {
+  fn activate_project_tree_directory_should_focus_without_selecting_document() -> Result<(), Box<dyn Error>> {
     let project = TestProject::new("activate-tree-directory")?;
     let child_dir = project.path().join(non_utf8_name());
     fs::create_dir(&child_dir)?;
@@ -1253,12 +1165,7 @@ mod tests {
       app.project_sidebar_state.focused_path.as_deref(),
       Some(entry_path.as_path())
     );
-    assert!(
-      app
-        .project_sidebar_state
-        .expanded_paths
-        .contains(&entry_path)
-    );
+    assert!(app.project_sidebar_state.expanded_paths.contains(&entry_path));
 
     let ProjectTreeActivation::LoadChildren(load_path) = activation else {
       return Err("directory activation should request lazy child loading".into());
@@ -1290,18 +1197,8 @@ mod tests {
 
     let toggle = app.toggle_project_tree_entry_state(&entry_path);
 
-    assert!(
-      app
-        .project_sidebar_state
-        .expanded_paths
-        .contains(&entry_path)
-    );
-    assert!(
-      app
-        .project_sidebar_state
-        .loading_paths
-        .contains(&entry_path)
-    );
+    assert!(app.project_sidebar_state.expanded_paths.contains(&entry_path));
+    assert!(app.project_sidebar_state.loading_paths.contains(&entry_path));
 
     let ProjectTreeToggle::LoadChildren(load_path) = toggle else {
       return Err("directory toggle should request lazy child loading".into());

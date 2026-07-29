@@ -1,15 +1,15 @@
 use std::path::Path;
 
 use chitin_ui::components::panel::{
-  PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelTab, PanelTabDrag, PanelTabDragState,
-  PanelTabDropTarget, PanelTabId, PanelTabScrollState, PanelTree,
+  PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelTab, PanelTabDrag, PanelTabDragState, PanelTabDropTarget,
+  PanelTabId, PanelTabScrollState, PanelTree,
 };
 use gpui::{SharedString, px};
 
 use super::{
   DocumentPanelState, OpenedProjectDocument,
   state::{
-    DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
+    DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, DocumentPanelContent, FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
     FIRST_DYNAMIC_DOCUMENT_TAB_ID,
   },
 };
@@ -24,11 +24,20 @@ use super::{
 ///
 /// An [`OpenedProjectDocument`] rooted under a stable test directory.
 fn test_document(name: &str) -> OpenedProjectDocument {
-  OpenedProjectDocument::new(
-    Path::new("/tmp/chitin-document-panel-test")
-      .join(name)
-      .as_path(),
-  )
+  OpenedProjectDocument::new(Path::new("/tmp/chitin-document-panel-test").join(name).as_path())
+}
+
+/// Creates project-document content for a test tab.
+///
+/// # Parameters
+///
+/// `name` is the file name used for the document path and title.
+///
+/// # Returns
+///
+/// A [`DocumentPanelContent`] value wrapping the test document.
+fn test_content(name: &str) -> DocumentPanelContent {
+  DocumentPanelContent::project(test_document(name))
 }
 
 /// Creates document panel state containing two tabs in the root panel.
@@ -48,12 +57,12 @@ fn two_tab_document_panel_state() -> DocumentPanelState {
         .tab(PanelTab::new(
           DEFAULT_DOCUMENT_TAB_ID,
           SharedString::from("alpha.rs"),
-          test_document("alpha.rs"),
+          test_content("alpha.rs"),
         ))
         .tab(PanelTab::new(
           PanelTabId::new(2),
           SharedString::from("beta.rs"),
-          test_document("beta.rs"),
+          test_content("beta.rs"),
         )),
     ),
     focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
@@ -92,8 +101,7 @@ fn test_tab_drag(panel_id: PanelId, tab_id: PanelTabId, source_index: usize) -> 
 fn split_panel_should_copy_only_active_tab() {
   let mut state = two_tab_document_panel_state();
 
-  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("document panel should split");
   };
   let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
@@ -106,7 +114,7 @@ fn split_panel_should_copy_only_active_tab() {
   assert_eq!(source_leaf.tabs.len(), 2);
   assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
   assert_eq!(new_leaf.tabs.len(), 1);
-  assert_eq!(new_leaf.tabs[0].payload.title, "alpha.rs");
+  assert_eq!(new_leaf.tabs[0].payload.title(), "alpha.rs");
   assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(3)));
 }
 
@@ -116,8 +124,7 @@ fn split_panel_should_copy_changed_active_tab() {
   let mut state = two_tab_document_panel_state();
   assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
 
-  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
-  else {
+  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical) else {
     panic!("document panel should split");
   };
   let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
@@ -125,7 +132,7 @@ fn split_panel_should_copy_changed_active_tab() {
   };
 
   assert_eq!(new_leaf.tabs.len(), 1);
-  assert_eq!(new_leaf.tabs[0].payload.title, "beta.rs");
+  assert_eq!(new_leaf.tabs[0].payload.title(), "beta.rs");
   assert_eq!(new_leaf.active_tab, Some(PanelTabId::new(3)));
 }
 
@@ -134,14 +141,10 @@ fn split_panel_should_copy_changed_active_tab() {
 fn split_panel_should_not_accumulate_all_source_tabs_on_repeated_splits() {
   let mut state = two_tab_document_panel_state();
 
-  let Some(first_new_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(first_new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("first split should succeed");
   };
-  let Some(second_new_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
-  else {
+  let Some(second_new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical) else {
     panic!("second split should succeed");
   };
 
@@ -161,8 +164,7 @@ fn split_panel_should_not_accumulate_all_source_tabs_on_repeated_splits() {
 fn close_tab_should_remove_empty_split_panel_and_keep_source_panel() {
   let mut state = two_tab_document_panel_state();
 
-  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
-  else {
+  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical) else {
     panic!("document panel should split");
   };
 
@@ -239,9 +241,7 @@ fn close_focused_tab_should_fall_back_to_left_neighbor() {
 #[test]
 fn focus_next_tab_should_cross_panel_boundary() {
   let mut state = two_tab_document_panel_state();
-  let Some(next_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(next_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("document panel should split");
   };
   assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2)));
@@ -259,9 +259,7 @@ fn focus_next_tab_should_cross_panel_boundary() {
 #[test]
 fn focus_previous_tab_should_cross_panel_boundary() {
   let mut state = two_tab_document_panel_state();
-  let Some(next_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(next_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("document panel should split");
   };
   assert!(state.activate_tab(next_panel_id, PanelTabId::new(3)));
@@ -279,9 +277,7 @@ fn focus_previous_tab_should_cross_panel_boundary() {
 #[test]
 fn focus_next_tab_should_wrap_across_panels_to_first_tab() {
   let mut state = two_tab_document_panel_state();
-  let Some(next_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(next_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("document panel should split");
   };
   assert!(state.activate_tab(next_panel_id, PanelTabId::new(3)));
@@ -299,9 +295,7 @@ fn focus_next_tab_should_wrap_across_panels_to_first_tab() {
 #[test]
 fn focus_previous_tab_should_wrap_across_panels_to_last_tab() {
   let mut state = two_tab_document_panel_state();
-  let Some(next_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(next_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("document panel should split");
   };
   assert!(state.activate_tab(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID));
@@ -320,8 +314,7 @@ fn focus_previous_tab_should_wrap_across_panels_to_last_tab() {
 fn split_panel_should_allocate_unique_tab_id_for_copied_active_tab() {
   let mut state = two_tab_document_panel_state();
 
-  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("document panel should split");
   };
   let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
@@ -345,8 +338,7 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
     tab_scroll: PanelTabScrollState::new(),
   };
 
-  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("empty document panel should split");
   };
   let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
@@ -355,6 +347,34 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
 
   assert!(new_leaf.tabs.is_empty());
   assert_eq!(new_leaf.active_tab, None);
+}
+
+/// Verifies that split callers can provide an independent payload for the new leaf.
+#[test]
+fn split_panel_with_content_should_use_caller_payload() {
+  let mut state = DocumentPanelState::with_content(test_content("alpha.rs"));
+  let split_content = test_content("independent.rs");
+
+  let Some(new_panel_id) = state.split_panel_with_content(
+    DEFAULT_DOCUMENT_PANEL_ID,
+    PanelSplitAxis::Horizontal,
+    Some(split_content),
+  ) else {
+    panic!("document panel should split");
+  };
+  let Some(source_leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+    panic!("source panel should still exist");
+  };
+  let Some(new_leaf) = state.tree.leaf(new_panel_id) else {
+    panic!("new panel should exist");
+  };
+
+  assert_eq!(source_leaf.tabs.len(), 1);
+  assert_eq!(source_leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
+  assert_eq!(source_leaf.tabs[0].payload.title(), "alpha.rs");
+  assert_eq!(new_leaf.tabs.len(), 1);
+  assert_eq!(new_leaf.tabs[0].payload.title(), "independent.rs");
+  assert_eq!(new_leaf.active_tab, Some(FIRST_DYNAMIC_DOCUMENT_TAB_ID));
 }
 
 /// Verifies a drag reorder preserves the moved document and focuses its panel.
@@ -374,11 +394,7 @@ fn tab_drag_should_reorder_inside_source_panel() {
     panic!("source panel should exist");
   };
   assert_eq!(
-    leaf
-      .tabs
-      .iter()
-      .map(|tab| tab.payload.title.as_str())
-      .collect::<Vec<_>>(),
+    leaf.tabs.iter().map(|tab| tab.payload.title()).collect::<Vec<_>>(),
     vec!["beta.rs", "alpha.rs"]
   );
   assert_eq!(leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
@@ -390,9 +406,7 @@ fn tab_drag_should_reorder_inside_source_panel() {
 #[test]
 fn tab_drag_should_move_existing_tab_to_target_panel() {
   let mut state = two_tab_document_panel_state();
-  let Some(target_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(target_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("target panel should be created");
   };
   let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2), 1);
@@ -408,7 +422,7 @@ fn tab_drag_should_move_existing_tab_to_target_panel() {
     panic!("target panel should survive");
   };
   assert_eq!(target.tabs[0].id, PanelTabId::new(2));
-  assert_eq!(target.tabs[0].payload.title, "beta.rs");
+  assert_eq!(target.tabs[0].payload.title(), "beta.rs");
   assert_eq!(target.active_tab, Some(PanelTabId::new(2)));
   assert_eq!(state.focused_panel_id, target_panel_id);
 }
@@ -417,9 +431,7 @@ fn tab_drag_should_move_existing_tab_to_target_panel() {
 #[test]
 fn tab_drag_should_focus_target_after_empty_source_panel_is_removed() {
   let mut state = DocumentPanelState::new(test_document("alpha.rs"));
-  let Some(target_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(target_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("target panel should be created");
   };
   let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
@@ -482,11 +494,7 @@ fn tab_drag_should_clear_target_without_cancelling_session() {
 fn tab_drag_should_reject_stale_source_without_temporary_state() {
   let mut state = two_tab_document_panel_state();
 
-  assert!(!state.start_tab_drag(test_tab_drag(
-    DEFAULT_DOCUMENT_PANEL_ID,
-    DEFAULT_DOCUMENT_TAB_ID,
-    1,
-  )));
+  assert!(!state.start_tab_drag(test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 1,)));
 
   assert_eq!(state.tab_drag, None);
 }
@@ -533,14 +541,10 @@ fn close_tab_should_keep_empty_state_when_only_panel_remains() {
 fn close_tab_should_keep_panel_tree_valid_after_repeated_splits_and_closes() {
   let mut state = two_tab_document_panel_state();
 
-  let Some(first_new_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(first_new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("first split should succeed");
   };
-  let Some(second_new_panel_id) =
-    state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
-  else {
+  let Some(second_new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical) else {
     panic!("second split should succeed");
   };
 
@@ -565,8 +569,8 @@ fn open_document_as_tab_should_append_to_focused_panel() {
 
   assert_eq!(leaf.tabs.len(), 2);
   assert_eq!(leaf.active_tab, Some(PanelTabId::new(2)));
-  assert_eq!(leaf.tabs[0].payload.title, "alpha.rs");
-  assert_eq!(leaf.tabs[1].payload.title, "beta.rs");
+  assert_eq!(leaf.tabs[0].payload.title(), "alpha.rs");
+  assert_eq!(leaf.tabs[1].payload.title(), "beta.rs");
 }
 
 /// Verifies that opening an already-open document focuses the existing tab.
@@ -584,15 +588,14 @@ fn open_document_as_tab_should_focus_existing_tab_in_focused_panel() {
 
   assert_eq!(leaf.tabs.len(), 2);
   assert_eq!(leaf.active_tab, Some(PanelTabId::new(2)));
-  assert_eq!(leaf.tabs[1].payload.title, "beta.rs");
+  assert_eq!(leaf.tabs[1].payload.title(), "beta.rs");
 }
 
 /// Verifies that new documents open in the currently focused split panel.
 #[test]
 fn open_document_as_tab_should_target_focused_panel() {
   let mut state = two_tab_document_panel_state();
-  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-  else {
+  let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
     panic!("document panel should split");
   };
 
@@ -609,7 +612,7 @@ fn open_document_as_tab_should_target_focused_panel() {
   assert_eq!(source_leaf.tabs.len(), 2);
   assert_eq!(focused_leaf.tabs.len(), 2);
   assert_eq!(focused_leaf.active_tab, Some(PanelTabId::new(4)));
-  assert_eq!(focused_leaf.tabs[1].payload.title, "gamma.rs");
+  assert_eq!(focused_leaf.tabs[1].payload.title(), "gamma.rs");
 }
 
 /// Verifies that document panel resize updates the target split ratio.
@@ -622,11 +625,7 @@ fn drag_resize_should_update_split_ratio() {
       .is_some()
   );
 
-  assert!(state.start_resize(
-    PanelSplitPath::root(),
-    PanelSplitAxis::Horizontal,
-    px(100.0)
-  ));
+  assert!(state.start_resize(PanelSplitPath::root(), PanelSplitAxis::Horizontal, px(100.0)));
   assert!(state.drag_resize(px(150.0), px(500.0), px(300.0)));
 
   assert_eq!(state.tree.split_ratio(&PanelSplitPath::root()), Some(0.6));
