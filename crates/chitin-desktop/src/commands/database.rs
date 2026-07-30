@@ -24,8 +24,7 @@ impl crate::app::ChitinApp {
     match command {
       DatabaseCommand::DownloadRcsbStructure => {
         let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure);
-        if let Some(descriptor) = self.command_registry.descriptor_for(&command) {
-          self.command_panel.open_form(descriptor);
+        if self.command_panel.open_form(command) {
           cx.notify();
         }
       }

@@ -19,10 +19,10 @@ use gpui::{
 };
 
 use crate::{
-  commands::{CommandPanelState, CommandRegistry, application::ToggleCommandPanel, workspace::ToggleWorkspace},
+  commands::{application::ToggleCommandPanel, workspace::ToggleWorkspace},
   components::{
     activity_bar::{ActiveActivity, render_activity_bar},
-    command_panel::render_command_panel,
+    command_panel::{CommandPanelController, render_command_panel},
     document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::render_window_bar,
@@ -43,20 +43,14 @@ pub struct ChitinApp {
   pub(crate) workbench_focus: Option<FocusHandle>,
   /// Focus handle used by document panel container shortcuts.
   pub(crate) document_panel_focus: Option<FocusHandle>,
-  /// Focus handle used by command panel keyboard input.
-  pub(crate) command_panel_focus: Option<FocusHandle>,
-  /// Focus handle that owned focus before the command panel opened.
-  pub(crate) command_panel_previous_focus: Option<FocusHandle>,
   /// Document panel tree currently shown in the main document area.
   pub(crate) document_panels: DocumentPanelState,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
   /// Whether the project workspace sidebar is visible when Workspace is active.
   pub(crate) project_sidebar_visible: bool,
-  /// Registry containing available command panel entries.
-  pub(crate) command_registry: CommandRegistry,
-  /// Searchable command panel overlay state.
-  pub(crate) command_panel: CommandPanelState,
+  /// Searchable command panel state, metadata, and focus ownership.
+  pub(crate) command_panel: CommandPanelController,
 }
 
 impl ChitinApp {
@@ -122,13 +116,10 @@ impl ChitinApp {
       project_sidebar_focus: None,
       workbench_focus: None,
       document_panel_focus: None,
-      command_panel_focus: None,
-      command_panel_previous_focus: None,
       document_panels: DocumentPanelState::empty(),
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
-      command_registry: CommandRegistry::new(),
-      command_panel: CommandPanelState::new(),
+      command_panel: CommandPanelController::new(),
     }
   }
 
@@ -246,22 +237,6 @@ impl ChitinApp {
       .clone()
   }
 
-  /// Returns the focus handle for command panel input.
-  ///
-  /// # Parameters
-  ///
-  /// `cx` creates the focus handle when it has not been allocated yet.
-  ///
-  /// # Returns
-  ///
-  /// A cloned [`FocusHandle`] for the command panel overlay.
-  pub(crate) fn command_panel_focus(&mut self, cx: &mut Context<Self>) -> FocusHandle {
-    self
-      .command_panel_focus
-      .get_or_insert_with(|| cx.focus_handle())
-      .clone()
-  }
-
   /// Shows or hides the project workspace sidebar.
   ///
   /// When another workbench activity is active, toggling the workspace first
@@ -280,58 +255,19 @@ impl ChitinApp {
     cx.notify();
   }
 
-  /// Shows or hides the command panel.
+  /// Toggles command-panel visibility for command dispatch without a window.
   ///
   /// # Parameters
   ///
-  /// `cx` is notified after the panel state changes.
+  /// `cx` is notified after panel visibility changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after updating controller state. Window-aware UI
+  /// entry points should call [`CommandPanelController::toggle`] directly.
   pub(crate) fn toggle_command_panel(&mut self, cx: &mut Context<Self>) {
-    self.command_panel.toggle();
-    cx.notify();
-  }
-
-  /// Shows or hides the command panel and focuses it when opened.
-  ///
-  /// # Parameters
-  ///
-  /// `window` receives the focus request after the panel is opened.
-  ///
-  /// `cx` is notified after the panel state changes.
-  pub(crate) fn toggle_command_panel_with_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    self.command_panel.toggle();
-    if self.command_panel.is_open {
-      self.command_panel_previous_focus = window.focused(cx);
-      let focus = self.command_panel_focus(cx);
-      window.focus(&focus, cx);
-    } else {
-      self.restore_command_panel_previous_focus(window, cx);
-    }
-    cx.notify();
-  }
-
-  /// Closes the command panel and restores the prior focus target.
-  ///
-  /// # Parameters
-  ///
-  /// `window` receives the focus restore request.
-  ///
-  /// `cx` is notified after the panel state changes.
-  pub(crate) fn close_command_panel_and_restore_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    self.command_panel.close();
-    self.restore_command_panel_previous_focus(window, cx);
-    cx.notify();
-  }
-
-  /// Restores focus to the handle that was focused before the command panel opened.
-  ///
-  /// # Parameters
-  ///
-  /// `window` receives the focus restore request.
-  ///
-  /// `cx` is used by GPUI focus APIs.
-  fn restore_command_panel_previous_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    if let Some(previous_focus) = self.command_panel_previous_focus.take() {
-      window.focus(&previous_focus, cx);
+    if self.command_panel.toggle_without_focus() {
+      cx.notify();
     }
   }
 
@@ -467,7 +403,6 @@ impl Render for ChitinApp {
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
     let document_panel_focus = self.document_panel_focus(cx);
-    let command_panel_focus = self.command_panel_focus(cx);
     let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
     let document_panel_resize_axis = self.document_panel_resize_axis();
     let visible_sidebar_width = if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
@@ -488,7 +423,9 @@ impl Render for ChitinApp {
         this.toggle_workspace_with_focus(window, cx);
       }))
       .on_action(cx.listener(|this, _: &ToggleCommandPanel, window, cx| {
-        this.toggle_command_panel_with_focus(window, cx);
+        if this.command_panel.toggle(window, cx) {
+          cx.notify();
+        }
       }))
       .capture_key_down({
         let app = app.clone();
@@ -591,15 +528,8 @@ impl Render for ChitinApp {
             cx,
           )),
       )
-      .when(self.command_panel.is_open, |layout| {
-        layout.child(render_command_panel(
-          &self.command_panel,
-          &self.command_registry,
-          &command_panel_focus,
-          theme,
-          app,
-          cx,
-        ))
+      .when(self.command_panel.is_open(), |layout| {
+        layout.child(render_command_panel(&mut self.command_panel, theme, app, cx))
       })
   }
 }

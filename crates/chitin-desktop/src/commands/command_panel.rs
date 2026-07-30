@@ -1,4 +1,4 @@
-//! Searchable command panel registry and state.
+//! Searchable command metadata and registry.
 
 use super::{ChitinCommand, application, database, tab, workspace};
 
@@ -63,35 +63,13 @@ pub(crate) struct CommandRegistry {
   commands: Vec<CommandDescriptor>,
 }
 
-/// Command panel interaction mode.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum CommandPanelMode {
-  /// Search mode listing all matching commands.
-  Search,
-  /// Command-specific form mode.
-  Form(CommandDescriptor),
-}
-
 /// Search result with score and descriptor.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CommandSearchResult {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CommandSearchResult<'a> {
   /// Ranking score. Higher scores sort first.
   pub(crate) score: i32,
   /// Matching command descriptor.
-  pub(crate) descriptor: CommandDescriptor,
-}
-
-/// State for the command panel overlay.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CommandPanelState {
-  /// Whether the panel is visible.
-  pub(crate) is_open: bool,
-  /// Current search query or form input.
-  pub(crate) query: String,
-  /// Selected result index.
-  pub(crate) selected_index: usize,
-  /// Current panel mode.
-  pub(crate) mode: CommandPanelMode,
+  pub(crate) descriptor: &'a CommandDescriptor,
 }
 
 impl CommandCategory {
@@ -189,13 +167,9 @@ impl CommandRegistry {
   ///
   /// # Returns
   ///
-  /// A cloned descriptor when the command is registered.
-  pub(crate) fn descriptor_for(&self, command: &ChitinCommand) -> Option<CommandDescriptor> {
-    self
-      .commands
-      .iter()
-      .find(|descriptor| &descriptor.command == command)
-      .cloned()
+  /// A descriptor borrowed from this registry when the command is registered.
+  pub(crate) fn descriptor_for(&self, command: &ChitinCommand) -> Option<&CommandDescriptor> {
+    self.commands.iter().find(|descriptor| &descriptor.command == command)
   }
 
   /// Searches commands using simple deterministic scoring.
@@ -207,16 +181,13 @@ impl CommandRegistry {
   /// # Returns
   ///
   /// Results ordered by descending score, then title.
-  pub(crate) fn search(&self, query: &str) -> Vec<CommandSearchResult> {
+  pub(crate) fn search(&self, query: &str) -> Vec<CommandSearchResult<'_>> {
     let query = normalize(query);
     let mut results = self
       .commands
       .iter()
       .filter_map(|descriptor| {
-        score_descriptor(descriptor, &query).map(|score| CommandSearchResult {
-          score,
-          descriptor: descriptor.clone(),
-        })
+        score_descriptor(descriptor, &query).map(|score| CommandSearchResult { score, descriptor })
       })
       .collect::<Vec<_>>();
     results.sort_by(|left, right| {
@@ -249,113 +220,6 @@ impl CommandRegistry {
 
 impl Default for CommandRegistry {
   /// Creates a command registry with all available commands.
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
-impl CommandPanelState {
-  /// Creates a closed command panel state.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A closed panel in search mode.
-  pub(crate) fn new() -> Self {
-    Self {
-      is_open: false,
-      query: String::new(),
-      selected_index: 0,
-      mode: CommandPanelMode::Search,
-    }
-  }
-
-  /// Opens the panel in search mode.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  pub(crate) fn open(&mut self) {
-    self.is_open = true;
-    self.query.clear();
-    self.selected_index = 0;
-    self.mode = CommandPanelMode::Search;
-  }
-
-  /// Toggles command panel visibility.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  pub(crate) fn toggle(&mut self) {
-    if self.is_open {
-      self.close();
-    } else {
-      self.open();
-    }
-  }
-
-  /// Closes the panel and clears transient input.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  pub(crate) fn close(&mut self) {
-    self.is_open = false;
-    self.query.clear();
-    self.selected_index = 0;
-    self.mode = CommandPanelMode::Search;
-  }
-
-  /// Replaces the current query.
-  ///
-  /// # Parameters
-  ///
-  /// `query` is the new search or form input.
-  pub(crate) fn set_query(&mut self, query: impl Into<String>) {
-    self.query = query.into();
-    self.selected_index = 0;
-  }
-
-  /// Moves selection to the next result.
-  ///
-  /// # Parameters
-  ///
-  /// `result_count` is the number of visible results.
-  pub(crate) fn select_next(&mut self, result_count: usize) {
-    if result_count > 0 {
-      self.selected_index = (self.selected_index + 1).min(result_count - 1);
-    }
-  }
-
-  /// Moves selection to the previous result.
-  ///
-  /// # Parameters
-  ///
-  /// `result_count` is the number of visible results.
-  pub(crate) fn select_previous(&mut self, result_count: usize) {
-    if result_count > 0 {
-      self.selected_index = self.selected_index.saturating_sub(1);
-    }
-  }
-
-  /// Enters form mode for a command.
-  ///
-  /// # Parameters
-  ///
-  /// `descriptor` is the command selected from search mode.
-  pub(crate) fn open_form(&mut self, descriptor: CommandDescriptor) {
-    self.mode = CommandPanelMode::Form(descriptor);
-    self.query.clear();
-    self.selected_index = 0;
-  }
-}
-
-impl Default for CommandPanelState {
-  /// Creates a closed command panel state.
   fn default() -> Self {
     Self::new()
   }
@@ -469,27 +333,5 @@ mod tests {
       results.first().map(|result| result.descriptor.id),
       Some("database.rcsb.download_structure")
     );
-  }
-
-  #[test]
-  fn command_panel_open_should_reset_query_and_selection() {
-    let mut state = CommandPanelState::new();
-    state.query = "tab".to_string();
-    state.selected_index = 2;
-
-    state.open();
-
-    assert_eq!(state, CommandPanelState::new_open_for_test());
-  }
-
-  impl CommandPanelState {
-    fn new_open_for_test() -> Self {
-      Self {
-        is_open: true,
-        query: String::new(),
-        selected_index: 0,
-        mode: CommandPanelMode::Search,
-      }
-    }
   }
 }

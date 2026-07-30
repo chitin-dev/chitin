@@ -3,8 +3,8 @@
 use std::rc::Rc;
 
 use gpui::{
-  AnyElement, App, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString, Styled, div,
-  px,
+  AnyElement, App, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString, Styled,
+  Window, div, px,
 };
 
 use crate::themes::{UIThemes, builtins};
@@ -21,7 +21,7 @@ pub const DEFAULT_QUICK_PICK_WIDTH: Pixels = px(660.0);
 pub const DEFAULT_QUICK_PICK_MAX_HEIGHT: Pixels = px(560.0);
 
 /// Callback invoked when a quick-pick row is selected.
-type QuickPickSelectHandler = dyn Fn(usize, &mut App);
+type QuickPickSelectHandler = dyn for<'a, 'b> Fn(usize, &'a mut Window, &'b mut App);
 
 /// One visible quick-pick result row.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,7 +107,7 @@ impl QuickPickItem {
 ///
 /// `theme` supplies workbench colors.
 ///
-/// `on_select` is invoked with the row index selected by pointer.
+/// `on_select` is invoked with the row index and current GPUI window selected by pointer.
 ///
 /// # Returns
 ///
@@ -282,8 +282,8 @@ fn render_item(
       theme.background.secondary
     })
     .hover(move |style| style.bg(theme.background.hover))
-    .on_mouse_up(MouseButton::Left, move |_, _, cx| {
-      on_select(index, cx);
+    .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+      on_select(index, window, cx);
     })
     .child(
       div()

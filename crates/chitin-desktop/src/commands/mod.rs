@@ -15,9 +15,7 @@ pub(crate) mod tab;
 pub(crate) mod workspace;
 
 pub(crate) use application::ApplicationCommand;
-pub(crate) use command_panel::{
-  CommandDescriptor, CommandInvocationKind, CommandPanelMode, CommandPanelState, CommandRegistry,
-};
+pub(crate) use command_panel::{CommandDescriptor, CommandInvocationKind, CommandRegistry};
 pub(crate) use database::DatabaseCommand;
 pub(crate) use tab::PanelTabCommand;
 pub(crate) use workspace::WorkspaceCommand;
