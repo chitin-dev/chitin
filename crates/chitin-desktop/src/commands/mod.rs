@@ -8,9 +8,17 @@ use gpui::Context;
 
 use crate::app::ChitinApp;
 
+pub(crate) mod application;
+pub(crate) mod command_panel;
+pub(crate) mod database;
 pub(crate) mod tab;
 pub(crate) mod workspace;
 
+pub(crate) use application::ApplicationCommand;
+pub(crate) use command_panel::{
+  CommandDescriptor, CommandInvocationKind, CommandPanelMode, CommandPanelState, CommandRegistry,
+};
+pub(crate) use database::DatabaseCommand;
 pub(crate) use tab::PanelTabCommand;
 pub(crate) use workspace::WorkspaceCommand;
 
@@ -19,8 +27,10 @@ pub(crate) use workspace::WorkspaceCommand;
 pub(crate) enum ChitinCommand {
   /// Commands owned by the project workspace sidebar and tree.
   Workspace(WorkspaceCommand),
-  /// Commands owned by the focused document panel tab stack.
-  PanelTab(PanelTabCommand),
+  /// Commands owned by external database provider workflows.
+  Database(DatabaseCommand),
+  /// Commands owned by the desktop application shell.
+  Application(ApplicationCommand),
 }
 
 impl ChitinCommand {
@@ -42,7 +52,8 @@ impl ChitinCommand {
   pub(crate) fn id(&self) -> &'static str {
     match self {
       Self::Workspace(command) => command.id(),
-      Self::PanelTab(command) => command.id(),
+      Self::Database(command) => command.id(),
+      Self::Application(command) => command.id(),
     }
   }
 }
@@ -60,6 +71,20 @@ impl From<WorkspaceCommand> for ChitinCommand {
   /// [`ChitinCommand::Workspace`] containing the provided workspace command.
   fn from(command: WorkspaceCommand) -> Self {
     Self::Workspace(command)
+  }
+}
+
+impl From<DatabaseCommand> for ChitinCommand {
+  /// Wraps a database command in the top-level desktop command hierarchy.
+  fn from(command: DatabaseCommand) -> Self {
+    Self::Database(command)
+  }
+}
+
+impl From<ApplicationCommand> for ChitinCommand {
+  /// Wraps an application command in the top-level desktop command hierarchy.
+  fn from(command: ApplicationCommand) -> Self {
+    Self::Application(command)
   }
 }
 
@@ -87,7 +112,8 @@ impl ChitinApp {
 
     match command {
       ChitinCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
-      ChitinCommand::PanelTab(command) => self.dispatch_panel_tab_command(command, cx),
+      ChitinCommand::Database(command) => self.dispatch_database_command(command, cx),
+      ChitinCommand::Application(command) => self.dispatch_application_command(command, cx),
     }
   }
 }
@@ -108,6 +134,7 @@ pub fn default_key_bindings() -> Vec<gpui::KeyBinding> {
   workspace::default_key_bindings()
     .into_iter()
     .chain(tab::default_key_bindings())
+    .chain(application::default_key_bindings())
     .collect()
 }
 
@@ -125,6 +152,6 @@ mod tests {
   /// Verifies that default keybindings include workspace and panel-tab groups.
   #[test]
   fn default_key_bindings_should_include_panel_tab_bindings() {
-    assert_eq!(default_key_bindings().len(), 13);
+    assert_eq!(default_key_bindings().len(), 14);
   }
 }

@@ -19,9 +19,10 @@ use gpui::{
 };
 
 use crate::{
-  commands::workspace::ToggleWorkspace,
+  commands::{CommandPanelState, CommandRegistry, application::ToggleCommandPanel, workspace::ToggleWorkspace},
   components::{
     activity_bar::{ActiveActivity, render_activity_bar},
+    command_panel::render_command_panel,
     document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::render_window_bar,
@@ -48,6 +49,10 @@ pub struct ChitinApp {
   pub(crate) active_activity: ActiveActivity,
   /// Whether the project workspace sidebar is visible when Workspace is active.
   pub(crate) project_sidebar_visible: bool,
+  /// Registry containing available command panel entries.
+  pub(crate) command_registry: CommandRegistry,
+  /// Searchable command panel overlay state.
+  pub(crate) command_panel: CommandPanelState,
 }
 
 impl ChitinApp {
@@ -116,6 +121,8 @@ impl ChitinApp {
       document_panels: DocumentPanelState::empty(),
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
+      command_registry: CommandRegistry::new(),
+      command_panel: CommandPanelState::new(),
     }
   }
 
@@ -248,6 +255,26 @@ impl ChitinApp {
   /// This function returns `()` and mutates workbench activity/sidebar state.
   pub(crate) fn toggle_workspace(&mut self, cx: &mut Context<Self>) {
     self.toggle_workspace_state();
+    cx.notify();
+  }
+
+  /// Shows or hides the command panel.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is notified after the panel state changes.
+  pub(crate) fn toggle_command_panel(&mut self, cx: &mut Context<Self>) {
+    self.command_panel.toggle();
+    cx.notify();
+  }
+
+  /// Closes the command panel.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is notified after the panel state changes.
+  pub(crate) fn close_command_panel(&mut self, cx: &mut Context<Self>) {
+    self.command_panel.close();
     cx.notify();
   }
 
@@ -395,12 +422,24 @@ impl Render for ChitinApp {
       .flex()
       .flex_col()
       .size_full()
+      .relative()
       .track_focus(&workbench_focus)
       .bg(theme.background.primary)
       .text_color(theme.text.primary)
       .on_action(cx.listener(|this, _: &ToggleWorkspace, window, cx| {
         this.toggle_workspace_with_focus(window, cx);
       }))
+      .on_action(cx.listener(|this, _: &ToggleCommandPanel, _, cx| {
+        this.toggle_command_panel(cx);
+      }))
+      .capture_key_down({
+        let app = app.clone();
+        move |event, window, cx| {
+          let _ = app.update(cx, |this, cx| {
+            this.handle_command_panel_key(event, window, cx);
+          });
+        }
+      })
       .when(project_sidebar_is_resizing, |layout| {
         layout.cursor(CursorStyle::ResizeLeftRight)
       })
@@ -494,6 +533,15 @@ impl Render for ChitinApp {
             cx,
           )),
       )
+      .when(self.command_panel.is_open, |layout| {
+        layout.child(render_command_panel(
+          &self.command_panel,
+          &self.command_registry,
+          theme,
+          app,
+          cx,
+        ))
+      })
   }
 }
 

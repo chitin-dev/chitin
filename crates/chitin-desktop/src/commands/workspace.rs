@@ -6,10 +6,92 @@
 
 use gpui::{KeyBinding, actions};
 
-use crate::{app::ChitinApp, components::workspace_tree::WorkspaceTreeNavigation};
+use crate::{
+  app::ChitinApp,
+  commands::{
+    PanelTabCommand,
+    command_panel::{
+      CommandCategory, CommandDescriptor, CommandInvocationKind, CommandShortcut, primary_shortcut_label,
+    },
+  },
+  components::workspace_tree::WorkspaceTreeNavigation,
+};
 
 /// GPUI key context used by the project workspace tree.
 pub(crate) const PROJECT_TREE_KEY_CONTEXT: &str = "ProjectTree";
+
+#[rustfmt::skip]
+const FOCUS_PREVIOUS_SHORTCUTS: [CommandShortcut; 2] = [
+  CommandShortcut::new(
+    "up",
+    "Up",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+  CommandShortcut::new(
+    "k",
+    "K",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+];
+
+#[rustfmt::skip]
+const FOCUS_NEXT_SHORTCUTS: [CommandShortcut; 2] = [
+  CommandShortcut::new(
+    "down",
+    "Down",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+  CommandShortcut::new(
+    "j",
+    "J",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+];
+
+#[rustfmt::skip]
+const ACTIVATE_FOCUSED_SHORTCUTS: [CommandShortcut; 1] = [
+  CommandShortcut::new(
+    "enter",
+    "Enter",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+];
+
+#[rustfmt::skip]
+const FOCUS_FIRST_SHORTCUTS: [CommandShortcut; 2] = [
+  CommandShortcut::new(
+    "home",
+    "Home",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+  CommandShortcut::new(
+    "g g",
+    "G G",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+];
+
+#[rustfmt::skip]
+const FOCUS_LAST_SHORTCUTS: [CommandShortcut; 2] = [
+  CommandShortcut::new(
+    "end",
+    "End",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+  CommandShortcut::new(
+    "G",
+    "Shift+G",
+    Some(PROJECT_TREE_KEY_CONTEXT)
+  ),
+];
+
+#[rustfmt::skip]
+const TOGGLE_WORKSPACE_SHORTCUTS: [CommandShortcut; 1] = [
+  CommandShortcut::new(
+    "shift-e",
+    "Shift+E",
+    None
+)];
 
 actions!(
   workspace,
@@ -44,6 +126,8 @@ pub(crate) enum WorkspaceCommand {
   FocusLast,
   /// Show or hide the project workspace sidebar.
   ToggleWorkspace,
+  /// Dispatch a document panel tab command.
+  PanelTab(PanelTabCommand),
 }
 
 impl WorkspaceCommand {
@@ -68,6 +152,7 @@ impl WorkspaceCommand {
       Self::FocusFirst => "workspace.focus_first_entry",
       Self::FocusLast => "workspace.focus_last_entry",
       Self::ToggleWorkspace => "workspace.toggle_workspace",
+      Self::PanelTab(command) => command.id(),
     }
   }
 
@@ -93,7 +178,7 @@ impl WorkspaceCommand {
       Self::ActivateFocused => Some(WorkspaceTreeNavigation::ActivateFocused),
       Self::FocusFirst => Some(WorkspaceTreeNavigation::FocusFirst),
       Self::FocusLast => Some(WorkspaceTreeNavigation::FocusLast),
-      Self::ToggleWorkspace => None,
+      Self::ToggleWorkspace | Self::PanelTab(_) => None,
     }
   }
 }
@@ -117,10 +202,14 @@ impl ChitinApp {
   /// This function returns `()`. The command mutates [`ChitinApp`] state
   /// directly through the workspace tree behavior.
   pub(crate) fn dispatch_workspace_command(&mut self, command: WorkspaceCommand, cx: &mut gpui::Context<Self>) {
-    if let Some(navigation) = command.tree_navigation() {
-      self.navigate_project_tree(navigation, cx);
-    } else {
-      self.toggle_workspace(cx);
+    match command {
+      WorkspaceCommand::ToggleWorkspace => self.toggle_workspace(cx),
+      WorkspaceCommand::PanelTab(command) => self.dispatch_panel_tab_command(command, cx),
+      command => {
+        if let Some(navigation) = command.tree_navigation() {
+          self.navigate_project_tree(navigation, cx);
+        }
+      }
     }
   }
 }
@@ -142,16 +231,96 @@ impl ChitinApp {
 /// Ten GPUI keybindings for the current workspace tree navigation commands.
 pub(crate) fn default_key_bindings() -> [KeyBinding; 10] {
   [
-    KeyBinding::new("up", FocusPreviousEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("k", FocusPreviousEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("down", FocusNextEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("j", FocusNextEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("enter", ActivateFocusedEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("home", FocusFirstEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("end", FocusLastEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("g g", FocusFirstEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("G", FocusLastEntry, Some(PROJECT_TREE_KEY_CONTEXT)),
-    KeyBinding::new("shift-e", ToggleWorkspace, None),
+    FOCUS_PREVIOUS_SHORTCUTS[0].binding(FocusPreviousEntry),
+    FOCUS_PREVIOUS_SHORTCUTS[1].binding(FocusPreviousEntry),
+    FOCUS_NEXT_SHORTCUTS[0].binding(FocusNextEntry),
+    FOCUS_NEXT_SHORTCUTS[1].binding(FocusNextEntry),
+    ACTIVATE_FOCUSED_SHORTCUTS[0].binding(ActivateFocusedEntry),
+    FOCUS_FIRST_SHORTCUTS[0].binding(FocusFirstEntry),
+    FOCUS_LAST_SHORTCUTS[0].binding(FocusLastEntry),
+    FOCUS_FIRST_SHORTCUTS[1].binding(FocusFirstEntry),
+    FOCUS_LAST_SHORTCUTS[1].binding(FocusLastEntry),
+    TOGGLE_WORKSPACE_SHORTCUTS[0].binding(ToggleWorkspace),
+  ]
+}
+
+/// Builds command panel descriptors for workspace commands.
+///
+/// # Parameters
+///
+/// This function takes no parameters.
+///
+/// # Returns
+///
+/// Workspace command metadata used by the command registry.
+pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
+  vec![
+    CommandDescriptor {
+      id: WorkspaceCommand::ToggleWorkspace.id(),
+      title: "Toggle Workspace Sidebar",
+      category: CommandCategory::Workspace,
+      keywords: &["files", "project", "sidebar", "explorer"],
+      shortcut: primary_shortcut_label(&TOGGLE_WORKSPACE_SHORTCUTS),
+      invocation: CommandInvocationKind::Immediate,
+      form_prompt: None,
+      form_placeholder: None,
+      command: WorkspaceCommand::ToggleWorkspace.into(),
+    },
+    CommandDescriptor {
+      id: WorkspaceCommand::FocusPrevious.id(),
+      title: "Focus Previous Project Entry",
+      category: CommandCategory::Workspace,
+      keywords: &["tree", "up", "previous"],
+      shortcut: primary_shortcut_label(&FOCUS_PREVIOUS_SHORTCUTS),
+      invocation: CommandInvocationKind::Immediate,
+      form_prompt: None,
+      form_placeholder: None,
+      command: WorkspaceCommand::FocusPrevious.into(),
+    },
+    CommandDescriptor {
+      id: WorkspaceCommand::FocusNext.id(),
+      title: "Focus Next Project Entry",
+      category: CommandCategory::Workspace,
+      keywords: &["tree", "down", "next"],
+      shortcut: primary_shortcut_label(&FOCUS_NEXT_SHORTCUTS),
+      invocation: CommandInvocationKind::Immediate,
+      form_prompt: None,
+      form_placeholder: None,
+      command: WorkspaceCommand::FocusNext.into(),
+    },
+    CommandDescriptor {
+      id: WorkspaceCommand::ActivateFocused.id(),
+      title: "Activate Focused Project Entry",
+      category: CommandCategory::Workspace,
+      keywords: &["open", "tree", "file", "directory"],
+      shortcut: primary_shortcut_label(&ACTIVATE_FOCUSED_SHORTCUTS),
+      invocation: CommandInvocationKind::Immediate,
+      form_prompt: None,
+      form_placeholder: None,
+      command: WorkspaceCommand::ActivateFocused.into(),
+    },
+    CommandDescriptor {
+      id: WorkspaceCommand::FocusFirst.id(),
+      title: "Focus First Project Entry",
+      category: CommandCategory::Workspace,
+      keywords: &["tree", "home", "first"],
+      shortcut: primary_shortcut_label(&FOCUS_FIRST_SHORTCUTS),
+      invocation: CommandInvocationKind::Immediate,
+      form_prompt: None,
+      form_placeholder: None,
+      command: WorkspaceCommand::FocusFirst.into(),
+    },
+    CommandDescriptor {
+      id: WorkspaceCommand::FocusLast.id(),
+      title: "Focus Last Project Entry",
+      category: CommandCategory::Workspace,
+      keywords: &["tree", "end", "last"],
+      shortcut: primary_shortcut_label(&FOCUS_LAST_SHORTCUTS),
+      invocation: CommandInvocationKind::Immediate,
+      form_prompt: None,
+      form_placeholder: None,
+      command: WorkspaceCommand::FocusLast.into(),
+    },
   ]
 }
 

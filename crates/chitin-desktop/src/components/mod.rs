@@ -1,4 +1,5 @@
 pub mod activity_bar;
+pub mod command_panel;
 pub mod document_area;
 pub mod project_sidebar;
 pub mod wgpu_panel;
