@@ -8,7 +8,7 @@ use chitin_ui::{
   },
   themes::UIThemes,
 };
-use gpui::{App, Context, Div, KeyDownEvent, SharedString, WeakEntity, Window};
+use gpui::{App, Context, Div, FocusHandle, InteractiveElement, KeyDownEvent, SharedString, WeakEntity, Window};
 
 use crate::{
   app::ChitinApp,
@@ -29,6 +29,8 @@ type CommandPanelSelectHandler = dyn Fn(usize, &mut App);
 ///
 /// `registry` provides searchable command descriptors.
 ///
+/// `focus_handle` receives keyboard focus when the panel opens.
+///
 /// `theme` supplies workbench colors.
 ///
 /// `app` is updated by pointer selection.
@@ -41,6 +43,7 @@ type CommandPanelSelectHandler = dyn Fn(usize, &mut App);
 pub(crate) fn render_command_panel(
   state: &CommandPanelState,
   registry: &CommandRegistry,
+  focus_handle: &FocusHandle,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
   _cx: &mut Context<ChitinApp>,
@@ -89,7 +92,7 @@ pub(crate) fn render_command_panel(
     });
   });
 
-  render_quick_pick_overlay(overlay, theme, on_select)
+  render_quick_pick_overlay(overlay, theme, on_select).track_focus(focus_handle)
 }
 
 impl ChitinApp {
@@ -110,7 +113,7 @@ impl ChitinApp {
     window.prevent_default();
     let key = event.keystroke.key.as_str();
     match key {
-      "escape" => self.close_command_panel(cx),
+      "escape" => self.close_command_panel_and_restore_focus(window, cx),
       "up" => {
         let count = self.command_registry.search(&self.command_panel.query).len();
         self.command_panel.select_previous(count);
