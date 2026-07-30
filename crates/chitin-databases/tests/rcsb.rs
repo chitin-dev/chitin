@@ -1,90 +1,15 @@
-use std::{
-  collections::VecDeque,
-  sync::{
-    Arc, Mutex,
-    atomic::{AtomicUsize, Ordering},
-  },
-  time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use chitin_databases::{
-  ArtifactFormat, Client, ClientConfig, DownloadedArtifact, HttpRequest, HttpResponse, HttpTransport, ProviderId,
-  RetryPolicy, TransportError,
+  ArtifactFormat, Client, ClientConfig, DownloadedArtifact, ProviderId, RetryPolicy, TransportError,
   providers::rcsb::{PdbId, PdbIdError, RcsbEndpoints, RcsbError, StructureFormat},
+  test_support::{MockTransport, response, response_with_headers},
 };
 use http::{
   HeaderMap, HeaderValue, StatusCode,
   header::{CONTENT_LENGTH, ETAG, LAST_MODIFIED},
 };
-
-#[derive(Clone)]
-struct MockTransport {
-  responses: Arc<Mutex<VecDeque<Result<HttpResponse, TransportError>>>>,
-  requests: Arc<Mutex<Vec<HttpRequest>>>,
-  active: Arc<AtomicUsize>,
-  max_active: Arc<AtomicUsize>,
-  delay: Duration,
-}
-
-impl MockTransport {
-  fn new(responses: Vec<Result<HttpResponse, TransportError>>) -> Self {
-    Self {
-      responses: Arc::new(Mutex::new(VecDeque::from(responses))),
-      requests: Arc::new(Mutex::new(Vec::new())),
-      active: Arc::new(AtomicUsize::new(0)),
-      max_active: Arc::new(AtomicUsize::new(0)),
-      delay: Duration::ZERO,
-    }
-  }
-
-  fn with_delay(mut self, delay: Duration) -> Self {
-    self.delay = delay;
-    self
-  }
-
-  fn request_count(&self) -> usize {
-    self.requests.lock().map(|requests| requests.len()).unwrap_or_default()
-  }
-
-  fn first_request_url(&self) -> Option<String> {
-    self
-      .requests
-      .lock()
-      .ok()
-      .and_then(|requests| requests.first().map(|request| request.url.to_string()))
-  }
-
-  fn max_active(&self) -> usize {
-    self.max_active.load(Ordering::SeqCst)
-  }
-}
-
-#[async_trait]
-impl HttpTransport for MockTransport {
-  async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
-    if let Ok(mut requests) = self.requests.lock() {
-      requests.push(request);
-    }
-
-    let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
-    self.max_active.fetch_max(active, Ordering::SeqCst);
-    if !self.delay.is_zero() {
-      tokio::time::sleep(self.delay).await;
-    }
-    self.active.fetch_sub(1, Ordering::SeqCst);
-
-    match self.responses.lock() {
-      Ok(mut responses) => responses
-        .pop_front()
-        .unwrap_or_else(|| Ok(response(StatusCode::OK, b""))),
-      Err(_) => Err(TransportError::Other {
-        message: "mock response lock poisoned".to_string(),
-      }),
-    }
-  }
-}
 
 fn test_client(transport: MockTransport) -> Client {
   let config = ClientConfig {
@@ -96,22 +21,6 @@ fn test_client(transport: MockTransport) -> Client {
     ..ClientConfig::default()
   };
   Client::with_transport(config, Arc::new(transport))
-}
-
-fn response(status: StatusCode, body: &'static [u8]) -> HttpResponse {
-  HttpResponse {
-    status,
-    headers: HeaderMap::new(),
-    body: Bytes::from_static(body),
-  }
-}
-
-fn response_with_headers(status: StatusCode, body: &'static [u8], headers: HeaderMap) -> HttpResponse {
-  HttpResponse {
-    status,
-    headers,
-    body: Bytes::from_static(body),
-  }
 }
 
 fn pdb_id(value: &str) -> PdbId {

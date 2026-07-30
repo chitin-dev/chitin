@@ -17,6 +17,9 @@ mod transport;
 
 /// External database provider clients.
 pub mod providers;
+/// Test helpers for deterministic provider tests.
+#[cfg(any(test, doctest, feature = "test-support"))]
+pub mod test_support;
 
 pub use client::Client;
 pub use config::ClientConfig;

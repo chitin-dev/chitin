@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 async-trait = "0.1.89"
 bytes = "1.11"
@@ -20,6 +23,11 @@ url = "2.5"
 
 [dev-dependencies]
 tokio = { version = "1.52", features = ["macros", "rt", "sync", "time"] }
+
+[[test]]
+name = "rcsb"
+path = "tests/rcsb.rs"
+required-features = ["test-support"]
 
 [lints]
 workspace = true
