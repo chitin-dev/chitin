@@ -150,6 +150,7 @@ pub fn dark() -> UIThemes {
     background: UIBackgroundColors {
       primary: dark::GRAY_18,
       secondary: dark::GRAY_1F,
+      tertiary: dark::GRAY_2B,
       hover: dark::GRAY_2B,
       active: dark::GRAY_1F,
       selection: dark::BLUE_TRANSPARENT,
@@ -198,8 +199,9 @@ pub fn light() -> UIThemes {
       success: light::GREEN,
     },
     background: UIBackgroundColors {
-      primary: light::GRAY_F8,
-      secondary: light::WHITE,
+      primary: light::WHITE,
+      secondary: light::GRAY_F8,
+      tertiary: light::GRAY_E5,
       hover: light::GRAY_F2,
       active: light::GRAY_E8,
       selection: light::BLUE_TRANSPARENT,

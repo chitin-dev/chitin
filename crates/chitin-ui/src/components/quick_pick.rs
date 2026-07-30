@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use gpui::{
   AnyElement, App, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString, Styled,
-  Window, div, px,
+  Window, div, prelude::*, px,
 };
 
 use crate::themes::{UIThemes, builtins};
@@ -117,6 +117,7 @@ pub fn render_quick_pick_overlay(
   theme: UIThemes,
   on_select: Rc<QuickPickSelectHandler>,
 ) -> Div {
+  let is_form = matches!(overlay.content, QuickPickContent::Form(_));
   let panel_body = match overlay.content {
     QuickPickContent::Items {
       items,
@@ -143,12 +144,14 @@ pub fn render_quick_pick_overlay(
         .border_color(theme.border.primary)
         .bg(theme.background.secondary)
         .overflow_hidden()
-        .child(render_query_line(
-          overlay.prompt,
-          overlay.query,
-          overlay.placeholder,
-          theme,
-        ))
+        .when(!is_form, |parent| {
+          parent.child(render_query_line(
+            overlay.prompt,
+            overlay.query,
+            overlay.placeholder,
+            theme,
+          ))
+        })
         .child(panel_body),
     )
 }
@@ -322,9 +325,10 @@ fn render_form(form: QuickPickForm, theme: UIThemes) -> AnyElement {
         .rounded_sm()
         .border_1()
         .border_color(theme.border.primary)
-        .bg(theme.background.primary)
+        .bg(theme.background.tertiary)
         .px_2()
-        .text_color(theme.text.primary)
+        .text_xs()
+        .text_color(theme.text.secondary)
         .child(form.value),
     )
     .into_any_element()

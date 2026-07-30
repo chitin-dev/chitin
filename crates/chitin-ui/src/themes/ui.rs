@@ -38,6 +38,8 @@ pub struct UIBackgroundColors {
   pub primary: Rgba,
   /// Secondary background color for metadata, hints, path descriptions, and placeholders.
   pub secondary: Rgba,
+  /// Tertiary background
+  pub tertiary: Rgba,
   /// Background color when the mouse hovers over an interactive element.
   pub hover: Rgba,
   /// Background color for active or pressed interface elements.

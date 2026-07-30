@@ -50,7 +50,7 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
     shortcut: None,
     invocation: CommandInvocationKind::Form,
     form_prompt: Some("RCSB PDB ID"),
-    form_placeholder: None,
+    form_placeholder: Some("protein ID, eg: 1YTH"),
     command: DatabaseCommand::DownloadRcsbStructure.into(),
   }]
 }
