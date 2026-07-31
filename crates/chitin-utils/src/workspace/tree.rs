@@ -46,7 +46,7 @@ pub enum ProjectTreeEntryKind {
 /// # Example
 /// ```
 /// use std::path::PathBuf;
-/// use chitin_core::workspace::{ProjectTreeEntry, ProjectTreeEntryKind};
+/// use chitin_utils::workspace::{ProjectTreeEntry, ProjectTreeEntryKind};
 ///
 /// let entry = ProjectTreeEntry {
 ///   path: PathBuf::from("/project/src"),
@@ -83,7 +83,7 @@ pub struct ProjectTreeEntry {
 /// # Example
 /// ```
 /// use std::path::PathBuf;
-/// use chitin_core::workspace::{ProjectTree, ProjectTreeEntry, ProjectTreeEntryKind};
+/// use chitin_utils::workspace::{ProjectTree, ProjectTreeEntry, ProjectTreeEntryKind};
 ///
 /// let root = ProjectTreeEntry {
 ///   path: PathBuf::from("/my_project"),
@@ -116,7 +116,7 @@ pub struct ProjectTree {
 /// # Example
 /// ```
 /// use std::path::PathBuf;
-/// use chitin_core::workspace::{ProjectWorkspace, ProjectTree, ProjectTreeEntry, ProjectTreeEntryKind};
+/// use chitin_utils::workspace::{ProjectWorkspace, ProjectTree, ProjectTreeEntry, ProjectTreeEntryKind};
 ///
 /// let root = PathBuf::from("/my_project");
 /// let tree = ProjectTree {

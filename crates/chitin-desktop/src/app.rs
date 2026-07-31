@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 
-use chitin_core::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
@@ -14,14 +13,16 @@ use chitin_ui::{
   },
   themes::builtins,
 };
+use chitin_utils::workspace::ProjectWorkspace;
 use gpui::{
   AnyView, Context, CursorStyle, FocusHandle, InteractiveElement, MouseButton, Render, Window, div, prelude::*,
 };
 
 use crate::{
-  commands::workspace::ToggleWorkspace,
+  commands::{application::ToggleCommandPanel, workspace::ToggleWorkspace},
   components::{
     activity_bar::{ActiveActivity, render_activity_bar},
+    command_panel::{CommandPanelController, render_command_panel},
     document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::render_window_bar,
@@ -48,6 +49,8 @@ pub struct ChitinApp {
   pub(crate) active_activity: ActiveActivity,
   /// Whether the project workspace sidebar is visible when Workspace is active.
   pub(crate) project_sidebar_visible: bool,
+  /// Searchable command panel state, metadata, and focus ownership.
+  pub(crate) command_panel: CommandPanelController,
 }
 
 impl ChitinApp {
@@ -116,6 +119,7 @@ impl ChitinApp {
       document_panels: DocumentPanelState::empty(),
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
+      command_panel: CommandPanelController::new(),
     }
   }
 
@@ -249,6 +253,22 @@ impl ChitinApp {
   pub(crate) fn toggle_workspace(&mut self, cx: &mut Context<Self>) {
     self.toggle_workspace_state();
     cx.notify();
+  }
+
+  /// Toggles command-panel visibility for command dispatch without a window.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` is notified after panel visibility changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after updating controller state. Window-aware UI
+  /// entry points should call [`CommandPanelController::toggle`] directly.
+  pub(crate) fn toggle_command_panel(&mut self, cx: &mut Context<Self>) {
+    if self.command_panel.toggle_without_focus() {
+      cx.notify();
+    }
   }
 
   /// Toggles the workspace sidebar and moves focus to a rendered target.
@@ -395,12 +415,26 @@ impl Render for ChitinApp {
       .flex()
       .flex_col()
       .size_full()
+      .relative()
       .track_focus(&workbench_focus)
       .bg(theme.background.primary)
       .text_color(theme.text.primary)
       .on_action(cx.listener(|this, _: &ToggleWorkspace, window, cx| {
         this.toggle_workspace_with_focus(window, cx);
       }))
+      .on_action(cx.listener(|this, _: &ToggleCommandPanel, window, cx| {
+        if this.command_panel.toggle(window, cx) {
+          cx.notify();
+        }
+      }))
+      .capture_key_down({
+        let app = app.clone();
+        move |event, window, cx| {
+          let _ = app.update(cx, |this, cx| {
+            this.handle_command_panel_key(event, window, cx);
+          });
+        }
+      })
       .when(project_sidebar_is_resizing, |layout| {
         layout.cursor(CursorStyle::ResizeLeftRight)
       })
@@ -494,6 +528,9 @@ impl Render for ChitinApp {
             cx,
           )),
       )
+      .when(self.command_panel.is_open(), |layout| {
+        layout.child(render_command_panel(&mut self.command_panel, theme, app, cx))
+      })
   }
 }
 

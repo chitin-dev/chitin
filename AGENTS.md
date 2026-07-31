@@ -4,7 +4,7 @@
 
 Chitin is a Rust workspace. Core crates live under `crates/`:
 
-- `crates/chitin-core`: domain and workspace data models; no GPUI dependency.
+- `crates/chitin-utils`: domain and workspace data models; no GPUI dependency.
 - `crates/chitin-ui`: reusable GPUI components, themes, and UI benchmarks.
 - `crates/chitin-desktop`: desktop application wiring, assets, and workspace
   views.

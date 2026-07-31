@@ -8,13 +8,13 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use chitin_core::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::sidebar::{
     Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
   },
   themes::UIThemes,
 };
+use chitin_utils::workspace::ProjectWorkspace;
 use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, UniformListScrollHandle, div, prelude::*};
 
 use crate::{
