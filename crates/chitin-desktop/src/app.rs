@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 
-use chitin_utils::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
@@ -14,6 +13,7 @@ use chitin_ui::{
   },
   themes::builtins,
 };
+use chitin_utils::workspace::ProjectWorkspace;
 use gpui::{
   AnyView, Context, CursorStyle, FocusHandle, InteractiveElement, MouseButton, Render, Window, div, prelude::*,
 };
