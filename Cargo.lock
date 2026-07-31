@@ -639,10 +639,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chitin-core"
-version = "0.1.0"
-
-[[package]]
 name = "chitin-databases"
 version = "0.1.0"
 dependencies = [
@@ -662,8 +658,8 @@ name = "chitin-desktop"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "chitin-core",
  "chitin-ui",
+ "chitin-utils",
  "chitin-wgpu",
  "env_logger",
  "glam",
@@ -680,6 +676,10 @@ dependencies = [
  "gpui-ce",
  "log",
 ]
+
+[[package]]
+name = "chitin-utils"
+version = "0.1.0"
 
 [[package]]
 name = "chitin-wgpu"

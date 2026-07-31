@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use chitin_core::workspace::ProjectWorkspace;
+use chitin_utils::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,

@@ -8,7 +8,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
-use chitin_core::workspace::ProjectWorkspace;
+use chitin_utils::workspace::ProjectWorkspace;
 use chitin_ui::{
   components::sidebar::{
     Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,

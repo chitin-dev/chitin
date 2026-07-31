@@ -160,7 +160,7 @@ impl ProjectWorkspaceError {
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use chitin_core::workspace::ProjectWorkspaceError;
+/// use chitin_utils::workspace::ProjectWorkspaceError;
 ///
 /// let err = ProjectWorkspaceError::NotFound(PathBuf::from("/nonexistent"));
 /// assert_eq!(
@@ -232,7 +232,7 @@ impl fmt::Display for ProjectWorkspaceError {
 /// ```
 /// use std::path::PathBuf;
 /// use std::error::Error;
-/// use chitin_core::workspace::ProjectWorkspaceError;
+/// use chitin_utils::workspace::ProjectWorkspaceError;
 ///
 /// let err = ProjectWorkspaceError::ReadDir {
 ///   path: PathBuf::from("/tmp"),

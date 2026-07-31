@@ -25,7 +25,7 @@ Goal: Establish the engineering shape of the project.
 
 Deliverables:
 
-- [x] Cargo workspace with `chitin-core` and `chitin-desktop`.
+- [x] Cargo workspace with `chitin-utils` and `chitin-desktop`.
 - [x] GPUI desktop shell with a real application frame.
 - [x] Formatting, linting, and CI-ready check commands.
 - [x] Project identity: logo, README, roadmap, license, contribution guide.
@@ -73,7 +73,7 @@ Goal: Define the core domain model independent of GPUI.
 Deliverables:
 
 - [ ] Workspace, document, dataset, molecule, sequence, job, and result types in
-      `chitin-core`.
+      `chitin-utils`.
 - [ ] Import pipeline with typed parse results and recoverable diagnostics.
 - [ ] Provenance model for generated files and job outputs.
 - [ ] Stable serialization for workspace metadata.
@@ -81,7 +81,7 @@ Deliverables:
 
 Important design points:
 
-- [ ] Keep UI-specific state out of `chitin-core`.
+- [ ] Keep UI-specific state out of `chitin-utils`.
 - [ ] Use typed errors for library boundaries.
 - [ ] Treat every generated artifact as traceable to inputs, parameters, tool
       version, and timestamp.

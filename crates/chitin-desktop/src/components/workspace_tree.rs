@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chitin_core::workspace::{ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace, ProjectWorkspaceError};
+use chitin_utils::workspace::{ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace, ProjectWorkspaceError};
 use chitin_ui::{
   components::tree::{
     DEFAULT_TREE_INDENT, DEFAULT_TREE_ROW_HEIGHT, TreeItemRow, TreeMessageRow, TreeRow, virtual_tree_rows_with_scroll,
