@@ -65,6 +65,7 @@ pub(crate) fn render_command_panel(
             })
             .collect(),
           selected_index: controller.selected_index(),
+          scroll_handle: Some(controller.result_scroll_handle()),
           empty_message: "No commands found".into(),
         },
       };
@@ -194,6 +195,7 @@ fn render_command_form(controller: &CommandPanelController) -> QuickPickOverlay 
       content: QuickPickContent::Items {
         items: Vec::new(),
         selected_index: 0,
+        scroll_handle: None,
         empty_message: "Command is unavailable".into(),
       },
     };

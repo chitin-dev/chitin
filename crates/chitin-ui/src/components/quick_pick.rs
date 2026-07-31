@@ -3,14 +3,14 @@
 use std::rc::Rc;
 
 use gpui::{
-  AnyElement, App, Div, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString, Styled,
-  Window, div, prelude::*, px,
+  AnyElement, App, Div, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString,
+  Styled, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 
 use crate::themes::{UIThemes, builtins};
 
-/// Maximum number of quick-pick rows rendered in one overlay.
-pub const DEFAULT_QUICK_PICK_VISIBLE_ROWS: usize = 10;
+/// Maximum number of quick-pick rows visible before the body scrolls.
+pub const DEFAULT_QUICK_PICK_VISIBLE_ROWS: usize = 8;
 /// Default height of quick pick item
 pub const DEFAULT_QUICK_PICK_ITEM_HEIGHT: Pixels = px(60.0);
 /// Default margin from top
@@ -19,6 +19,8 @@ pub const DEFAULT_QUICK_PICK_MARGIN_TOP: Pixels = px(30.0);
 pub const DEFAULT_QUICK_PICK_WIDTH: Pixels = px(660.0);
 /// Default max height of quick pick panel
 pub const DEFAULT_QUICK_PICK_MAX_HEIGHT: Pixels = px(560.0);
+/// Default max height of the quick-pick result list.
+pub const DEFAULT_QUICK_PICK_BODY_MAX_HEIGHT: Pixels = px(512.0);
 
 /// Callback invoked when a quick-pick row is selected.
 type QuickPickSelectHandler = dyn for<'a, 'b> Fn(usize, &'a mut Window, &'b mut App);
@@ -44,7 +46,7 @@ pub struct QuickPickForm {
 }
 
 /// Body content rendered below the query line.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum QuickPickContent {
   /// Ranked selectable rows.
   Items {
@@ -52,6 +54,8 @@ pub enum QuickPickContent {
     items: Vec<QuickPickItem>,
     /// Currently selected row index.
     selected_index: usize,
+    /// Optional virtual-list scroll handle used to reveal the selected row.
+    scroll_handle: Option<UniformListScrollHandle>,
     /// Empty-state text.
     empty_message: SharedString,
   },
@@ -60,7 +64,7 @@ pub enum QuickPickContent {
 }
 
 /// Data needed to render one quick-pick overlay.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct QuickPickOverlay {
   /// Leading prompt label.
   pub prompt: SharedString,
@@ -122,8 +126,17 @@ pub fn render_quick_pick_overlay(
     QuickPickContent::Items {
       items,
       selected_index,
+      scroll_handle,
       empty_message,
-    } => render_items(items, selected_index, empty_message, theme, on_select),
+    } => render_items(
+      "quick-pick-result-list",
+      items,
+      selected_index,
+      scroll_handle,
+      empty_message,
+      theme,
+      on_select,
+    ),
     QuickPickContent::Form(form) => render_form(form, theme),
   };
 
@@ -133,6 +146,10 @@ pub fn render_quick_pick_overlay(
     .flex()
     .justify_center()
     .bg(builtins::TRANSPARENT)
+    .occlude()
+    .on_scroll_wheel(|_, _, cx| {
+      cx.stop_propagation();
+    })
     .child(
       div()
         .mt(DEFAULT_QUICK_PICK_MARGIN_TOP)
@@ -144,6 +161,9 @@ pub fn render_quick_pick_overlay(
         .border_color(theme.border.primary)
         .bg(theme.background.secondary)
         .overflow_hidden()
+        .on_scroll_wheel(|_, _, cx| {
+          cx.stop_propagation();
+        })
         .when(!is_form, |parent| {
           parent.child(render_query_line(
             overlay.prompt,
@@ -206,6 +226,8 @@ fn render_query_line(prompt: SharedString, query: SharedString, placeholder: Sha
 ///
 /// `selected_index` controls highlight state.
 ///
+/// `scroll_handle` optionally preserves and controls virtual-list scroll state.
+///
 /// `empty_message` is shown when no rows exist.
 ///
 /// `theme` supplies colors.
@@ -216,8 +238,10 @@ fn render_query_line(prompt: SharedString, query: SharedString, placeholder: Sha
 ///
 /// A quick-pick body element.
 fn render_items(
+  id: impl Into<ElementId>,
   items: Vec<QuickPickItem>,
   selected_index: usize,
+  scroll_handle: Option<UniformListScrollHandle>,
   empty_message: SharedString,
   theme: UIThemes,
   on_select: Rc<QuickPickSelectHandler>,
@@ -233,16 +257,31 @@ fn render_items(
       .into_any_element();
   }
 
+  let visible_rows = items.len().min(DEFAULT_QUICK_PICK_VISIBLE_ROWS);
+  let body_height = DEFAULT_QUICK_PICK_ITEM_HEIGHT * visible_rows;
+  let items = Rc::new(items);
+  let item_count = items.len();
+  let list = uniform_list(id, item_count, move |range, _window, _cx| {
+    range
+      .filter_map(|index| items.get(index).cloned().map(|item| (index, item)))
+      .map(|(index, item)| {
+        render_item(index, item, index == selected_index, theme, on_select.clone()).into_any_element()
+      })
+      .collect()
+  });
+
+  let list = match scroll_handle {
+    Some(scroll_handle) => list.track_scroll(&scroll_handle),
+    None => list,
+  };
+
   div()
     .flex()
     .flex_col()
-    .children(
-      items
-        .into_iter()
-        .take(DEFAULT_QUICK_PICK_VISIBLE_ROWS)
-        .enumerate()
-        .map(|(index, item)| render_item(index, item, index == selected_index, theme, on_select.clone())),
-    )
+    .h(body_height)
+    .max_h(DEFAULT_QUICK_PICK_BODY_MAX_HEIGHT)
+    .min_h_0()
+    .child(gpui::Styled::scrollbar_width(list.size_full(), px(8.0)))
     .into_any_element()
 }
 
@@ -277,6 +316,7 @@ fn render_item(
     .items_center()
     .justify_between()
     .h(DEFAULT_QUICK_PICK_ITEM_HEIGHT)
+    .w_full()
     .px_3()
     .py_3()
     .bg(if selected {

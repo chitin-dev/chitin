@@ -1,6 +1,6 @@
 //! Desktop-owned command-panel state and focus management.
 
-use gpui::{Context, FocusHandle, KeyDownEvent, Window};
+use gpui::{Context, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
 
 use crate::{
   app::ChitinApp,
@@ -39,6 +39,8 @@ pub(crate) struct CommandPanelController {
   query: String,
   /// Selected search result index.
   selected_index: usize,
+  /// Scroll handle for the virtualized command result list.
+  result_scroll: UniformListScrollHandle,
   /// Current panel interaction mode.
   mode: CommandPanelMode,
   /// Focus handle tracked by the rendered quick-pick overlay.
@@ -63,6 +65,7 @@ impl CommandPanelController {
       is_open: false,
       query: String::new(),
       selected_index: 0,
+      result_scroll: UniformListScrollHandle::new(),
       mode: CommandPanelMode::Search,
       focus: None,
       previous_focus: None,
@@ -132,6 +135,19 @@ impl CommandPanelController {
   /// The zero-based selected search result index.
   pub(crate) fn selected_index(&self) -> usize {
     self.selected_index
+  }
+
+  /// Returns the scroll handle for command result virtualization.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads the controller state.
+  ///
+  /// # Returns
+  ///
+  /// A cloned GPUI uniform-list handle for the rendered command rows.
+  pub(crate) fn result_scroll_handle(&self) -> UniformListScrollHandle {
+    self.result_scroll.clone()
   }
 
   /// Returns the descriptor for the command whose form is open.
@@ -270,6 +286,7 @@ impl CommandPanelController {
     self.mode = CommandPanelMode::Form(command);
     self.query.clear();
     self.selected_index = 0;
+    self.reveal_selected(ScrollStrategy::Top);
     true
   }
 
@@ -291,22 +308,26 @@ impl CommandPanelController {
       "escape" => Some(CommandPanelEvent::Close),
       "up" => {
         self.select_previous();
+        self.reveal_selected(ScrollStrategy::Top);
         Some(CommandPanelEvent::StateChanged)
       }
       "down" => {
         self.select_next();
+        self.reveal_selected(ScrollStrategy::Bottom);
         Some(CommandPanelEvent::StateChanged)
       }
       "enter" => Some(self.submit()),
       "backspace" => {
         self.query.pop();
         self.selected_index = 0;
+        self.reveal_selected(ScrollStrategy::Top);
         Some(CommandPanelEvent::StateChanged)
       }
       _ => {
         let character = printable_character(event)?;
         self.query.push_str(character);
         self.selected_index = 0;
+        self.reveal_selected(ScrollStrategy::Top);
         Some(CommandPanelEvent::StateChanged)
       }
     }
@@ -326,6 +347,7 @@ impl CommandPanelController {
     self.query.clear();
     self.selected_index = 0;
     self.mode = CommandPanelMode::Search;
+    self.reveal_selected(ScrollStrategy::Top);
   }
 
   /// Moves selection to the previous visible search result.
@@ -363,6 +385,19 @@ impl CommandPanelController {
     if result_count > 0 {
       self.selected_index = (self.selected_index + 1).min(result_count - 1);
     }
+  }
+
+  /// Scrolls the virtual result list so the selected row remains visible.
+  ///
+  /// # Parameters
+  ///
+  /// `strategy` controls which viewport edge GPUI should use when scrolling is needed.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after recording a deferred GPUI scroll request.
+  fn reveal_selected(&self, strategy: ScrollStrategy) {
+    self.result_scroll.scroll_to_item(self.selected_index, strategy);
   }
 
   /// Resolves the current input line into a command-panel operation.
