@@ -35,6 +35,7 @@ pub struct ButtonStyle {
   border: Option<gpui::Rgba>,
   focus_border: Option<gpui::Rgba>,
   width: Option<Pixels>,
+  height: Option<Pixels>,
   horizontal_padding: Option<Pixels>,
 }
 
@@ -89,6 +90,12 @@ impl ButtonStyle {
   /// Sets an explicit visual width.
   pub fn width(mut self, width: Pixels) -> Self {
     self.width = Some(width);
+    self
+  }
+
+  /// Sets an explicit visual height.
+  pub fn height(mut self, height: Pixels) -> Self {
+    self.height = Some(height);
     self
   }
 
@@ -195,7 +202,7 @@ impl RenderOnce for Button {
       .items_center()
       .justify_center()
       .gap_1()
-      .h(metrics.height)
+      .h(self.style.height.unwrap_or(metrics.height))
       .when_some(self.style.width, |style, width| style.w(width))
       .when(self.style.width.is_none(), |style| style.w_auto())
       .when(self.full_width, |style| style.w_full())
@@ -383,5 +390,12 @@ mod tests {
     );
 
     assert_eq!(colors.background, theme.background.warning);
+  }
+
+  #[test]
+  fn button_style_should_override_height() {
+    let height = px(40.0);
+
+    assert_eq!(ButtonStyle::new().height(height).height, Some(height));
   }
 }

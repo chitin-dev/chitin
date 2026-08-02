@@ -6,8 +6,8 @@
 use std::path::PathBuf;
 
 use chitin_ui::{
-  components::activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
   composite::{
+    activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
     panel::{PanelSplitAxis, PanelTabDrag},
     window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
   },
@@ -21,7 +21,7 @@ use gpui::{
 use crate::{
   commands::{application::ToggleCommandPanel, workspace::ToggleWorkspace},
   components::{
-    activity_bar::{ActiveActivity, render_activity_bar},
+    activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
     document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
@@ -53,6 +53,8 @@ pub struct ChitinApp {
   pub(crate) command_panel: CommandPanelController,
   /// Primitive button state for platform window actions.
   pub(crate) window_bar_controls: Option<WindowBarControls>,
+  /// Primitive button state for activity-bar navigation controls.
+  pub(crate) activity_bar_controls: Option<ActivityBarControls>,
 }
 
 impl ChitinApp {
@@ -123,6 +125,7 @@ impl ChitinApp {
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
       window_bar_controls: None,
+      activity_bar_controls: None,
     }
   }
 
@@ -387,6 +390,18 @@ impl ChitinApp {
     self.window_bar_controls = Some(controls.clone());
     controls
   }
+
+  /// Returns persistent primitive button state for activity-bar controls.
+  fn activity_bar_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> ActivityBarControls {
+    if let Some(controls) = self.activity_bar_controls.as_ref() {
+      return controls.clone();
+    }
+
+    let controls = ActivityBarControls::new(cx);
+    controls.subscribe(window, cx);
+    self.activity_bar_controls = Some(controls.clone());
+    controls
+  }
 }
 
 impl Render for ChitinApp {
@@ -414,6 +429,7 @@ impl Render for ChitinApp {
 
     let theme = builtins::dark();
     let window_bar_controls = self.window_bar_controls(window, cx);
+    let activity_bar_controls = self.activity_bar_controls(window, cx);
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
@@ -522,7 +538,7 @@ impl Render for ChitinApp {
           .flex()
           .flex_1()
           .min_h_0()
-          .child(render_activity_bar(self.active_activity, theme, cx))
+          .child(render_activity_bar(self.active_activity, theme, activity_bar_controls))
           .when(
             self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible,
             |layout| {
