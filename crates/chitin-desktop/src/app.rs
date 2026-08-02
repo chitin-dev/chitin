@@ -9,8 +9,8 @@ use chitin_ui::{
   components::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
     panel::{PanelSplitAxis, PanelTabDrag},
-    window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
   },
+  composite::window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
   themes::builtins,
 };
 use chitin_utils::workspace::ProjectWorkspace;
@@ -25,7 +25,7 @@ use crate::{
     command_panel::{CommandPanelController, render_command_panel},
     document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
-    window_bar::render_window_bar,
+    window_bar::{WindowBarControls, render_window_bar},
   },
 };
 
@@ -51,6 +51,8 @@ pub struct ChitinApp {
   pub(crate) project_sidebar_visible: bool,
   /// Searchable command panel state, metadata, and focus ownership.
   pub(crate) command_panel: CommandPanelController,
+  /// Primitive button state for platform window actions.
+  pub(crate) window_bar_controls: Option<WindowBarControls>,
 }
 
 impl ChitinApp {
@@ -120,6 +122,7 @@ impl ChitinApp {
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
+      window_bar_controls: None,
     }
   }
 
@@ -372,6 +375,18 @@ impl ChitinApp {
   fn document_panel_root_height(window_height: gpui::Pixels) -> gpui::Pixels {
     gpui::px((f32::from(window_height) - f32::from(DEFAULT_WINDOW_BAR_HEIGHT)).max(0.0))
   }
+
+  /// Returns persistent primitive button state for platform window controls.
+  fn window_bar_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> WindowBarControls {
+    if let Some(controls) = self.window_bar_controls.as_ref() {
+      return controls.clone();
+    }
+
+    let controls = WindowBarControls::new(cx);
+    controls.subscribe(window, cx);
+    self.window_bar_controls = Some(controls.clone());
+    controls
+  }
 }
 
 impl Render for ChitinApp {
@@ -384,8 +399,7 @@ impl Render for ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `_window` is the GPUI window being rendered. The current implementation
-  /// does not need it directly.
+  /// `window` is the GPUI window used to register platform window controls.
   ///
   /// `cx` is the GPUI render context used to access the app entity and focus
   /// handles.
@@ -393,12 +407,13 @@ impl Render for ChitinApp {
   /// # Returns
   ///
   /// A GPUI element tree for the current Chitin desktop frame.
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
     if !cx.has_active_drag() {
       self.cancel_document_panel_tab_drag();
     }
 
     let theme = builtins::dark();
+    let window_bar_controls = self.window_bar_controls(window, cx);
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
@@ -501,7 +516,7 @@ impl Render for ChitinApp {
           });
         }
       })
-      .child(render_window_bar(theme, cx))
+      .child(render_window_bar(theme, window_bar_controls))
       .child(
         div()
           .flex()
