@@ -5,15 +5,9 @@
 
 /// Vertical workbench activity bar components.
 pub mod activity_bar;
-/// IDE-style multi-panel container components.
-pub mod panel;
 /// Generic quick-pick overlay components.
 pub mod quick_pick;
 /// Generic resize gesture state.
 pub mod resize;
 /// Sidebar shell and subsection components.
 pub mod sidebar;
-/// Generic hierarchical tree components.
-pub mod tree;
-/// Custom window title bar components.
-pub mod window_bar;
