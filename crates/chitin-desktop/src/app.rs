@@ -430,6 +430,7 @@ impl Render for ChitinApp {
     let theme = builtins::dark();
     let window_bar_controls = self.window_bar_controls(window, cx);
     let activity_bar_controls = self.activity_bar_controls(window, cx);
+    let command_panel_search_input = self.command_panel_search_input(window, cx);
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
@@ -560,7 +561,13 @@ impl Render for ChitinApp {
           )),
       )
       .when(self.command_panel.is_open(), |layout| {
-        layout.child(render_command_panel(&mut self.command_panel, theme, app, cx))
+        layout.child(render_command_panel(
+          &mut self.command_panel,
+          theme,
+          app,
+          cx,
+          command_panel_search_input,
+        ))
       })
   }
 }

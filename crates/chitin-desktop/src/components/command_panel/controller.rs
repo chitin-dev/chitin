@@ -1,6 +1,7 @@
 //! Desktop-owned command-panel state and focus management.
 
-use gpui::{Context, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
+use chitin_ui::primitive::input::text::TextInputState;
+use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
 
 use crate::{
   app::ChitinApp,
@@ -41,10 +42,12 @@ pub(crate) struct CommandPanelController {
   selected_index: usize,
   /// Scroll handle for the virtualized command result list.
   result_scroll: UniformListScrollHandle,
+  /// Primitive text-input state for quick-pick search.
+  search_input: Option<Entity<TextInputState>>,
+  /// Whether desktop routing has subscribed to search input events.
+  search_input_subscribed: bool,
   /// Current panel interaction mode.
   mode: CommandPanelMode,
-  /// Focus handle tracked by the rendered quick-pick overlay.
-  focus: Option<FocusHandle>,
   /// Focus target active before the overlay opened.
   previous_focus: Option<FocusHandle>,
 }
@@ -66,8 +69,9 @@ impl CommandPanelController {
       query: String::new(),
       selected_index: 0,
       result_scroll: UniformListScrollHandle::new(),
+      search_input: None,
+      search_input_subscribed: false,
       mode: CommandPanelMode::Search,
-      focus: None,
       previous_focus: None,
     }
   }
@@ -150,6 +154,36 @@ impl CommandPanelController {
     self.result_scroll.clone()
   }
 
+  /// Returns persistent primitive state for the quick-pick search input.
+  pub(crate) fn search_input(&mut self, cx: &mut Context<ChitinApp>) -> Entity<TextInputState> {
+    self
+      .search_input
+      .get_or_insert_with(|| cx.new(TextInputState::new))
+      .clone()
+  }
+
+  /// Marks the search input's desktop event subscription as installed.
+  pub(crate) fn take_search_input_subscription(&mut self) -> bool {
+    if self.search_input_subscribed {
+      return false;
+    }
+
+    self.search_input_subscribed = true;
+    true
+  }
+
+  /// Updates the query after a primitive text-input change event.
+  pub(crate) fn set_query(&mut self, query: impl Into<String>) {
+    self.query = query.into();
+    self.selected_index = 0;
+    self.reveal_selected(ScrollStrategy::Top);
+  }
+
+  /// Resolves the current search selection or form value into a panel event.
+  pub(crate) fn submit_current(&self) -> CommandPanelEvent {
+    self.submit()
+  }
+
   /// Returns the descriptor for the command whose form is open.
   ///
   /// # Parameters
@@ -164,19 +198,6 @@ impl CommandPanelController {
       return None;
     };
     self.registry.descriptor_for(command)
-  }
-
-  /// Returns the focus handle tracked by the command-panel overlay.
-  ///
-  /// # Parameters
-  ///
-  /// `cx` allocates the handle if the overlay has not rendered before.
-  ///
-  /// # Returns
-  ///
-  /// A cloned focus handle for the quick-pick overlay.
-  pub(crate) fn focus_handle(&mut self, cx: &mut Context<ChitinApp>) -> FocusHandle {
-    self.focus.get_or_insert_with(|| cx.focus_handle()).clone()
   }
 
   /// Opens the command panel and focuses its overlay.
@@ -197,7 +218,11 @@ impl CommandPanelController {
 
     self.reset_for_open();
     self.previous_focus = window.focused(cx);
-    let focus = self.focus_handle(cx);
+    let search_input = self.search_input(cx);
+    search_input.update(cx, |state, cx| {
+      state.set_text("", cx);
+    });
+    let focus = search_input.read(cx).focus_handle().clone();
     window.focus(&focus, cx);
     true
   }
@@ -261,6 +286,11 @@ impl CommandPanelController {
 
     self.is_open = false;
     self.query.clear();
+    if let Some(search_input) = self.search_input.as_ref() {
+      search_input.update(cx, |state, cx| {
+        state.set_text("", cx);
+      });
+    }
     self.selected_index = 0;
     self.mode = CommandPanelMode::Search;
     if let Some(previous_focus) = self.previous_focus.take() {
@@ -478,5 +508,16 @@ mod tests {
 
     assert!(controller.open_form(command.clone()));
     assert_eq!(controller.mode, CommandPanelMode::Form(command));
+  }
+
+  #[test]
+  fn set_query_should_reset_result_selection() {
+    let mut controller = CommandPanelController::new();
+    controller.selected_index = 3;
+
+    controller.set_query("workspace");
+
+    assert_eq!(controller.query(), "workspace");
+    assert_eq!(controller.selected_index(), 0);
   }
 }
