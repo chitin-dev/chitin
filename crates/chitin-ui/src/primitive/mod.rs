@@ -8,6 +8,8 @@ pub mod icon;
 pub mod input;
 /// Generic resize gesture state.
 pub mod resize;
+/// Sidebar layout and resize controls.
+pub mod sidebar;
 /// Text display controls with optional clipboard support.
 pub mod text;
 /// Virtualized tree layout and scroll state.

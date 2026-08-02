@@ -9,10 +9,12 @@ use std::{
 };
 
 use chitin_ui::{
-  components::sidebar::{
-    Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
+  primitive::{
+    sidebar::{
+      Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
+    },
+    tree::TreeState,
   },
-  primitive::tree::TreeState,
   themes::UIThemes,
 };
 use chitin_utils::workspace::ProjectWorkspace;
@@ -278,7 +280,7 @@ pub fn render_project_sidebar(
 
 #[cfg(test)]
 mod tests {
-  use chitin_ui::components::sidebar::DEFAULT_SIDEBAR_WIDTH;
+  use chitin_ui::primitive::sidebar::DEFAULT_SIDEBAR_WIDTH;
 
   use super::*;
 

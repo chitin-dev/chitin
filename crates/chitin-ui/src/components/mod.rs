@@ -7,5 +7,3 @@
 pub mod activity_bar;
 /// Generic quick-pick overlay components.
 pub mod quick_pick;
-/// Sidebar shell and subsection components.
-pub mod sidebar;

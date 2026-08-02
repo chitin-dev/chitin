@@ -49,7 +49,7 @@ pub const DEFAULT_HEADER_HEIGHT: Pixels = px(30.0);
 /// # Example
 ///
 /// ```no_run
-/// use chitin_ui::components::sidebar::SidebarResizeState;
+/// use chitin_ui::primitive::sidebar::SidebarResizeState;
 /// use gpui::px;
 ///
 /// let mut resize = SidebarResizeState::default();
