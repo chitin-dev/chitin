@@ -6,12 +6,12 @@ use std::{
   rc::Rc,
 };
 
-use chitin_ui::components::{
-  panel::{
+use chitin_ui::{
+  composite::panel::{
     PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag, PanelTabDragState,
     PanelTabDropTarget, PanelTabId, PanelTabScrollState, PanelTree,
   },
-  resize::ResizeGesture,
+  primitive::resize::ResizeGesture,
 };
 use gpui::{AnyView, App, Pixels, Window};
 

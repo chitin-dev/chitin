@@ -3,7 +3,7 @@
 use std::{rc::Rc, time::Instant};
 
 use chitin_ui::{
-  components::panel::{
+  composite::panel::{
     PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
     PanelTabCloseIconRenderer, PanelTabDragConfig, PanelTabDragStartHandler, PanelTabDragTargetHandler,
     PanelTabDropHandler, render_panel_container,

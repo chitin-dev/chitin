@@ -6,11 +6,11 @@
 use std::path::PathBuf;
 
 use chitin_ui::{
-  components::{
-    activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
+  components::activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
+  composite::{
     panel::{PanelSplitAxis, PanelTabDrag},
+    window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
   },
-  composite::window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
   themes::builtins,
 };
 use chitin_utils::workspace::ProjectWorkspace;

@@ -13,7 +13,7 @@ use gpui::{
 };
 
 use crate::{
-  components::resize::ResizeGesture,
+  primitive::resize::ResizeGesture,
   themes::{UIThemes, builtins},
 };
 

@@ -7,7 +7,5 @@
 pub mod activity_bar;
 /// Generic quick-pick overlay components.
 pub mod quick_pick;
-/// Generic resize gesture state.
-pub mod resize;
 /// Sidebar shell and subsection components.
 pub mod sidebar;

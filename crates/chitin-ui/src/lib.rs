@@ -6,5 +6,9 @@
 
 /// Reusable GPUI component primitives.
 pub mod components;
+/// Composite controls assembled from reusable primitives.
+pub mod composite;
+/// Low-level, application-neutral controls.
+pub mod primitive;
 /// Theme structures and built-in palettes.
 pub mod themes;

@@ -6,6 +6,8 @@ pub mod button;
 pub mod icon;
 /// Input controls and their state models.
 pub mod input;
+/// Generic resize gesture state.
+pub mod resize;
 /// Text display controls with optional clipboard support.
 pub mod text;
 /// Virtualized tree layout and scroll state.
