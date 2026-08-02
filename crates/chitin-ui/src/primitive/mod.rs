@@ -8,3 +8,5 @@ pub mod icon;
 pub mod input;
 /// Text display controls with optional clipboard support.
 pub mod text;
+/// Virtualized tree layout and scroll state.
+pub mod tree;
