@@ -60,18 +60,8 @@ pub fn render_window_bar(theme: UIThemes, controls: WindowBarControls) -> Window
     .theme(theme)
     .subtitle("open your project")
     .items([
-      WindowBarItem::new(
-        "minimize",
-        "Minimize",
-        "icons/window-bar/lucide-minus.svg",
-        controls.minimize,
-      ),
-      WindowBarItem::new(
-        "maximize",
-        "Maximize",
-        "icons/window-bar/lucide-square.svg",
-        controls.maximize,
-      ),
-      WindowBarItem::new("close", "Close", "icons/window-bar/lucide-x.svg", controls.close),
+      WindowBarItem::new("minimize", "Minimize", "icons/window-minimize.svg", controls.minimize),
+      WindowBarItem::new("maximize", "Maximize", "icons/window-maximize.svg", controls.maximize),
+      WindowBarItem::new("close", "Close", "icons/window-close.svg", controls.close),
     ])
 }

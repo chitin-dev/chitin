@@ -175,27 +175,27 @@ pub fn render_activity_bar(
     .active_item(active_activity.id())
     .item(activity_item(
       ActiveActivity::Workspace,
-      "icons/activity-bar/codicon-workspace.svg",
+      "icons/activity-workspace.svg",
       controls.workspace,
     ))
     .item(activity_item(
       ActiveActivity::Search,
-      "icons/activity-bar/codicon-search.svg",
+      "icons/activity-search.svg",
       controls.search,
     ))
     .item(activity_item(
       ActiveActivity::Jobs,
-      "icons/activity-bar/codicon-job.svg",
+      "icons/activity-jobs.svg",
       controls.jobs,
     ))
     .item(activity_item(
       ActiveActivity::Agents,
-      "icons/activity-bar/codicon-agent.svg",
+      "icons/activity-agents.svg",
       controls.agents,
     ))
     .bottom_item(activity_item(
       ActiveActivity::Settings,
-      "icons/activity-bar/codicon-settings.svg",
+      "icons/activity-settings.svg",
       controls.settings,
     ))
 }

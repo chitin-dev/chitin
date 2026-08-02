@@ -28,11 +28,11 @@ use crate::{
 const TREE_ICON_SIZE_VALUE: f32 = 16.0;
 const TREE_ICON_SIZE: gpui::Pixels = px(TREE_ICON_SIZE_VALUE);
 
-const FILE_ICON: &str = "icons/workspace/catppuccin-default-file.svg";
-const FOLDER_CLOSED_ICON: &str = "icons/workspace/catppuccin-default-folder-close.svg";
-const FOLDER_OPEN_ICON: &str = "icons/workspace/catppuccin-default-folder-open.svg";
-const LIST_CLOSED_ICON: &str = "icons/workspace/codicon-list-close.svg";
-const LIST_OPEN_ICON: &str = "icons/workspace/codicon-list-open.svg";
+const FILE_ICON: &str = "icons/file.svg";
+const FOLDER_CLOSED_ICON: &str = "icons/folder-closed.svg";
+const FOLDER_OPEN_ICON: &str = "icons/folder-open.svg";
+const LIST_CLOSED_ICON: &str = "icons/tree-collapse.svg";
+const LIST_OPEN_ICON: &str = "icons/tree-expand.svg";
 
 impl ChitinApp {
   /// Applies keyboard navigation to the visible project workspace tree.
