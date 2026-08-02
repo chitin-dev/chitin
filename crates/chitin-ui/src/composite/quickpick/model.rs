@@ -95,8 +95,6 @@ pub enum QuickPickContent {
 /// Data needed to render one quick-pick overlay.
 #[derive(Clone)]
 pub struct QuickPickOverlay {
-  /// Leading prompt label.
-  pub prompt: SharedString,
   /// Current query text.
   pub query: SharedString,
   /// Placeholder shown when `query` is empty.

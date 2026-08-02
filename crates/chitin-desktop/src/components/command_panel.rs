@@ -55,7 +55,6 @@ pub(crate) fn render_command_panel(
         .map(|result| result.descriptor.command.clone())
         .collect::<Vec<_>>();
       let overlay = QuickPickOverlay {
-        prompt: ">".into(),
         query: controller.query().into(),
         placeholder: "Type a command".into(),
         search_input: Some(QuickPickSearchInput::new(search_input)),
@@ -229,7 +228,6 @@ fn form_value(controller: &CommandPanelController, descriptor: &CommandDescripto
 fn render_command_form(controller: &CommandPanelController) -> QuickPickOverlay {
   let Some(descriptor) = controller.form_descriptor() else {
     return QuickPickOverlay {
-      prompt: "Input".into(),
       query: controller.query().into(),
       placeholder: "".into(),
       search_input: None,
@@ -243,7 +241,6 @@ fn render_command_form(controller: &CommandPanelController) -> QuickPickOverlay 
   };
 
   QuickPickOverlay {
-    prompt: descriptor.form_prompt.unwrap_or("Input").into(),
     query: controller.query().into(),
     placeholder: descriptor.form_placeholder.unwrap_or("").into(),
     search_input: None,

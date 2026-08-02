@@ -9,6 +9,7 @@ use super::{
   QuickPickContent, QuickPickForm, QuickPickItem, QuickPickOverlay, QuickPickSearchInput, QuickPickSelectHandler,
 };
 use crate::{
+  primitive::icon::Icon,
   primitive::input::text::{TextInput, TextInputSize},
   themes::{UIThemes, builtins},
 };
@@ -89,7 +90,6 @@ pub fn render_quick_pick_overlay(
         })
         .when(!is_form, |parent| {
           parent.child(render_query_line(
-            overlay.prompt,
             overlay.query,
             overlay.placeholder,
             overlay.search_input,
@@ -104,8 +104,6 @@ pub fn render_quick_pick_overlay(
 ///
 /// # Parameters
 ///
-/// `prompt` is shown before the query text.
-///
 /// `query` is the current text.
 ///
 /// `placeholder` is shown when `query` is empty.
@@ -116,7 +114,6 @@ pub fn render_quick_pick_overlay(
 ///
 /// A visual input row.
 fn render_query_line(
-  prompt: SharedString,
   query: SharedString,
   placeholder: SharedString,
   search_input: Option<QuickPickSearchInput>,
@@ -134,7 +131,8 @@ fn render_query_line(
     .border_b_1()
     .border_color(theme.border.muted)
     .text_color(theme.text.primary)
-    .child(div().text_color(theme.text.secondary).child(prompt))
+    // Though it's called tree-collapse, it's used here as a prompt indicator
+    .child(Icon::new("icons/tree-collapse.svg").theme(theme))
     .child(match search_input {
       Some(search_input) => TextInput::new(search_input.state)
         .theme(theme)
