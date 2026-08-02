@@ -88,10 +88,11 @@ impl RenderOnce for TextInput {
 
     self.state.update(cx, |state, cx| state.sync_focus(focused, cx));
 
-    let (text, disabled, readonly, caret_visible) = {
+    let (text, selection, disabled, readonly, caret_visible) = {
       let state = self.state.read(cx);
       (
         state.text().to_owned(),
+        state.selection(),
         state.is_disabled(),
         state.is_readonly(),
         focused && state.caret_visible(Instant::now()),
@@ -104,6 +105,7 @@ impl RenderOnce for TextInput {
 
     let placeholder = self.placeholder.unwrap_or_default();
     let text_is_empty = text.is_empty();
+    let (prefix, suffix) = text.split_at(selection.head());
     let theme = self.theme;
     let state_for_mouse = state.clone();
     let state_for_keys = state.clone();
@@ -153,13 +155,25 @@ impl RenderOnce for TextInput {
           .flex()
           .items_center()
           .min_w_0()
+          .flex_1()
           .overflow_hidden()
-          .text_color(if text_is_empty {
-            theme.text.disabled
-          } else {
-            theme.text.primary
+          // The placeholder is visual-only: it must not advance the caret.
+          .when(text_is_empty, |style| {
+            style.child(
+              div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .bottom_0()
+                .flex()
+                .items_center()
+                .text_color(theme.text.disabled)
+                .child(placeholder),
+            )
           })
-          .child(if text_is_empty { placeholder } else { text.into() })
+          .when(!text_is_empty, |style| {
+            style.text_color(theme.text.primary).child(prefix.to_owned())
+          })
           .when(focused && !disabled, |style| {
             style.child(
               div()
@@ -169,7 +183,8 @@ impl RenderOnce for TextInput {
                 .bg(theme.accent.primary)
                 .opacity(if caret_visible { 1.0 } else { 0.0 }),
             )
-          }),
+          })
+          .when(!text_is_empty, |style| style.child(suffix.to_owned())),
       )
       .when(readonly && !disabled, |style| style.cursor(CursorStyle::IBeam))
   }
@@ -211,5 +226,13 @@ mod tests {
   #[test]
   fn text_input_size_should_use_medium_height_by_default() {
     assert_eq!(TextInputSize::default().metrics().height, px(30.0));
+  }
+
+  #[test]
+  fn caret_should_split_text_at_selection_head() {
+    let text = "molecule";
+    let selection = super::super::TextSelection::caret(4);
+
+    assert_eq!(text.split_at(selection.head()), ("mole", "cule"));
   }
 }
