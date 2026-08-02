@@ -8,5 +8,5 @@ mod render;
 mod state;
 
 pub use event::ButtonEvent;
-pub use render::{Button, ButtonSize, ButtonStyle};
+pub use render::{Button, ButtonSize, ButtonStyle, ButtonVariant};
 pub use state::ButtonState;

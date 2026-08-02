@@ -9,9 +9,9 @@ use crate::themes::{UIThemes, builtins};
 const DEFAULT_BUTTON_HEIGHT: Pixels = px(30.0);
 const DEFAULT_BUTTON_PADDING_X: Pixels = px(10.0);
 
-/// Visual style for a [`Button`].
+/// Built-in theme-based appearance variants for a [`Button`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ButtonStyle {
+pub enum ButtonVariant {
   /// A neutral button for standard actions.
   #[default]
   Secondary,
@@ -19,6 +19,84 @@ pub enum ButtonStyle {
   Primary,
   /// A low-chrome button for toolbars and inline actions.
   Transparent,
+}
+
+/// Visual-only overrides for a [`Button`].
+///
+/// This style intentionally cannot alter button interaction, focus ownership,
+/// keyboard activation, disabled behavior, or emitted events.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ButtonStyle {
+  background: Option<gpui::Rgba>,
+  hover_background: Option<gpui::Rgba>,
+  pressed_background: Option<gpui::Rgba>,
+  foreground: Option<gpui::Rgba>,
+  hover_foreground: Option<gpui::Rgba>,
+  border: Option<gpui::Rgba>,
+  focus_border: Option<gpui::Rgba>,
+  width: Option<Pixels>,
+  horizontal_padding: Option<Pixels>,
+}
+
+impl ButtonStyle {
+  /// Creates a style with no overrides.
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// Overrides the default background color.
+  pub fn background(mut self, color: gpui::Rgba) -> Self {
+    self.background = Some(color);
+    self
+  }
+
+  /// Overrides the hover background color.
+  pub fn hover_background(mut self, color: gpui::Rgba) -> Self {
+    self.hover_background = Some(color);
+    self
+  }
+
+  /// Overrides the pressed background color.
+  pub fn pressed_background(mut self, color: gpui::Rgba) -> Self {
+    self.pressed_background = Some(color);
+    self
+  }
+
+  /// Overrides the default foreground color.
+  pub fn foreground(mut self, color: gpui::Rgba) -> Self {
+    self.foreground = Some(color);
+    self
+  }
+
+  /// Overrides the hover foreground color.
+  pub fn hover_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.hover_foreground = Some(color);
+    self
+  }
+
+  /// Overrides the default border color.
+  pub fn border(mut self, color: gpui::Rgba) -> Self {
+    self.border = Some(color);
+    self
+  }
+
+  /// Overrides the border color while the button is focused.
+  pub fn focus_border(mut self, color: gpui::Rgba) -> Self {
+    self.focus_border = Some(color);
+    self
+  }
+
+  /// Sets an explicit visual width.
+  pub fn width(mut self, width: Pixels) -> Self {
+    self.width = Some(width);
+    self
+  }
+
+  /// Sets horizontal padding.
+  pub fn horizontal_padding(mut self, padding: Pixels) -> Self {
+    self.horizontal_padding = Some(padding);
+    self
+  }
 }
 
 /// Visual size for a [`Button`].
@@ -39,6 +117,7 @@ pub struct Button {
   state: Entity<ButtonState>,
   children: Vec<AnyElement>,
   theme: UIThemes,
+  variant: ButtonVariant,
   style: ButtonStyle,
   size: ButtonSize,
   full_width: bool,
@@ -51,6 +130,7 @@ impl Button {
       state,
       children: Vec::new(),
       theme: builtins::dark(),
+      variant: ButtonVariant::default(),
       style: ButtonStyle::default(),
       size: ButtonSize::default(),
       full_width: false,
@@ -69,7 +149,13 @@ impl Button {
     self
   }
 
-  /// Sets the visual emphasis style.
+  /// Sets one of the built-in theme-based appearance variants.
+  pub fn variant(mut self, variant: ButtonVariant) -> Self {
+    self.variant = variant;
+    self
+  }
+
+  /// Applies visual-only appearance overrides.
   pub fn style(mut self, style: ButtonStyle) -> Self {
     self.style = style;
     self
@@ -99,7 +185,7 @@ impl RenderOnce for Button {
       let state = self.state.read(cx);
       (state.is_disabled(), state.is_pressed())
     };
-    let colors = ButtonColors::new(self.theme, self.style, pressed, disabled);
+    let colors = ButtonColors::new(self.theme, self.variant, self.style, pressed, disabled);
     let state_for_mouse_down = self.state.clone();
     let state_for_mouse_up = self.state.clone();
     let state_for_keys = self.state.clone();
@@ -110,9 +196,10 @@ impl RenderOnce for Button {
       .justify_center()
       .gap_1()
       .h(metrics.height)
-      .w_auto()
+      .when_some(self.style.width, |style, width| style.w(width))
+      .when(self.style.width.is_none(), |style| style.w_auto())
       .when(self.full_width, |style| style.w_full())
-      .px(DEFAULT_BUTTON_PADDING_X)
+      .px(self.style.horizontal_padding.unwrap_or(DEFAULT_BUTTON_PADDING_X))
       .rounded_sm()
       .bg(colors.background)
       .text_size(metrics.font_size)
@@ -125,9 +212,10 @@ impl RenderOnce for Button {
         CursorStyle::PointingHand
       })
       .when(!disabled, |style| {
-        style
-          .hover(move |style| style.bg(colors.hover_background).text_color(colors.hover_foreground))
-          .focus(move |style| style.border_color(self.theme.border.focus))
+        style.hover(move |style| style.bg(colors.hover_background).text_color(colors.hover_foreground))
+      })
+      .when(!disabled, |style| {
+        style.focus(move |style| style.border_color(colors.focus_border))
       })
       .on_mouse_down(MouseButton::Left, move |_, window, cx| {
         if state_for_mouse_down.read(cx).is_disabled() {
@@ -187,10 +275,11 @@ struct ButtonColors {
   foreground: gpui::Rgba,
   hover_foreground: gpui::Rgba,
   border: gpui::Rgba,
+  focus_border: gpui::Rgba,
 }
 
 impl ButtonColors {
-  fn new(theme: UIThemes, style: ButtonStyle, pressed: bool, disabled: bool) -> Self {
+  fn new(theme: UIThemes, variant: ButtonVariant, style: ButtonStyle, pressed: bool, disabled: bool) -> Self {
     if disabled {
       return Self {
         background: theme.background.secondary,
@@ -198,11 +287,12 @@ impl ButtonColors {
         foreground: theme.text.disabled,
         hover_foreground: theme.text.disabled,
         border: theme.border.muted,
+        focus_border: theme.border.muted,
       };
     }
 
-    match style {
-      ButtonStyle::Primary => Self {
+    let colors = match variant {
+      ButtonVariant::Primary => Self {
         background: if pressed {
           theme.background.active
         } else {
@@ -212,8 +302,9 @@ impl ButtonColors {
         foreground: theme.accent.foreground,
         hover_foreground: theme.accent.foreground,
         border: theme.accent.primary,
+        focus_border: theme.border.focus,
       },
-      ButtonStyle::Secondary => Self {
+      ButtonVariant::Secondary => Self {
         background: if pressed {
           theme.background.active
         } else {
@@ -223,8 +314,9 @@ impl ButtonColors {
         foreground: theme.text.primary,
         hover_foreground: theme.text.hover,
         border: theme.border.primary,
+        focus_border: theme.border.focus,
       },
-      ButtonStyle::Transparent => Self {
+      ButtonVariant::Transparent => Self {
         background: if pressed {
           theme.background.active
         } else {
@@ -234,7 +326,24 @@ impl ButtonColors {
         foreground: theme.text.secondary,
         hover_foreground: theme.text.primary,
         border: builtins::TRANSPARENT,
+        focus_border: theme.border.focus,
       },
+    };
+
+    Self {
+      background: if pressed {
+        style
+          .pressed_background
+          .or(style.background)
+          .unwrap_or(colors.background)
+      } else {
+        style.background.unwrap_or(colors.background)
+      },
+      hover_background: style.hover_background.unwrap_or(colors.hover_background),
+      foreground: style.foreground.unwrap_or(colors.foreground),
+      hover_foreground: style.hover_foreground.unwrap_or(colors.hover_foreground),
+      border: style.border.unwrap_or(colors.border),
+      focus_border: style.focus_border.unwrap_or(theme.border.focus),
     }
   }
 }
@@ -246,5 +355,33 @@ mod tests {
   #[test]
   fn button_size_should_use_medium_height_by_default() {
     assert_eq!(ButtonSize::default().metrics().height, DEFAULT_BUTTON_HEIGHT);
+  }
+
+  #[test]
+  fn button_style_should_override_focus_border_color() {
+    let theme = builtins::dark();
+    let colors = ButtonColors::new(
+      theme,
+      ButtonVariant::Transparent,
+      ButtonStyle::new().focus_border(builtins::TRANSPARENT),
+      false,
+      false,
+    );
+
+    assert_eq!(colors.focus_border, builtins::TRANSPARENT);
+  }
+
+  #[test]
+  fn button_style_should_override_pressed_background_color() {
+    let theme = builtins::dark();
+    let colors = ButtonColors::new(
+      theme,
+      ButtonVariant::Transparent,
+      ButtonStyle::new().pressed_background(theme.background.warning),
+      true,
+      false,
+    );
+
+    assert_eq!(colors.background, theme.background.warning);
   }
 }
