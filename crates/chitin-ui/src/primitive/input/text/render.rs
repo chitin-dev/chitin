@@ -1,8 +1,9 @@
 use std::time::Instant;
 
 use gpui::{
-  App, CursorStyle, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Window,
-  div, prelude::*, px,
+  App, Bounds, CursorStyle, Element, ElementId, Entity, GlobalElementId, InspectorElementId, InteractiveElement,
+  IntoElement, LayoutId, MouseButton, PaintQuad, ParentElement, Pixels, RenderOnce, ShapedLine, SharedString, Style,
+  TextColor, Window, div, fill, point, prelude::*, px, relative, size,
 };
 
 use super::TextInputState;
@@ -28,7 +29,7 @@ pub enum TextInputSize {
 #[derive(IntoElement)]
 pub struct TextInput {
   state: Entity<TextInputState>,
-  placeholder: Option<gpui::SharedString>,
+  placeholder: Option<SharedString>,
   theme: UIThemes,
   size: TextInputSize,
   full_width: bool,
@@ -49,7 +50,7 @@ impl TextInput {
   }
 
   /// Sets placeholder text shown while the value is empty.
-  pub fn placeholder(mut self, placeholder: impl Into<gpui::SharedString>) -> Self {
+  pub fn placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
     self.placeholder = Some(placeholder.into());
     self
   }
@@ -80,14 +81,18 @@ impl TextInput {
 }
 
 impl RenderOnce for TextInput {
+  /// Renders the input shell, then delegates line painting to [`TextInputContent`].
   fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    // Resolve the visual metrics and focus handle before touching the entity.
     let metrics = self.size.metrics();
     let focus_handle = self.state.read(cx).focus_handle().clone();
     let focused = focus_handle.is_focused(window);
     let state = self.state.clone();
 
+    // Mirror the observed GPUI focus state into the model so it can emit Focus/Blur events.
     self.state.update(cx, |state, cx| state.sync_focus(focused, cx));
 
+    // Snapshot every value the content element needs so it never borrows the entity.
     let (text, selection, disabled, readonly, caret_visible) = {
       let state = self.state.read(cx);
       (
@@ -99,13 +104,11 @@ impl RenderOnce for TextInput {
       )
     };
 
+    // Keep the frame loop alive while focused so the caret continues to blink.
     if focused && !disabled {
       window.request_animation_frame();
     }
 
-    let placeholder = self.placeholder.unwrap_or_default();
-    let text_is_empty = text.is_empty();
-    let (prefix, suffix) = text.split_at(selection.head());
     let theme = self.theme;
     let state_for_mouse = state.clone();
     let state_for_keys = state.clone();
@@ -113,7 +116,6 @@ impl RenderOnce for TextInput {
     div()
       .flex()
       .items_center()
-      .gap(px(2.0))
       .w(DEFAULT_TEXT_INPUT_WIDTH)
       .when(self.full_width, |style| style.w_full())
       .h(metrics.height)
@@ -150,6 +152,7 @@ impl RenderOnce for TextInput {
         }
       })
       .track_focus(&focus_handle)
+      // Clip the content box so long lines never paint outside the input.
       .child(
         div()
           .relative()
@@ -159,51 +162,174 @@ impl RenderOnce for TextInput {
           .flex_1()
           .h_full()
           .overflow_hidden()
-          // The placeholder is visual-only: it must not advance the caret.
-          .when(text_is_empty, |style| {
-            style.child(
-              div()
-                .absolute()
-                .left_0()
-                .top_0()
-                .bottom_0()
-                .flex()
-                .items_center()
-                .text_color(theme.text.disabled)
-                .child(placeholder),
-            )
-          })
-          .when(!text_is_empty, |style| {
-            style.text_color(theme.text.primary).child(prefix.to_owned())
-          })
-          .when(focused && !disabled, |style| {
-            // This zero-width anchor follows the text prefix without shifting
-            // the suffix; the caret itself is an absolute overlay.
-            style.child(
-              div().relative().flex_none().w(px(0.0)).h_full().child(
-                div()
-                  .absolute()
-                  .left_0()
-                  .top_0()
-                  .bottom_0()
-                  .flex()
-                  .items_center()
-                  .child(
-                    div()
-                      .w(CARET_WIDTH)
-                      .h(metrics.caret_height)
-                      .bg(theme.accent.primary)
-                      .opacity(if caret_visible { 1.0 } else { 0.0 }),
-                  ),
-              ),
-            )
-          })
-          .when(!text_is_empty, |style| style.child(suffix.to_owned())),
+          .child(TextInputContent {
+            text: text.into(),
+            placeholder: self.placeholder.unwrap_or_default(),
+            selection,
+            theme,
+            show_caret: focused && !disabled,
+            caret_visible,
+            metrics,
+          }),
       )
       .when(readonly && !disabled, |style| style.cursor(CursorStyle::IBeam))
   }
 }
 
+/// A single shaped input line with selection and caret paint overlays.
+struct TextInputContent {
+  text: SharedString,
+  placeholder: SharedString,
+  selection: super::TextSelection,
+  theme: UIThemes,
+  show_caret: bool,
+  caret_visible: bool,
+  metrics: TextInputMetrics,
+}
+
+/// Precomputed paint data: the shaped line plus optional selection and caret quads.
+struct TextInputContentPrepaint {
+  line: ShapedLine,
+  selection: Option<PaintQuad>,
+  caret: Option<PaintQuad>,
+}
+
+impl IntoElement for TextInputContent {
+  type Element = Self;
+
+  fn into_element(self) -> Self::Element {
+    self
+  }
+}
+
+impl Element for TextInputContent {
+  type RequestLayoutState = ();
+  type PrepaintState = TextInputContentPrepaint;
+
+  fn id(&self) -> Option<ElementId> {
+    None
+  }
+
+  fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+    None
+  }
+
+  /// Requests a box that fills the parent so clipping matches the content area.
+  ///
+  /// - `window`: used to register the requested layout box.
+  ///
+  /// Returns the layout id and no custom layout state.
+  fn request_layout(
+    &mut self,
+    _: Option<&GlobalElementId>,
+    _: Option<&InspectorElementId>,
+    window: &mut Window,
+    cx: &mut App,
+  ) -> (LayoutId, Self::RequestLayoutState) {
+    // Fill 100% of the parent; the outer container already imposes the real size.
+    let mut style = Style::default();
+    style.size.width = relative(1.).into();
+    style.size.height = relative(1.).into();
+    (window.request_layout(style, [], cx), ())
+  }
+
+  /// Shapes the line and computes the selection and caret quads for painting.
+  ///
+  /// - `bounds`: the layout box returned by [`Self::request_layout`].
+  /// - `window`: provides the base text style and the text system used to shape the line.
+  ///
+  /// Returns the prepared paint state consumed by [`Self::paint`].
+  fn prepaint(
+    &mut self,
+    _: Option<&GlobalElementId>,
+    _: Option<&InspectorElementId>,
+    bounds: Bounds<Pixels>,
+    _: &mut Self::RequestLayoutState,
+    window: &mut Window,
+    _: &mut App,
+  ) -> Self::PrepaintState {
+    // Fall back to the placeholder when there is no real text yet.
+    let empty = self.text.is_empty();
+    let display_text = if empty {
+      self.placeholder.clone()
+    } else {
+      self.text.clone()
+    };
+
+    // Build a text run whose color communicates placeholder vs real content.
+    let text_style = window.text_style();
+    let font_size = text_style.font_size.to_pixels(window.rem_size());
+    let mut run = text_style.to_run(display_text.len());
+    run.color = TextColor::from(if empty {
+      self.theme.text.disabled
+    } else {
+      self.theme.text.primary
+    });
+
+    // Shape the whole logical line once; x_for_index maps byte offsets to pixels.
+    let line = window.text_system().shape_line(display_text, font_size, &[run], None);
+
+    // Selection highlight spans the shaped range and is vertically centered.
+    let range = self.selection.range();
+    let selection = (!empty && !range.is_empty()).then(|| {
+      let start = line.x_for_index(range.start);
+      let end = line.x_for_index(range.end);
+      let selection_height = line.ascent + line.descent;
+      let selection_top = bounds.top() + (bounds.size.height - selection_height) / 2.0;
+      fill(
+        Bounds::new(
+          point(bounds.left() + start, selection_top),
+          size(end - start, selection_height),
+        ),
+        self.theme.background.selection,
+      )
+    });
+
+    // Caret is a thin quad at the head, shown only when the selection is collapsed.
+    let caret = (self.show_caret && range.is_empty()).then(|| {
+      let x = line.x_for_index(self.selection.head());
+      let caret_top = bounds.top() + (bounds.size.height - self.metrics.caret_height) / 2.0;
+      fill(
+        Bounds::new(
+          point(bounds.left() + x, caret_top),
+          size(CARET_WIDTH, self.metrics.caret_height),
+        ),
+        self.theme.accent.primary,
+      )
+    });
+    TextInputContentPrepaint { line, selection, caret }
+  }
+
+  /// Paints selection, text, then caret so overlays keep the correct stacking order.
+  ///
+  /// - `bounds`: the layout box used as the text origin.
+  /// - `window`/`cx`: forwarded to the shaped line painter.
+  fn paint(
+    &mut self,
+    _: Option<&GlobalElementId>,
+    _: Option<&InspectorElementId>,
+    bounds: Bounds<Pixels>,
+    _: &mut Self::RequestLayoutState,
+    prepaint: &mut Self::PrepaintState,
+    window: &mut Window,
+    cx: &mut App,
+  ) {
+    // Selection sits below the glyphs.
+    if let Some(selection) = prepaint.selection.take() {
+      window.paint_quad(selection);
+    }
+    // Text glyphs in the middle.
+    let _ = prepaint.line.paint(bounds.origin, bounds.size.height, window, cx);
+    // Caret on top, gated by the blink phase computed during render.
+    if let Some(caret) = prepaint.caret.take()
+      && self.caret_visible
+    {
+      window.paint_quad(caret);
+    }
+  }
+}
+
+/// Pixel metrics derived from the selected [`TextInputSize`] variant.
 #[derive(Clone, Copy)]
 struct TextInputMetrics {
   height: Pixels,
@@ -212,6 +338,7 @@ struct TextInputMetrics {
 }
 
 impl TextInputSize {
+  /// Returns the height, font size, and caret height for this size variant.
   fn metrics(self) -> TextInputMetrics {
     match self {
       Self::Small => TextInputMetrics {
@@ -240,13 +367,5 @@ mod tests {
   #[test]
   fn text_input_size_should_use_medium_height_by_default() {
     assert_eq!(TextInputSize::default().metrics().height, px(30.0));
-  }
-
-  #[test]
-  fn caret_should_split_text_at_selection_head() {
-    let text = "molecule";
-    let selection = super::super::TextSelection::caret(4);
-
-    assert_eq!(text.split_at(selection.head()), ("mole", "cule"));
   }
 }
