@@ -1,3 +1,5 @@
+//! Workspace tree models and filesystem traversal helpers.
+
 use std::{
   cmp::Ordering,
   ffi::OsStr,

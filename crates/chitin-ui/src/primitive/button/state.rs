@@ -1,3 +1,5 @@
+//! Persistent interaction state for the reusable button primitive.
+
 use gpui::{Context, EventEmitter, FocusHandle};
 
 use super::ButtonEvent;
@@ -91,6 +93,17 @@ impl ButtonState {
     }
   }
 
+  /// Updates pressed state and emits the corresponding semantic event.
+  ///
+  /// # Parameters
+  ///
+  /// `pressed` selects the next pointer-activation state.
+  ///
+  /// `cx` emits the state-change event and refreshes observers.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after updating a changed pressed state.
   fn set_pressed(&mut self, pressed: bool, cx: &mut Context<Self>) {
     if self.pressed == pressed {
       return;
@@ -101,6 +114,15 @@ impl ButtonState {
     cx.notify();
   }
 
+  /// Emits one semantic button activation event.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` emits the click event and refreshes observers.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after publishing the click event.
   fn emit_click(&self, cx: &mut Context<Self>) {
     cx.emit(ButtonEvent::Click);
     cx.notify();

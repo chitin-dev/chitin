@@ -1,3 +1,5 @@
+//! Rendering for the reusable single-line text input primitive.
+
 use std::time::Instant;
 
 use gpui::{

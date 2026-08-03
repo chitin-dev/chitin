@@ -1,3 +1,5 @@
+//! Semantic events for the reusable text display primitive.
+
 use gpui::SharedString;
 
 /// Semantic events emitted by [`super::TextState`].

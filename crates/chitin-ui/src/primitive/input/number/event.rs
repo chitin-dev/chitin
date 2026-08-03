@@ -1,3 +1,5 @@
+//! Semantic events for the reusable numeric input primitive.
+
 use gpui::SharedString;
 
 /// Semantic events emitted by [`super::NumberInputState`].

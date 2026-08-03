@@ -1,3 +1,5 @@
+//! Unit coverage for document-area state transitions and panel tree behavior.
+
 use std::path::Path;
 
 use chitin_ui::composite::panel::{

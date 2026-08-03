@@ -1,3 +1,5 @@
+//! Semantic color-token structures shared by Chitin UI themes.
+
 use gpui::Rgba;
 
 /// Semantic text color palette for the IDE interface.

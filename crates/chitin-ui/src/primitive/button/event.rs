@@ -1,3 +1,5 @@
+//! Semantic events for the reusable button primitive.
+
 /// Semantic events emitted by [`super::ButtonState`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonEvent {

@@ -1,3 +1,5 @@
+//! Error types returned by workspace discovery and loading operations.
+
 use core::fmt;
 use std::{
   error::Error,

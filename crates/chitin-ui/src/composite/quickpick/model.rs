@@ -1,3 +1,5 @@
+//! Data models for the reusable quick-pick composite.
+
 use gpui::{App, Entity, SharedString, UniformListScrollHandle, Window};
 
 use crate::primitive::input::text::TextInputState;

@@ -1,3 +1,5 @@
+//! Rendering and visual customization for the reusable button primitive.
+
 use gpui::{
   AnyElement, App, CursorStyle, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
   RenderOnce, Window, div, prelude::*, px,
@@ -257,6 +259,15 @@ struct ButtonMetrics {
 }
 
 impl ButtonSize {
+  /// Returns visual metrics for one predefined button size.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads the selected button size.
+  ///
+  /// # Returns
+  ///
+  /// Height and font size values for the rendered button.
   fn metrics(self) -> ButtonMetrics {
     match self {
       Self::Small => ButtonMetrics {
@@ -286,6 +297,21 @@ struct ButtonColors {
 }
 
 impl ButtonColors {
+  /// Resolves semantic button colors for one interaction and appearance state.
+  ///
+  /// # Parameters
+  ///
+  /// `theme` supplies semantic UI color tokens.
+  ///
+  /// `variant` selects the built-in visual treatment.
+  ///
+  /// `style` supplies visual-only component overrides.
+  ///
+  /// `pressed` and `disabled` describe the current interaction state.
+  ///
+  /// # Returns
+  ///
+  /// Resolved colors for the rendered button state.
   fn new(theme: UIThemes, variant: ButtonVariant, style: ButtonStyle, pressed: bool, disabled: bool) -> Self {
     if disabled {
       return Self {

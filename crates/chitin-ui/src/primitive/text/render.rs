@@ -1,3 +1,5 @@
+//! Rendering for the reusable text display primitive.
+
 use gpui::{
   App, ClipboardItem, CursorStyle, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
   RenderOnce, Window, div, prelude::*, px,
@@ -98,6 +100,15 @@ impl RenderOnce for Text {
 }
 
 impl TextSize {
+  /// Returns the font size for one predefined text display size.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads the selected text display size.
+  ///
+  /// # Returns
+  ///
+  /// The semantic font size used by the rendered text element.
   fn font_size(self) -> Pixels {
     match self {
       Self::Small => px(12.0),

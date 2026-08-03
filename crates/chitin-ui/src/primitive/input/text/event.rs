@@ -1,3 +1,5 @@
+//! Semantic events and selection data for the text input primitive.
+
 use std::ops::Range;
 
 use gpui::SharedString;

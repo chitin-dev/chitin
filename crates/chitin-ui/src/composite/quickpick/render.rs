@@ -1,3 +1,5 @@
+//! Rendering for the reusable quick-pick composite.
+
 use std::rc::Rc;
 
 use gpui::{

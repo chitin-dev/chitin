@@ -1,3 +1,5 @@
+//! Unit coverage for composite panel tree behavior.
+
 use super::*;
 use gpui::{Bounds, px};
 

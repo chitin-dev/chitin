@@ -1,3 +1,5 @@
+//! Persistent editing state and keyboard behavior for the text input primitive.
+
 use std::time::{Duration, Instant};
 
 use gpui::{Context, EventEmitter, FocusHandle, KeyDownEvent, SharedString};
@@ -251,6 +253,19 @@ impl TextInputState {
     handled
   }
 
+  /// Moves or extends the selection by one complete Unicode scalar.
+  ///
+  /// # Parameters
+  ///
+  /// `forward` selects movement toward increasing byte offsets.
+  ///
+  /// `extend` selects whether the existing selection anchor is retained.
+  ///
+  /// `cx` emits a selection-change event when the cursor position changes.
+  ///
+  /// # Returns
+  ///
+  /// `true` after handling a valid horizontal cursor command.
   fn move_cursor(&mut self, forward: bool, extend: bool, cx: &mut Context<Self>) -> bool {
     let selection = self.selection;
     let target = if forward {
@@ -270,12 +285,38 @@ impl TextInputState {
     true
   }
 
+  /// Moves or extends the selection to one validated text boundary.
+  ///
+  /// # Parameters
+  ///
+  /// `target` supplies the destination UTF-8 byte offset.
+  ///
+  /// `extend` selects whether the existing selection anchor is retained.
+  ///
+  /// `cx` emits a selection-change event when the cursor position changes.
+  ///
+  /// # Returns
+  ///
+  /// `true` after handling the boundary movement command.
   fn move_to_boundary(&mut self, target: usize, extend: bool, cx: &mut Context<Self>) -> bool {
     let anchor = if extend { self.selection.anchor() } else { target };
     self.set_selection_internal(TextSelection::new(anchor, target), cx);
     true
   }
 
+  /// Replaces one selected byte range and moves the cursor after the replacement.
+  ///
+  /// # Parameters
+  ///
+  /// `range` identifies a valid UTF-8 range in the current text.
+  ///
+  /// `replacement` supplies normalized replacement text.
+  ///
+  /// `cx` emits selection and text-change events.
+  ///
+  /// # Returns
+  ///
+  /// `true` after replacing the requested text range.
   fn replace_range(&mut self, range: std::ops::Range<usize>, replacement: &str, cx: &mut Context<Self>) -> bool {
     let mut text = self.text.to_string();
     text.replace_range(range.clone(), replacement);
@@ -285,6 +326,17 @@ impl TextInputState {
     true
   }
 
+  /// Updates selection state and emits an event only when it changed.
+  ///
+  /// # Parameters
+  ///
+  /// `selection` supplies the next UTF-8 byte-offset selection.
+  ///
+  /// `cx` emits the selection-change event and refreshes observers.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after applying a changed selection.
   fn set_selection_internal(&mut self, selection: TextSelection, cx: &mut Context<Self>) {
     if self.selection == selection {
       return;
@@ -295,6 +347,15 @@ impl TextInputState {
     cx.notify();
   }
 
+  /// Emits a semantic event containing the current complete text value.
+  ///
+  /// # Parameters
+  ///
+  /// `cx` emits the text-change event and refreshes observers.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after publishing the current text value.
   fn emit_change(&self, cx: &mut Context<Self>) {
     cx.emit(TextInputEvent::Change {
       value: self.text.clone(),
@@ -302,10 +363,28 @@ impl TextInputState {
     cx.notify();
   }
 
+  /// Restarts the caret blink interval after a handled interaction.
+  ///
+  /// # Parameters
+  ///
+  /// This method mutates the input state's blink epoch.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after recording the current instant.
   fn reset_caret_blink(&mut self) {
     self.caret_epoch = Instant::now();
   }
 
+  /// Reports whether one byte offset is within the current text at a UTF-8 boundary.
+  ///
+  /// # Parameters
+  ///
+  /// `offset` supplies the candidate UTF-8 byte offset.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the offset is valid for cursor or selection placement.
   fn is_valid_offset(&self, offset: usize) -> bool {
     offset <= self.text.len() && self.text.is_char_boundary(offset)
   }
@@ -313,6 +392,15 @@ impl TextInputState {
 
 impl EventEmitter<TextInputEvent> for TextInputState {}
 
+/// Replaces line-break characters so the control always stores one logical line.
+///
+/// # Parameters
+///
+/// `text` supplies raw text entered or assigned by a caller.
+///
+/// # Returns
+///
+/// A text value with carriage returns and line feeds replaced by spaces.
 fn normalize_single_line(text: SharedString) -> SharedString {
   if !text.contains(['\n', '\r']) {
     return text;
@@ -320,6 +408,15 @@ fn normalize_single_line(text: SharedString) -> SharedString {
   SharedString::from(text.replace(['\n', '\r'], " "))
 }
 
+/// Extracts printable input from an unmodified GPUI key event.
+///
+/// # Parameters
+///
+/// `event` supplies the key event to inspect.
+///
+/// # Returns
+///
+/// The printable character sequence, or `None` when modifiers reserve the key.
 fn printable_character(event: &KeyDownEvent) -> Option<&str> {
   let modifiers = event.keystroke.modifiers;
   if modifiers.control || modifiers.platform || modifiers.alt || modifiers.function {
@@ -334,6 +431,14 @@ fn printable_character(event: &KeyDownEvent) -> Option<&str> {
 }
 
 /// Maps GPUI's normalized horizontal cursor keys to movement direction.
+///
+/// # Parameters
+///
+/// `key` supplies the normalized GPUI key name.
+///
+/// # Returns
+///
+/// `Some(true)` for right, `Some(false)` for left, or `None` for other keys.
 fn cursor_direction(key: &str) -> Option<bool> {
   match key {
     "left" => Some(false),
@@ -342,14 +447,32 @@ fn cursor_direction(key: &str) -> Option<bool> {
   }
 }
 
+/// Finds the UTF-8 boundary immediately before one valid byte offset.
+///
+/// # Parameters
+///
+/// `text` supplies the source string.
+///
+/// `offset` supplies the current valid UTF-8 byte offset.
+///
+/// # Returns
+///
+/// The preceding boundary, or `None` at the beginning of the text.
 fn previous_char_boundary(text: &str, offset: usize) -> Option<usize> {
   text[..offset].char_indices().next_back().map(|(index, _)| index)
 }
 
 /// Returns the text range Backspace should remove for one selection state.
 ///
-/// A collapsed selection at byte offset zero has no preceding scalar and
-/// therefore returns `None` without changing the input value.
+/// # Parameters
+///
+/// `text` supplies the source string.
+///
+/// `selection` supplies the current UTF-8 byte-offset selection.
+///
+/// # Returns
+///
+/// The selected range or preceding scalar range, or `None` at text start.
 fn backward_deletion_range(text: &str, selection: TextSelection) -> Option<std::ops::Range<usize>> {
   let range = selection.range();
   if !range.is_empty() {
@@ -359,6 +482,17 @@ fn backward_deletion_range(text: &str, selection: TextSelection) -> Option<std::
   previous_char_boundary(text, range.start).map(|start| start..range.start)
 }
 
+/// Finds the UTF-8 boundary immediately after one valid byte offset.
+///
+/// # Parameters
+///
+/// `text` supplies the source string.
+///
+/// `offset` supplies the current valid UTF-8 byte offset.
+///
+/// # Returns
+///
+/// The following boundary, or `None` at the end of the text.
 fn next_char_boundary(text: &str, offset: usize) -> Option<usize> {
   text[offset..]
     .chars()

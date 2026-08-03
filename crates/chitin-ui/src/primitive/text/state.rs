@@ -1,3 +1,5 @@
+//! Persistent copyability and focus state for the text display primitive.
+
 use gpui::{Context, EventEmitter, FocusHandle, SharedString};
 
 use super::TextEvent;

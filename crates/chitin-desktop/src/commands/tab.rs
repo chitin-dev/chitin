@@ -1,3 +1,5 @@
+//! Typed commands and key bindings for document tabs.
+
 use gpui::{KeyBinding, actions};
 
 use crate::{
