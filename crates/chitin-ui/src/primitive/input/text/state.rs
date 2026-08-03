@@ -163,14 +163,8 @@ impl TextInputState {
       return false;
     }
 
-    let range = self.selection.range();
-    let range = if range.is_empty() {
-      let Some(start) = previous_char_boundary(&self.text, range.start) else {
-        return false;
-      };
-      start..range.start
-    } else {
-      range
+    let Some(range) = backward_deletion_range(&self.text, self.selection) else {
+      return false;
     };
 
     self.replace_range(range, "", cx)
@@ -352,6 +346,19 @@ fn previous_char_boundary(text: &str, offset: usize) -> Option<usize> {
   text[..offset].char_indices().next_back().map(|(index, _)| index)
 }
 
+/// Returns the text range Backspace should remove for one selection state.
+///
+/// A collapsed selection at byte offset zero has no preceding scalar and
+/// therefore returns `None` without changing the input value.
+fn backward_deletion_range(text: &str, selection: TextSelection) -> Option<std::ops::Range<usize>> {
+  let range = selection.range();
+  if !range.is_empty() {
+    return Some(range);
+  }
+
+  previous_char_boundary(text, range.start).map(|start| start..range.start)
+}
+
 fn next_char_boundary(text: &str, offset: usize) -> Option<usize> {
   text[offset..]
     .chars()
@@ -383,5 +390,19 @@ mod tests {
     assert_eq!(cursor_direction("left"), Some(false));
     assert_eq!(cursor_direction("right"), Some(true));
     assert_eq!(cursor_direction("arrowleft"), None);
+  }
+
+  #[test]
+  fn delete_backward_at_text_start_should_preserve_text() {
+    let text = "workspace";
+    let selection = TextSelection::caret(0);
+    let mut updated = text.to_owned();
+
+    if let Some(range) = backward_deletion_range(text, selection) {
+      updated.replace_range(range, "");
+    }
+
+    assert_eq!(updated, text);
+    assert_eq!(selection, TextSelection::caret(0));
   }
 }

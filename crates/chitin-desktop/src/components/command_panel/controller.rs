@@ -334,6 +334,23 @@ impl CommandPanelController {
       return None;
     }
 
+    if self.mode == CommandPanelMode::Search {
+      return self.handle_search_key(event);
+    }
+
+    self.handle_form_key(event)
+  }
+
+  /// Handles navigation keys while the search input owns query editing.
+  ///
+  /// # Parameters
+  ///
+  /// `event` is the GPUI key event received by the workbench root.
+  ///
+  /// # Returns
+  ///
+  /// A panel event for navigation or cancellation, or `None` for text editing.
+  fn handle_search_key(&mut self, event: &KeyDownEvent) -> Option<CommandPanelEvent> {
     match event.keystroke.key.as_str() {
       "escape" => Some(CommandPanelEvent::Close),
       "up" => {
@@ -346,6 +363,24 @@ impl CommandPanelController {
         self.reveal_selected(ScrollStrategy::Bottom);
         Some(CommandPanelEvent::StateChanged)
       }
+      // TextInputState owns Search-mode typing, deletion, cursor movement,
+      // and submission. It reports changes through TextInputEvent.
+      _ => None,
+    }
+  }
+
+  /// Handles form-mode keys until forms use a dedicated primitive input.
+  ///
+  /// # Parameters
+  ///
+  /// `event` is the GPUI key event received by the workbench root.
+  ///
+  /// # Returns
+  ///
+  /// A panel event for form edits, submission, or cancellation.
+  fn handle_form_key(&mut self, event: &KeyDownEvent) -> Option<CommandPanelEvent> {
+    match event.keystroke.key.as_str() {
+      "escape" => Some(CommandPanelEvent::Close),
       "enter" => Some(self.submit()),
       "backspace" => {
         self.query.pop();
@@ -486,6 +521,18 @@ fn printable_character(event: &KeyDownEvent) -> Option<&str> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use gpui::Keystroke;
+
+  fn key_down(key: &str) -> KeyDownEvent {
+    KeyDownEvent {
+      keystroke: Keystroke {
+        key: key.to_owned(),
+        ..Default::default()
+      },
+      is_held: false,
+      prefer_character_input: false,
+    }
+  }
 
   #[test]
   fn reset_for_open_should_clear_query_and_selection() {
@@ -519,5 +566,15 @@ mod tests {
 
     assert_eq!(controller.query(), "workspace");
     assert_eq!(controller.selected_index(), 0);
+  }
+
+  #[test]
+  fn search_backspace_should_not_mutate_query_outside_text_input() {
+    let mut controller = CommandPanelController::new();
+    controller.is_open = true;
+    controller.set_query("workspace");
+
+    assert_eq!(controller.handle_key(&key_down("backspace")), None);
+    assert_eq!(controller.query(), "workspace");
   }
 }
