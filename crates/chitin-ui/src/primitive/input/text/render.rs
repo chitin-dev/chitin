@@ -152,10 +152,12 @@ impl RenderOnce for TextInput {
       .track_focus(&focus_handle)
       .child(
         div()
+          .relative()
           .flex()
           .items_center()
           .min_w_0()
           .flex_1()
+          .h_full()
           .overflow_hidden()
           // The placeholder is visual-only: it must not advance the caret.
           .when(text_is_empty, |style| {
@@ -175,13 +177,25 @@ impl RenderOnce for TextInput {
             style.text_color(theme.text.primary).child(prefix.to_owned())
           })
           .when(focused && !disabled, |style| {
+            // This zero-width anchor follows the text prefix without shifting
+            // the suffix; the caret itself is an absolute overlay.
             style.child(
-              div()
-                .flex_none()
-                .w(CARET_WIDTH)
-                .h(metrics.caret_height)
-                .bg(theme.accent.primary)
-                .opacity(if caret_visible { 1.0 } else { 0.0 }),
+              div().relative().flex_none().w(px(0.0)).h_full().child(
+                div()
+                  .absolute()
+                  .left_0()
+                  .top_0()
+                  .bottom_0()
+                  .flex()
+                  .items_center()
+                  .child(
+                    div()
+                      .w(CARET_WIDTH)
+                      .h(metrics.caret_height)
+                      .bg(theme.accent.primary)
+                      .opacity(if caret_visible { 1.0 } else { 0.0 }),
+                  ),
+              ),
             )
           })
           .when(!text_is_empty, |style| style.child(suffix.to_owned())),

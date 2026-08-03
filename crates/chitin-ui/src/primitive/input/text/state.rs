@@ -223,30 +223,32 @@ impl TextInputState {
       return false;
     }
 
-    let handled = match event.keystroke.key.as_str() {
-      "backspace" => self.delete_backward(cx),
-      "delete" => self.delete_forward(cx),
-      "enter" => {
-        cx.emit(TextInputEvent::Submit {
-          value: self.text.clone(),
-        });
-        cx.notify();
-        true
+    let handled = if let Some(forward) = cursor_direction(event.keystroke.key.as_str()) {
+      self.move_cursor(forward, event.keystroke.modifiers.shift, cx)
+    } else {
+      match event.keystroke.key.as_str() {
+        "backspace" => self.delete_backward(cx),
+        "delete" => self.delete_forward(cx),
+        "enter" => {
+          cx.emit(TextInputEvent::Submit {
+            value: self.text.clone(),
+          });
+          cx.notify();
+          true
+        }
+        "escape" => {
+          cx.emit(TextInputEvent::Cancel);
+          cx.notify();
+          true
+        }
+        "home" => self.move_to_boundary(0, event.keystroke.modifiers.shift, cx),
+        "end" => self.move_to_boundary(self.text.len(), event.keystroke.modifiers.shift, cx),
+        "a" if event.keystroke.modifiers.platform || event.keystroke.modifiers.control => {
+          self.select_all(cx);
+          true
+        }
+        _ => printable_character(event).is_some_and(|character| self.insert_text(character, cx)),
       }
-      "escape" => {
-        cx.emit(TextInputEvent::Cancel);
-        cx.notify();
-        true
-      }
-      "arrowleft" => self.move_cursor(false, event.keystroke.modifiers.shift, cx),
-      "arrowright" => self.move_cursor(true, event.keystroke.modifiers.shift, cx),
-      "home" => self.move_to_boundary(0, event.keystroke.modifiers.shift, cx),
-      "end" => self.move_to_boundary(self.text.len(), event.keystroke.modifiers.shift, cx),
-      "a" if event.keystroke.modifiers.platform || event.keystroke.modifiers.control => {
-        self.select_all(cx);
-        true
-      }
-      _ => printable_character(event).is_some_and(|character| self.insert_text(character, cx)),
     };
 
     if handled {
@@ -337,6 +339,15 @@ fn printable_character(event: &KeyDownEvent) -> Option<&str> {
     .or_else(|| (event.keystroke.key.len() == 1).then_some(event.keystroke.key.as_str()))
 }
 
+/// Maps GPUI's normalized horizontal cursor keys to movement direction.
+fn cursor_direction(key: &str) -> Option<bool> {
+  match key {
+    "left" => Some(false),
+    "right" => Some(true),
+    _ => None,
+  }
+}
+
 fn previous_char_boundary(text: &str, offset: usize) -> Option<usize> {
   text[..offset].char_indices().next_back().map(|(index, _)| index)
 }
@@ -365,5 +376,12 @@ mod tests {
   #[test]
   fn next_char_boundary_should_preserve_unicode_scalars() {
     assert_eq!(next_char_boundary("水a", 0), Some("水".len()));
+  }
+
+  #[test]
+  fn cursor_direction_should_use_gpui_normalized_arrow_keys() {
+    assert_eq!(cursor_direction("left"), Some(false));
+    assert_eq!(cursor_direction("right"), Some(true));
+    assert_eq!(cursor_direction("arrowleft"), None);
   }
 }
