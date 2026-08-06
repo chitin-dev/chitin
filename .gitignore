@@ -2,3 +2,7 @@
 /.vscode/
 *.log
 /.temp
+# codex superpower plugin
+docs/superpowers
+.superpowers/
+.worktrees/
