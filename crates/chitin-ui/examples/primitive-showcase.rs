@@ -160,123 +160,134 @@ impl Render for PrimitiveShowcase {
 
     div()
       .size_full()
-      .overflow_y_scroll()
+      .flex()
+      .flex_col()
       .bg(theme.background.primary)
       .text_color(theme.text.primary)
-      .overflow_y_scroll()
       .child(
         div()
-          .w(px(640.0))
-          .mx_auto()
-          .p_6()
+          .id("primitive-showcase-scroll")
           .flex()
           .flex_col()
-          .gap_5()
-          .child(div().text_lg().child("Primitive Showcase"))
+          .flex_1()
+          .min_h_0()
+          .overflow_y_scroll()
           .child(
             div()
-              .text_sm()
-              .text_color(theme.text.secondary)
-              .child("TextInput owns editing, focus, and semantic events."),
-          )
-          .child(
-            div()
+              .w(px(640.0))
+              .mx_auto()
+              .p_6()
               .flex()
               .flex_col()
-              .gap_4()
-              .p_4()
-              .border_1()
-              .border_color(theme.border.primary)
-              .rounded_sm()
-              .bg(theme.background.secondary)
-              .child(div().text_sm().child("Text Input"))
-              .child(Self::text_input_example(
-                TextInputExample {
-                  title: "Default",
-                  description: "Editable, medium-sized input.",
-                  placeholder: None,
-                  input: self.default_input.clone(),
-                  status: self.default_status.clone(),
-                  size: TextInputSize::Medium,
-                  variant: TextInputVariant::Secondary,
-                  style: TextInputStyle::new(),
-                },
-                theme,
-              ))
-              .child(Self::text_input_example(
-                TextInputExample {
-                  title: "Primary variant",
-                  description: "Uses the built-in primary input treatment.",
-                  placeholder: None,
-                  input: self.primary_input.clone(),
-                  status: self.primary_status.clone(),
-                  size: TextInputSize::Medium,
-                  variant: TextInputVariant::Primary,
-                  style: TextInputStyle::new(),
-                },
-                theme,
-              ))
-              .child(Self::text_input_example(
-                TextInputExample {
-                  title: "Placeholder",
-                  description: "Shows guidance while its value is empty.",
-                  placeholder: Some("Search structures"),
-                  input: self.placeholder_input.clone(),
-                  status: self.placeholder_status.clone(),
-                  size: TextInputSize::Small,
-                  variant: TextInputVariant::Secondary,
-                  style: TextInputStyle::new(),
-                },
-                theme,
-              ))
-              .child(Self::text_input_example(
-                TextInputExample {
-                  title: "Custom style",
-                  description: "Overrides visual tokens while keeping TextInput behavior.",
-                  placeholder: None,
-                  input: self.custom_style_input.clone(),
-                  status: self.custom_style_status.clone(),
-                  size: TextInputSize::Medium,
-                  variant: TextInputVariant::Secondary,
-                  style: TextInputStyle::new()
-                    .background(rgba(0x11111bff))
-                    .border(rgba(0xeff1f5ff))
-                    .focus_border(rgba(0x89dcebff))
-                    .foreground(rgba(0x9ca0b0ff))
-                    .placeholder_foreground(theme.text.secondary)
-                    .selection_background(theme.background.selection)
-                    .caret(theme.accent.primary)
-                    .height(px(34.0))
-                    .horizontal_padding(px(12.0)),
-                },
-                theme,
-              ))
-              .child(Self::text_input_example(
-                TextInputExample {
-                  title: "Read-only",
-                  description: "Allows selection without text mutation.",
-                  placeholder: None,
-                  input: self.readonly_input.clone(),
-                  status: self.readonly_status.clone(),
-                  size: TextInputSize::Large,
-                  variant: TextInputVariant::Secondary,
-                  style: TextInputStyle::new(),
-                },
-                theme,
-              ))
-              .child(Self::text_input_example(
-                TextInputExample {
-                  title: "Disabled",
-                  description: "Does not receive focus or input events.",
-                  placeholder: None,
-                  input: self.disabled_input.clone(),
-                  status: self.disabled_status.clone(),
-                  size: TextInputSize::Medium,
-                  variant: TextInputVariant::Secondary,
-                  style: TextInputStyle::new(),
-                },
-                theme,
-              )),
+              .gap_5()
+              .child(div().text_lg().child("Primitive Showcase"))
+              // TextInput showcase title
+              .child(
+                div()
+                  .text_sm()
+                  .text_color(theme.text.secondary)
+                  .child("TextInput owns editing, focus, and semantic events."),
+              )
+              // TextInput showcase panel
+              .child(
+                div()
+                  .flex()
+                  .flex_col()
+                  .gap_4()
+                  .p_4()
+                  .border_1()
+                  .border_color(theme.border.primary)
+                  .rounded_sm()
+                  .bg(theme.background.secondary)
+                  .child(div().text_sm().child("Text Input"))
+                  .child(Self::text_input_example(
+                    TextInputExample {
+                      title: "Default",
+                      description: "Editable, medium-sized input.",
+                      placeholder: None,
+                      input: self.default_input.clone(),
+                      status: self.default_status.clone(),
+                      size: TextInputSize::Medium,
+                      variant: TextInputVariant::Secondary,
+                      style: TextInputStyle::new(),
+                    },
+                    theme,
+                  ))
+                  .child(Self::text_input_example(
+                    TextInputExample {
+                      title: "Primary variant",
+                      description: "Uses the built-in primary input treatment.",
+                      placeholder: None,
+                      input: self.primary_input.clone(),
+                      status: self.primary_status.clone(),
+                      size: TextInputSize::Medium,
+                      variant: TextInputVariant::Primary,
+                      style: TextInputStyle::new(),
+                    },
+                    theme,
+                  ))
+                  .child(Self::text_input_example(
+                    TextInputExample {
+                      title: "Placeholder",
+                      description: "Shows guidance while its value is empty.",
+                      placeholder: Some("Search structures"),
+                      input: self.placeholder_input.clone(),
+                      status: self.placeholder_status.clone(),
+                      size: TextInputSize::Small,
+                      variant: TextInputVariant::Secondary,
+                      style: TextInputStyle::new(),
+                    },
+                    theme,
+                  ))
+                  .child(Self::text_input_example(
+                    TextInputExample {
+                      title: "Custom style",
+                      description: "Overrides visual tokens while keeping TextInput behavior.",
+                      placeholder: None,
+                      input: self.custom_style_input.clone(),
+                      status: self.custom_style_status.clone(),
+                      size: TextInputSize::Medium,
+                      variant: TextInputVariant::Secondary,
+                      style: TextInputStyle::new()
+                        .background(rgba(0x11111bff))
+                        .border(rgba(0xeff1f5ff))
+                        .focus_border(rgba(0x89dcebff))
+                        .foreground(rgba(0x9ca0b0ff))
+                        .placeholder_foreground(theme.text.secondary)
+                        .selection_background(theme.background.selection)
+                        .caret(theme.accent.primary)
+                        .height(px(34.0))
+                        .horizontal_padding(px(12.0)),
+                    },
+                    theme,
+                  ))
+                  .child(Self::text_input_example(
+                    TextInputExample {
+                      title: "Read-only",
+                      description: "Allows selection without text mutation.",
+                      placeholder: None,
+                      input: self.readonly_input.clone(),
+                      status: self.readonly_status.clone(),
+                      size: TextInputSize::Large,
+                      variant: TextInputVariant::Secondary,
+                      style: TextInputStyle::new(),
+                    },
+                    theme,
+                  ))
+                  .child(Self::text_input_example(
+                    TextInputExample {
+                      title: "Disabled",
+                      description: "Does not receive focus or input events.",
+                      placeholder: None,
+                      input: self.disabled_input.clone(),
+                      status: self.disabled_status.clone(),
+                      size: TextInputSize::Medium,
+                      variant: TextInputVariant::Secondary,
+                      style: TextInputStyle::new(),
+                    },
+                    theme,
+                  )),
+              ),
           ),
       )
   }
