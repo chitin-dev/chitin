@@ -14,9 +14,13 @@ pub const CARET_VISIBLE_DURATION: Duration = Duration::from_millis(500);
 /// Persistent state for a reusable single-line text input.
 pub struct TextInputState {
   text: SharedString,
+  // Selection (blue background) in text input, it has an anchor from the start
+  // of our selection movement
   selection: TextSelection,
   focus_handle: FocusHandle,
+  // When disabled, text input cannot be written and copied
   disabled: bool,
+  // When readonly, text input cannot be written, but can be copied
   readonly: bool,
   focused: bool,
   caret_epoch: Instant,
@@ -30,6 +34,7 @@ impl TextInputState {
 
   /// Creates an input state initialized with `text` and a caret at its end.
   pub fn with_text(text: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
+    // Because our text input can only accepts single line
     let text = normalize_single_line(text.into());
     let cursor = text.len();
 
@@ -267,8 +272,12 @@ impl TextInputState {
   ///
   /// `true` after handling a valid horizontal cursor command.
   fn move_cursor(&mut self, forward: bool, extend: bool, cx: &mut Context<Self>) -> bool {
+    // when we press shift, the parameter `extend` should be true, that's because
+    // we need to retain the anchor and move our caret
     let selection = self.selection;
     let target = if forward {
+      // function `is_collapsed()` will check whether the selection contains
+      // no text
       if !extend && !selection.is_collapsed() {
         selection.range().end
       } else {
@@ -393,14 +402,6 @@ impl TextInputState {
 impl EventEmitter<TextInputEvent> for TextInputState {}
 
 /// Replaces line-break characters so the control always stores one logical line.
-///
-/// # Parameters
-///
-/// `text` supplies raw text entered or assigned by a caller.
-///
-/// # Returns
-///
-/// A text value with carriage returns and line feeds replaced by spaces.
 fn normalize_single_line(text: SharedString) -> SharedString {
   if !text.contains(['\n', '\r']) {
     return text;

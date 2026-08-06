@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
   primitive::icon::Icon,
-  primitive::input::text::{TextInput, TextInputSize},
+  primitive::input::text::{TextInput, TextInputSize, TextInputVariant},
   themes::{UIThemes, builtins},
 };
 
@@ -140,7 +140,7 @@ fn render_query_line(
         .theme(theme)
         .size(TextInputSize::Large)
         .full_width(true)
-        .appearance(false)
+        .variant(TextInputVariant::Transparent)
         .placeholder(placeholder)
         .into_any_element(),
       None => div()

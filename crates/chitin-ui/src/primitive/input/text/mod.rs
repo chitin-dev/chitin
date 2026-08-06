@@ -8,5 +8,5 @@ mod render;
 mod state;
 
 pub use event::{TextInputEvent, TextSelection};
-pub use render::{TextInput, TextInputSize};
+pub use render::{TextInput, TextInputSize, TextInputStyle, TextInputVariant};
 pub use state::TextInputState;

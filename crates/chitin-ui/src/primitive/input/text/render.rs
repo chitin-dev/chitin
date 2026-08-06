@@ -15,6 +15,191 @@ const DEFAULT_TEXT_INPUT_WIDTH: Pixels = px(240.0);
 const DEFAULT_TEXT_INPUT_PADDING_X: Pixels = px(8.0);
 const CARET_WIDTH: Pixels = px(2.0);
 
+/// Built-in theme-based appearance variants for a [`TextInput`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextInputVariant {
+  /// A prominent input surface for form controls.
+  Primary,
+  /// A neutral input surface for panels and toolbars.
+  #[default]
+  Secondary,
+  /// A low-chrome input for composite controls that provide their own shell.
+  Transparent,
+}
+
+/// Visual-only overrides for a [`TextInput`].
+///
+/// This style intentionally cannot alter editing behavior, focus ownership,
+/// disabled behavior, keyboard handling, or emitted semantic events.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextInputStyle {
+  background: Option<gpui::Rgba>,
+  foreground: Option<gpui::Rgba>,
+  placeholder_foreground: Option<gpui::Rgba>,
+  selection_background: Option<gpui::Rgba>,
+  caret: Option<gpui::Rgba>,
+  border: Option<gpui::Rgba>,
+  focus_border: Option<gpui::Rgba>,
+  width: Option<Pixels>,
+  height: Option<Pixels>,
+  horizontal_padding: Option<Pixels>,
+}
+
+impl TextInputStyle {
+  /// Creates a style with no overrides.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no Rust parameters.
+  ///
+  /// # Returns
+  ///
+  /// A visual style that preserves the selected [`TextInputVariant`] defaults.
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// Overrides the input background color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the input surface.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn background(mut self, color: gpui::Rgba) -> Self {
+    self.background = Some(color);
+    self
+  }
+
+  /// Overrides the input text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for entered text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn foreground(mut self, color: gpui::Rgba) -> Self {
+    self.foreground = Some(color);
+    self
+  }
+
+  /// Overrides the placeholder text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for placeholder text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn placeholder_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.placeholder_foreground = Some(color);
+    self
+  }
+
+  /// Overrides the selected-range background color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use behind selected text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn selection_background(mut self, color: gpui::Rgba) -> Self {
+    self.selection_background = Some(color);
+    self
+  }
+
+  /// Overrides the caret color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the insertion caret.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn caret(mut self, color: gpui::Rgba) -> Self {
+    self.caret = Some(color);
+    self
+  }
+
+  /// Overrides the default border color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the idle border.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn border(mut self, color: gpui::Rgba) -> Self {
+    self.border = Some(color);
+    self
+  }
+
+  /// Overrides the border color while the input is focused.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the focused border.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn focus_border(mut self, color: gpui::Rgba) -> Self {
+    self.focus_border = Some(color);
+    self
+  }
+
+  /// Sets an explicit visual width.
+  ///
+  /// # Parameters
+  ///
+  /// `width` is the fixed rendered width before `full_width` expansion.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn width(mut self, width: Pixels) -> Self {
+    self.width = Some(width);
+    self
+  }
+
+  /// Sets an explicit visual height.
+  ///
+  /// # Parameters
+  ///
+  /// `height` is the fixed rendered height for the input shell.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn height(mut self, height: Pixels) -> Self {
+    self.height = Some(height);
+    self
+  }
+
+  /// Sets horizontal padding.
+  ///
+  /// # Parameters
+  ///
+  /// `padding` is the inline spacing around the text viewport.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn horizontal_padding(mut self, padding: Pixels) -> Self {
+    self.horizontal_padding = Some(padding);
+    self
+  }
+}
+
 /// Visual size for a [`TextInput`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextInputSize {
@@ -33,6 +218,8 @@ pub struct TextInput {
   state: Entity<TextInputState>,
   placeholder: Option<SharedString>,
   theme: UIThemes,
+  variant: TextInputVariant,
+  style: TextInputStyle,
   size: TextInputSize,
   full_width: bool,
   appearance: bool,
@@ -45,6 +232,8 @@ impl TextInput {
       state,
       placeholder: None,
       theme: builtins::dark(),
+      variant: TextInputVariant::default(),
+      style: TextInputStyle::default(),
       size: TextInputSize::default(),
       full_width: false,
       appearance: true,
@@ -60,6 +249,34 @@ impl TextInput {
   /// Sets the semantic theme used for this input.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
+    self
+  }
+
+  /// Sets one of the built-in theme-based appearance variants.
+  ///
+  /// # Parameters
+  ///
+  /// `variant` selects a semantic visual treatment.
+  ///
+  /// # Returns
+  ///
+  /// The updated text input builder.
+  pub fn variant(mut self, variant: TextInputVariant) -> Self {
+    self.variant = variant;
+    self
+  }
+
+  /// Applies visual-only appearance overrides.
+  ///
+  /// # Parameters
+  ///
+  /// `style` supplies component-specific visual overrides.
+  ///
+  /// # Returns
+  ///
+  /// The updated text input builder.
+  pub fn style(mut self, style: TextInputStyle) -> Self {
+    self.style = style;
     self
   }
 
@@ -112,32 +329,31 @@ impl RenderOnce for TextInput {
     }
 
     let theme = self.theme;
+    let colors = TextInputColors::new(theme, self.variant, self.style, disabled);
     let state_for_mouse = state.clone();
     let state_for_keys = state.clone();
 
     div()
       .flex()
       .items_center()
-      .w(DEFAULT_TEXT_INPUT_WIDTH)
+      .w(self.style.width.unwrap_or(DEFAULT_TEXT_INPUT_WIDTH))
       .when(self.full_width, |style| style.w_full())
-      .h(metrics.height)
-      .px(DEFAULT_TEXT_INPUT_PADDING_X)
+      .h(self.style.height.unwrap_or(metrics.height))
+      .px(self.style.horizontal_padding.unwrap_or(DEFAULT_TEXT_INPUT_PADDING_X))
       .rounded_sm()
       .when(self.appearance, |style| {
         style
           .border_1()
-          .border_color(theme.border.primary)
-          .focus(move |style| style.border_color(theme.border.focus))
-          .bg(theme.background.tertiary)
+          .border_color(colors.border)
+          .focus(move |style| style.border_color(colors.focus_border))
+          .bg(colors.background)
       })
       .text_size(metrics.font_size)
+      .text_color(colors.foreground)
       .cursor(if disabled {
         CursorStyle::Arrow
       } else {
         CursorStyle::IBeam
-      })
-      .when(disabled, |style| {
-        style.text_color(theme.text.disabled).bg(theme.background.secondary)
       })
       .on_mouse_down(MouseButton::Left, move |_, window, cx| {
         if state_for_mouse.read(cx).is_disabled() {
@@ -168,7 +384,7 @@ impl RenderOnce for TextInput {
             text: text.into(),
             placeholder: self.placeholder.unwrap_or_default(),
             selection,
-            theme,
+            colors,
             show_caret: focused && !disabled,
             caret_visible,
             metrics,
@@ -183,7 +399,7 @@ struct TextInputContent {
   text: SharedString,
   placeholder: SharedString,
   selection: super::TextSelection,
-  theme: UIThemes,
+  colors: TextInputColors,
   show_caret: bool,
   caret_visible: bool,
   metrics: TextInputMetrics,
@@ -263,9 +479,9 @@ impl Element for TextInputContent {
     let font_size = text_style.font_size.to_pixels(window.rem_size());
     let mut run = text_style.to_run(display_text.len());
     run.color = TextColor::from(if empty {
-      self.theme.text.disabled
+      self.colors.placeholder_foreground
     } else {
-      self.theme.text.primary
+      self.colors.foreground
     });
 
     // Shape the whole logical line once; x_for_index maps byte offsets to pixels.
@@ -283,7 +499,7 @@ impl Element for TextInputContent {
           point(bounds.left() + start, selection_top),
           size(end - start, selection_height),
         ),
-        self.theme.background.selection,
+        self.colors.selection_background,
       )
     });
 
@@ -296,7 +512,7 @@ impl Element for TextInputContent {
           point(bounds.left() + x, caret_top),
           size(CARET_WIDTH, self.metrics.caret_height),
         ),
-        self.theme.accent.primary,
+        self.colors.caret,
       )
     });
     TextInputContentPrepaint { line, selection, caret }
@@ -327,6 +543,89 @@ impl Element for TextInputContent {
       && self.caret_visible
     {
       window.paint_quad(caret);
+    }
+  }
+}
+
+/// Resolved visual colors for one rendered text-input state.
+#[derive(Clone, Copy)]
+struct TextInputColors {
+  background: gpui::Rgba,
+  foreground: gpui::Rgba,
+  placeholder_foreground: gpui::Rgba,
+  selection_background: gpui::Rgba,
+  caret: gpui::Rgba,
+  border: gpui::Rgba,
+  focus_border: gpui::Rgba,
+}
+
+impl TextInputColors {
+  /// Resolves semantic text-input colors for one appearance state.
+  ///
+  /// # Parameters
+  ///
+  /// `theme` supplies semantic UI color tokens.
+  ///
+  /// `variant` selects the built-in visual treatment.
+  ///
+  /// `style` supplies visual-only component overrides.
+  ///
+  /// `disabled` describes whether the input should use disabled visuals.
+  ///
+  /// # Returns
+  ///
+  /// Resolved colors for the rendered input.
+  fn new(theme: UIThemes, variant: TextInputVariant, style: TextInputStyle, disabled: bool) -> Self {
+    if disabled {
+      return Self {
+        background: theme.background.secondary,
+        foreground: theme.text.disabled,
+        placeholder_foreground: theme.text.disabled,
+        selection_background: theme.background.selection,
+        caret: theme.accent.primary,
+        border: theme.border.muted,
+        focus_border: theme.border.muted,
+      };
+    }
+
+    let colors = match variant {
+      TextInputVariant::Primary => Self {
+        background: theme.background.secondary,
+        foreground: theme.text.primary,
+        placeholder_foreground: theme.text.secondary,
+        selection_background: theme.background.selection,
+        caret: theme.accent.primary,
+        border: theme.border.primary,
+        focus_border: theme.border.focus,
+      },
+      TextInputVariant::Secondary => Self {
+        background: theme.background.tertiary,
+        foreground: theme.text.primary,
+        placeholder_foreground: theme.text.disabled,
+        selection_background: theme.background.selection,
+        caret: theme.accent.primary,
+        border: theme.border.primary,
+        focus_border: theme.border.focus,
+      },
+      TextInputVariant::Transparent => Self {
+        background: builtins::TRANSPARENT,
+        foreground: theme.text.primary,
+        placeholder_foreground: theme.text.disabled,
+        selection_background: theme.background.selection,
+        caret: theme.accent.primary,
+        border: builtins::TRANSPARENT,
+        focus_border: builtins::TRANSPARENT,
+      },
+    };
+
+    Self {
+      background: style.background.unwrap_or(colors.background),
+      foreground: style.foreground.unwrap_or(colors.foreground),
+      placeholder_foreground: style.placeholder_foreground.unwrap_or(colors.placeholder_foreground),
+      selection_background: style.selection_background.unwrap_or(colors.selection_background),
+      caret: style.caret.unwrap_or(colors.caret),
+      border: style.border.unwrap_or(colors.border),
+      focus_border: style.focus_border.unwrap_or(colors.focus_border),
     }
   }
 }
@@ -369,5 +668,33 @@ mod tests {
   #[test]
   fn text_input_size_should_use_medium_height_by_default() {
     assert_eq!(TextInputSize::default().metrics().height, px(30.0));
+  }
+
+  #[test]
+  fn text_input_style_should_override_focus_border_color() {
+    let theme = builtins::dark();
+    let colors = TextInputColors::new(
+      theme,
+      TextInputVariant::Secondary,
+      TextInputStyle::new().focus_border(builtins::TRANSPARENT),
+      false,
+    );
+
+    assert_eq!(colors.focus_border, builtins::TRANSPARENT);
+  }
+
+  #[test]
+  fn text_input_variant_should_make_transparent_background() {
+    let theme = builtins::dark();
+    let colors = TextInputColors::new(theme, TextInputVariant::Transparent, TextInputStyle::new(), false);
+
+    assert_eq!(colors.background, builtins::TRANSPARENT);
+  }
+
+  #[test]
+  fn text_input_style_should_override_width() {
+    let width = px(320.0);
+
+    assert_eq!(TextInputStyle::new().width(width).width, Some(width));
   }
 }
