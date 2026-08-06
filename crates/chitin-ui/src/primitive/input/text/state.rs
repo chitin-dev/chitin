@@ -79,6 +79,11 @@ impl TextInputState {
     self.focused
   }
 
+  /// Returns the selected text when selection is not empty.
+  pub fn selected_text(&self) -> Option<SharedString> {
+    selected_text_from(&self.text, self.selection, self.disabled)
+  }
+
   /// Enables or disables the input and emits an availability event when changed.
   pub fn set_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
     if self.disabled == disabled {
@@ -409,6 +414,28 @@ fn normalize_single_line(text: SharedString) -> SharedString {
   SharedString::from(text.replace(['\n', '\r'], " "))
 }
 
+/// Returns the selected text for one text/selection/disabled snapshot.
+///
+/// # Parameters
+///
+/// `text` supplies the current input contents.
+///
+/// `selection` supplies the byte-offset selection to extract.
+///
+/// `disabled` controls whether selection should be copyable.
+///
+/// # Returns
+///
+/// The selected text, or an empty string when selection is empty or disabled.
+fn selected_text_from(text: &str, selection: TextSelection, disabled: bool) -> Option<SharedString> {
+  let range = selection.range();
+  if !disabled && !range.is_empty() {
+    Some(text[range].into())
+  } else {
+    Some(SharedString::from(""))
+  }
+}
+
 /// Extracts printable input from an unmodified GPUI key event.
 ///
 /// # Parameters
@@ -539,5 +566,29 @@ mod tests {
 
     assert_eq!(updated, text);
     assert_eq!(selection, TextSelection::caret(0));
+  }
+
+  #[test]
+  fn selected_text_from_should_return_selected_range() {
+    assert_eq!(
+      selected_text_from("workspace", TextSelection::new(0, 4), false),
+      Some("work".into())
+    );
+  }
+
+  #[test]
+  fn selected_text_from_should_return_empty_text_when_selection_is_empty() {
+    assert_eq!(
+      selected_text_from("workspace", TextSelection::caret(4), false),
+      Some(SharedString::from(""))
+    );
+  }
+
+  #[test]
+  fn selected_text_from_should_return_empty_text_when_input_is_disabled() {
+    assert_eq!(
+      selected_text_from("workspace", TextSelection::new(0, 4), true),
+      Some(SharedString::from(""))
+    );
   }
 }

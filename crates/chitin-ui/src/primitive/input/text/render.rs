@@ -3,9 +3,9 @@
 use std::time::Instant;
 
 use gpui::{
-  App, Bounds, CursorStyle, Element, ElementId, Entity, GlobalElementId, InspectorElementId, InteractiveElement,
-  IntoElement, LayoutId, MouseButton, PaintQuad, ParentElement, Pixels, RenderOnce, ShapedLine, SharedString, Style,
-  TextColor, Window, div, fill, point, prelude::*, px, relative, size,
+  App, Bounds, ClipboardItem, CursorStyle, Element, ElementId, Entity, GlobalElementId, InspectorElementId,
+  InteractiveElement, IntoElement, KeyDownEvent, LayoutId, MouseButton, PaintQuad, ParentElement, Pixels, RenderOnce,
+  ShapedLine, SharedString, Style, TextColor, Window, div, fill, point, prelude::*, px, relative, size,
 };
 
 use super::TextInputState;
@@ -363,8 +363,17 @@ impl RenderOnce for TextInput {
         window.focus(&focus_handle, cx);
         cx.stop_propagation();
       })
+      // Because [`TextInputState`] should stay platform/ui-service independent.
+      // Ctrl+C and Ctrl+V need platform clipboard access. They are local to the
+      // component/entity model
       .on_key_down(move |event, _, cx| {
-        let handled = state_for_keys.update(cx, |state, cx| state.handle_key_down(event, cx));
+        let handled = if is_clipboard_shortcut(event, "c") {
+          copy_selection_to_clipboard(&state_for_keys, cx)
+        } else if is_clipboard_shortcut(event, "v") {
+          paste_clipboard_text(&state_for_keys, cx)
+        } else {
+          state_for_keys.update(cx, |state, cx| state.handle_key_down(event, cx))
+        };
         if handled {
           cx.stop_propagation();
         }
@@ -392,6 +401,65 @@ impl RenderOnce for TextInput {
       )
       .when(readonly && !disabled, |style| style.cursor(CursorStyle::IBeam))
   }
+}
+
+/// Returns whether a key event is a platform clipboard shortcut for `key`.
+///
+/// # Parameters
+///
+/// `event` supplies the normalized GPUI key event.
+///
+/// `key` supplies the lower-case clipboard key to match.
+///
+/// # Returns
+///
+/// `true` when Ctrl or the platform modifier is pressed with `key`.
+fn is_clipboard_shortcut(event: &KeyDownEvent, key: &str) -> bool {
+  let modifiers = event.keystroke.modifiers;
+  event.keystroke.key == key && (modifiers.control || modifiers.platform)
+}
+
+/// Copies the current selected input text into the platform clipboard.
+///
+/// # Parameters
+///
+/// `state` supplies the text input state entity.
+///
+/// `cx` provides platform clipboard access.
+///
+/// # Returns
+///
+/// `true` when selected text was copied.
+fn copy_selection_to_clipboard(state: &Entity<TextInputState>, cx: &mut App) -> bool {
+  let Some(selected_text) = state.read(cx).selected_text() else {
+    return false;
+  };
+
+  if selected_text.is_empty() {
+    return false;
+  }
+
+  cx.write_to_clipboard(ClipboardItem::new_string(selected_text.to_string()));
+  true
+}
+
+/// Pastes text from the platform clipboard into the input selection.
+///
+/// # Parameters
+///
+/// `state` supplies the text input state entity.
+///
+/// `cx` provides platform clipboard access and state mutation.
+///
+/// # Returns
+///
+/// `true` when clipboard text changed the input.
+fn paste_clipboard_text(state: &Entity<TextInputState>, cx: &mut App) -> bool {
+  let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+    return false;
+  };
+
+  state.update(cx, |state, cx| state.insert_text(&text, cx))
 }
 
 /// A single shaped input line with selection and caret paint overlays.
@@ -664,6 +732,7 @@ impl TextInputSize {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use gpui::{KeyDownEvent, Keystroke, Modifiers};
 
   #[test]
   fn text_input_size_should_use_medium_height_by_default() {
@@ -696,5 +765,36 @@ mod tests {
     let width = px(320.0);
 
     assert_eq!(TextInputStyle::new().width(width).width, Some(width));
+  }
+
+  #[test]
+  fn is_clipboard_shortcut_should_accept_control_key() {
+    assert!(is_clipboard_shortcut(&key_down("c", true, false), "c"));
+  }
+
+  #[test]
+  fn is_clipboard_shortcut_should_accept_platform_key() {
+    assert!(is_clipboard_shortcut(&key_down("v", false, true), "v"));
+  }
+
+  #[test]
+  fn is_clipboard_shortcut_should_reject_unmodified_key() {
+    assert!(!is_clipboard_shortcut(&key_down("c", false, false), "c"));
+  }
+
+  fn key_down(key: &str, control: bool, platform: bool) -> KeyDownEvent {
+    KeyDownEvent {
+      keystroke: Keystroke {
+        modifiers: Modifiers {
+          control,
+          platform,
+          ..Default::default()
+        },
+        key: key.to_owned(),
+        key_char: Some(key.to_owned()),
+      },
+      is_held: false,
+      prefer_character_input: false,
+    }
   }
 }
