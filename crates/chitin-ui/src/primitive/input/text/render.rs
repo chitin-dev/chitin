@@ -364,13 +364,15 @@ impl RenderOnce for TextInput {
         cx.stop_propagation();
       })
       // Because [`TextInputState`] should stay platform/ui-service independent.
-      // Ctrl+C and Ctrl+V need platform clipboard access. They are local to the
+      // Ctrl/Cmd copy, cut, and paste need platform clipboard access. They are local to the
       // component/entity model
       .on_key_down(move |event, _, cx| {
         let handled = if is_clipboard_shortcut(event, "c") {
           copy_selection_to_clipboard(&state_for_keys, cx)
         } else if is_clipboard_shortcut(event, "v") {
           paste_clipboard_text(&state_for_keys, cx)
+        } else if is_clipboard_shortcut(event, "x") {
+          cut_selection_to_clipboard(&state_for_keys, cx)
         } else {
           state_for_keys.update(cx, |state, cx| state.handle_key_down(event, cx))
         };
@@ -441,6 +443,25 @@ fn copy_selection_to_clipboard(state: &Entity<TextInputState>, cx: &mut App) -> 
 
   cx.write_to_clipboard(ClipboardItem::new_string(selected_text.to_string()));
   true
+}
+
+/// Copies the editable selection to the clipboard, then removes it from the input.
+///
+/// # Parameters
+///
+/// `state` supplies the text input state entity.
+///
+/// `cx` provides platform clipboard access and state mutation.
+///
+/// # Returns
+///
+/// `true` when the selected text was copied and removed.
+fn cut_selection_to_clipboard(state: &Entity<TextInputState>, cx: &mut App) -> bool {
+  if state.read(cx).is_readonly() || !copy_selection_to_clipboard(state, cx) {
+    return false;
+  }
+
+  state.update(cx, |state, cx| state.insert_text("", cx))
 }
 
 /// Pastes text from the platform clipboard into the input selection.
@@ -775,6 +796,11 @@ mod tests {
   #[test]
   fn is_clipboard_shortcut_should_accept_platform_key() {
     assert!(is_clipboard_shortcut(&key_down("v", false, true), "v"));
+  }
+
+  #[test]
+  fn is_clipboard_shortcut_should_accept_cut_key() {
+    assert!(is_clipboard_shortcut(&key_down("x", true, false), "x"));
   }
 
   #[test]
