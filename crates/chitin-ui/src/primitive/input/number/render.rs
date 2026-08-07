@@ -1,17 +1,19 @@
 //! Rendering for the reusable numeric input primitive.
 
 use gpui::{
-  App, Entity, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Window, div,
-  prelude::*, px,
+  App, CursorStyle, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce,
+  SharedString, Window, div, prelude::*, px,
 };
 
 use super::NumberInputState;
 use crate::{
+  primitive::icon::Icon,
   primitive::input::text::{TextInput, TextInputSize},
   themes::{UIThemes, builtins},
 };
 
 const DEFAULT_NUMBER_INPUT_WIDTH: Pixels = px(160.0);
+const STEPPER_WIDTH: Pixels = px(20.0);
 
 /// Visual size for a [`NumberInput`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -25,6 +27,16 @@ pub enum NumberInputSize {
   Large,
 }
 
+/// Built-in numeric interaction affordances rendered by [`NumberInput`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NumberInputControls {
+  /// Render no pointer controls and rely on keyboard stepping.
+  None,
+  /// Render increment and decrement controls that preserve editor focus.
+  #[default]
+  Stepper,
+}
+
 /// A numeric editing control bound to its own [`NumberInputState`] entity.
 #[derive(IntoElement)]
 pub struct NumberInput {
@@ -34,6 +46,7 @@ pub struct NumberInput {
   placeholder: Option<SharedString>,
   theme: UIThemes,
   size: NumberInputSize,
+  controls: NumberInputControls,
   full_width: bool,
 }
 
@@ -55,6 +68,7 @@ impl NumberInput {
       placeholder: None,
       theme: builtins::dark(),
       size: NumberInputSize::default(),
+      controls: NumberInputControls::default(),
       full_width: false,
     }
   }
@@ -129,6 +143,20 @@ impl NumberInput {
     self
   }
 
+  /// Sets built-in numeric interaction affordances.
+  ///
+  /// # Parameters
+  ///
+  /// `controls` selects the pointer controls rendered by this input.
+  ///
+  /// # Returns
+  ///
+  /// This input configured with the supplied controls.
+  pub fn controls(mut self, controls: NumberInputControls) -> Self {
+    self.controls = controls;
+    self
+  }
+
   /// Makes the control fill its parent width when enabled.
   ///
   /// # Parameters
@@ -155,9 +183,27 @@ impl RenderOnce for NumberInput {
   ///
   /// The rendered numeric input control.
   fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-    let input = self.state.read(cx).text_input();
+    let (input, validation_error, interaction_disabled) = {
+      let state = self.state.read(cx);
+      (
+        state.text_input(),
+        state.draft_state().has_validation_error(),
+        state.is_disabled() || state.is_readonly(),
+      )
+    };
     let focus_handle = input.read(cx).focus_handle().clone();
     let theme = self.theme;
+    let border_color = if validation_error {
+      theme.text.error
+    } else {
+      theme.border.primary
+    };
+    let focus_border = if validation_error {
+      theme.text.error
+    } else {
+      theme.border.focus
+    };
+    let state_for_keys = self.state.clone();
 
     div()
       .flex()
@@ -166,9 +212,16 @@ impl RenderOnce for NumberInput {
       .when(self.full_width, |style| style.w_full())
       .rounded_sm()
       .border_1()
-      .border_color(theme.border.primary)
+      .border_color(border_color)
       .bg(theme.background.tertiary)
-      .focus(move |style| style.border_color(theme.border.focus))
+      .focus(move |style| style.border_color(focus_border))
+      .on_key_down(move |event, window, cx| {
+        let stepped = state_for_keys.update(cx, |state, cx| state.handle_key_down(event, cx));
+        if stepped {
+          window.invalidate_character_coordinates();
+          cx.stop_propagation();
+        }
+      })
       .track_focus(&focus_handle)
       .when_some(self.prefix, |style, prefix| {
         style.child(div().pl_2().text_color(theme.text.secondary).child(prefix))
@@ -184,7 +237,111 @@ impl RenderOnce for NumberInput {
       .when_some(self.suffix, |style, suffix| {
         style.child(div().pr_2().text_color(theme.text.secondary).child(suffix))
       })
+      .when(self.controls == NumberInputControls::Stepper, |style| {
+        style.child(render_stepper(self.state, focus_handle, theme, interaction_disabled))
+      })
   }
+}
+
+/// Renders focus-preserving pointer controls for incrementing and decrementing a number.
+///
+/// # Parameters
+///
+/// `state` owns numeric stepping behavior.
+/// `focus_handle` identifies the nested text editor that must retain focus.
+/// `theme` supplies semantic visual tokens.
+/// `disabled` prevents pointer-driven stepping when editing is unavailable.
+///
+/// # Returns
+///
+/// A compact vertical increment/decrement control group.
+fn render_stepper(
+  state: Entity<NumberInputState>,
+  focus_handle: gpui::FocusHandle,
+  theme: UIThemes,
+  disabled: bool,
+) -> gpui::Div {
+  div()
+    .w(STEPPER_WIDTH)
+    .flex_none()
+    .h_full()
+    .flex()
+    .flex_col()
+    .border_l_1()
+    .border_color(theme.border.primary)
+    .child(render_stepper_button(
+      state.clone(),
+      focus_handle.clone(),
+      theme,
+      disabled,
+      1,
+      "icons/number-increment.svg",
+    ))
+    .child(render_stepper_button(
+      state,
+      focus_handle,
+      theme,
+      disabled,
+      -1,
+      "icons/number-decrement.svg",
+    ))
+}
+
+/// Renders one focus-preserving numeric stepper button.
+///
+/// # Parameters
+///
+/// `state` owns numeric stepping behavior.
+/// `focus_handle` identifies the nested text editor that must retain focus.
+/// `theme` supplies semantic visual tokens.
+/// `disabled` prevents pointer-driven stepping when editing is unavailable.
+/// `count` supplies the signed step count.
+/// `icon_path` identifies the visual-only step direction icon.
+///
+/// # Returns
+///
+/// A half-height pointer target for one numeric step direction.
+fn render_stepper_button(
+  state: Entity<NumberInputState>,
+  focus_handle: gpui::FocusHandle,
+  theme: UIThemes,
+  disabled: bool,
+  count: i32,
+  icon_path: &'static str,
+) -> gpui::Div {
+  div()
+    .flex_1()
+    .flex()
+    .items_center()
+    .justify_center()
+    .text_color(if disabled {
+      theme.text.disabled
+    } else {
+      theme.text.secondary
+    })
+    .cursor(if disabled {
+      CursorStyle::Arrow
+    } else {
+      CursorStyle::PointingHand
+    })
+    .when(!disabled, |style| {
+      style.hover(move |style| style.bg(theme.background.hover))
+    })
+    .when(!disabled, |style| {
+      style.on_mouse_down(MouseButton::Left, move |_, window, cx| {
+        window.focus(&focus_handle, cx);
+        let stepped = state.update(cx, |state, cx| state.step_by(count, cx));
+        if stepped {
+          window.invalidate_character_coordinates();
+          cx.stop_propagation();
+        }
+      })
+    })
+    .child(Icon::new(icon_path).size(px(12.0)).color(if disabled {
+      theme.text.disabled
+    } else {
+      theme.text.secondary
+    }))
 }
 
 impl NumberInputSize {
@@ -214,5 +371,10 @@ mod tests {
   #[test]
   fn number_input_size_should_use_medium_text_input_size_by_default() {
     assert_eq!(NumberInputSize::default().text_input_size(), TextInputSize::Medium);
+  }
+
+  #[test]
+  fn number_input_controls_should_show_steppers_by_default() {
+    assert_eq!(NumberInputControls::default(), NumberInputControls::Stepper);
   }
 }
