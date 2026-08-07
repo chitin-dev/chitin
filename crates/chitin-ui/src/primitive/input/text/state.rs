@@ -354,7 +354,7 @@ impl TextInputState {
           self.select_all(cx);
           true
         }
-        _ => false,
+        _ => key_text(event).is_some_and(|text| self.insert_text(text, cx)),
       }
     };
 
@@ -779,6 +779,24 @@ fn cursor_direction(key: &str) -> Option<bool> {
   }
 }
 
+/// Extracts text committed by an unmodified normal keyboard event.
+///
+/// # Parameters
+///
+/// `event` supplies the focused keyboard event from GPUI.
+///
+/// # Returns
+///
+/// The committed text for direct insertion, or `None` for shortcuts and non-text keys.
+fn key_text(event: &KeyDownEvent) -> Option<&str> {
+  let modifiers = event.keystroke.modifiers;
+  if modifiers.platform || modifiers.control || modifiers.function || modifiers.alt {
+    return None;
+  }
+
+  event.keystroke.key_char.as_deref().filter(|text| !text.is_empty())
+}
+
 /// Finds the UTF-8 boundary immediately before one valid byte offset.
 ///
 /// # Parameters
@@ -964,6 +982,27 @@ mod tests {
   }
 
   #[test]
+  fn key_text_should_return_unmodified_english_text() {
+    let event = key_down("a", Some("a"), gpui::Modifiers::default());
+
+    assert_eq!(key_text(&event), Some("a"));
+  }
+
+  #[test]
+  fn key_text_should_reject_control_shortcuts() {
+    let event = key_down(
+      "c",
+      Some("c"),
+      gpui::Modifiers {
+        control: true,
+        ..Default::default()
+      },
+    );
+
+    assert_eq!(key_text(&event), None);
+  }
+
+  #[test]
   fn delete_backward_at_text_start_should_preserve_text() {
     let text = "workspace";
     let selection = TextSelection::caret(0);
@@ -1029,5 +1068,17 @@ mod tests {
   #[test]
   fn range_from_utf16_should_convert_non_ascii_composition_ranges() {
     assert_eq!(range_from_utf16("a😀水", 1..4), 1.."a😀水".len());
+  }
+
+  fn key_down(key: &str, key_char: Option<&str>, modifiers: gpui::Modifiers) -> KeyDownEvent {
+    KeyDownEvent {
+      keystroke: gpui::Keystroke {
+        modifiers,
+        key: key.to_owned(),
+        key_char: key_char.map(str::to_owned),
+      },
+      is_held: false,
+      prefer_character_input: false,
+    }
   }
 }
