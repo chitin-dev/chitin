@@ -11,7 +11,7 @@ env_logger = "0.10"
 chitin-utils = { path = "../chitin-utils" }
 chitin-ui = { path = "../chitin-ui" }
 chitin-wgpu = { path = "../chitin-wgpu" }
-gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "32197ffc3febdb2921d178c7f4802d73702f9b62" }
+gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "70e45b549634e6c1cea07370b7e12e3a79c31c03" }
 wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
 
 [dev-dependencies]

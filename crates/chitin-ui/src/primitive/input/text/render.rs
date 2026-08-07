@@ -3,10 +3,10 @@
 use std::time::Instant;
 
 use gpui::{
-  App, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Element, ElementId, Entity, GlobalElementId, Hitbox,
-  HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId, MouseButton,
-  MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, RenderOnce, ShapedLine, SharedString,
-  Style, TextColor, Window, div, fill, point, prelude::*, px, relative, size,
+  App, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+  GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId,
+  MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, RenderOnce, ShapedLine,
+  SharedString, Style, TextColor, TextRun, UnderlineStyle, Window, div, fill, point, prelude::*, px, relative, size,
 };
 
 use super::TextInputState;
@@ -313,11 +313,12 @@ impl RenderOnce for TextInput {
     self.state.update(cx, |state, cx| state.sync_focus(focused, cx));
 
     // Snapshot every value the content element needs so it never borrows the entity.
-    let (text, selection, disabled, readonly, caret_visible) = {
+    let (text, selection, marked_range, disabled, readonly, caret_visible) = {
       let state = self.state.read(cx);
       (
         state.text().to_owned(),
         state.selection(),
+        state.marked_range(),
         state.is_disabled(),
         state.is_readonly(),
         focused && state.caret_visible(Instant::now()),
@@ -358,7 +359,7 @@ impl RenderOnce for TextInput {
       // Because [`TextInputState`] should stay platform/ui-service independent.
       // Ctrl/Cmd copy, cut, and paste need platform clipboard access. They are local to the
       // component/entity model
-      .on_key_down(move |event, _, cx| {
+      .on_key_down(move |event, window, cx| {
         let handled = if is_clipboard_shortcut(event, "c") {
           copy_selection_to_clipboard(&state_for_keys, cx)
         } else if is_clipboard_shortcut(event, "v") {
@@ -369,6 +370,7 @@ impl RenderOnce for TextInput {
           state_for_keys.update(cx, |state, cx| state.handle_key_down(event, cx))
         };
         if handled {
+          window.invalidate_character_coordinates();
           cx.stop_propagation();
         }
       })
@@ -388,6 +390,7 @@ impl RenderOnce for TextInput {
             text: text.into(),
             placeholder: self.placeholder.unwrap_or_default(),
             selection,
+            marked_range,
             colors,
             show_caret: focused && !disabled,
             caret_visible,
@@ -482,6 +485,7 @@ struct TextInputContent {
   text: SharedString,
   placeholder: SharedString,
   selection: super::TextSelection,
+  marked_range: Option<std::ops::Range<usize>>,
   colors: TextInputColors,
   show_caret: bool,
   caret_visible: bool,
@@ -570,7 +574,8 @@ impl Element for TextInputContent {
     });
 
     // Shape the whole logical line once; x_for_index maps byte offsets to pixels.
-    let line = window.text_system().shape_line(display_text, font_size, &[run], None);
+    let runs = text_runs(run, (!empty).then_some(self.marked_range.clone()).flatten());
+    let line = window.text_system().shape_line(display_text, font_size, &runs, None);
 
     // Selection highlight spans the shaped range and is vertically centered.
     let range = self.selection.range();
@@ -623,6 +628,12 @@ impl Element for TextInputContent {
     window: &mut Window,
     cx: &mut App,
   ) {
+    let focus_handle = self.state.read(cx).focus_handle().clone();
+    self
+      .state
+      .update(cx, |state, _| state.update_layout_cache(prepaint.line.clone(), bounds));
+    window.handle_input(&focus_handle, ElementInputHandler::new(bounds, self.state.clone()), cx);
+
     register_pointer_selection_handlers(
       self.state.clone(),
       prepaint.hitbox.clone(),
@@ -644,6 +655,47 @@ impl Element for TextInputContent {
       window.paint_quad(caret);
     }
   }
+}
+
+/// Builds visual text runs for one complete input line.
+///
+/// # Parameters
+///
+/// `run` supplies the base text styling for the complete line.
+///
+/// `marked_range` optionally identifies the active IME composition range.
+///
+/// # Returns
+///
+/// One run for ordinary text, or three contiguous runs with an underlined marked range.
+fn text_runs(mut run: TextRun, marked_range: Option<std::ops::Range<usize>>) -> Vec<TextRun> {
+  let Some(marked_range) = marked_range.filter(|range| range.start < range.end && range.end <= run.len) else {
+    return vec![run];
+  };
+
+  let before = marked_range.start;
+  let marked = marked_range.end - marked_range.start;
+  let after = run.len - marked_range.end;
+  let underline_color = run.color.to_hsla();
+  let marked_run = TextRun {
+    len: marked,
+    underline: Some(UnderlineStyle {
+      color: Some(underline_color),
+      thickness: px(1.0),
+      wavy: false,
+    }),
+    ..run.clone()
+  };
+  run.len = before;
+
+  [
+    (before > 0).then_some(run.clone()),
+    Some(marked_run),
+    (after > 0).then_some(TextRun { len: after, ..run }),
+  ]
+  .into_iter()
+  .flatten()
+  .collect()
 }
 
 /// Registers pointer handlers that place and extend the input selection.
@@ -689,6 +741,7 @@ fn register_pointer_selection_handlers(
       state.update(cx, |state, cx| {
         state.begin_pointer_selection(offset, event.modifiers.shift, cx)
       });
+      window.invalidate_character_coordinates();
       cx.stop_propagation();
     }
   });
@@ -697,13 +750,14 @@ fn register_pointer_selection_handlers(
     let state = state.clone();
     let line = line.clone();
     let bounds = hitbox.bounds;
-    move |event: &MouseMoveEvent, phase, _, cx| {
+    move |event: &MouseMoveEvent, phase, window, cx| {
       if phase != DispatchPhase::Bubble || !event.dragging() {
         return;
       }
 
       let offset = pointer_offset_for_position(event.position, bounds, &line, text_is_empty);
       if state.update(cx, |state, cx| state.update_pointer_selection(offset, cx)) {
+        window.invalidate_character_coordinates();
         cx.stop_propagation();
       }
     }

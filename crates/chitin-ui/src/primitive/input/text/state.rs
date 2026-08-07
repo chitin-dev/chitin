@@ -1,8 +1,14 @@
 //! Persistent editing state and keyboard behavior for the text input primitive.
 
-use std::time::{Duration, Instant};
+use std::{
+  ops::Range,
+  time::{Duration, Instant},
+};
 
-use gpui::{Context, EventEmitter, FocusHandle, KeyDownEvent, SharedString};
+use gpui::{
+  Bounds, Context, EntityInputHandler, EventEmitter, FocusHandle, KeyDownEvent, Pixels, Point, ShapedLine,
+  SharedString, UTF16Selection, Window, point,
+};
 
 use super::{TextInputEvent, TextSelection};
 
@@ -10,6 +16,13 @@ use super::{TextInputEvent, TextSelection};
 pub const CARET_BLINK_PERIOD: Duration = Duration::from_millis(1_000);
 /// Duration for which the caret is visible within a blink cycle.
 pub const CARET_VISIBLE_DURATION: Duration = Duration::from_millis(500);
+
+/// Transient shaped-text data needed by the platform text-input bridge.
+#[derive(Default)]
+struct TextInputLayoutCache {
+  line: Option<ShapedLine>,
+  bounds: Option<Bounds<Pixels>>,
+}
 
 /// Persistent state for a reusable single-line text input.
 pub struct TextInputState {
@@ -23,6 +36,8 @@ pub struct TextInputState {
   // When readonly, text input cannot be written, but can be copied
   readonly: bool,
   pointer_selection_anchor: Option<usize>,
+  marked_range: Option<Range<usize>>,
+  layout: TextInputLayoutCache,
   focused: bool,
   caret_epoch: Instant,
 }
@@ -46,6 +61,8 @@ impl TextInputState {
       disabled: false,
       readonly: false,
       pointer_selection_anchor: None,
+      marked_range: None,
+      layout: TextInputLayoutCache::default(),
       focused: false,
       caret_epoch: Instant::now(),
     }
@@ -81,6 +98,16 @@ impl TextInputState {
     self.focused
   }
 
+  /// Returns whether platform text input currently has marked composition text.
+  pub fn is_composing(&self) -> bool {
+    self.marked_range.is_some()
+  }
+
+  /// Returns the UTF-8 byte range currently owned by the platform IME.
+  pub(crate) fn marked_range(&self) -> Option<Range<usize>> {
+    self.marked_range.clone()
+  }
+
   /// Returns the selected text when selection is not empty.
   pub fn selected_text(&self) -> Option<SharedString> {
     selected_text_from(&self.text, self.selection, self.disabled)
@@ -95,6 +122,7 @@ impl TextInputState {
     self.disabled = disabled;
     if disabled {
       self.pointer_selection_anchor = None;
+      self.marked_range = None;
     }
     cx.emit(TextInputEvent::DisabledChange { disabled });
     cx.notify();
@@ -119,6 +147,7 @@ impl TextInputState {
     }
 
     self.text = text;
+    self.marked_range = None;
     self.set_selection_internal(TextSelection::caret(self.text.len()), cx);
     self.emit_change(cx);
     true
@@ -278,6 +307,7 @@ impl TextInputState {
     self.focused = focused;
     if !focused {
       self.pointer_selection_anchor = None;
+      self.marked_range = None;
     }
     self.reset_caret_blink();
     cx.emit(if focused {
@@ -324,7 +354,7 @@ impl TextInputState {
           self.select_all(cx);
           true
         }
-        _ => printable_character(event).is_some_and(|character| self.insert_text(character, cx)),
+        _ => false,
       }
     };
 
@@ -403,12 +433,136 @@ impl TextInputState {
   ///
   /// `true` after replacing the requested text range.
   fn replace_range(&mut self, range: std::ops::Range<usize>, replacement: &str, cx: &mut Context<Self>) -> bool {
-    let mut text = self.text.to_string();
-    text.replace_range(range.clone(), replacement);
-    self.text = SharedString::from(text);
-    self.set_selection_internal(TextSelection::caret(range.start + replacement.len()), cx);
-    self.emit_change(cx);
+    let cursor = range.start + replacement.len();
+    self.replace_text_range(range, replacement, TextSelection::caret(cursor), None, cx);
     true
+  }
+
+  /// Stores the shaped line and bounds used by the current platform input handler.
+  ///
+  /// # Parameters
+  ///
+  /// `line` is the complete shaped text line from the current render pass.
+  ///
+  /// `bounds` is the text viewport in window coordinates.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after replacing the transient layout cache.
+  pub(crate) fn update_layout_cache(&mut self, line: ShapedLine, bounds: Bounds<Pixels>) {
+    self.layout = TextInputLayoutCache {
+      line: Some(line),
+      bounds: Some(bounds),
+    };
+  }
+
+  /// Replaces an IME-specified UTF-16 range with committed text.
+  ///
+  /// # Parameters
+  ///
+  /// `range_utf16` optionally identifies the platform replacement range.
+  ///
+  /// `text` is the committed platform text.
+  ///
+  /// `cx` emits semantic text and selection changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after applying the committed replacement when editing is enabled.
+  fn replace_committed_text(&mut self, range_utf16: Option<Range<usize>>, text: &str, cx: &mut Context<Self>) {
+    if self.disabled || self.readonly {
+      return;
+    }
+
+    let range = self.ime_replacement_range(range_utf16);
+    let text = normalize_single_line(SharedString::from(text));
+    let cursor = range.start + text.len();
+    self.replace_text_range(range, &text, TextSelection::caret(cursor), None, cx);
+  }
+
+  /// Replaces an IME-specified UTF-16 range with marked composition text.
+  ///
+  /// # Parameters
+  ///
+  /// `range_utf16` optionally identifies the platform replacement range.
+  ///
+  /// `text` is the current composition text.
+  ///
+  /// `selected_range_utf16` is the composition-local selection supplied by the platform.
+  ///
+  /// `cx` emits semantic text and selection changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after applying the marked replacement when editing is enabled.
+  fn replace_marked_text(
+    &mut self,
+    range_utf16: Option<Range<usize>>,
+    text: &str,
+    selected_range_utf16: Option<Range<usize>>,
+    cx: &mut Context<Self>,
+  ) {
+    if self.disabled || self.readonly {
+      return;
+    }
+
+    let range = self.ime_replacement_range(range_utf16);
+    let text = normalize_single_line(SharedString::from(text));
+    let selection = selected_range_utf16
+      .map(|selected_range| range_from_utf16(&text, selected_range))
+      .map(|selected_range| TextSelection::new(range.start + selected_range.start, range.start + selected_range.end))
+      .unwrap_or_else(|| TextSelection::caret(range.start + text.len()));
+    let marked_range = (!text.is_empty()).then_some(range.start..range.start + text.len());
+    self.replace_text_range(range, &text, selection, marked_range, cx);
+  }
+
+  /// Resolves the text range replaced by the next platform text-input operation.
+  ///
+  /// # Parameters
+  ///
+  /// `range_utf16` optionally identifies a platform-provided replacement range.
+  ///
+  /// # Returns
+  ///
+  /// A valid UTF-8 byte range from the explicit range, active composition, or selection.
+  fn ime_replacement_range(&self, range_utf16: Option<Range<usize>>) -> Range<usize> {
+    range_utf16
+      .map(|range| range_from_utf16(&self.text, range))
+      .or_else(|| self.marked_range.clone())
+      .unwrap_or_else(|| self.selection.range())
+  }
+
+  /// Replaces one valid UTF-8 range while synchronizing selection and composition state.
+  ///
+  /// # Parameters
+  ///
+  /// `range` identifies the text to replace.
+  ///
+  /// `replacement` is the normalized replacement text.
+  ///
+  /// `selection` is the post-replacement directional selection.
+  ///
+  /// `marked_range` identifies active composition text, when present.
+  ///
+  /// `cx` emits semantic updates.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after updating the visible text state.
+  fn replace_text_range(
+    &mut self,
+    range: Range<usize>,
+    replacement: &str,
+    selection: TextSelection,
+    marked_range: Option<Range<usize>>,
+    cx: &mut Context<Self>,
+  ) {
+    let mut text = self.text.to_string();
+    text.replace_range(range, replacement);
+    self.text = SharedString::from(text);
+    self.marked_range = marked_range;
+    self.set_selection_internal(selection, cx);
+    self.emit_change(cx);
   }
 
   /// Updates selection state and emits an event only when it changed.
@@ -475,6 +629,107 @@ impl TextInputState {
   }
 }
 
+impl EntityInputHandler for TextInputState {
+  fn text_for_range(
+    &mut self,
+    range_utf16: Range<usize>,
+    adjusted_range: &mut Option<Range<usize>>,
+    _: &mut Window,
+    _: &mut Context<Self>,
+  ) -> Option<String> {
+    let range = range_from_utf16(&self.text, range_utf16);
+    adjusted_range.replace(range_to_utf16(&self.text, range.clone()));
+    Some(self.text[range].to_string())
+  }
+
+  fn selected_text_range(
+    &mut self,
+    ignore_disabled_input: bool,
+    _: &mut Window,
+    _: &mut Context<Self>,
+  ) -> Option<UTF16Selection> {
+    if self.disabled && !ignore_disabled_input {
+      return None;
+    }
+
+    Some(UTF16Selection {
+      range: range_to_utf16(&self.text, self.selection.range()),
+      reversed: self.selection.anchor() > self.selection.head(),
+    })
+  }
+
+  fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
+    self.marked_range.clone().map(|range| range_to_utf16(&self.text, range))
+  }
+
+  fn unmark_text(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    if self.marked_range.take().is_some() {
+      cx.notify();
+      window.invalidate_character_coordinates();
+    }
+  }
+
+  fn replace_text_in_range(
+    &mut self,
+    range_utf16: Option<Range<usize>>,
+    text: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    self.replace_committed_text(range_utf16, text, cx);
+    window.invalidate_character_coordinates();
+  }
+
+  fn replace_and_mark_text_in_range(
+    &mut self,
+    range_utf16: Option<Range<usize>>,
+    text: &str,
+    selected_range_utf16: Option<Range<usize>>,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    self.replace_marked_text(range_utf16, text, selected_range_utf16, cx);
+    window.invalidate_character_coordinates();
+  }
+
+  fn bounds_for_range(
+    &mut self,
+    range_utf16: Range<usize>,
+    element_bounds: Bounds<Pixels>,
+    _: &mut Window,
+    _: &mut Context<Self>,
+  ) -> Option<Bounds<Pixels>> {
+    let line = self.layout.line.as_ref()?;
+    let range = range_from_utf16(&self.text, range_utf16);
+    Some(Bounds::from_corners(
+      point(
+        element_bounds.left() + line.x_for_index(range.start),
+        element_bounds.top(),
+      ),
+      point(
+        element_bounds.left() + line.x_for_index(range.end),
+        element_bounds.bottom(),
+      ),
+    ))
+  }
+
+  fn character_index_for_point(
+    &mut self,
+    point: Point<Pixels>,
+    _: &mut Window,
+    _: &mut Context<Self>,
+  ) -> Option<usize> {
+    let bounds = self.layout.bounds?;
+    let line = self.layout.line.as_ref()?;
+    let point = bounds.localize(&point)?;
+    Some(offset_to_utf16(&self.text, line.closest_index_for_x(point.x)))
+  }
+
+  fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
+    !self.disabled && !self.readonly
+  }
+}
+
 impl EventEmitter<TextInputEvent> for TextInputState {}
 
 /// Replaces line-break characters so the control always stores one logical line.
@@ -505,28 +760,6 @@ fn selected_text_from(text: &str, selection: TextSelection, disabled: bool) -> O
   } else {
     Some(SharedString::from(""))
   }
-}
-
-/// Extracts printable input from an unmodified GPUI key event.
-///
-/// # Parameters
-///
-/// `event` supplies the key event to inspect.
-///
-/// # Returns
-///
-/// The printable character sequence, or `None` when modifiers reserve the key.
-fn printable_character(event: &KeyDownEvent) -> Option<&str> {
-  let modifiers = event.keystroke.modifiers;
-  if modifiers.control || modifiers.platform || modifiers.alt || modifiers.function {
-    return None;
-  }
-
-  event
-    .keystroke
-    .key_char
-    .as_deref()
-    .or_else(|| (event.keystroke.key.len() == 1).then_some(event.keystroke.key.as_str()))
 }
 
 /// Maps GPUI's normalized horizontal cursor keys to movement direction.
@@ -631,6 +864,79 @@ fn selection_from_pointer_anchor(anchor: usize, head: usize) -> TextSelection {
   TextSelection::new(anchor, head)
 }
 
+/// Converts one UTF-8 byte offset into a UTF-16 code-unit offset.
+///
+/// # Parameters
+///
+/// `text` supplies the current input text.
+///
+/// `offset` identifies a UTF-8 byte boundary in `text`.
+///
+/// # Returns
+///
+/// The matching UTF-16 code-unit offset, clamped to the text end.
+fn offset_to_utf16(text: &str, offset: usize) -> usize {
+  text
+    .char_indices()
+    .take_while(|(index, _)| *index < offset)
+    .map(|(_, character)| character.len_utf16())
+    .sum()
+}
+
+/// Converts one UTF-16 code-unit offset into a UTF-8 byte offset.
+///
+/// # Parameters
+///
+/// `text` supplies the current input text.
+///
+/// `offset` identifies a UTF-16 code-unit position in `text`.
+///
+/// # Returns
+///
+/// The first valid UTF-8 byte boundary at or after the requested position.
+fn offset_from_utf16(text: &str, offset: usize) -> usize {
+  let mut utf16_offset = 0;
+
+  for (utf8_offset, character) in text.char_indices() {
+    if utf16_offset >= offset {
+      return utf8_offset;
+    }
+    utf16_offset += character.len_utf16();
+  }
+
+  text.len()
+}
+
+/// Converts one UTF-8 byte range into a UTF-16 code-unit range.
+///
+/// # Parameters
+///
+/// `text` supplies the current input text.
+///
+/// `range` identifies valid UTF-8 byte boundaries in `text`.
+///
+/// # Returns
+///
+/// The corresponding UTF-16 code-unit range.
+fn range_to_utf16(text: &str, range: Range<usize>) -> Range<usize> {
+  offset_to_utf16(text, range.start)..offset_to_utf16(text, range.end)
+}
+
+/// Converts one UTF-16 code-unit range into a UTF-8 byte range.
+///
+/// # Parameters
+///
+/// `text` supplies the current input text.
+///
+/// `range` identifies UTF-16 code-unit positions in `text`.
+///
+/// # Returns
+///
+/// A valid UTF-8 byte range, clamped to the input text.
+fn range_from_utf16(text: &str, range: Range<usize>) -> Range<usize> {
+  offset_from_utf16(text, range.start)..offset_from_utf16(text, range.end)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -708,5 +1014,20 @@ mod tests {
   #[test]
   fn pointer_selection_should_keep_its_anchor_while_the_head_moves() {
     assert_eq!(selection_from_pointer_anchor(2, 8), TextSelection::new(2, 8));
+  }
+
+  #[test]
+  fn offset_to_utf16_should_count_surrogate_pairs() {
+    assert_eq!(offset_to_utf16("a😀水", "a😀".len()), 3);
+  }
+
+  #[test]
+  fn offset_from_utf16_should_preserve_utf8_character_boundaries() {
+    assert_eq!(offset_from_utf16("a😀水", 2), "a😀".len());
+  }
+
+  #[test]
+  fn range_from_utf16_should_convert_non_ascii_composition_ranges() {
+    assert_eq!(range_from_utf16("a😀水", 1..4), 1.."a😀水".len());
   }
 }
