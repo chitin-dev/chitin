@@ -3,9 +3,10 @@
 use std::time::Instant;
 
 use gpui::{
-  App, Bounds, ClipboardItem, CursorStyle, Element, ElementId, Entity, GlobalElementId, InspectorElementId,
-  InteractiveElement, IntoElement, KeyDownEvent, LayoutId, MouseButton, PaintQuad, ParentElement, Pixels, RenderOnce,
-  ShapedLine, SharedString, Style, TextColor, Window, div, fill, point, prelude::*, px, relative, size,
+  App, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Element, ElementId, Entity, GlobalElementId, Hitbox,
+  HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId, MouseButton,
+  MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, RenderOnce, ShapedLine, SharedString,
+  Style, TextColor, Window, div, fill, point, prelude::*, px, relative, size,
 };
 
 use super::TextInputState;
@@ -330,7 +331,6 @@ impl RenderOnce for TextInput {
 
     let theme = self.theme;
     let colors = TextInputColors::new(theme, self.variant, self.style, disabled);
-    let state_for_mouse = state.clone();
     let state_for_keys = state.clone();
 
     div()
@@ -354,14 +354,6 @@ impl RenderOnce for TextInput {
         CursorStyle::Arrow
       } else {
         CursorStyle::IBeam
-      })
-      .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-        if state_for_mouse.read(cx).is_disabled() {
-          return;
-        }
-        let focus_handle = state_for_mouse.read(cx).focus_handle().clone();
-        window.focus(&focus_handle, cx);
-        cx.stop_propagation();
       })
       // Because [`TextInputState`] should stay platform/ui-service independent.
       // Ctrl/Cmd copy, cut, and paste need platform clipboard access. They are local to the
@@ -392,6 +384,7 @@ impl RenderOnce for TextInput {
           .h_full()
           .overflow_hidden()
           .child(TextInputContent {
+            state,
             text: text.into(),
             placeholder: self.placeholder.unwrap_or_default(),
             selection,
@@ -485,6 +478,7 @@ fn paste_clipboard_text(state: &Entity<TextInputState>, cx: &mut App) -> bool {
 
 /// A single shaped input line with selection and caret paint overlays.
 struct TextInputContent {
+  state: Entity<TextInputState>,
   text: SharedString,
   placeholder: SharedString,
   selection: super::TextSelection,
@@ -497,6 +491,8 @@ struct TextInputContent {
 /// Precomputed paint data: the shaped line plus optional selection and caret quads.
 struct TextInputContentPrepaint {
   line: ShapedLine,
+  hitbox: Hitbox,
+  text_is_empty: bool,
   selection: Option<PaintQuad>,
   caret: Option<PaintQuad>,
 }
@@ -604,7 +600,13 @@ impl Element for TextInputContent {
         self.colors.caret,
       )
     });
-    TextInputContentPrepaint { line, selection, caret }
+    TextInputContentPrepaint {
+      line,
+      hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
+      text_is_empty: empty,
+      selection,
+      caret,
+    }
   }
 
   /// Paints selection, text, then caret so overlays keep the correct stacking order.
@@ -621,6 +623,14 @@ impl Element for TextInputContent {
     window: &mut Window,
     cx: &mut App,
   ) {
+    register_pointer_selection_handlers(
+      self.state.clone(),
+      prepaint.hitbox.clone(),
+      prepaint.line.clone(),
+      prepaint.text_is_empty,
+      window,
+    );
+
     // Selection sits below the glyphs.
     if let Some(selection) = prepaint.selection.take() {
       window.paint_quad(selection);
@@ -634,6 +644,104 @@ impl Element for TextInputContent {
       window.paint_quad(caret);
     }
   }
+}
+
+/// Registers pointer handlers that place and extend the input selection.
+///
+/// # Parameters
+///
+/// `state` owns the selection and active pointer anchor.
+///
+/// `hitbox` identifies the interactive text viewport.
+///
+/// `line` maps pointer x coordinates to shaped-text offsets.
+///
+/// `text_is_empty` prevents placeholder glyphs from becoming input offsets.
+///
+/// `window` registers handlers for the current rendered frame.
+///
+/// # Returns
+///
+/// This function returns `()` after registering pointer handlers.
+fn register_pointer_selection_handlers(
+  state: Entity<TextInputState>,
+  hitbox: Hitbox,
+  line: ShapedLine,
+  text_is_empty: bool,
+  window: &mut Window,
+) {
+  window.on_mouse_event({
+    let state = state.clone();
+    let hitbox = hitbox.clone();
+    let line = line.clone();
+    move |event: &MouseDownEvent, phase, window, cx| {
+      if phase != DispatchPhase::Bubble || event.button != MouseButton::Left || !hitbox.is_hovered(window) {
+        return;
+      }
+
+      if state.read(cx).is_disabled() {
+        return;
+      }
+
+      let offset = pointer_offset_for_position(event.position, hitbox.bounds, &line, text_is_empty);
+      let focus_handle = state.read(cx).focus_handle().clone();
+      window.focus(&focus_handle, cx);
+      state.update(cx, |state, cx| {
+        state.begin_pointer_selection(offset, event.modifiers.shift, cx)
+      });
+      cx.stop_propagation();
+    }
+  });
+
+  window.on_mouse_event({
+    let state = state.clone();
+    let line = line.clone();
+    let bounds = hitbox.bounds;
+    move |event: &MouseMoveEvent, phase, _, cx| {
+      if phase != DispatchPhase::Bubble || !event.dragging() {
+        return;
+      }
+
+      let offset = pointer_offset_for_position(event.position, bounds, &line, text_is_empty);
+      if state.update(cx, |state, cx| state.update_pointer_selection(offset, cx)) {
+        cx.stop_propagation();
+      }
+    }
+  });
+
+  window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+    if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+      state.update(cx, |state, _| state.end_pointer_selection());
+    }
+  });
+}
+
+/// Maps a window pointer position to one UTF-8 boundary in the shaped input line.
+///
+/// # Parameters
+///
+/// `position` supplies the pointer location in window coordinates.
+///
+/// `bounds` supplies the text viewport's window bounds.
+///
+/// `line` supplies the complete shaped input line.
+///
+/// `text_is_empty` identifies placeholder-only layouts.
+///
+/// # Returns
+///
+/// The nearest UTF-8 byte offset in the current input text.
+fn pointer_offset_for_position(
+  position: gpui::Point<Pixels>,
+  bounds: Bounds<Pixels>,
+  line: &ShapedLine,
+  text_is_empty: bool,
+) -> usize {
+  if text_is_empty {
+    return 0;
+  }
+
+  line.closest_index_for_x((position.x - bounds.left()).max(px(0.0)))
 }
 
 /// Resolved visual colors for one rendered text-input state.

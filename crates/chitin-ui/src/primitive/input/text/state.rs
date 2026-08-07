@@ -22,6 +22,7 @@ pub struct TextInputState {
   disabled: bool,
   // When readonly, text input cannot be written, but can be copied
   readonly: bool,
+  pointer_selection_anchor: Option<usize>,
   focused: bool,
   caret_epoch: Instant,
 }
@@ -44,6 +45,7 @@ impl TextInputState {
       focus_handle: cx.focus_handle(),
       disabled: false,
       readonly: false,
+      pointer_selection_anchor: None,
       focused: false,
       caret_epoch: Instant::now(),
     }
@@ -91,6 +93,9 @@ impl TextInputState {
     }
 
     self.disabled = disabled;
+    if disabled {
+      self.pointer_selection_anchor = None;
+    }
     cx.emit(TextInputEvent::DisabledChange { disabled });
     cx.notify();
   }
@@ -147,6 +152,69 @@ impl TextInputState {
 
     self.set_selection_internal(TextSelection::new(anchor, head), cx);
     true
+  }
+
+  /// Starts a pointer selection at `offset`, optionally extending the current selection.
+  ///
+  /// # Parameters
+  ///
+  /// `offset` supplies the UTF-8 byte offset under the pointer.
+  ///
+  /// `extend` retains the current selection anchor when true.
+  ///
+  /// `cx` emits selection-change events and refreshes observers.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the pointer selection began.
+  pub(crate) fn begin_pointer_selection(&mut self, offset: usize, extend: bool, cx: &mut Context<Self>) -> bool {
+    if self.disabled || !self.is_valid_offset(offset) {
+      return false;
+    }
+
+    let anchor = pointer_selection_anchor(self.selection, offset, extend);
+    self.pointer_selection_anchor = Some(anchor);
+    self.set_selection_internal(selection_from_pointer_anchor(anchor, offset), cx);
+    self.reset_caret_blink();
+    true
+  }
+
+  /// Extends the active pointer selection to `offset`.
+  ///
+  /// # Parameters
+  ///
+  /// `offset` supplies the UTF-8 byte offset under the pointer.
+  ///
+  /// `cx` emits selection-change events and refreshes observers.
+  ///
+  /// # Returns
+  ///
+  /// `true` when an active pointer selection was updated.
+  pub(crate) fn update_pointer_selection(&mut self, offset: usize, cx: &mut Context<Self>) -> bool {
+    let Some(anchor) = self.pointer_selection_anchor else {
+      return false;
+    };
+
+    if self.disabled || !self.is_valid_offset(offset) {
+      return false;
+    }
+
+    self.set_selection_internal(selection_from_pointer_anchor(anchor, offset), cx);
+    self.reset_caret_blink();
+    true
+  }
+
+  /// Ends the active pointer-selection gesture.
+  ///
+  /// # Parameters
+  ///
+  /// This method clears the stored pointer anchor.
+  ///
+  /// # Returns
+  ///
+  /// `true` when a pointer-selection gesture was active.
+  pub(crate) fn end_pointer_selection(&mut self) -> bool {
+    self.pointer_selection_anchor.take().is_some()
   }
 
   /// Replaces the current selection with one logical line of `inserted` text.
@@ -208,6 +276,9 @@ impl TextInputState {
     }
 
     self.focused = focused;
+    if !focused {
+      self.pointer_selection_anchor = None;
+    }
     self.reset_caret_blink();
     cx.emit(if focused {
       TextInputEvent::Focus
@@ -528,6 +599,38 @@ fn next_char_boundary(text: &str, offset: usize) -> Option<usize> {
     .map(|character| offset + character.len_utf8())
 }
 
+/// Chooses the persistent anchor for a new pointer-selection gesture.
+///
+/// # Parameters
+///
+/// `selection` supplies the existing cursor or selected range.
+///
+/// `offset` supplies the UTF-8 byte offset under the pressed pointer.
+///
+/// `extend` retains the existing anchor when true.
+///
+/// # Returns
+///
+/// The UTF-8 byte offset that remains fixed while the pointer moves.
+fn pointer_selection_anchor(selection: TextSelection, offset: usize, extend: bool) -> usize {
+  if extend { selection.anchor() } else { offset }
+}
+
+/// Builds the selection range for one pointer anchor and current pointer offset.
+///
+/// # Parameters
+///
+/// `anchor` supplies the persistent UTF-8 byte offset from the press event.
+///
+/// `head` supplies the current UTF-8 byte offset under the pointer.
+///
+/// # Returns
+///
+/// A directional selection that preserves the pointer gesture's anchor.
+fn selection_from_pointer_anchor(anchor: usize, head: usize) -> TextSelection {
+  TextSelection::new(anchor, head)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -590,5 +693,20 @@ mod tests {
       selected_text_from("workspace", TextSelection::new(0, 4), true),
       Some(SharedString::from(""))
     );
+  }
+
+  #[test]
+  fn pointer_selection_anchor_should_use_the_press_offset_without_extension() {
+    assert_eq!(pointer_selection_anchor(TextSelection::new(2, 6), 4, false), 4);
+  }
+
+  #[test]
+  fn pointer_selection_anchor_should_preserve_the_existing_anchor_when_extended() {
+    assert_eq!(pointer_selection_anchor(TextSelection::new(2, 6), 4, true), 2);
+  }
+
+  #[test]
+  fn pointer_selection_should_keep_its_anchor_while_the_head_moves() {
+    assert_eq!(selection_from_pointer_anchor(2, 8), TextSelection::new(2, 8));
   }
 }
