@@ -137,6 +137,20 @@ impl NumberInputStyle {
     self
   }
 
+  /// Overrides the selected-range text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for selected glyphs.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn selection_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.selection_foreground = Some(color);
+    self
+  }
+
   /// Overrides the caret color.
   ///
   /// # Parameters
@@ -814,6 +828,7 @@ mod tests {
       .foreground(theme.text.primary)
       .placeholder_foreground(theme.text.secondary)
       .selection_background(theme.background.selection)
+      .selection_foreground(theme.accent.foreground)
       .caret(theme.accent.primary)
       .border(theme.border.primary)
       .focus_border(theme.border.focus)
@@ -831,6 +846,7 @@ mod tests {
     assert_eq!(style.appearance.foreground, Some(theme.text.primary));
     assert_eq!(style.appearance.placeholder_foreground, Some(theme.text.secondary));
     assert_eq!(style.appearance.selection_background, Some(theme.background.selection));
+    assert_eq!(style.appearance.selection_foreground, Some(theme.accent.foreground));
     assert_eq!(style.appearance.caret, Some(theme.accent.primary));
     assert_eq!(style.appearance.border, Some(theme.border.primary));
     assert_eq!(style.appearance.focus_border, Some(theme.border.focus));

@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use gpui::{
-  App, Bounds, ClipboardItem, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+  App, Bounds, ClipboardItem, ContentMask, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
   GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement, KeyDownEvent, LayoutId,
   MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement, Pixels, RenderOnce, ShapedLine,
   SharedString, Style, TextColor, TextRun, UnderlineStyle, Window, div, fill, point, prelude::*, px, relative, size,
@@ -107,6 +107,20 @@ impl TextInputStyle {
   /// The updated visual-only style.
   pub fn selection_background(mut self, color: gpui::Rgba) -> Self {
     self.appearance.selection_background = Some(color);
+    self
+  }
+
+  /// Overrides the selected-range text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for selected glyphs.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn selection_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.selection_foreground = Some(color);
     self
   }
 
@@ -508,9 +522,11 @@ struct TextInputContent {
 /// Precomputed paint data: the shaped line plus optional selection and caret quads.
 struct TextInputContentPrepaint {
   line: ShapedLine,
+  selection_line: Option<ShapedLine>,
   hitbox: Hitbox,
   text_is_empty: bool,
   selection: Option<PaintQuad>,
+  selection_bounds: Option<Bounds<Pixels>>,
   caret: Option<PaintQuad>,
 }
 
@@ -586,24 +602,31 @@ impl Element for TextInputContent {
       self.colors.foreground
     });
 
+    let range = self.selection.range();
     // Shape the whole logical line once; x_for_index maps byte offsets to pixels.
-    let runs = text_runs(run, (!empty).then_some(self.marked_range.clone()).flatten());
+    let runs = text_runs(run.clone(), (!empty).then_some(self.marked_range.clone()).flatten());
     let line = window.text_system().shape_line(display_text, font_size, &runs, None);
 
     // Selection highlight spans the shaped range and is vertically centered.
-    let range = self.selection.range();
-    let selection = (!empty && !range.is_empty()).then(|| {
+    let selection_bounds = (!empty && !range.is_empty()).then(|| {
       let start = line.x_for_index(range.start);
       let end = line.x_for_index(range.end);
       let selection_height = line.ascent + line.descent;
       let selection_top = bounds.top() + (bounds.size.height - selection_height) / 2.0;
-      fill(
-        Bounds::new(
-          point(bounds.left() + start, selection_top),
-          size(end - start, selection_height),
-        ),
-        self.colors.selection_background,
+      Bounds::new(
+        point(bounds.left() + start, selection_top),
+        size(end - start, selection_height),
       )
+    });
+    let selection = selection_bounds.map(|bounds| fill(bounds, self.colors.selection_background));
+    let selection_line = selection_bounds.map(|_| {
+      let selection_run = TextRun {
+        color: TextColor::from(self.colors.selection_foreground),
+        ..run
+      };
+      window
+        .text_system()
+        .shape_line(line.text.clone(), font_size, &[selection_run], None)
     });
 
     // Caret is a thin quad at the head, shown only when the selection is collapsed.
@@ -620,9 +643,11 @@ impl Element for TextInputContent {
     });
     TextInputContentPrepaint {
       line,
+      selection_line,
       hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
       text_is_empty: empty,
       selection,
+      selection_bounds,
       caret,
     }
   }
@@ -661,6 +686,18 @@ impl Element for TextInputContent {
     }
     // Text glyphs in the middle.
     let _ = prepaint.line.paint(bounds.origin, bounds.size.height, window, cx);
+    // Repaint the complete shaped line through the selected bounds. This changes glyph color
+    // without splitting the base layout at selection boundaries.
+    if let (Some(selection_line), Some(selection_bounds)) = (&prepaint.selection_line, prepaint.selection_bounds) {
+      window.with_content_mask(
+        Some(ContentMask {
+          bounds: selection_bounds,
+        }),
+        |window| {
+          let _ = selection_line.paint(bounds.origin, bounds.size.height, window, cx);
+        },
+      );
+    }
     // Caret on top, gated by the blink phase computed during render.
     if let Some(caret) = prepaint.caret.take()
       && self.caret_visible
@@ -818,6 +855,7 @@ pub(crate) struct TextInputColors {
   foreground: gpui::Rgba,
   placeholder_foreground: gpui::Rgba,
   selection_background: gpui::Rgba,
+  selection_foreground: gpui::Rgba,
   caret: gpui::Rgba,
   pub(crate) border: gpui::Rgba,
   pub(crate) focus_border: gpui::Rgba,
@@ -846,6 +884,7 @@ impl TextInputColors {
         foreground: theme.text.disabled,
         placeholder_foreground: theme.text.disabled,
         selection_background: theme.background.selection,
+        selection_foreground: theme.accent.foreground,
         caret: theme.accent.primary,
         border: theme.border.muted,
         focus_border: theme.border.muted,
@@ -858,6 +897,7 @@ impl TextInputColors {
         foreground: theme.text.primary,
         placeholder_foreground: theme.text.secondary,
         selection_background: theme.background.selection,
+        selection_foreground: theme.accent.foreground,
         caret: theme.accent.primary,
         border: theme.border.primary,
         focus_border: theme.border.focus,
@@ -867,6 +907,7 @@ impl TextInputColors {
         foreground: theme.text.primary,
         placeholder_foreground: theme.text.disabled,
         selection_background: theme.background.selection,
+        selection_foreground: theme.accent.foreground,
         caret: theme.accent.primary,
         border: theme.border.primary,
         focus_border: theme.border.focus,
@@ -876,6 +917,7 @@ impl TextInputColors {
         foreground: theme.text.primary,
         placeholder_foreground: theme.text.disabled,
         selection_background: theme.background.selection,
+        selection_foreground: theme.accent.foreground,
         caret: theme.accent.primary,
         border: builtins::TRANSPARENT,
         focus_border: builtins::TRANSPARENT,
@@ -893,6 +935,10 @@ impl TextInputColors {
         .appearance
         .selection_background
         .unwrap_or(colors.selection_background),
+      selection_foreground: style
+        .appearance
+        .selection_foreground
+        .unwrap_or(colors.selection_foreground),
       caret: style.appearance.caret.unwrap_or(colors.caret),
       border: style.appearance.border.unwrap_or(colors.border),
       focus_border: style.appearance.focus_border.unwrap_or(colors.focus_border),
@@ -965,6 +1011,19 @@ mod tests {
     );
 
     assert_eq!(colors.focus_border, builtins::TRANSPARENT);
+  }
+
+  #[test]
+  fn text_input_style_should_override_selection_foreground_color() {
+    let theme = builtins::dark();
+    let colors = TextInputColors::new(
+      theme,
+      TextInputVariant::Secondary,
+      TextInputStyle::new().selection_foreground(theme.accent.foreground),
+      false,
+    );
+
+    assert_eq!(colors.selection_foreground, theme.accent.foreground);
   }
 
   #[test]
