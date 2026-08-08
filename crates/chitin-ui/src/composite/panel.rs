@@ -1,9 +1,10 @@
-//! Reusable multi-panel container primitives.
+//! Composite multi-panel container.
 //!
 //! IDE docking layouts are commonly represented as a binary tree: internal
 //! nodes are splits, and leaf nodes are tab stacks. This module provides that
-//! model plus a lightweight GPUI renderer for panel chrome. Application crates
-//! keep concrete view rendering and command wiring outside `chitin-ui`.
+//! model, interaction state, and a lightweight GPUI renderer for panel chrome.
+//! Application crates keep concrete view rendering and command wiring outside
+//! `chitin-ui`.
 
 mod drag;
 mod layout;

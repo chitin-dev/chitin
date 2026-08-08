@@ -3,7 +3,7 @@
 use std::{rc::Rc, time::Instant};
 
 use chitin_ui::{
-  components::panel::{
+  composite::panel::{
     PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
     PanelTabCloseIconRenderer, PanelTabDragConfig, PanelTabDragStartHandler, PanelTabDragTargetHandler,
     PanelTabDropHandler, render_panel_container,
@@ -26,11 +26,11 @@ use crate::{
 use super::state::{DocumentPanelContent, DocumentPanelState, OpenedProjectDocument};
 
 /// Asset path for the horizontal split panel action.
-const SPLIT_HORIZONTAL_ICON_PATH: &str = "icons/panel/codicon-split-horizontal.svg";
+const SPLIT_HORIZONTAL_ICON_PATH: &str = "icons/panel-split-horizontal.svg";
 /// Asset path for the vertical split panel action.
-const SPLIT_VERTICAL_ICON_PATH: &str = "icons/panel/codicon-split-vertical.svg";
+const SPLIT_VERTICAL_ICON_PATH: &str = "icons/panel-split-vertical.svg";
 /// Asset path for document tab close buttons.
-const TAB_CLOSE_ICON_PATH: &str = "icons/panel/lucide-x.svg";
+const TAB_CLOSE_ICON_PATH: &str = "icons/tab-close.svg";
 /// Size used by tab strip action icons.
 const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
 /// Size used by close tab button icons.

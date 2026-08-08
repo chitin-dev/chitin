@@ -5,7 +5,7 @@
 //! flattened rows from the cost of selecting the viewport rows that a virtual
 //! list asks the component to render.
 
-use chitin_ui::components::tree::{TreeItemRow, TreeMessageRow, TreeRow};
+use chitin_ui::primitive::tree::{TreeItemRow, TreeMessageRow, TreeRow};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 const VIEWPORT_ROW_COUNT: usize = 48;

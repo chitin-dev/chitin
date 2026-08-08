@@ -38,10 +38,6 @@ Avoid `unwrap`, `expect`, `dbg!`, and `todo!`; workspace Clippy denies them.
 Prefer builder-style component methods such as `.theme(theme)` and
 `.child(element)` over broad getter/setter APIs.
 
-Use summary-parameters-returns style doc comments for private helper functions
-and public API functions. Use single-line doc comments or no doc comments
-inside test modules.
-
 ## Testing Guidelines
 
 Place focused unit tests near implementation code in `#[cfg(test)]` modules.
@@ -66,3 +62,17 @@ useful, and risks or follow-ups.
 Follow the roadmap dependency direction: UI should not directly own heavy
 scientific data, domain crates should not depend on GPUI, and long-running work
 should move through async/background or future job-system boundaries.
+
+## Primitive Component Design
+
+- Primitives own required interaction behavior, internal state, focus handling,
+  and semantic events. Callers must not replace these with raw GPUI handlers.
+- Only primitives with persistent interaction state expose an `Entity<State>`;
+  stateless primitives remain lightweight.
+- Primitives provide semantic theme variants and standard size variants. Their
+  component-specific `style()` API may override visual properties only.
+- Custom styles must not change behavior, event semantics, focus handling,
+  disabled behavior, keyboard activation, or accessibility guarantees.
+- Composite components assemble primitives and customize appearance through
+  their public style APIs. Avoid scenario-specific primitive booleans when a
+  variant, visual style, or dedicated composite expresses the requirement.

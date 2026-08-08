@@ -9,13 +9,16 @@ use std::{
 };
 
 use chitin_ui::{
-  components::sidebar::{
-    Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
+  primitive::{
+    sidebar::{
+      Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
+    },
+    tree::TreeState,
   },
   themes::UIThemes,
 };
 use chitin_utils::workspace::ProjectWorkspace;
-use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, UniformListScrollHandle, div, prelude::*};
+use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, div, prelude::*};
 
 use crate::{
   app::ChitinApp,
@@ -47,8 +50,8 @@ pub struct ProjectSidebarState {
   pub selected_path: Option<PathBuf>,
   /// Workspace tree entry focused for keyboard navigation.
   pub focused_path: Option<PathBuf>,
-  /// Scroll handle for keeping keyboard-focused workspace tree rows visible.
-  pub tree_scroll: UniformListScrollHandle,
+  /// Virtualized workspace tree scroll state.
+  pub tree: TreeState,
   /// Generic resize state for the project sidebar shell.
   pub resize: SidebarResizeState,
 }
@@ -70,7 +73,7 @@ impl ProjectSidebarState {
       loading_paths: HashSet::new(),
       selected_path: None,
       focused_path: None,
-      tree_scroll: UniformListScrollHandle::new(),
+      tree: TreeState::new(),
       resize: SidebarResizeState::default(),
     }
   }
@@ -115,7 +118,7 @@ impl ProjectSidebarState {
   ///
   /// This function returns `()` and records a deferred GPUI scroll request.
   pub fn reveal_tree_row(&self, row_index: usize, strategy: ScrollStrategy) {
-    self.tree_scroll.scroll_to_item(row_index, strategy);
+    self.tree.reveal_row(row_index, strategy);
   }
 
   /// Starts a sidebar resize drag at the current cursor position.
@@ -277,7 +280,7 @@ pub fn render_project_sidebar(
 
 #[cfg(test)]
 mod tests {
-  use chitin_ui::components::sidebar::DEFAULT_SIDEBAR_WIDTH;
+  use chitin_ui::primitive::sidebar::DEFAULT_SIDEBAR_WIDTH;
 
   use super::*;
 

@@ -1,4 +1,4 @@
-//! Vertical activity bar components.
+//! Vertical activity bar assembled from button and icon primitives.
 //!
 //! An activity bar is the narrow, always-visible navigation strip usually placed
 //! at the far edge of an IDE window. It is similar to Visual Studio Code's
@@ -8,14 +8,20 @@
 //! This module intentionally stays domain-neutral. It does not know about
 //! Chitin workspaces, molecules, docking jobs, or agents. Applications should
 //! map their own state into
-//! [`ActivityBarItem`](crate::components::activity_bar::ActivityBarItem) values and keep selection,
+//! [`ActivityBarItem`](crate::composite::activity_bar::ActivityBarItem) values and keep selection,
 //! routing, permissions, and persistence outside this crate.
 
-use gpui::{App, IntoElement, MouseButton, MouseUpEvent, Pixels, Rgba, SharedString, Window, div, prelude::*, px, svg};
+use gpui::{
+  App, Entity, IntoElement, ParentElement, Pixels, RenderOnce, Rgba, SharedString, Window, div, prelude::*, px,
+};
 
-use crate::themes::{UIThemes, builtins};
-
-type ActivityBarItemClickListener = Box<dyn Fn(&MouseUpEvent, &mut Window, &mut App) + 'static>;
+use crate::{
+  primitive::{
+    button::{Button, ButtonSize, ButtonState, ButtonStyle, ButtonVariant},
+    icon::Icon,
+  },
+  themes::{UIThemes, builtins},
+};
 
 /// Default width of the activity bar.
 ///
@@ -44,10 +50,10 @@ pub struct ActivityBarItem {
   label: SharedString,
   icon_path: SharedString,
   badge: Option<SharedString>,
+  button_state: Entity<ButtonState>,
   theme: UIThemes,
   selected: bool,
   disabled: bool,
-  on_click: Option<ActivityBarItemClickListener>,
 }
 
 impl ActivityBarItem {
@@ -69,16 +75,21 @@ impl ActivityBarItem {
   /// # Returns
   ///
   /// An [`ActivityBarItem`] with default theme, enabled state, and no badge.
-  pub fn new(id: impl Into<SharedString>, label: impl Into<SharedString>, icon_path: impl Into<SharedString>) -> Self {
+  pub fn new(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    icon_path: impl Into<SharedString>,
+    button_state: Entity<ButtonState>,
+  ) -> Self {
     Self {
       id: id.into(),
       label: label.into(),
       icon_path: icon_path.into(),
       badge: None,
+      button_state,
       theme: builtins::dark(),
       selected: false,
       disabled: false,
-      on_click: None,
     }
   }
 
@@ -182,24 +193,6 @@ impl ActivityBarItem {
     self
   }
 
-  /// Registers a mouse click handler for this item.
-  ///
-  /// The callback receives GPUI's mouse-up event, window, and app context. The
-  /// callback should update application state outside `chitin-ui`; for example,
-  /// switching the active panel in `chitin-desktop`.
-  ///
-  /// # Parameters
-  ///
-  /// `listener` is invoked when the item receives a left mouse-up event.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBarItem`] for builder chaining.
-  pub fn on_click(mut self, listener: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static) -> Self {
-    self.on_click = Some(Box::new(listener));
-    self
-  }
-
   /// Returns the text/icon color for the current item state.
   ///
   /// # Parameters
@@ -221,61 +214,45 @@ impl ActivityBarItem {
   }
 }
 
-impl IntoElement for ActivityBarItem {
-  type Element = gpui::Div;
-
-  /// Converts this item into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self`, including its click listener.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` containing the activity item icon, optional badge, selected
-  /// indicator, hover styling, and click handling.
-  fn into_element(self) -> Self::Element {
+impl ActivityBarItem {
+  /// Renders this item through its primitive button state.
+  fn render(self, theme: UIThemes, cx: &mut App) -> gpui::Div {
     let selected = self.selected;
     let disabled = self.disabled;
     let text_color = self.text_color();
     let badge = self.badge;
-    let theme = self.theme;
     let icon_path = self.icon_path;
+    let button_state = self.button_state;
 
-    let mut icon = svg()
-      .path(icon_path)
-      .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
-      .text_color(text_color);
+    button_state.update(cx, |state, cx| state.set_disabled(disabled, cx));
 
-    if !disabled {
-      icon = icon.hover(move |style| style.text_color(theme.accent.primary));
-    }
+    let mut item = div().relative().child(
+      Button::new(button_state)
+        .theme(theme)
+        .variant(ButtonVariant::Transparent)
+        .style(
+          ButtonStyle::new()
+            .width(px(40.0))
+            .height(px(40.0))
+            .horizontal_padding(px(0.0))
+            .background(theme.background.primary)
+            .hover_background(theme.background.primary)
+            .pressed_background(theme.background.active)
+            .foreground(text_color)
+            .hover_foreground(theme.accent.primary)
+            .border(builtins::TRANSPARENT)
+            .focus_border(builtins::TRANSPARENT),
+        )
+        .size(ButtonSize::Medium)
+        .child(
+          Icon::new(icon_path)
+            .theme(theme)
+            .color(text_color)
+            .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH),
+        ),
+    );
 
-    let mut item = div()
-      .relative()
-      .flex()
-      .items_center()
-      .justify_center()
-      .size(px(40.0))
-      .rounded_sm()
-      .bg(theme.background.primary)
-      .text_color(text_color)
-      .child(
-        div()
-          .flex()
-          .items_center()
-          .justify_center()
-          .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH)
-          .child(icon),
-      );
-
-    if !disabled {
-      item = item
-        .hover(move |style| style.text_color(theme.accent.primary))
-        .cursor_pointer();
-    }
-
-    // This creates the effect of left callout block
+    // A selected item receives the conventional activity-bar leading indicator.
     if selected {
       item = item.child(
         div()
@@ -288,8 +265,6 @@ impl IntoElement for ActivityBarItem {
       );
     }
 
-    // Badges currently use the theme's informational color. Status-specific
-    // colors should be added when the badge API grows a semantic status field.
     if let Some(badge) = badge {
       item = item.child(
         div()
@@ -310,10 +285,6 @@ impl IntoElement for ActivityBarItem {
       );
     }
 
-    if !disabled && let Some(listener) = self.on_click {
-      item = item.on_mouse_up(MouseButton::Left, listener);
-    }
-
     item
   }
 }
@@ -331,21 +302,10 @@ impl IntoElement for ActivityBarItem {
 /// up. This matches the common IDE pattern where primary navigation lives at the
 /// top and account/settings controls live at the bottom.
 ///
-/// # Example
-///
-/// ```no_run
-/// use chitin_ui::components::activity_bar::{ActivityBar, ActivityBarItem};
-///
-/// let activity_bar = ActivityBar::new()
-///   .active_item("files")
-///   .item(ActivityBarItem::new("files", "Files", "icons/activity-bar/files.svg"))
-///   .item(ActivityBarItem::new("search", "Search", "icons/activity-bar/search.svg"))
-///   .bottom_item(ActivityBarItem::new(
-///     "settings",
-///     "Settings",
-///     "icons/activity-bar/settings.svg",
-///   ));
-/// ```
+/// Each item receives a persistent [`ButtonState`]. Applications subscribe to
+/// its [`crate::primitive::button::ButtonEvent`] values and retain the state
+/// across renders.
+#[derive(IntoElement)]
 pub struct ActivityBar {
   width: Pixels,
   theme: UIThemes,
@@ -499,19 +459,9 @@ impl Default for ActivityBar {
   }
 }
 
-impl IntoElement for ActivityBar {
-  type Element = gpui::Div;
-
-  /// Converts this activity bar into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self` and all configured items.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` containing top-aligned and bottom-aligned activity items.
-  fn into_element(self) -> Self::Element {
+impl RenderOnce for ActivityBar {
+  /// Renders the top- and bottom-aligned activity items.
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
     let active_item_id = self.active_item_id;
     let theme = self.theme;
 
@@ -535,7 +485,7 @@ impl IntoElement for ActivityBar {
           .gap_1()
           .children(self.items.into_iter().map(|item| {
             let selected = active_item_id.as_ref().is_some_and(|active_id| active_id == &item.id);
-            item.theme(theme).selected(selected)
+            item.theme(theme).selected(selected).render(theme, cx)
           })),
       )
       .child(
@@ -546,7 +496,7 @@ impl IntoElement for ActivityBar {
           .gap_1()
           .children(self.bottom_items.into_iter().map(|item| {
             let selected = active_item_id.as_ref().is_some_and(|active_id| active_id == &item.id);
-            item.theme(theme).selected(selected)
+            item.theme(theme).selected(selected).render(theme, cx)
           })),
       )
   }

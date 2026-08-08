@@ -8,12 +8,15 @@ pub(crate) use controller::CommandPanelController;
 use controller::{CommandPanelEvent, CommandPanelMode};
 
 use chitin_ui::{
-  components::quick_pick::{
-    QuickPickContent, QuickPickForm, QuickPickItem, QuickPickOverlay, render_quick_pick_overlay,
+  composite::quickpick::{
+    QuickPickContent, QuickPickForm, QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay,
   },
+  primitive::input::text::{TextInputEvent, TextInputState},
   themes::UIThemes,
 };
-use gpui::{App, Context, Div, InteractiveElement, KeyDownEvent, SharedString, WeakEntity, Window};
+use gpui::{
+  App, Context, Div, Entity, InteractiveElement, KeyDownEvent, SharedString, Subscription, WeakEntity, Window,
+};
 
 use crate::{
   app::ChitinApp,
@@ -41,7 +44,9 @@ pub(crate) fn render_command_panel(
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
   cx: &mut Context<ChitinApp>,
+  search_input: Entity<TextInputState>,
 ) -> Div {
+  let focus_handle = search_input.read(cx).focus_handle().clone();
   let (overlay, selected_commands) = match controller.mode() {
     CommandPanelMode::Search => {
       let results = controller.registry().search(controller.query());
@@ -50,9 +55,9 @@ pub(crate) fn render_command_panel(
         .map(|result| result.descriptor.command.clone())
         .collect::<Vec<_>>();
       let overlay = QuickPickOverlay {
-        prompt: ">".into(),
         query: controller.query().into(),
         placeholder: "Type a command".into(),
+        search_input: Some(QuickPickSearchInput::new(search_input)),
         content: QuickPickContent::Items {
           items: results
             .iter()
@@ -82,11 +87,45 @@ pub(crate) fn render_command_panel(
     });
   });
 
-  let focus_handle = controller.focus_handle(cx);
   render_quick_pick_overlay(overlay, theme, on_select).track_focus(&focus_handle)
 }
 
 impl ChitinApp {
+  /// Returns the command panel's input state and subscribes desktop behavior once.
+  pub(crate) fn command_panel_search_input(
+    &mut self,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Entity<TextInputState> {
+    let search_input = self.command_panel.search_input(cx);
+    if !self.command_panel.take_search_input_subscription() {
+      return search_input;
+    }
+
+    let subscription: Subscription =
+      cx.subscribe_in(&search_input, window, move |this, _, event, window, cx| match event {
+        TextInputEvent::Change { value } => {
+          this.command_panel.set_query(value.to_string());
+          cx.notify();
+        }
+        TextInputEvent::Submit { .. } => match this.command_panel.submit_current() {
+          CommandPanelEvent::Invoke(command) => this.invoke_command_from_panel(command, window, cx),
+          CommandPanelEvent::SubmitForm { .. } => {
+            this.command_panel.close(window, cx);
+            cx.notify();
+          }
+          CommandPanelEvent::StateChanged | CommandPanelEvent::Close => {}
+        },
+        TextInputEvent::Cancel => {
+          this.command_panel.close(window, cx);
+          cx.notify();
+        }
+        _ => {}
+      });
+    subscription.detach();
+    search_input
+  }
+
   /// Handles command panel keyboard input.
   ///
   /// # Parameters
@@ -189,9 +228,9 @@ fn form_value(controller: &CommandPanelController, descriptor: &CommandDescripto
 fn render_command_form(controller: &CommandPanelController) -> QuickPickOverlay {
   let Some(descriptor) = controller.form_descriptor() else {
     return QuickPickOverlay {
-      prompt: "Input".into(),
       query: controller.query().into(),
       placeholder: "".into(),
+      search_input: None,
       content: QuickPickContent::Items {
         items: Vec::new(),
         selected_index: 0,
@@ -202,9 +241,9 @@ fn render_command_form(controller: &CommandPanelController) -> QuickPickOverlay 
   };
 
   QuickPickOverlay {
-    prompt: descriptor.form_prompt.unwrap_or("Input").into(),
     query: controller.query().into(),
     placeholder: descriptor.form_placeholder.unwrap_or("").into(),
+    search_input: None,
     content: QuickPickContent::Form(QuickPickForm {
       title: descriptor.title.into(),
       value: form_value(controller, descriptor),

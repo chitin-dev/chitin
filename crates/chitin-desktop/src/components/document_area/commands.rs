@@ -1,6 +1,6 @@
 //! Document panel command adapters for the desktop app.
 
-use chitin_ui::components::panel::{
+use chitin_ui::composite::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
 use gpui::{Context, Pixels, Window};
