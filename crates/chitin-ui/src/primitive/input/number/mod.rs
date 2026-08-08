@@ -9,5 +9,5 @@ mod render;
 mod state;
 
 pub use event::NumberInputEvent;
-pub use render::{NumberInput, NumberInputControls, NumberInputSize};
+pub use render::{NumberInput, NumberInputControls, NumberInputSize, NumberInputStyle, NumberInputVariant};
 pub use state::{NumberBounds, NumberDraftState, NumberFormat, NumberInputState};

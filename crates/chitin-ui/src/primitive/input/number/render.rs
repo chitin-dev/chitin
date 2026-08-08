@@ -8,12 +8,27 @@ use gpui::{
 use super::NumberInputState;
 use crate::{
   primitive::icon::Icon,
-  primitive::input::text::{TextInput, TextInputSize},
+  primitive::input::{
+    appearance::InputAppearanceStyle,
+    text::{TextInput, TextInputColors, TextInputSize, TextInputStyle, TextInputVariant},
+  },
   themes::{UIThemes, builtins},
 };
 
 const DEFAULT_NUMBER_INPUT_WIDTH: Pixels = px(160.0);
 const STEPPER_WIDTH: Pixels = px(20.0);
+
+/// Built-in theme-based appearance variants for a [`NumberInput`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NumberInputVariant {
+  /// A prominent numeric input surface for form controls.
+  Primary,
+  /// A neutral numeric input surface for panels and toolbars.
+  #[default]
+  Secondary,
+  /// A low-chrome numeric input for composite controls that provide their own shell.
+  Transparent,
+}
 
 /// Visual size for a [`NumberInput`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -37,6 +52,260 @@ pub enum NumberInputControls {
   Stepper,
 }
 
+/// Visual-only overrides for a [`NumberInput`].
+///
+/// This style intentionally cannot alter numeric parsing, validation, focus
+/// ownership, keyboard stepping, disabled behavior, or emitted semantic events.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct NumberInputStyle {
+  appearance: InputAppearanceStyle,
+  invalid_border: Option<gpui::Rgba>,
+  prefix_foreground: Option<gpui::Rgba>,
+  suffix_foreground: Option<gpui::Rgba>,
+  stepper_border: Option<gpui::Rgba>,
+  stepper_hover_background: Option<gpui::Rgba>,
+  stepper_foreground: Option<gpui::Rgba>,
+}
+
+impl NumberInputStyle {
+  /// Creates a style with no overrides.
+  ///
+  /// # Parameters
+  ///
+  /// This function takes no Rust parameters.
+  ///
+  /// # Returns
+  ///
+  /// A visual style that preserves the selected [`NumberInputVariant`] defaults.
+  pub fn new() -> Self {
+    Self::default()
+  }
+
+  /// Overrides the numeric-input background color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the input surface.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn background(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.background = Some(color);
+    self
+  }
+
+  /// Overrides the numeric-input text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for entered text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn foreground(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.foreground = Some(color);
+    self
+  }
+
+  /// Overrides the numeric-input placeholder text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for placeholder text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn placeholder_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.placeholder_foreground = Some(color);
+    self
+  }
+
+  /// Overrides the selected-range background color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use behind selected text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn selection_background(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.selection_background = Some(color);
+    self
+  }
+
+  /// Overrides the caret color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the insertion caret.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn caret(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.caret = Some(color);
+    self
+  }
+
+  /// Overrides the default numeric-input border color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the idle border.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn border(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.border = Some(color);
+    self
+  }
+
+  /// Overrides the numeric-input border color while focused.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the focused border.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn focus_border(mut self, color: gpui::Rgba) -> Self {
+    self.appearance.focus_border = Some(color);
+    self
+  }
+
+  /// Overrides the numeric-input border color for an invalid draft.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for validation errors.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn invalid_border(mut self, color: gpui::Rgba) -> Self {
+    self.invalid_border = Some(color);
+    self
+  }
+
+  /// Overrides the non-editable prefix text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for prefix text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn prefix_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.prefix_foreground = Some(color);
+    self
+  }
+
+  /// Overrides the non-editable suffix text color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for suffix text.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn suffix_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.suffix_foreground = Some(color);
+    self
+  }
+
+  /// Sets an explicit visual width.
+  ///
+  /// # Parameters
+  ///
+  /// `width` is the fixed rendered width before `full_width` expansion.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn width(mut self, width: Pixels) -> Self {
+    self.appearance.width = Some(width);
+    self
+  }
+
+  /// Sets an explicit visual height.
+  ///
+  /// # Parameters
+  ///
+  /// `height` is the fixed rendered height for the input shell.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn height(mut self, height: Pixels) -> Self {
+    self.appearance.height = Some(height);
+    self
+  }
+
+  /// Sets horizontal padding around the numeric text viewport.
+  ///
+  /// # Parameters
+  ///
+  /// `padding` is the inline spacing around the text viewport.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn horizontal_padding(mut self, padding: Pixels) -> Self {
+    self.appearance.horizontal_padding = Some(padding);
+    self
+  }
+
+  /// Overrides the border separating the stepper controls from the editor.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the stepper separator.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn stepper_border(mut self, color: gpui::Rgba) -> Self {
+    self.stepper_border = Some(color);
+    self
+  }
+
+  /// Overrides the stepper-button background while hovered.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for an enabled hover surface.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn stepper_hover_background(mut self, color: gpui::Rgba) -> Self {
+    self.stepper_hover_background = Some(color);
+    self
+  }
+
+  /// Overrides the enabled stepper icon color.
+  ///
+  /// # Parameters
+  ///
+  /// `color` is the semantic theme token to use for the stepper icons.
+  ///
+  /// # Returns
+  ///
+  /// The updated visual-only style.
+  pub fn stepper_foreground(mut self, color: gpui::Rgba) -> Self {
+    self.stepper_foreground = Some(color);
+    self
+  }
+}
+
 /// A numeric editing control bound to its own [`NumberInputState`] entity.
 #[derive(IntoElement)]
 pub struct NumberInput {
@@ -45,8 +314,10 @@ pub struct NumberInput {
   suffix: Option<SharedString>,
   placeholder: Option<SharedString>,
   theme: UIThemes,
+  variant: NumberInputVariant,
   size: NumberInputSize,
   controls: NumberInputControls,
+  style: NumberInputStyle,
   full_width: bool,
 }
 
@@ -67,8 +338,10 @@ impl NumberInput {
       suffix: None,
       placeholder: None,
       theme: builtins::dark(),
+      variant: NumberInputVariant::default(),
       size: NumberInputSize::default(),
       controls: NumberInputControls::default(),
+      style: NumberInputStyle::default(),
       full_width: false,
     }
   }
@@ -129,6 +402,20 @@ impl NumberInput {
     self
   }
 
+  /// Sets one of the built-in theme-based appearance variants.
+  ///
+  /// # Parameters
+  ///
+  /// `variant` selects a semantic visual treatment.
+  ///
+  /// # Returns
+  ///
+  /// The updated numeric input builder.
+  pub fn variant(mut self, variant: NumberInputVariant) -> Self {
+    self.variant = variant;
+    self
+  }
+
   /// Sets the visual size.
   ///
   /// # Parameters
@@ -154,6 +441,20 @@ impl NumberInput {
   /// This input configured with the supplied controls.
   pub fn controls(mut self, controls: NumberInputControls) -> Self {
     self.controls = controls;
+    self
+  }
+
+  /// Applies visual-only appearance overrides.
+  ///
+  /// # Parameters
+  ///
+  /// `style` supplies component-specific visual overrides.
+  ///
+  /// # Returns
+  ///
+  /// The updated numeric input builder.
+  pub fn style(mut self, style: NumberInputStyle) -> Self {
+    self.style = style;
     self
   }
 
@@ -193,27 +494,28 @@ impl RenderOnce for NumberInput {
     };
     let focus_handle = input.read(cx).focus_handle().clone();
     let theme = self.theme;
+    let colors = NumberInputColors::new(theme, self.variant, self.style, interaction_disabled);
     let border_color = if validation_error {
-      theme.text.error
+      self.style.invalid_border.unwrap_or(colors.invalid_border)
     } else {
-      theme.border.primary
+      colors.border
     };
     let focus_border = if validation_error {
-      theme.text.error
+      self.style.invalid_border.unwrap_or(colors.invalid_border)
     } else {
-      theme.border.focus
+      colors.focus_border
     };
     let state_for_keys = self.state.clone();
 
     div()
       .flex()
       .items_center()
-      .w(DEFAULT_NUMBER_INPUT_WIDTH)
+      .w(self.style.appearance.width.unwrap_or(DEFAULT_NUMBER_INPUT_WIDTH))
       .when(self.full_width, |style| style.w_full())
       .rounded_sm()
       .border_1()
       .border_color(border_color)
-      .bg(theme.background.tertiary)
+      .bg(colors.background)
       .focus(move |style| style.border_color(focus_border))
       .on_key_down(move |event, window, cx| {
         let stepped = state_for_keys.update(cx, |state, cx| state.handle_key_down(event, cx));
@@ -224,21 +526,23 @@ impl RenderOnce for NumberInput {
       })
       .track_focus(&focus_handle)
       .when_some(self.prefix, |style, prefix| {
-        style.child(div().pl_2().text_color(theme.text.secondary).child(prefix))
+        style.child(div().pl_2().text_color(colors.prefix_foreground).child(prefix))
       })
       .child(
         TextInput::new(input)
           .placeholder(self.placeholder.unwrap_or_default())
           .theme(theme)
+          .variant(self.variant.text_input_variant())
+          .style(TextInputStyle::from_appearance(self.style.appearance))
           .size(self.size.text_input_size())
           .appearance(false)
           .full_width(true),
       )
       .when_some(self.suffix, |style, suffix| {
-        style.child(div().pr_2().text_color(theme.text.secondary).child(suffix))
+        style.child(div().pr_2().text_color(colors.suffix_foreground).child(suffix))
       })
       .when(self.controls == NumberInputControls::Stepper, |style| {
-        style.child(render_stepper(self.state, focus_handle, theme, interaction_disabled))
+        style.child(render_stepper(self.state, focus_handle, colors, interaction_disabled))
       })
   }
 }
@@ -249,7 +553,7 @@ impl RenderOnce for NumberInput {
 ///
 /// `state` owns numeric stepping behavior.
 /// `focus_handle` identifies the nested text editor that must retain focus.
-/// `theme` supplies semantic visual tokens.
+/// `colors` supplies resolved semantic visual tokens.
 /// `disabled` prevents pointer-driven stepping when editing is unavailable.
 ///
 /// # Returns
@@ -258,7 +562,7 @@ impl RenderOnce for NumberInput {
 fn render_stepper(
   state: Entity<NumberInputState>,
   focus_handle: gpui::FocusHandle,
-  theme: UIThemes,
+  colors: NumberInputColors,
   disabled: bool,
 ) -> gpui::Div {
   div()
@@ -268,11 +572,11 @@ fn render_stepper(
     .flex()
     .flex_col()
     .border_l_1()
-    .border_color(theme.border.primary)
+    .border_color(colors.stepper_border)
     .child(render_stepper_button(
       state.clone(),
       focus_handle.clone(),
-      theme,
+      colors,
       disabled,
       1,
       "icons/number-increment.svg",
@@ -280,7 +584,7 @@ fn render_stepper(
     .child(render_stepper_button(
       state,
       focus_handle,
-      theme,
+      colors,
       disabled,
       -1,
       "icons/number-decrement.svg",
@@ -293,7 +597,7 @@ fn render_stepper(
 ///
 /// `state` owns numeric stepping behavior.
 /// `focus_handle` identifies the nested text editor that must retain focus.
-/// `theme` supplies semantic visual tokens.
+/// `colors` supplies resolved semantic visual tokens.
 /// `disabled` prevents pointer-driven stepping when editing is unavailable.
 /// `count` supplies the signed step count.
 /// `icon_path` identifies the visual-only step direction icon.
@@ -301,10 +605,17 @@ fn render_stepper(
 /// # Returns
 ///
 /// A half-height pointer target for one numeric step direction.
+///
+/// # Notice
+///
+/// This buttons is not similar with primitive button, number inputs is not a
+/// composite components formed by [`TextInput`] and [`Button`], it's input core
+/// is derived from [`TextInput`] but it should be in same primitive level with
+/// them.
 fn render_stepper_button(
   state: Entity<NumberInputState>,
   focus_handle: gpui::FocusHandle,
-  theme: UIThemes,
+  colors: NumberInputColors,
   disabled: bool,
   count: i32,
   icon_path: &'static str,
@@ -314,18 +625,14 @@ fn render_stepper_button(
     .flex()
     .items_center()
     .justify_center()
-    .text_color(if disabled {
-      theme.text.disabled
-    } else {
-      theme.text.secondary
-    })
+    .text_color(colors.stepper_foreground)
     .cursor(if disabled {
       CursorStyle::Arrow
     } else {
       CursorStyle::PointingHand
     })
     .when(!disabled, |style| {
-      style.hover(move |style| style.bg(theme.background.hover))
+      style.hover(move |style| style.bg(colors.stepper_hover_background))
     })
     .when(!disabled, |style| {
       style.on_mouse_down(MouseButton::Left, move |_, window, cx| {
@@ -337,11 +644,70 @@ fn render_stepper_button(
         }
       })
     })
-    .child(Icon::new(icon_path).size(px(12.0)).color(if disabled {
-      theme.text.disabled
-    } else {
-      theme.text.secondary
-    }))
+    .child(Icon::new(icon_path).size(px(12.0)).color(colors.stepper_foreground))
+}
+
+/// Resolved colors for one numeric-input appearance state.
+#[derive(Clone, Copy)]
+struct NumberInputColors {
+  background: gpui::Rgba,
+  border: gpui::Rgba,
+  focus_border: gpui::Rgba,
+  invalid_border: gpui::Rgba,
+  prefix_foreground: gpui::Rgba,
+  suffix_foreground: gpui::Rgba,
+  stepper_border: gpui::Rgba,
+  stepper_hover_background: gpui::Rgba,
+  stepper_foreground: gpui::Rgba,
+}
+
+impl NumberInputColors {
+  /// Resolves semantic numeric-input colors for one appearance state.
+  ///
+  /// # Parameters
+  ///
+  /// `theme` supplies semantic UI color tokens.
+  /// `variant` selects the built-in visual treatment.
+  /// `style` supplies visual-only component overrides.
+  /// `disabled` describes whether the input should use disabled visuals.
+  ///
+  /// # Returns
+  ///
+  /// Resolved colors for the rendered numeric input.
+  fn new(theme: UIThemes, variant: NumberInputVariant, style: NumberInputStyle, disabled: bool) -> Self {
+    let text_colors = TextInputColors::new(
+      theme,
+      variant.text_input_variant(),
+      TextInputStyle::from_appearance(style.appearance),
+      disabled,
+    );
+
+    if disabled {
+      return Self {
+        background: text_colors.background,
+        border: text_colors.border,
+        focus_border: text_colors.focus_border,
+        invalid_border: text_colors.border,
+        prefix_foreground: theme.text.disabled,
+        suffix_foreground: theme.text.disabled,
+        stepper_border: text_colors.border,
+        stepper_hover_background: theme.background.secondary,
+        stepper_foreground: theme.text.disabled,
+      };
+    }
+
+    Self {
+      background: text_colors.background,
+      border: text_colors.border,
+      focus_border: text_colors.focus_border,
+      invalid_border: theme.text.error,
+      prefix_foreground: style.prefix_foreground.unwrap_or(theme.text.secondary),
+      suffix_foreground: style.suffix_foreground.unwrap_or(theme.text.secondary),
+      stepper_border: style.stepper_border.unwrap_or(text_colors.border),
+      stepper_hover_background: style.stepper_hover_background.unwrap_or(theme.background.hover),
+      stepper_foreground: style.stepper_foreground.unwrap_or(theme.text.secondary),
+    }
+  }
 }
 
 impl NumberInputSize {
@@ -363,6 +729,25 @@ impl NumberInputSize {
   }
 }
 
+impl NumberInputVariant {
+  /// Maps one numeric-input appearance variant to its embedded text-input variant.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads the selected numeric-input appearance variant.
+  ///
+  /// # Returns
+  ///
+  /// The matching text-input appearance variant.
+  fn text_input_variant(self) -> TextInputVariant {
+    match self {
+      Self::Primary => TextInputVariant::Primary,
+      Self::Secondary => TextInputVariant::Secondary,
+      Self::Transparent => TextInputVariant::Transparent,
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -376,5 +761,56 @@ mod tests {
   #[test]
   fn number_input_controls_should_show_steppers_by_default() {
     assert_eq!(NumberInputControls::default(), NumberInputControls::Stepper);
+  }
+
+  #[test]
+  fn number_input_variant_should_make_transparent_background() {
+    let colors = NumberInputColors::new(
+      builtins::dark(),
+      NumberInputVariant::Transparent,
+      NumberInputStyle::new(),
+      false,
+    );
+
+    assert_eq!(colors.background, builtins::TRANSPARENT);
+  }
+
+  #[test]
+  fn number_input_style_should_store_flat_visual_overrides() {
+    let theme = builtins::dark();
+    let style = NumberInputStyle::new()
+      .background(theme.background.primary)
+      .foreground(theme.text.primary)
+      .placeholder_foreground(theme.text.secondary)
+      .selection_background(theme.background.selection)
+      .caret(theme.accent.primary)
+      .border(theme.border.primary)
+      .focus_border(theme.border.focus)
+      .invalid_border(theme.text.error)
+      .prefix_foreground(theme.text.secondary)
+      .width(px(240.0))
+      .height(px(32.0))
+      .horizontal_padding(px(12.0))
+      .suffix_foreground(theme.text.primary)
+      .stepper_border(theme.border.muted)
+      .stepper_hover_background(theme.background.hover)
+      .stepper_foreground(theme.text.secondary);
+
+    assert_eq!(style.appearance.background, Some(theme.background.primary));
+    assert_eq!(style.appearance.foreground, Some(theme.text.primary));
+    assert_eq!(style.appearance.placeholder_foreground, Some(theme.text.secondary));
+    assert_eq!(style.appearance.selection_background, Some(theme.background.selection));
+    assert_eq!(style.appearance.caret, Some(theme.accent.primary));
+    assert_eq!(style.appearance.border, Some(theme.border.primary));
+    assert_eq!(style.appearance.focus_border, Some(theme.border.focus));
+    assert_eq!(style.invalid_border, Some(theme.text.error));
+    assert_eq!(style.prefix_foreground, Some(theme.text.secondary));
+    assert_eq!(style.appearance.width, Some(px(240.0)));
+    assert_eq!(style.appearance.height, Some(px(32.0)));
+    assert_eq!(style.appearance.horizontal_padding, Some(px(12.0)));
+    assert_eq!(style.suffix_foreground, Some(theme.text.primary));
+    assert_eq!(style.stepper_border, Some(theme.border.muted));
+    assert_eq!(style.stepper_hover_background, Some(theme.background.hover));
+    assert_eq!(style.stepper_foreground, Some(theme.text.secondary));
   }
 }

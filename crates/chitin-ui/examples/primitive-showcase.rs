@@ -6,14 +6,17 @@ use std::{borrow::Cow, fs, path::PathBuf};
 
 use chitin_ui::{
   primitive::input::{
-    number::{NumberDraftState, NumberFormat, NumberInput, NumberInputEvent, NumberInputSize, NumberInputState},
+    number::{
+      NumberDraftState, NumberFormat, NumberInput, NumberInputEvent, NumberInputSize, NumberInputState,
+      NumberInputStyle, NumberInputVariant,
+    },
     text::{TextInput, TextInputEvent, TextInputSize, TextInputState, TextInputStyle, TextInputVariant},
   },
   themes::{UIThemes, builtins},
 };
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Context, Div, Entity, IntoElement, ParentElement, Render, Result,
-  SharedString, Subscription, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgba, size,
+  SharedString, Subscription, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
 };
 
 macro_rules! subscribe_status {
@@ -120,7 +123,9 @@ struct NumberInputExample {
   suffix: Option<&'static str>,
   input: Entity<NumberInputState>,
   status: SharedString,
+  variant: NumberInputVariant,
   size: NumberInputSize,
+  style: NumberInputStyle,
 }
 
 impl PrimitiveShowcase {
@@ -212,8 +217,8 @@ impl PrimitiveShowcase {
       .child(
         TextInput::new(example.input)
           .theme(theme)
-          .size(example.size)
           .variant(example.variant)
+          .size(example.size)
           .style(example.style)
           .full_width(true)
           .when_some(example.placeholder, |input, placeholder| input.placeholder(placeholder)),
@@ -246,7 +251,9 @@ impl PrimitiveShowcase {
       .child(
         NumberInput::new(example.input)
           .theme(theme)
+          .variant(example.variant)
           .size(example.size)
+          .style(example.style)
           .full_width(true)
           .when_some(example.placeholder, |input, placeholder| input.placeholder(placeholder))
           .when_some(example.suffix, |input, suffix| input.suffix(suffix)),
@@ -352,10 +359,10 @@ impl Render for PrimitiveShowcase {
                       size: TextInputSize::Medium,
                       variant: TextInputVariant::Secondary,
                       style: TextInputStyle::new()
-                        .background(rgba(0x11111bff))
-                        .border(rgba(0xeff1f5ff))
-                        .focus_border(rgba(0x89dcebff))
-                        .foreground(rgba(0x9ca0b0ff))
+                        .background(theme.background.primary)
+                        .border(theme.border.primary)
+                        .focus_border(theme.accent.primary)
+                        .foreground(theme.text.primary)
                         .placeholder_foreground(theme.text.secondary)
                         .selection_background(theme.background.selection)
                         .caret(theme.accent.primary)
@@ -418,19 +425,30 @@ impl Render for PrimitiveShowcase {
                       suffix: None,
                       input: self.numeric_input.clone(),
                       status: self.numeric_status.clone(),
+                      variant: NumberInputVariant::Secondary,
                       size: NumberInputSize::Medium,
+                      style: NumberInputStyle::new(),
                     },
                     theme,
                   ))
                   .child(Self::number_input_example(
                     NumberInputExample {
                       title: "Molecular mass",
-                      description: "Uses fixed precision and a non-editable unit suffix.",
+                      description: "Uses fixed precision, a unit suffix, and semantic visual overrides.",
                       placeholder: None,
                       suffix: Some("g/mol"),
                       input: self.mass_input.clone(),
                       status: self.mass_status.clone(),
+                      variant: NumberInputVariant::Primary,
                       size: NumberInputSize::Small,
+                      style: NumberInputStyle::new()
+                        .background(theme.background.primary)
+                        .border(theme.border.muted)
+                        .focus_border(theme.accent.primary)
+                        .suffix_foreground(theme.text.primary)
+                        .stepper_border(theme.border.muted)
+                        .stepper_hover_background(theme.background.active)
+                        .stepper_foreground(theme.text.primary),
                     },
                     theme,
                   )),
