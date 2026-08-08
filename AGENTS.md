@@ -38,10 +38,6 @@ Avoid `unwrap`, `expect`, `dbg!`, and `todo!`; workspace Clippy denies them.
 Prefer builder-style component methods such as `.theme(theme)` and
 `.child(element)` over broad getter/setter APIs.
 
-Use summary-parameters-returns style doc comments for private helper functions
-and public API functions. Use single-line doc comments or no doc comments
-inside test modules.
-
 ## Testing Guidelines
 
 Place focused unit tests near implementation code in `#[cfg(test)]` modules.
