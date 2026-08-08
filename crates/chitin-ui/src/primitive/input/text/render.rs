@@ -929,6 +929,19 @@ impl TextInputSize {
       },
     }
   }
+
+  /// Returns the text size used by this input-size variant.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads the selected text-input size variant.
+  ///
+  /// # Returns
+  ///
+  /// The font size used for text and placeholder layout.
+  pub(crate) fn font_size(self) -> Pixels {
+    self.metrics().font_size
+  }
 }
 
 #[cfg(test)]

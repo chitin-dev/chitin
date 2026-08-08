@@ -506,6 +506,7 @@ impl RenderOnce for NumberInput {
       colors.focus_border
     };
     let state_for_keys = self.state.clone();
+    let affix_font_size = self.size.font_size();
 
     div()
       .flex()
@@ -526,7 +527,13 @@ impl RenderOnce for NumberInput {
       })
       .track_focus(&focus_handle)
       .when_some(self.prefix, |style, prefix| {
-        style.child(div().pl_2().text_color(colors.prefix_foreground).child(prefix))
+        style.child(
+          div()
+            .pl_2()
+            .text_size(affix_font_size)
+            .text_color(colors.prefix_foreground)
+            .child(prefix),
+        )
       })
       .child(
         TextInput::new(input)
@@ -539,7 +546,13 @@ impl RenderOnce for NumberInput {
           .full_width(true),
       )
       .when_some(self.suffix, |style, suffix| {
-        style.child(div().pr_2().text_color(colors.suffix_foreground).child(suffix))
+        style.child(
+          div()
+            .pr_2()
+            .text_color(colors.suffix_foreground)
+            .text_size(affix_font_size)
+            .child(suffix),
+        )
       })
       .when(self.controls == NumberInputControls::Stepper, |style| {
         style.child(render_stepper(self.state, focus_handle, colors, interaction_disabled))
@@ -727,6 +740,19 @@ impl NumberInputSize {
       Self::Large => TextInputSize::Large,
     }
   }
+
+  /// Returns the font size shared by numeric text, placeholders, and affixes.
+  ///
+  /// # Parameters
+  ///
+  /// This method reads the selected numeric-input size.
+  ///
+  /// # Returns
+  ///
+  /// The font size used by the embedded text input.
+  fn font_size(self) -> Pixels {
+    self.text_input_size().font_size()
+  }
 }
 
 impl NumberInputVariant {
@@ -756,6 +782,11 @@ mod tests {
   #[test]
   fn number_input_size_should_use_medium_text_input_size_by_default() {
     assert_eq!(NumberInputSize::default().text_input_size(), TextInputSize::Medium);
+  }
+
+  #[test]
+  fn number_input_size_should_use_the_embedded_text_font_size_for_affixes() {
+    assert_eq!(NumberInputSize::Small.font_size(), px(12.0));
   }
 
   #[test]
