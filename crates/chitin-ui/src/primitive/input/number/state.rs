@@ -493,8 +493,7 @@ impl NumberInputState {
     }
 
     let base = self.value().or(self.committed_value).unwrap_or(0.0);
-    let value = self.bounds.clamp(base + self.step * f64::from(count));
-    let value = self.normalize_stepped_value(value);
+    let value = stepped_value(base, self.step, count, self.bounds, self.format);
     let changed = self.set_committed_value(Some(value), cx);
     if changed {
       cx.emit(NumberInputEvent::Commit {
@@ -663,19 +662,6 @@ impl NumberInputState {
     committed_changed || draft_changed
   }
 
-  /// Normalizes stepped values to the display precision when fixed formatting is active.
-  ///
-  /// # Parameters
-  ///
-  /// * `value` supplies the bounded stepped value.
-  ///
-  /// # Returns
-  ///
-  /// The normalized value used for the next committed step.
-  fn normalize_stepped_value(&self, value: f64) -> f64 {
-    normalize_stepped_value(value, self.format)
-  }
-
   /// Formats one finite value using the configured output format.
   ///
   /// # Parameters
@@ -766,6 +752,24 @@ fn normalize_stepped_value(value: f64, format: NumberFormat) -> f64 {
   (value * scale).round() / scale
 }
 
+/// Calculates one stepped value while preserving configured numeric bounds.
+///
+/// # Parameters
+///
+/// * `base` supplies the current finite value.
+/// * `step` supplies the configured positive increment.
+/// * `count` supplies the signed number of increments to apply.
+/// * `bounds` supplies the inclusive range for the committed result.
+/// * `format` selects fixed-precision normalization when configured.
+///
+/// # Returns
+///
+/// The normalized value clamped to the configured bounds.
+fn stepped_value(base: f64, step: f64, count: i32, bounds: NumberBounds, format: NumberFormat) -> f64 {
+  let value = normalize_stepped_value(base + step * f64::from(count), format);
+  bounds.clamp(value)
+}
+
 /// Formats one finite numeric value according to a selected output format.
 ///
 /// # Parameters
@@ -846,6 +850,19 @@ mod tests {
     let value = normalize_stepped_value(0.1 + 0.2, format);
 
     assert_eq!(value, 0.3);
+  }
+
+  #[test]
+  fn stepped_value_should_clamp_after_fixed_precision_normalization() {
+    let bounds = NumberBounds {
+      minimum: None,
+      maximum: Some(0.95),
+    };
+
+    assert_eq!(
+      stepped_value(0.9, 0.1, 1, bounds, NumberFormat::Fixed { decimals: 1 }),
+      0.95
+    );
   }
 
   #[test]

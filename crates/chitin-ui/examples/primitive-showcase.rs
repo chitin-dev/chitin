@@ -89,6 +89,7 @@ struct PrimitiveShowcase {
   // number inputs state
   numeric_input: Entity<NumberInputState>,
   mass_input: Entity<NumberInputState>,
+  precision_bounds_input: Entity<NumberInputState>,
 
   // text inputs status string representation
   default_status: SharedString,
@@ -101,6 +102,7 @@ struct PrimitiveShowcase {
   // number inputs status string representation
   numeric_status: SharedString,
   mass_status: SharedString,
+  precision_bounds_status: SharedString,
 
   _input_subscriptions: Vec<Subscription>,
 }
@@ -162,6 +164,14 @@ impl PrimitiveShowcase {
       input.set_value(Some(58.44), cx);
       input
     });
+    let precision_bounds_input = cx.new(|cx| {
+      let mut input = NumberInputState::new(cx);
+      input.set_format(NumberFormat::Fixed { decimals: 1 });
+      input.set_maximum(Some(0.95), cx);
+      input.set_step(0.1);
+      input.set_value(Some(0.9), cx);
+      input
+    });
     let input_subscriptions = vec![
       subscribe_status!(cx, default_input, default_status, text_input_event_summary),
       subscribe_status!(cx, primary_input, primary_status, text_input_event_summary),
@@ -171,6 +181,12 @@ impl PrimitiveShowcase {
       subscribe_status!(cx, disabled_input, disabled_status, text_input_event_summary),
       subscribe_status!(cx, numeric_input, numeric_status, number_input_event_summary),
       subscribe_status!(cx, mass_input, mass_status, number_input_event_summary),
+      subscribe_status!(
+        cx,
+        precision_bounds_input,
+        precision_bounds_status,
+        number_input_event_summary
+      ),
     ];
 
     Self {
@@ -182,6 +198,7 @@ impl PrimitiveShowcase {
       disabled_input,
       numeric_input,
       mass_input,
+      precision_bounds_input,
       default_status: "Ready".into(),
       primary_status: "Ready".into(),
       placeholder_status: "Ready".into(),
@@ -190,6 +207,7 @@ impl PrimitiveShowcase {
       disabled_status: "Ready".into(),
       numeric_status: "Ready".into(),
       mass_status: "Ready".into(),
+      precision_bounds_status: "Ready".into(),
       _input_subscriptions: input_subscriptions,
     }
   }
@@ -451,6 +469,20 @@ impl Render for PrimitiveShowcase {
                         .stepper_border(theme.border.muted)
                         .stepper_hover_background(theme.background.active)
                         .stepper_foreground(theme.text.primary),
+                    },
+                    theme,
+                  ))
+                  .child(Self::number_input_example(
+                    NumberInputExample {
+                      title: "Fixed precision boundary",
+                      description: "Starts at 0.9 with maximum 0.95, one decimal place, and a 0.1 step. Increment to verify normalization occurs before the final clamp.",
+                      placeholder: None,
+                      suffix: None,
+                      input: self.precision_bounds_input.clone(),
+                      status: self.precision_bounds_status.clone(),
+                      variant: NumberInputVariant::Secondary,
+                      size: NumberInputSize::Small,
+                      style: NumberInputStyle::new(),
                     },
                     theme,
                   )),
