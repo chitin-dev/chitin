@@ -27,10 +27,10 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
-            archive: chitin-linux-x86_64.tar.gz
+            executable: chitin-desktop
           - os: windows-latest
             target: windows-x86_64
-            archive: chitin-windows-x86_64.zip
+            executable: chitin-desktop.exe
 
     steps:
       - name: Checkout
@@ -61,28 +61,24 @@ jobs:
       - name: Build desktop release
         run: cargo build -p chitin-desktop --release --locked
 
-      - name: Package Linux release
+      - name: Package Linux executable
         if: runner.os == 'Linux'
         run: |
-          mkdir -p dist/chitin-linux-x86_64
-          cp target/release/chitin-desktop dist/chitin-linux-x86_64/
-          cp -R assets dist/chitin-linux-x86_64/
-          tar -C dist -czf dist/chitin-linux-x86_64.tar.gz chitin-linux-x86_64
+          mkdir -p dist
+          cp target/release/chitin-desktop dist/chitin-desktop
 
-      - name: Package Windows release
+      - name: Package Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist/chitin-windows-x86_64/assets
-          Copy-Item target/release/chitin-desktop.exe dist/chitin-windows-x86_64/
-          Copy-Item assets/* dist/chitin-windows-x86_64/assets/ -Recurse -Force
-          Compress-Archive -Path dist/chitin-windows-x86_64 -DestinationPath dist/chitin-windows-x86_64.zip -Force
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/release/chitin-desktop.exe dist/chitin-desktop.exe
 
-      - name: Upload release package
+      - name: Upload release executable
         uses: actions/upload-artifact@v4
         with:
           name: chitin-${{ matrix.target }}
-          path: dist/${{ matrix.archive }}
+          path: dist/${{ matrix.executable }}
           if-no-files-found: error
 
   release:
@@ -102,7 +98,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download release packages
+      - name: Download release executables
         uses: actions/download-artifact@v4
         with:
           pattern: chitin-*
@@ -124,6 +120,6 @@ jobs:
           body: |
             Automated nightly build for commit ${{ github.sha }}.
           files: |
-            release/chitin-linux-x86_64.tar.gz
-            release/chitin-windows-x86_64.zip
+            release/chitin-desktop
+            release/chitin-desktop.exe
           fail_on_unmatched_files: true

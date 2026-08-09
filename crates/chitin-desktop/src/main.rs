@@ -1,20 +1,24 @@
 #![forbid(unsafe_code)]
 //! Chitin desktop binary entry point.
 
-use std::{borrow::Cow, fs, path::PathBuf};
+use std::{borrow::Cow, collections::BTreeSet, path::PathBuf};
 
 use chitin_desktop::{app::ChitinApp, commands::default_key_bindings};
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
+use rust_embed::RustEmbed;
 
-/// GPUI asset source backed by the repository's `assets/` directory.
-struct DesktopAssets {
-  base: PathBuf,
-}
+/// Compile-time asset bundle for the desktop application.
+#[derive(RustEmbed)]
+#[folder = "$CARGO_MANIFEST_DIR/../../assets"]
+struct EmbeddedAssets;
+
+/// GPUI asset source backed by the embedded desktop assets.
+struct DesktopAssets;
 
 impl AssetSource for DesktopAssets {
-  /// Loads one asset file from the configured desktop asset directory.
+  /// Loads one embedded asset file.
   ///
   /// # Parameters
   ///
@@ -23,15 +27,12 @@ impl AssetSource for DesktopAssets {
   ///
   /// # Returns
   ///
-  /// `Ok(Some(bytes))` when the asset exists and is readable. Filesystem errors
-  /// are converted into GPUI errors.
+  /// `Ok(Some(bytes))` when the asset exists, or `Ok(None)` when it does not.
   fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-    fs::read(self.base.join(path))
-      .map(|data| Some(Cow::Owned(data)))
-      .map_err(Into::into)
+    Ok(EmbeddedAssets::get(path).map(|asset| asset.data))
   }
 
-  /// Lists child asset names inside an asset directory.
+  /// Lists direct child asset names inside an embedded asset directory.
   ///
   /// # Parameters
   ///
@@ -39,21 +40,25 @@ impl AssetSource for DesktopAssets {
   ///
   /// # Returns
   ///
-  /// `Ok(Vec<SharedString>)` containing UTF-8 child names in filesystem
-  /// iteration order. Filesystem errors are converted into GPUI errors.
+  /// `Ok(Vec<SharedString>)` containing unique UTF-8 child names in sorted
+  /// order.
   fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-    fs::read_dir(self.base.join(path))
-      .map(|entries| {
-        entries
-          .filter_map(|entry| {
-            entry
-              .ok()
-              .and_then(|entry| entry.file_name().into_string().ok())
-              .map(SharedString::from)
-          })
-          .collect()
-      })
-      .map_err(Into::into)
+    let path = path.trim_matches('/');
+    let prefix = (!path.is_empty()).then(|| format!("{path}/"));
+    let mut children = BTreeSet::new();
+
+    for asset_path in EmbeddedAssets::iter() {
+      let relative_path = match &prefix {
+        Some(prefix) => asset_path.strip_prefix(prefix),
+        None => Some(asset_path.as_ref()),
+      };
+
+      if let Some(name) = relative_path.and_then(|path| path.split('/').next()) {
+        children.insert(name.to_owned());
+      }
+    }
+
+    Ok(children.into_iter().map(SharedString::from).collect())
   }
 }
 
@@ -76,34 +81,30 @@ fn main() {
   env_logger::init();
   let project_path = std::env::args_os().nth(1).map(PathBuf::from);
 
-  Application::new()
-    .with_assets(DesktopAssets {
-      base: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
-    })
-    .run(|cx: &mut App| {
-      cx.bind_keys(default_key_bindings());
+  Application::new().with_assets(DesktopAssets).run(|cx: &mut App| {
+    cx.bind_keys(default_key_bindings());
 
-      let bounds = Bounds::centered(None, size(px(1100.0), px(760.0)), cx);
-      let result = cx.open_window(
-        WindowOptions {
-          window_bounds: Some(WindowBounds::Windowed(bounds)),
-          app_id: Some("dev.chitin.Chitin".to_string()),
-          ..Default::default()
-        },
-        |window, cx| {
-          let project_sidebar_focus = cx.focus_handle();
-          window.focus(&project_sidebar_focus, cx);
-          window.activate_window();
-          cx.new(|_| ChitinApp::new_with_project_sidebar_focus(project_path, project_sidebar_focus))
-        },
-      );
+    let bounds = Bounds::centered(None, size(px(1100.0), px(760.0)), cx);
+    let result = cx.open_window(
+      WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        app_id: Some("dev.chitin.Chitin".to_string()),
+        ..Default::default()
+      },
+      |window, cx| {
+        let project_sidebar_focus = cx.focus_handle();
+        window.focus(&project_sidebar_focus, cx);
+        window.activate_window();
+        cx.new(|_| ChitinApp::new_with_project_sidebar_focus(project_path, project_sidebar_focus))
+      },
+    );
 
-      if let Err(error) = result {
-        eprintln!("failed to open Chitin desktop window: {error}");
-        cx.quit();
-        return;
-      }
+    if let Err(error) = result {
+      eprintln!("failed to open Chitin desktop window: {error}");
+      cx.quit();
+      return;
+    }
 
-      cx.activate(true);
-    });
+    cx.activate(true);
+  });
 }
