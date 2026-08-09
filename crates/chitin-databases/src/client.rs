@@ -32,7 +32,7 @@ impl Client {
   /// # Parameters
   ///
   /// * `config` controls timeouts, retry policy, response limits, and
-  /// concurrency.
+  ///   concurrency.
   ///
   /// # Returns
   ///

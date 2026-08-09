@@ -114,7 +114,7 @@ impl PanelTabScrollState {
   /// # Parameters
   ///
   /// * `live_panel_ids` contains the panel identifiers present in the current
-  /// panel tree.
+  ///   panel tree.
   ///
   /// # Returns
   ///

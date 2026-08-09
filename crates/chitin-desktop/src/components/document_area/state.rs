@@ -608,7 +608,7 @@ impl DocumentPanelState {
   /// # Parameters
   ///
   /// * `target` identifies the panel and raw visual insertion position under the
-  /// pointer.
+  ///   pointer.
   ///
   /// # Returns
   ///
@@ -707,7 +707,7 @@ impl DocumentPanelState {
   /// * `path` identifies the split node whose handle was pressed.
   /// * `axis` controls whether horizontal or vertical pointer movement is used.
   /// * `start_position` is the cursor position on the resize axis where the drag
-  /// began.
+  ///   began.
   ///
   /// # Returns
   ///

@@ -44,9 +44,9 @@ impl ChitinApp {
   /// # Parameters
   ///
   /// * `navigation` identifies the requested keyboard behavior, such as moving to
-  /// the next visible row or activating the focused row.
+  ///   the next visible row or activating the focused row.
   /// * `cx` is the GPUI context used to spawn lazy directory loading and notify
-  /// the UI after command handling.
+  ///   the UI after command handling.
   ///
   /// # Returns
   ///
@@ -138,9 +138,9 @@ impl ChitinApp {
   /// # Parameters
   ///
   /// * `target` describes whether focus should move relatively
-  /// (`Previous`/`Next`) or jump absolutely (`First`/`Last`).
+  ///   (`Previous`/`Next`) or jump absolutely (`First`/`Last`).
   /// * `scroll_strategy` controls which viewport edge GPUI should use if the
-  /// focused row is outside the current virtual-list viewport.
+  ///   focused row is outside the current virtual-list viewport.
   ///
   /// # Returns
   ///
@@ -180,7 +180,7 @@ impl ChitinApp {
   ///
   /// * `path` is the original filesystem path of the tree entry to activate.
   /// * `cx` is the GPUI context used to spawn directory loading when the
-  /// activated entry is an unloaded directory.
+  ///   activated entry is an unloaded directory.
   ///
   /// # Returns
   ///
@@ -311,7 +311,7 @@ impl ChitinApp {
   ///
   /// * `path` is the directory path whose children were requested.
   /// * `result` is the outcome of loading direct children on the background
-  /// executor.
+  ///   executor.
   ///
   /// # Returns
   ///
@@ -416,7 +416,7 @@ impl From<ProjectTreeToggle> for ProjectTreeActivation {
 ///
 /// * `path` is the directory path whose direct children should be loaded.
 /// * `cx` is the GPUI context used to spawn the async task and later update the
-/// app entity.
+///   app entity.
 ///
 /// # Returns
 ///
@@ -546,7 +546,7 @@ pub fn render_workspace_tree(
 ///
 /// * `entry` is the root tree entry to flatten.
 /// * `state` determines which descendants are visible and which rows are focused
-/// or selected.
+///   or selected.
 ///
 /// # Returns
 ///
@@ -569,7 +569,7 @@ fn visible_workspace_tree_rows(
 ///
 /// * `entry` is the root tree entry used to build the visible row list.
 /// * `state` contains expansion and loading state that determines which
-/// descendants are visible.
+///   descendants are visible.
 ///
 /// # Returns
 ///
@@ -619,7 +619,7 @@ fn focusable_workspace_tree_rows(rows: &[TreeRow<WorkspaceEntryRow>]) -> Vec<(us
 /// * `paths` is the ordered list of visible, focusable tree entry paths.
 /// * `focused_path` is the current keyboard focus path, if any.
 /// * `selected_path` is the current selected/opened file path, used as a fallback
-/// navigation anchor when no focused path exists.
+///   navigation anchor when no focused path exists.
 /// * `target` is the relative or absolute focus movement to resolve.
 ///
 /// # Returns

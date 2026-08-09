@@ -156,7 +156,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// * `surface` is the GPUI-owned WGPU surface created by the desktop window.
   /// * `scene` renders each frame using the surface resources supplied by this
-  /// panel.
+  ///   panel.
   ///
   /// # Returns
   ///

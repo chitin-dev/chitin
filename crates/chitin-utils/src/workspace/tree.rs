@@ -55,12 +55,12 @@ pub enum ProjectTreeEntryKind {
 ///   name: "src".to_string(),
 ///   kind: ProjectTreeEntryKind::Directory,
 ///   children: vec![
-///     ProjectTreeEntry {
-///       path: PathBuf::from("/project/src/main.rs"),
-///       name: "main.rs".to_string(),
-///       kind: ProjectTreeEntryKind::File,
-///       children: vec![],
-///     }
+///   ProjectTreeEntry {
+///   path: PathBuf::from("/project/src/main.rs"),
+///   name: "main.rs".to_string(),
+///   kind: ProjectTreeEntryKind::File,
+///   children: vec![],
+///   }
 ///   ],
 /// };
 /// ```
@@ -123,10 +123,10 @@ pub struct ProjectTree {
 /// let root = PathBuf::from("/my_project");
 /// let tree = ProjectTree {
 ///   root: ProjectTreeEntry {
-///     path: root.clone(),
-///     name: "my_project".to_string(),
-///     kind: ProjectTreeEntryKind::Directory,
-///     children: vec![],
+///   path: root.clone(),
+///   name: "my_project".to_string(),
+///   kind: ProjectTreeEntryKind::Directory,
+///   children: vec![],
 ///   },
 /// };
 ///

@@ -196,7 +196,7 @@ impl ChitinApp {
   /// * `path` identifies the split node whose handle was pressed.
   /// * `axis` controls whether horizontal or vertical pointer movement is used.
   /// * `start_position` is the cursor position on the resize axis where the drag
-  /// began.
+  ///   began.
   ///
   /// # Returns
   ///
@@ -216,7 +216,7 @@ impl ChitinApp {
   /// # Parameters
   ///
   /// * `current_position` is the latest cursor position on the active resize
-  /// axis.
+  ///   axis.
   /// * `root_width` is the rendered width available to the document panel root.
   /// * `root_height` is the rendered height available to the document panel root.
   ///

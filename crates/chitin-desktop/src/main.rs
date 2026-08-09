@@ -19,7 +19,7 @@ impl AssetSource for DesktopAssets {
   /// # Parameters
   ///
   /// * `path` is the asset-relative path requested by GPUI, such as an icon path
-  /// under `assets/icons`.
+  ///   under `assets/icons`.
   ///
   /// # Returns
   ///

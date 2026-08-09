@@ -95,7 +95,7 @@ impl SidebarResizeState {
   /// # Parameters
   ///
   /// * `width` is the requested sidebar width. It is clamped to the configured
-  /// bounds.
+  ///   bounds.
   ///
   /// # Returns
   ///
@@ -275,7 +275,7 @@ impl SidebarResizeConfig {
   /// # Parameters
   ///
   /// * `on_resize_start` is invoked when the user presses the resize handle. It
-  /// receives the cursor x-position, window, and app context.
+  ///   receives the cursor x-position, window, and app context.
   ///
   /// # Returns
   ///

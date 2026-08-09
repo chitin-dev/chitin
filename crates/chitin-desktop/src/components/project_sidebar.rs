@@ -109,9 +109,9 @@ impl ProjectSidebarState {
   /// # Parameters
   ///
   /// * `row_index` is the zero-based index in the rendered virtual tree row
-  /// list, including non-focusable message rows.
+  ///   list, including non-focusable message rows.
   /// * `strategy` controls which viewport edge should be used when the row is
-  /// outside the visible range.
+  ///   outside the visible range.
   ///
   /// # Returns
   ///
@@ -201,14 +201,14 @@ impl Default for ProjectSidebarState {
 /// # Parameters
 ///
 /// * `workspace` is the currently opened project workspace. When `None`, the
-/// sidebar renders an empty-workspace message instead of a tree.
+///   sidebar renders an empty-workspace message instead of a tree.
 /// * `state` contains expansion, loading, selection, focus, and resize state used
-/// by the sidebar and tree.
+///   by the sidebar and tree.
 /// * `focus_handle` is the GPUI focus handle associated with the `"ProjectTree"`
-/// key context.
+///   key context.
 /// * `theme` supplies the UI colors and spacing used by the sidebar shell.
 /// * `cx` is the GPUI context used to create command action listeners and obtain
-/// a weak app entity for resize callbacks.
+///   a weak app entity for resize callbacks.
 ///
 /// # Returns
 ///

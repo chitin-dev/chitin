@@ -155,7 +155,7 @@ impl PanelContainerConfig {
   /// # Parameters
   ///
   /// * `renderer` produces caller-owned controls at the right end of each panel
-  /// tab strip.
+  ///   tab strip.
   ///
   /// # Returns
   ///
@@ -266,7 +266,7 @@ impl Render for PanelTabDragPreview {
 /// * `tree` is the panel tree to render.
 /// * `theme` supplies visual tokens for panel chrome.
 /// * `config` contains optional resize, tab activation, close, icon, and
-/// tab-strip action behavior.
+///   tab-strip action behavior.
 /// * `render_body` renders the body for one active tab.
 ///
 /// # Returns
@@ -806,7 +806,7 @@ fn render_panel_tab_leading_insertion_marker(color: gpui::Hsla) -> Div {
 /// * `active` controls whether the close glyph is visible by default.
 /// * `tab_hover_group` identifies the GPUI hover group shared with the tab.
 /// * `context` contains theme tokens, close callbacks, and optional icon
-/// rendering.
+///   rendering.
 ///
 /// # Returns
 ///

@@ -25,7 +25,7 @@ impl<TAnchor, TValue> ResizeGesture<TAnchor, TValue> {
   ///
   /// * `anchor` identifies the resized target.
   /// * `start_position` is the cursor position on the resize axis where dragging
-  /// began.
+  ///   began.
   /// * `start_value` is the target value when dragging began.
   ///
   /// # Returns

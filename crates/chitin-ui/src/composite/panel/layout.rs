@@ -36,7 +36,7 @@ impl PanelResizeConfig {
   /// # Parameters
   ///
   /// * `on_resize_start` is invoked with the split path, split axis, cursor
-  /// position on the resize axis, window, and app context.
+  ///   position on the resize axis, window, and app context.
   ///
   /// # Returns
   ///
@@ -401,7 +401,7 @@ pub(super) fn clamp_split_ratio(ratio: f32) -> f32 {
 ///
 /// * `source_index` is the tab position before removal.
 /// * `raw_insertion_index` is the visual insertion position in the original
-/// strip.
+///   strip.
 /// * `tab_count` is the source panel's tab count before removal.
 ///
 /// # Returns

@@ -68,7 +68,7 @@ impl ChitinApp {
   /// # Parameters
   ///
   /// * `project_path` is the filesystem path to open as the initial workspace.
-  /// When it is `None`, the process current directory is used.
+  ///   When it is `None`, the process current directory is used.
   ///
   /// # Returns
   ///
@@ -137,9 +137,9 @@ impl ChitinApp {
   /// # Parameters
   ///
   /// * `project_path` is forwarded to [`ChitinApp::new`] as the initial
-  /// workspace path.
+  ///   workspace path.
   /// * `project_sidebar_focus` is the GPUI focus handle tracked by the project
-  /// sidebar key context.
+  ///   sidebar key context.
   ///
   /// # Returns
   ///
@@ -156,9 +156,9 @@ impl ChitinApp {
   /// # Parameters
   ///
   /// * `project_path` is forwarded to [`ChitinApp::new`] as the initial
-  /// workspace path.
+  ///   workspace path.
   /// * `project_sidebar_focus` is the GPUI focus handle tracked by the project
-  /// sidebar key context.
+  ///   sidebar key context.
   /// * `title` is the document tab title used for the WGPU viewport.
   /// * `wgpu_panel` is the GPUI view that renders WGPU content.
   /// * `clone_wgpu_panel` creates independent WGPU views for split panels.
@@ -346,7 +346,7 @@ impl ChitinApp {
   ///
   /// * `window_width` is the full GPUI window width.
   /// * `visible_sidebar_width` is the current width occupied by an open sidebar,
-  /// or zero when no sidebar is visible.
+  ///   or zero when no sidebar is visible.
   ///
   /// # Returns
   ///
@@ -409,7 +409,7 @@ impl Render for ChitinApp {
   ///
   /// * `window` is the GPUI window used to register platform window controls.
   /// * `cx` is the GPUI render context used to access the app entity and focus
-  /// handles.
+  ///   handles.
   ///
   /// # Returns
   ///

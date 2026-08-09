@@ -431,7 +431,7 @@ impl ActivityBar {
   /// # Parameters
   ///
   /// * `items` is the collection of activity items appended to the bottom
-  /// section.
+  ///   section.
   ///
   /// # Returns
   ///

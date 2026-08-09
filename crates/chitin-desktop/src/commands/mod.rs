@@ -62,7 +62,7 @@ impl From<WorkspaceCommand> for ChitinCommand {
   /// # Parameters
   ///
   /// * `command` is the workspace-scoped command to expose as a generic
-  /// [`ChitinCommand`].
+  ///   [`ChitinCommand`].
   ///
   /// # Returns
   ///
@@ -98,7 +98,7 @@ impl ChitinApp {
   ///
   /// * `command` is the typed command to execute.
   /// * `cx` is the GPUI app context used to notify the UI or spawn follow-up
-  /// work from command handlers.
+  ///   work from command handlers.
   ///
   /// # Returns
   ///
