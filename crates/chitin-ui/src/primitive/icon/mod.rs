@@ -3,7 +3,7 @@
 //! [`Icon`] deliberately has no interaction state, callbacks, or event stream.
 //! Compose it inside interactive primitives such as [`crate::primitive::button::Button`].
 
-use gpui::{IntoElement, Pixels, RenderOnce, Rgba, Styled, Window, svg};
+use gpui::{InteractiveElement, IntoElement, Pixels, RenderOnce, Rgba, Styled, Window, svg};
 
 use crate::themes::{UIThemes, builtins};
 
@@ -16,6 +16,7 @@ pub struct Icon {
   path: gpui::SharedString,
   size: Pixels,
   color: Option<Rgba>,
+  hover_color: Option<Rgba>,
   theme: UIThemes,
 }
 
@@ -26,6 +27,7 @@ impl Icon {
       path: path.into(),
       size: DEFAULT_ICON_SIZE,
       color: None,
+      hover_color: None,
       theme: builtins::dark(),
     }
   }
@@ -42,6 +44,12 @@ impl Icon {
     self
   }
 
+  /// Sets the icon color while the pointer hovers over it.
+  pub fn hover_color(mut self, color: Rgba) -> Self {
+    self.hover_color = Some(color);
+    self
+  }
+
   /// Sets the theme used for the default secondary text color.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
@@ -51,10 +59,16 @@ impl Icon {
 
 impl RenderOnce for Icon {
   fn render(self, _: &mut Window, _: &mut gpui::App) -> impl IntoElement {
-    svg()
+    let icon = svg()
       .path(self.path)
       .size(self.size)
-      .text_color(self.color.unwrap_or(self.theme.text.secondary))
+      .text_color(self.color.unwrap_or(self.theme.text.secondary));
+
+    if let Some(hover_color) = self.hover_color {
+      icon.hover(move |style| style.text_color(hover_color))
+    } else {
+      icon
+    }
   }
 }
 

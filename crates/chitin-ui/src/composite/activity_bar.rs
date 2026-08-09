@@ -8,8 +8,8 @@
 //! This module intentionally stays domain-neutral. It does not know about
 //! Chitin workspaces, molecules, docking jobs, or agents. Applications should
 //! map their own state into
-//! [`ActivityBarItem`](crate::composite::activity_bar::ActivityBarItem) values and keep selection,
-//! routing, permissions, and persistence outside this crate.
+//! [`ActivityBarItem`](crate::composite::activity_bar::ActivityBarItem) values
+//! and keep selection, routing, permissions, and persistence outside this crate.
 
 use gpui::{
   App, Entity, IntoElement, ParentElement, Pixels, RenderOnce, Rgba, SharedString, Window, div, prelude::*, px,
@@ -92,14 +92,6 @@ impl ActivityBarItem {
   }
 
   /// Returns this item's stable id.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A borrowed stable item identifier.
   pub fn id(&self) -> &SharedString {
     &self.id
   }
@@ -109,14 +101,6 @@ impl ActivityBarItem {
   /// The label is separate from the icon because compact activity bars often
   /// render only an icon while still needing descriptive text for tooltips,
   /// accessibility, command routing, and tests.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A borrowed human-readable label.
   pub fn label(&self) -> &SharedString {
     &self.label
   }
@@ -126,12 +110,6 @@ impl ActivityBarItem {
   /// Badges are intended for small counts or state markers, such as pending
   /// tasks, warnings, or background jobs. Keep badge text short so the activity
   /// bar remains narrow.
-  ///
-  /// # Parameters
-  ///
-  /// * `badge` is the short badge text to render over the activity item.
-  ///
-  /// # Returns
   ///
   /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn badge(mut self, badge: impl Into<SharedString>) -> Self {
@@ -143,14 +121,6 @@ impl ActivityBarItem {
   ///
   /// This is usually set by [`ActivityBar`] while it renders its children. It is
   /// public so callers can render individual activity items directly.
-  ///
-  /// # Parameters
-  ///
-  /// * `theme` is the UI theme used for colors in this item.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
     self
@@ -161,14 +131,6 @@ impl ActivityBarItem {
   /// Most callers should prefer [`ActivityBar::active_item`] over setting this
   /// manually. This method is public for direct rendering and advanced
   /// composition cases.
-  ///
-  /// # Parameters
-  ///
-  /// * `selected` controls whether selected styling is applied.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn selected(mut self, selected: bool) -> Self {
     self.selected = selected;
     self
@@ -178,29 +140,12 @@ impl ActivityBarItem {
   ///
   /// Disabled items are rendered with muted styling and do not attach click
   /// handlers.
-  ///
-  /// # Parameters
-  ///
-  /// * `disabled` controls whether the item can be clicked or hovered.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBarItem`] for builder chaining.
   pub fn disabled(mut self, disabled: bool) -> Self {
     self.disabled = disabled;
     self
   }
 
   /// Returns the text/icon color for the current item state.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, including theme, selected state, and disabled
-  /// state.
-  ///
-  /// # Returns
-  ///
-  /// The [`Rgba`] color to use for the item icon and related text.
   fn text_color(&self) -> Rgba {
     if self.disabled {
       self.theme.text.disabled
@@ -237,7 +182,7 @@ impl ActivityBarItem {
             .hover_background(theme.background.primary)
             .pressed_background(theme.background.active)
             .foreground(text_color)
-            .hover_foreground(theme.accent.primary)
+            .hover_foreground(theme.text.hover)
             .border(builtins::TRANSPARENT)
             .focus_border(builtins::TRANSPARENT),
         )
@@ -246,6 +191,7 @@ impl ActivityBarItem {
           Icon::new(icon_path)
             .theme(theme)
             .color(text_color)
+            .hover_color(theme.text.hover)
             .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH),
         ),
     );
@@ -314,14 +260,6 @@ pub struct ActivityBar {
 
 impl ActivityBar {
   /// Creates an empty activity bar with the default IDE-style width.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// An empty [`ActivityBar`] using the built-in dark theme.
   pub fn new() -> Self {
     Self {
       width: DEFAULT_ACTIVITY_BAR_WIDTH,
@@ -336,14 +274,6 @@ impl ActivityBar {
   ///
   /// Use this sparingly. A consistent activity bar width helps the surrounding
   /// application shell feel stable as panels open, close, and resize.
-  ///
-  /// # Parameters
-  ///
-  /// * `width` is the desired fixed bar width.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBar`] for builder chaining.
   pub fn width(mut self, width: Pixels) -> Self {
     self.width = width;
     self
@@ -353,14 +283,6 @@ impl ActivityBar {
   ///
   /// Components default to [`builtins::dark`], but callers can pass another
   /// [`UIThemes`] value to keep an application-wide theme consistent.
-  ///
-  /// # Parameters
-  ///
-  /// * `theme` supplies colors used by the bar and all contained items.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBar`] for builder chaining.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
     self
@@ -371,71 +293,30 @@ impl ActivityBar {
   /// The active item receives selected styling. The id is compared against
   /// [`ActivityBarItem::id`]. Selection state is deliberately passed in from the
   /// application so this component remains stateless and reusable.
-  ///
-  /// # Parameters
-  ///
-  /// * `id` is the item identifier that should receive selected styling.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBar`] for builder chaining.
   pub fn active_item(mut self, id: impl Into<SharedString>) -> Self {
     self.active_item_id = Some(id.into());
     self
   }
 
   /// Adds an item to the primary, top-aligned section.
-  ///
-  /// # Parameters
-  ///
-  /// * `item` is the activity item appended to the top section.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBar`] for builder chaining.
   pub fn item(mut self, item: ActivityBarItem) -> Self {
     self.items.push(item);
     self
   }
 
   /// Adds multiple items to the primary, top-aligned section.
-  ///
-  /// # Parameters
-  ///
-  /// * `items` is the collection of activity items appended to the top section.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBar`] for builder chaining.
   pub fn items(mut self, items: impl IntoIterator<Item = ActivityBarItem>) -> Self {
     self.items.extend(items);
     self
   }
 
   /// Adds an item to the secondary, bottom-aligned section.
-  ///
-  /// # Parameters
-  ///
-  /// * `item` is the activity item appended to the bottom section.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBar`] for builder chaining.
   pub fn bottom_item(mut self, item: ActivityBarItem) -> Self {
     self.bottom_items.push(item);
     self
   }
 
   /// Adds multiple items to the secondary, bottom-aligned section.
-  ///
-  /// # Parameters
-  ///
-  /// * `items` is the collection of activity items appended to the bottom
-  ///   section.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`ActivityBar`] for builder chaining.
   pub fn bottom_items(mut self, items: impl IntoIterator<Item = ActivityBarItem>) -> Self {
     self.bottom_items.extend(items);
     self
