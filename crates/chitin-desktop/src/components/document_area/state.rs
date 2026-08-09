@@ -6,12 +6,12 @@ use std::{
   rc::Rc,
 };
 
-use chitin_ui::components::{
-  panel::{
+use chitin_ui::{
+  composite::panel::{
     PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag, PanelTabDragState,
     PanelTabDropTarget, PanelTabId, PanelTabScrollState, PanelTree,
   },
-  resize::ResizeGesture,
+  primitive::resize::ResizeGesture,
 };
 use gpui::{AnyView, App, Pixels, Window};
 
@@ -92,7 +92,7 @@ impl OpenedProjectDocument {
   ///
   /// # Parameters
   ///
-  /// `path` is the workspace file path opened from the project tree.
+  /// * `path` is the workspace file path opened from the project tree.
   ///
   /// # Returns
   ///
@@ -114,7 +114,7 @@ impl WgpuDocumentViewFactory {
   ///
   /// # Parameters
   ///
-  /// `build` creates a fresh GPUI view from the current window and app context.
+  /// * `build` creates a fresh GPUI view from the current window and app context.
   ///
   /// # Returns
   ///
@@ -127,9 +127,8 @@ impl WgpuDocumentViewFactory {
   ///
   /// # Parameters
   ///
-  /// `window` owns the GPUI surface allocation API.
-  ///
-  /// `cx` creates the GPUI entity that renders the surface.
+  /// * `window` owns the GPUI surface allocation API.
+  /// * `cx` creates the GPUI entity that renders the surface.
   ///
   /// # Returns
   ///
@@ -160,7 +159,7 @@ impl DocumentPanelContent {
   ///
   /// # Parameters
   ///
-  /// `document` is the opened project file descriptor.
+  /// * `document` is the opened project file descriptor.
   ///
   /// # Returns
   ///
@@ -174,9 +173,8 @@ impl DocumentPanelContent {
   ///
   /// # Parameters
   ///
-  /// `title` is the tab-strip label for the WGPU panel.
-  ///
-  /// `view` is the GPUI entity that renders and owns WGPU interaction state.
+  /// * `title` is the tab-strip label for the WGPU panel.
+  /// * `view` is the GPUI entity that renders and owns WGPU interaction state.
   ///
   /// # Returns
   ///
@@ -227,7 +225,7 @@ impl DocumentPanelContent {
   ///
   /// # Parameters
   ///
-  /// `path` is the project path being opened or focused.
+  /// * `path` is the project path being opened or focused.
   ///
   /// # Returns
   ///
@@ -243,9 +241,8 @@ impl DocumentPanelContent {
   ///
   /// # Parameters
   ///
-  /// `window` owns any surface allocation required by WGPU payloads.
-  ///
-  /// `cx` creates any GPUI entities required by cloned payloads.
+  /// * `window` owns any surface allocation required by WGPU payloads.
+  /// * `cx` creates any GPUI entities required by cloned payloads.
   ///
   /// # Returns
   ///
@@ -289,7 +286,7 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `document` is the first document to show in the default root panel.
+  /// * `document` is the first document to show in the default root panel.
   ///
   /// # Returns
   ///
@@ -302,7 +299,7 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `content` is the first document-area payload to show in the root panel.
+  /// * `content` is the first document-area payload to show in the root panel.
   ///
   /// # Returns
   ///
@@ -332,7 +329,7 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `document` is the workspace file descriptor to focus or append.
+  /// * `document` is the workspace file descriptor to focus or append.
   ///
   /// # Returns
   ///
@@ -370,9 +367,8 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the document panel whose active tab should change.
-  ///
-  /// `tab_id` identifies the tab to activate.
+  /// * `panel_id` identifies the document panel whose active tab should change.
+  /// * `tab_id` identifies the tab to activate.
   ///
   /// # Returns
   ///
@@ -393,9 +389,8 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the document panel whose tab should close.
-  ///
-  /// `tab_id` identifies the tab to close.
+  /// * `panel_id` identifies the document panel whose tab should close.
+  /// * `tab_id` identifies the tab to close.
   ///
   /// # Returns
   ///
@@ -509,7 +504,7 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the panel whose active tab should be read.
+  /// * `panel_id` identifies the panel whose active tab should be read.
   ///
   /// # Returns
   ///
@@ -526,9 +521,8 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the source panel to split.
-  ///
-  /// `axis` controls whether the new split is horizontal or vertical.
+  /// * `panel_id` identifies the source panel to split.
+  /// * `axis` controls whether the new split is horizontal or vertical.
   ///
   /// # Returns
   ///
@@ -544,11 +538,9 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the source panel to split.
-  ///
-  /// `axis` controls whether the new split is horizontal or vertical.
-  ///
-  /// `active_content` is the independent payload to install in the new panel.
+  /// * `panel_id` identifies the source panel to split.
+  /// * `axis` controls whether the new split is horizontal or vertical.
+  /// * `active_content` is the independent payload to install in the new panel.
   ///
   /// # Returns
   ///
@@ -588,7 +580,7 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `drag` contains stable source identifiers, the original index, and title.
+  /// * `drag` contains stable source identifiers, the original index, and title.
   ///
   /// # Returns
   ///
@@ -615,8 +607,8 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `target` identifies the panel and raw visual insertion position under the
-  /// pointer.
+  /// * `target` identifies the panel and raw visual insertion position under the
+  ///   pointer.
   ///
   /// # Returns
   ///
@@ -670,9 +662,8 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `drag` is GPUI's stable payload for the released tab.
-  ///
-  /// `target_panel_id` identifies the tab strip that accepted the drop.
+  /// * `drag` is GPUI's stable payload for the released tab.
+  /// * `target_panel_id` identifies the tab strip that accepted the drop.
   ///
   /// # Returns
   ///
@@ -713,12 +704,10 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `path` identifies the split node whose handle was pressed.
-  ///
-  /// `axis` controls whether horizontal or vertical pointer movement is used.
-  ///
-  /// `start_position` is the cursor position on the resize axis where the drag
-  /// began.
+  /// * `path` identifies the split node whose handle was pressed.
+  /// * `axis` controls whether horizontal or vertical pointer movement is used.
+  /// * `start_position` is the cursor position on the resize axis where the drag
+  ///   began.
   ///
   /// # Returns
   ///
@@ -741,11 +730,9 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `current_position` is the latest cursor position on the resize axis.
-  ///
-  /// `root_width` is the rendered width available to the document panel root.
-  ///
-  /// `root_height` is the rendered height available to the document panel root.
+  /// * `current_position` is the latest cursor position on the resize axis.
+  /// * `root_width` is the rendered width available to the document panel root.
+  /// * `root_height` is the rendered height available to the document panel root.
   ///
   /// # Returns
   ///
@@ -830,7 +817,7 @@ impl DocumentPanelState {
   ///
   /// # Parameters
   ///
-  /// `offset` is `-1` for previous or `1` for next.
+  /// * `offset` is `-1` for previous or `1` for next.
   ///
   /// # Returns
   ///

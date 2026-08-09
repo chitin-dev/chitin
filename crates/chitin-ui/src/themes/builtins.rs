@@ -12,7 +12,7 @@ use vscode_modern::{dark, light};
 ///
 /// # Parameters
 ///
-/// `hex` is a `0xRRGGBB` color value.
+/// * `hex` is a `0xRRGGBB` color value.
 ///
 /// # Returns
 ///
@@ -30,7 +30,7 @@ const fn rgb_const(hex: u32) -> gpui::Rgba {
 ///
 /// # Parameters
 ///
-/// `hex` is a `0xRRGGBBAA` color value.
+/// * `hex` is a `0xRRGGBBAA` color value.
 ///
 /// # Returns
 ///

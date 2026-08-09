@@ -18,8 +18,8 @@ impl AssetSource for DesktopAssets {
   ///
   /// # Parameters
   ///
-  /// `path` is the asset-relative path requested by GPUI, such as an icon path
-  /// under `assets/icons`.
+  /// * `path` is the asset-relative path requested by GPUI, such as an icon path
+  ///   under `assets/icons`.
   ///
   /// # Returns
   ///
@@ -35,7 +35,7 @@ impl AssetSource for DesktopAssets {
   ///
   /// # Parameters
   ///
-  /// `path` is the asset-relative directory path requested by GPUI.
+  /// * `path` is the asset-relative directory path requested by GPUI.
   ///
   /// # Returns
   ///
@@ -66,7 +66,7 @@ impl AssetSource for DesktopAssets {
 /// # Parameters
 ///
 /// This function takes no Rust parameters. It reads process arguments through
-/// `std::env::args_os`.
+/// * `std::env::args_os`.
 ///
 /// # Returns
 ///

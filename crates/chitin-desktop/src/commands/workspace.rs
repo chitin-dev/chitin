@@ -192,10 +192,9 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `command` is the workspace command to execute.
-  ///
-  /// `cx` is the GPUI app context used by tree navigation to notify the UI and
-  /// spawn lazy directory loading when needed.
+  /// * `command` is the workspace command to execute.
+  /// * `cx` is the GPUI app context used by tree navigation to notify the UI and
+  ///   spawn lazy directory loading when needed.
   ///
   /// # Returns
   ///

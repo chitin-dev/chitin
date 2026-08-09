@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use chitin_ui::{
-  components::{
+  composite::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
     panel::{PanelSplitAxis, PanelTabDrag},
     window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
@@ -21,11 +21,11 @@ use gpui::{
 use crate::{
   commands::{application::ToggleCommandPanel, workspace::ToggleWorkspace},
   components::{
-    activity_bar::{ActiveActivity, render_activity_bar},
+    activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
     document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
-    window_bar::render_window_bar,
+    window_bar::{WindowBarControls, render_window_bar},
   },
 };
 
@@ -51,6 +51,10 @@ pub struct ChitinApp {
   pub(crate) project_sidebar_visible: bool,
   /// Searchable command panel state, metadata, and focus ownership.
   pub(crate) command_panel: CommandPanelController,
+  /// Primitive button state for platform window actions.
+  pub(crate) window_bar_controls: Option<WindowBarControls>,
+  /// Primitive button state for activity-bar navigation controls.
+  pub(crate) activity_bar_controls: Option<ActivityBarControls>,
 }
 
 impl ChitinApp {
@@ -63,8 +67,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `project_path` is the filesystem path to open as the initial workspace.
-  /// When it is `None`, the process current directory is used.
+  /// * `project_path` is the filesystem path to open as the initial workspace.
+  ///   When it is `None`, the process current directory is used.
   ///
   /// # Returns
   ///
@@ -120,6 +124,8 @@ impl ChitinApp {
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
+      window_bar_controls: None,
+      activity_bar_controls: None,
     }
   }
 
@@ -130,11 +136,10 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `project_path` is forwarded to [`ChitinApp::new`] as the initial
-  /// workspace path.
-  ///
-  /// `project_sidebar_focus` is the GPUI focus handle tracked by the project
-  /// sidebar key context.
+  /// * `project_path` is forwarded to [`ChitinApp::new`] as the initial
+  ///   workspace path.
+  /// * `project_sidebar_focus` is the GPUI focus handle tracked by the project
+  ///   sidebar key context.
   ///
   /// # Returns
   ///
@@ -150,17 +155,13 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `project_path` is forwarded to [`ChitinApp::new`] as the initial
-  /// workspace path.
-  ///
-  /// `project_sidebar_focus` is the GPUI focus handle tracked by the project
-  /// sidebar key context.
-  ///
-  /// `title` is the document tab title used for the WGPU viewport.
-  ///
-  /// `wgpu_panel` is the GPUI view that renders WGPU content.
-  ///
-  /// `clone_wgpu_panel` creates independent WGPU views for split panels.
+  /// * `project_path` is forwarded to [`ChitinApp::new`] as the initial
+  ///   workspace path.
+  /// * `project_sidebar_focus` is the GPUI focus handle tracked by the project
+  ///   sidebar key context.
+  /// * `title` is the document tab title used for the WGPU viewport.
+  /// * `wgpu_panel` is the GPUI view that renders WGPU content.
+  /// * `clone_wgpu_panel` creates independent WGPU views for split panels.
   ///
   /// # Returns
   ///
@@ -188,7 +189,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `cx` is the GPUI context used to allocate a focus handle when none exists.
+  /// * `cx` is the GPUI context used to allocate a focus handle when none exists.
   ///
   /// # Returns
   ///
@@ -208,7 +209,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `cx` is the GPUI context used to allocate a focus handle when none exists.
+  /// * `cx` is the GPUI context used to allocate a focus handle when none exists.
   ///
   /// # Returns
   ///
@@ -225,7 +226,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `cx` is the GPUI context used to allocate a focus handle when none exists.
+  /// * `cx` is the GPUI context used to allocate a focus handle when none exists.
   ///
   /// # Returns
   ///
@@ -245,7 +246,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `cx` is the GPUI context notified after the workbench state changes.
+  /// * `cx` is the GPUI context notified after the workbench state changes.
   ///
   /// # Returns
   ///
@@ -259,7 +260,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `cx` is notified after panel visibility changes.
+  /// * `cx` is notified after panel visibility changes.
   ///
   /// # Returns
   ///
@@ -280,9 +281,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `window` is the GPUI window whose keyboard focus should be updated.
-  ///
-  /// `cx` is the GPUI context notified after the workbench state changes.
+  /// * `window` is the GPUI window whose keyboard focus should be updated.
+  /// * `cx` is the GPUI context notified after the workbench state changes.
   ///
   /// # Returns
   ///
@@ -305,7 +305,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `cx` is the GPUI context used to lazily allocate focus handles.
+  /// * `cx` is the GPUI context used to lazily allocate focus handles.
   ///
   /// # Returns
   ///
@@ -344,10 +344,9 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `window_width` is the full GPUI window width.
-  ///
-  /// `visible_sidebar_width` is the current width occupied by an open sidebar,
-  /// or zero when no sidebar is visible.
+  /// * `window_width` is the full GPUI window width.
+  /// * `visible_sidebar_width` is the current width occupied by an open sidebar,
+  ///   or zero when no sidebar is visible.
   ///
   /// # Returns
   ///
@@ -363,7 +362,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `window_height` is the full GPUI window height.
+  /// * `window_height` is the full GPUI window height.
   ///
   /// # Returns
   ///
@@ -371,6 +370,30 @@ impl ChitinApp {
   /// the window bar.
   fn document_panel_root_height(window_height: gpui::Pixels) -> gpui::Pixels {
     gpui::px((f32::from(window_height) - f32::from(DEFAULT_WINDOW_BAR_HEIGHT)).max(0.0))
+  }
+
+  /// Returns persistent primitive button state for platform window controls.
+  fn window_bar_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> WindowBarControls {
+    if let Some(controls) = self.window_bar_controls.as_ref() {
+      return controls.clone();
+    }
+
+    let controls = WindowBarControls::new(cx);
+    controls.subscribe(window, cx);
+    self.window_bar_controls = Some(controls.clone());
+    controls
+  }
+
+  /// Returns persistent primitive button state for activity-bar controls.
+  fn activity_bar_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> ActivityBarControls {
+    if let Some(controls) = self.activity_bar_controls.as_ref() {
+      return controls.clone();
+    }
+
+    let controls = ActivityBarControls::new(cx);
+    controls.subscribe(window, cx);
+    self.activity_bar_controls = Some(controls.clone());
+    controls
   }
 }
 
@@ -384,21 +407,22 @@ impl Render for ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `_window` is the GPUI window being rendered. The current implementation
-  /// does not need it directly.
-  ///
-  /// `cx` is the GPUI render context used to access the app entity and focus
-  /// handles.
+  /// * `window` is the GPUI window used to register platform window controls.
+  /// * `cx` is the GPUI render context used to access the app entity and focus
+  ///   handles.
   ///
   /// # Returns
   ///
   /// A GPUI element tree for the current Chitin desktop frame.
-  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
     if !cx.has_active_drag() {
       self.cancel_document_panel_tab_drag();
     }
 
     let theme = builtins::dark();
+    let window_bar_controls = self.window_bar_controls(window, cx);
+    let activity_bar_controls = self.activity_bar_controls(window, cx);
+    let command_panel_search_input = self.command_panel_search_input(window, cx);
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
@@ -501,13 +525,13 @@ impl Render for ChitinApp {
           });
         }
       })
-      .child(render_window_bar(theme, cx))
+      .child(render_window_bar(theme, window_bar_controls))
       .child(
         div()
           .flex()
           .flex_1()
           .min_h_0()
-          .child(render_activity_bar(self.active_activity, theme, cx))
+          .child(render_activity_bar(self.active_activity, theme, activity_bar_controls))
           .when(
             self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible,
             |layout| {
@@ -529,7 +553,13 @@ impl Render for ChitinApp {
           )),
       )
       .when(self.command_panel.is_open(), |layout| {
-        layout.child(render_command_panel(&mut self.command_panel, theme, app, cx))
+        layout.child(render_command_panel(
+          &mut self.command_panel,
+          theme,
+          app,
+          cx,
+          command_panel_search_input,
+        ))
       })
   }
 }

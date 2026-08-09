@@ -40,7 +40,7 @@ impl RcsbClient {
   ///
   /// # Parameters
   ///
-  /// `runtime` is shared by all provider clients from the top-level client.
+  /// * `runtime` is shared by all provider clients from the top-level client.
   ///
   /// # Returns
   ///
@@ -56,9 +56,8 @@ impl RcsbClient {
   ///
   /// # Parameters
   ///
-  /// `id` identifies the RCSB PDB entry.
-  ///
-  /// `format` selects PDB or mmCIF raw content.
+  /// * `id` identifies the RCSB PDB entry.
+  /// * `format` selects PDB or mmCIF raw content.
   ///
   /// # Returns
   ///
@@ -92,7 +91,7 @@ impl RcsbClient {
   ///
   /// # Parameters
   ///
-  /// `id` identifies the RCSB PDB entry.
+  /// * `id` identifies the RCSB PDB entry.
   ///
   /// # Returns
   ///
@@ -127,7 +126,7 @@ impl RcsbClient {
 ///
 /// # Parameters
 ///
-/// `format` is the requested structure file format.
+/// * `format` is the requested structure file format.
 ///
 /// # Returns
 ///
@@ -143,9 +142,8 @@ fn artifact_format(format: StructureFormat) -> ArtifactFormat {
 ///
 /// # Parameters
 ///
-/// `response` is the provider response.
-///
-/// `id` is the requested PDB identifier.
+/// * `response` is the provider response.
+/// * `id` is the requested PDB identifier.
 ///
 /// # Returns
 ///
@@ -168,9 +166,8 @@ fn map_status(response: HttpResponse, id: &PdbId) -> Result<HttpResponse, RcsbEr
 ///
 /// # Parameters
 ///
-/// `dto` is the decoded RCSB wire response.
-///
-/// `provenance` records request and response metadata.
+/// * `dto` is the decoded RCSB wire response.
+/// * `provenance` records request and response metadata.
 ///
 /// # Returns
 ///

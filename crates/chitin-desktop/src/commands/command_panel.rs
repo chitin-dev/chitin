@@ -96,11 +96,9 @@ impl CommandShortcut {
   ///
   /// # Parameters
   ///
-  /// `keystrokes` is the GPUI keybinding syntax.
-  ///
-  /// `label` is the command-panel display text.
-  ///
-  /// `context` limits dispatch to a GPUI key context when present.
+  /// * `keystrokes` is the GPUI keybinding syntax.
+  /// * `label` is the command-panel display text.
+  /// * `context` limits dispatch to a GPUI key context when present.
   ///
   /// # Returns
   ///
@@ -117,7 +115,7 @@ impl CommandShortcut {
   ///
   /// # Parameters
   ///
-  /// `action` is the GPUI action dispatched by this shortcut.
+  /// * `action` is the GPUI action dispatched by this shortcut.
   ///
   /// # Returns
   ///
@@ -131,7 +129,7 @@ impl CommandShortcut {
 ///
 /// # Parameters
 ///
-/// `shortcuts` is the shortcut collection owned by a command module.
+/// * `shortcuts` is the shortcut collection owned by a command module.
 ///
 /// # Returns
 ///
@@ -163,7 +161,7 @@ impl CommandRegistry {
   ///
   /// # Parameters
   ///
-  /// `command` is the typed command payload to locate.
+  /// * `command` is the typed command payload to locate.
   ///
   /// # Returns
   ///
@@ -176,7 +174,7 @@ impl CommandRegistry {
   ///
   /// # Parameters
   ///
-  /// `query` is the user-entered search text.
+  /// * `query` is the user-entered search text.
   ///
   /// # Returns
   ///
@@ -203,16 +201,15 @@ impl CommandRegistry {
   ///
   /// # Parameters
   ///
-  /// `descriptor` is appended to the registry.
+  /// * `descriptor` is appended to the registry.
   fn register(&mut self, descriptor: CommandDescriptor) {
     self.commands.push(descriptor);
   }
 
   /// Registers a descriptor collection.
-  ///
   /// # Parameters
   ///
-  /// `descriptors` is the command metadata collection to append.
+  /// * `descriptors` is the command metadata collection to append.
   fn register_many(&mut self, descriptors: impl IntoIterator<Item = CommandDescriptor>) {
     descriptors.into_iter().for_each(|descriptor| self.register(descriptor));
   }
@@ -226,12 +223,10 @@ impl Default for CommandRegistry {
 }
 
 /// Scores one command descriptor against a normalized query.
-///
 /// # Parameters
 ///
-/// `descriptor` is the command being scored.
-///
-/// `query` is the normalized query.
+/// * `descriptor` is the command being scored.
+/// * `query` is the normalized query.
 ///
 /// # Returns
 ///
@@ -276,7 +271,7 @@ fn score_descriptor(descriptor: &CommandDescriptor, query: &str) -> Option<i32> 
 ///
 /// # Parameters
 ///
-/// `value` is the string to normalize.
+/// * `value` is the string to normalize.
 ///
 /// # Returns
 ///

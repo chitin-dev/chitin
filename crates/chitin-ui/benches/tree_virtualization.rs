@@ -5,7 +5,7 @@
 //! flattened rows from the cost of selecting the viewport rows that a virtual
 //! list asks the component to render.
 
-use chitin_ui::components::tree::{TreeItemRow, TreeMessageRow, TreeRow};
+use chitin_ui::primitive::tree::{TreeItemRow, TreeMessageRow, TreeRow};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 const VIEWPORT_ROW_COUNT: usize = 48;
@@ -22,10 +22,9 @@ struct BenchTreePayload {
 ///
 /// This approximates a wide directory such as generated output folders or
 /// package dependency trees where one expanded node owns many direct children.
-///
 /// # Parameters
 ///
-/// `visible_leaf_count` is the number of leaf rows appended under the root.
+/// * `visible_leaf_count` is the number of leaf rows appended under the root.
 ///
 /// # Returns
 ///
@@ -63,9 +62,8 @@ fn flat_rows(visible_leaf_count: usize) -> Vec<TreeRow<BenchTreePayload>> {
 ///
 /// # Parameters
 ///
-/// `group_count` is the number of expanded group rows under the root.
-///
-/// `leaves_per_group` is the number of leaf rows appended under each group.
+/// * `group_count` is the number of expanded group rows under the root.
+/// * `leaves_per_group` is the number of leaf rows appended under each group.
 ///
 /// # Returns
 ///
@@ -119,9 +117,8 @@ fn grouped_rows(group_count: usize, leaves_per_group: usize) -> Vec<TreeRow<Benc
 ///
 /// # Parameters
 ///
-/// `rows` is the mutable row collection receiving the message row.
-///
-/// `depth` is the visual nesting depth assigned to the message row.
+/// * `rows` is the mutable row collection receiving the message row.
+/// * `depth` is the visual nesting depth assigned to the message row.
 ///
 /// # Returns
 ///
@@ -140,11 +137,9 @@ fn append_message_row(rows: &mut Vec<TreeRow<BenchTreePayload>>, depth: usize) {
 ///
 /// # Parameters
 ///
-/// `rows` is the flattened row slice to select from.
-///
-/// `start` is the first requested row index.
-///
-/// `count` is the maximum number of rows requested for the viewport.
+/// * `rows` is the flattened row slice to select from.
+/// * `start` is the first requested row index.
+/// * `count` is the maximum number of rows requested for the viewport.
 ///
 /// # Returns
 ///
@@ -166,7 +161,7 @@ fn collect_viewport_rows(
 ///
 /// # Parameters
 ///
-/// `c` is Criterion's benchmark context.
+/// * `c` is Criterion's benchmark context.
 ///
 /// # Returns
 ///
@@ -224,7 +219,7 @@ fn bench_visible_row_construction(c: &mut Criterion) {
 ///
 /// # Parameters
 ///
-/// `c` is Criterion's benchmark context.
+/// * `c` is Criterion's benchmark context.
 ///
 /// # Returns
 ///

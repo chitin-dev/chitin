@@ -82,9 +82,8 @@ impl crate::app::ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `command` is the application command to execute.
-  ///
-  /// `cx` is the GPUI app context notified when state changes.
+  /// * `command` is the application command to execute.
+  /// * `cx` is the GPUI app context notified when state changes.
   pub(crate) fn dispatch_application_command(&mut self, command: ApplicationCommand, cx: &mut gpui::Context<Self>) {
     match command {
       ApplicationCommand::ToggleCommandPanel => self.toggle_command_panel(cx),

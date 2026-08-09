@@ -1,6 +1,6 @@
 //! Document panel command adapters for the desktop app.
 
-use chitin_ui::components::panel::{
+use chitin_ui::composite::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
 use gpui::{Context, Pixels, Window};
@@ -16,7 +16,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `document` is the file descriptor created from a project tree entry.
+  /// * `document` is the file descriptor created from a project tree entry.
   ///
   /// # Returns
   ///
@@ -31,9 +31,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the document panel to split.
-  ///
-  /// `axis` controls the orientation of the new split.
+  /// * `panel_id` identifies the document panel to split.
+  /// * `axis` controls the orientation of the new split.
   ///
   /// # Returns
   ///
@@ -59,9 +58,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the document panel that owns the tab.
-  ///
-  /// `tab_id` identifies the tab to activate.
+  /// * `panel_id` identifies the document panel that owns the tab.
+  /// * `tab_id` identifies the tab to activate.
   ///
   /// # Returns
   ///
@@ -74,9 +72,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the document panel that owns the tab.
-  ///
-  /// `tab_id` identifies the tab to close.
+  /// * `panel_id` identifies the document panel that owns the tab.
+  /// * `tab_id` identifies the tab to close.
   ///
   /// # Returns
   ///
@@ -129,7 +126,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `drag` identifies the source panel, tab, index, and preview title.
+  /// * `drag` identifies the source panel, tab, index, and preview title.
   ///
   /// # Returns
   ///
@@ -142,7 +139,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `target` identifies a valid panel tab strip and raw insertion index.
+  /// * `target` identifies a valid panel tab strip and raw insertion index.
   ///
   /// # Returns
   ///
@@ -168,9 +165,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `drag` is the stable GPUI drag payload.
-  ///
-  /// `target_panel_id` identifies the strip accepting the drop.
+  /// * `drag` is the stable GPUI drag payload.
+  /// * `target_panel_id` identifies the strip accepting the drop.
   ///
   /// # Returns
   ///
@@ -197,12 +193,10 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `path` identifies the split node whose handle was pressed.
-  ///
-  /// `axis` controls whether horizontal or vertical pointer movement is used.
-  ///
-  /// `start_position` is the cursor position on the resize axis where the drag
-  /// began.
+  /// * `path` identifies the split node whose handle was pressed.
+  /// * `axis` controls whether horizontal or vertical pointer movement is used.
+  /// * `start_position` is the cursor position on the resize axis where the drag
+  ///   began.
   ///
   /// # Returns
   ///
@@ -221,12 +215,10 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `current_position` is the latest cursor position on the active resize
-  /// axis.
-  ///
-  /// `root_width` is the rendered width available to the document panel root.
-  ///
-  /// `root_height` is the rendered height available to the document panel root.
+  /// * `current_position` is the latest cursor position on the active resize
+  ///   axis.
+  /// * `root_width` is the rendered width available to the document panel root.
+  /// * `root_height` is the rendered height available to the document panel root.
   ///
   /// # Returns
   ///

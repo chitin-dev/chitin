@@ -1,6 +1,7 @@
 //! Desktop-owned command-panel state and focus management.
 
-use gpui::{Context, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
+use chitin_ui::primitive::input::text::TextInputState;
+use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
 
 use crate::{
   app::ChitinApp,
@@ -41,10 +42,12 @@ pub(crate) struct CommandPanelController {
   selected_index: usize,
   /// Scroll handle for the virtualized command result list.
   result_scroll: UniformListScrollHandle,
+  /// Primitive text-input state for quick-pick search.
+  search_input: Option<Entity<TextInputState>>,
+  /// Whether desktop routing has subscribed to search input events.
+  search_input_subscribed: bool,
   /// Current panel interaction mode.
   mode: CommandPanelMode,
-  /// Focus handle tracked by the rendered quick-pick overlay.
-  focus: Option<FocusHandle>,
   /// Focus target active before the overlay opened.
   previous_focus: Option<FocusHandle>,
 }
@@ -66,98 +69,74 @@ impl CommandPanelController {
       query: String::new(),
       selected_index: 0,
       result_scroll: UniformListScrollHandle::new(),
+      search_input: None,
+      search_input_subscribed: false,
       mode: CommandPanelMode::Search,
-      focus: None,
       previous_focus: None,
     }
   }
 
   /// Returns whether the command panel is visible.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the quick-pick overlay should render.
   pub(crate) fn is_open(&self) -> bool {
     self.is_open
   }
 
   /// Returns the current command metadata registry.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// The registry used for command lookup and search.
   pub(crate) fn registry(&self) -> &CommandRegistry {
     &self.registry
   }
 
   /// Returns the active panel interaction mode.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// Search mode or the identity of the command whose form is open.
   pub(crate) fn mode(&self) -> &CommandPanelMode {
     &self.mode
   }
 
   /// Returns the current search text or form input.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// The current input line.
   pub(crate) fn query(&self) -> &str {
     &self.query
   }
 
   /// Returns the selected command result index.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// The zero-based selected search result index.
   pub(crate) fn selected_index(&self) -> usize {
     self.selected_index
   }
 
   /// Returns the scroll handle for command result virtualization.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// A cloned GPUI uniform-list handle for the rendered command rows.
   pub(crate) fn result_scroll_handle(&self) -> UniformListScrollHandle {
     self.result_scroll.clone()
   }
 
+  /// Returns persistent primitive state for the quick-pick search input.
+  pub(crate) fn search_input(&mut self, cx: &mut Context<ChitinApp>) -> Entity<TextInputState> {
+    self
+      .search_input
+      .get_or_insert_with(|| cx.new(TextInputState::new))
+      .clone()
+  }
+
+  /// Marks the search input's desktop event subscription as installed.
+  pub(crate) fn take_search_input_subscription(&mut self) -> bool {
+    if self.search_input_subscribed {
+      return false;
+    }
+
+    self.search_input_subscribed = true;
+    true
+  }
+
+  /// Updates the query after a primitive text-input change event.
+  pub(crate) fn set_query(&mut self, query: impl Into<String>) {
+    self.query = query.into();
+    self.selected_index = 0;
+    self.reveal_selected(ScrollStrategy::Top);
+  }
+
+  /// Resolves the current search selection or form value into a panel event.
+  pub(crate) fn submit_current(&self) -> CommandPanelEvent {
+    self.submit()
+  }
+
   /// Returns the descriptor for the command whose form is open.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state and command registry.
-  ///
-  /// # Returns
-  ///
   /// The form command descriptor when the current mode identifies one.
   pub(crate) fn form_descriptor(&self) -> Option<&CommandDescriptor> {
     let CommandPanelMode::Form(command) = &self.mode else {
@@ -166,26 +145,12 @@ impl CommandPanelController {
     self.registry.descriptor_for(command)
   }
 
-  /// Returns the focus handle tracked by the command-panel overlay.
-  ///
-  /// # Parameters
-  ///
-  /// `cx` allocates the handle if the overlay has not rendered before.
-  ///
-  /// # Returns
-  ///
-  /// A cloned focus handle for the quick-pick overlay.
-  pub(crate) fn focus_handle(&mut self, cx: &mut Context<ChitinApp>) -> FocusHandle {
-    self.focus.get_or_insert_with(|| cx.focus_handle()).clone()
-  }
-
   /// Opens the command panel and focuses its overlay.
   ///
   /// # Parameters
   ///
-  /// `window` supplies the focus snapshot and receives the focus request.
-  ///
-  /// `cx` allocates the overlay focus handle when necessary.
+  /// * `window` supplies the focus snapshot and receives the focus request.
+  /// * `cx` allocates the overlay focus handle when necessary.
   ///
   /// # Returns
   ///
@@ -197,7 +162,11 @@ impl CommandPanelController {
 
     self.reset_for_open();
     self.previous_focus = window.focused(cx);
-    let focus = self.focus_handle(cx);
+    let search_input = self.search_input(cx);
+    search_input.update(cx, |state, cx| {
+      state.set_text("", cx);
+    });
+    let focus = search_input.read(cx).focus_handle().clone();
     window.focus(&focus, cx);
     true
   }
@@ -206,9 +175,8 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `window` supplies focus state for opening and closing.
-  ///
-  /// `cx` allocates or restores GPUI focus handles.
+  /// * `window` supplies focus state for opening and closing.
+  /// * `cx` allocates or restores GPUI focus handles.
   ///
   /// # Returns
   ///
@@ -247,9 +215,8 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `window` receives the focus restoration request.
-  ///
-  /// `cx` is used by GPUI focus APIs.
+  /// * `window` receives the focus restoration request.
+  /// * `cx` is used by GPUI focus APIs.
   ///
   /// # Returns
   ///
@@ -261,6 +228,11 @@ impl CommandPanelController {
 
     self.is_open = false;
     self.query.clear();
+    if let Some(search_input) = self.search_input.as_ref() {
+      search_input.update(cx, |state, cx| {
+        state.set_text("", cx);
+      });
+    }
     self.selected_index = 0;
     self.mode = CommandPanelMode::Search;
     if let Some(previous_focus) = self.previous_focus.take() {
@@ -273,7 +245,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `command` identifies the command that owns the form metadata.
+  /// * `command` identifies the command that owns the form metadata.
   ///
   /// # Returns
   ///
@@ -294,7 +266,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI key event received by the workbench root.
+  /// * `event` is the GPUI key event received by the workbench root.
   ///
   /// # Returns
   ///
@@ -304,6 +276,23 @@ impl CommandPanelController {
       return None;
     }
 
+    if self.mode == CommandPanelMode::Search {
+      return self.handle_search_key(event);
+    }
+
+    self.handle_form_key(event)
+  }
+
+  /// Handles navigation keys while the search input owns query editing.
+  ///
+  /// # Parameters
+  ///
+  /// * `event` is the GPUI key event received by the workbench root.
+  ///
+  /// # Returns
+  ///
+  /// A panel event for navigation or cancellation, or `None` for text editing.
+  fn handle_search_key(&mut self, event: &KeyDownEvent) -> Option<CommandPanelEvent> {
     match event.keystroke.key.as_str() {
       "escape" => Some(CommandPanelEvent::Close),
       "up" => {
@@ -316,6 +305,24 @@ impl CommandPanelController {
         self.reveal_selected(ScrollStrategy::Bottom);
         Some(CommandPanelEvent::StateChanged)
       }
+      // TextInputState owns Search-mode typing, deletion, cursor movement,
+      // and submission. It reports changes through TextInputEvent.
+      _ => None,
+    }
+  }
+
+  /// Handles form-mode keys until forms use a dedicated primitive input.
+  ///
+  /// # Parameters
+  ///
+  /// * `event` is the GPUI key event received by the workbench root.
+  ///
+  /// # Returns
+  ///
+  /// A panel event for form edits, submission, or cancellation.
+  fn handle_form_key(&mut self, event: &KeyDownEvent) -> Option<CommandPanelEvent> {
+    match event.keystroke.key.as_str() {
+      "escape" => Some(CommandPanelEvent::Close),
       "enter" => Some(self.submit()),
       "backspace" => {
         self.query.pop();
@@ -391,7 +398,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `strategy` controls which viewport edge GPUI should use when scrolling is needed.
+  /// * `strategy` controls which viewport edge GPUI should use when scrolling is needed.
   ///
   /// # Returns
   ///
@@ -436,7 +443,7 @@ impl Default for CommandPanelController {
 ///
 /// # Parameters
 ///
-/// `event` is the key event received by the command panel.
+/// * `event` is the key event received by the command panel.
 ///
 /// # Returns
 ///
@@ -456,6 +463,18 @@ fn printable_character(event: &KeyDownEvent) -> Option<&str> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use gpui::Keystroke;
+
+  fn key_down(key: &str) -> KeyDownEvent {
+    KeyDownEvent {
+      keystroke: Keystroke {
+        key: key.to_owned(),
+        ..Default::default()
+      },
+      is_held: false,
+      prefer_character_input: false,
+    }
+  }
 
   #[test]
   fn reset_for_open_should_clear_query_and_selection() {
@@ -478,5 +497,26 @@ mod tests {
 
     assert!(controller.open_form(command.clone()));
     assert_eq!(controller.mode, CommandPanelMode::Form(command));
+  }
+
+  #[test]
+  fn set_query_should_reset_result_selection() {
+    let mut controller = CommandPanelController::new();
+    controller.selected_index = 3;
+
+    controller.set_query("workspace");
+
+    assert_eq!(controller.query(), "workspace");
+    assert_eq!(controller.selected_index(), 0);
+  }
+
+  #[test]
+  fn search_backspace_should_not_mutate_query_outside_text_input() {
+    let mut controller = CommandPanelController::new();
+    controller.is_open = true;
+    controller.set_query("workspace");
+
+    assert_eq!(controller.handle_key(&key_down("backspace")), None);
+    assert_eq!(controller.query(), "workspace");
   }
 }

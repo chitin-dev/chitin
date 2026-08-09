@@ -38,8 +38,8 @@ impl ChitinCommand {
   /// command palette, status-bar command input, keybinding file, or plugin API.
   /// Internal desktop code should prefer dispatching the typed enum variant
   /// instead of parsing this string.
-  ///
   /// # Parameters
+  ///
   ///
   /// This method reads `self`, the typed command value whose external ID is
   /// requested.
@@ -61,8 +61,8 @@ impl From<WorkspaceCommand> for ChitinCommand {
   ///
   /// # Parameters
   ///
-  /// `command` is the workspace-scoped command to expose as a generic
-  /// [`ChitinCommand`].
+  /// * `command` is the workspace-scoped command to expose as a generic
+  ///   [`ChitinCommand`].
   ///
   /// # Returns
   ///
@@ -96,10 +96,9 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `command` is the typed command to execute.
-  ///
-  /// `cx` is the GPUI app context used to notify the UI or spawn follow-up
-  /// work from command handlers.
+  /// * `command` is the typed command to execute.
+  /// * `cx` is the GPUI app context used to notify the UI or spawn follow-up
+  ///   work from command handlers.
   ///
   /// # Returns
   ///

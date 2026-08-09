@@ -1,3 +1,5 @@
+//! Integration coverage for the RCSB PDB database provider.
+
 use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;

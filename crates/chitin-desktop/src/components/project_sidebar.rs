@@ -9,13 +9,16 @@ use std::{
 };
 
 use chitin_ui::{
-  components::sidebar::{
-    Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
+  primitive::{
+    sidebar::{
+      Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
+    },
+    tree::TreeState,
   },
   themes::UIThemes,
 };
 use chitin_utils::workspace::ProjectWorkspace;
-use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, UniformListScrollHandle, div, prelude::*};
+use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, div, prelude::*};
 
 use crate::{
   app::ChitinApp,
@@ -47,8 +50,8 @@ pub struct ProjectSidebarState {
   pub selected_path: Option<PathBuf>,
   /// Workspace tree entry focused for keyboard navigation.
   pub focused_path: Option<PathBuf>,
-  /// Scroll handle for keeping keyboard-focused workspace tree rows visible.
-  pub tree_scroll: UniformListScrollHandle,
+  /// Virtualized workspace tree scroll state.
+  pub tree: TreeState,
   /// Generic resize state for the project sidebar shell.
   pub resize: SidebarResizeState,
 }
@@ -58,7 +61,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `root` is the optional workspace root path to mark as expanded.
+  /// * `root` is the optional workspace root path to mark as expanded.
   ///
   /// # Returns
   ///
@@ -70,7 +73,7 @@ impl ProjectSidebarState {
       loading_paths: HashSet::new(),
       selected_path: None,
       focused_path: None,
-      tree_scroll: UniformListScrollHandle::new(),
+      tree: TreeState::new(),
       resize: SidebarResizeState::default(),
     }
   }
@@ -79,7 +82,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path to store as the selected project entry.
+  /// * `path` is the filesystem path to store as the selected project entry.
   ///
   /// # Returns
   ///
@@ -92,7 +95,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path to store as the focused project entry.
+  /// * `path` is the filesystem path to store as the focused project entry.
   ///
   /// # Returns
   ///
@@ -105,24 +108,23 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `row_index` is the zero-based index in the rendered virtual tree row
-  /// list, including non-focusable message rows.
-  ///
-  /// `strategy` controls which viewport edge should be used when the row is
-  /// outside the visible range.
+  /// * `row_index` is the zero-based index in the rendered virtual tree row
+  ///   list, including non-focusable message rows.
+  /// * `strategy` controls which viewport edge should be used when the row is
+  ///   outside the visible range.
   ///
   /// # Returns
   ///
   /// This function returns `()` and records a deferred GPUI scroll request.
   pub fn reveal_tree_row(&self, row_index: usize, strategy: ScrollStrategy) {
-    self.tree_scroll.scroll_to_item(row_index, strategy);
+    self.tree.reveal_row(row_index, strategy);
   }
 
   /// Starts a sidebar resize drag at the current cursor position.
   ///
   /// # Parameters
   ///
-  /// `start_x` is the horizontal cursor position where dragging began.
+  /// * `start_x` is the horizontal cursor position where dragging began.
   ///
   /// # Returns
   ///
@@ -136,7 +138,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `current_x` is the latest horizontal cursor position during the drag.
+  /// * `current_x` is the latest horizontal cursor position during the drag.
   ///
   /// # Returns
   ///
@@ -198,19 +200,15 @@ impl Default for ProjectSidebarState {
 ///
 /// # Parameters
 ///
-/// `workspace` is the currently opened project workspace. When `None`, the
-/// sidebar renders an empty-workspace message instead of a tree.
-///
-/// `state` contains expansion, loading, selection, focus, and resize state used
-/// by the sidebar and tree.
-///
-/// `focus_handle` is the GPUI focus handle associated with the `"ProjectTree"`
-/// key context.
-///
-/// `theme` supplies the UI colors and spacing used by the sidebar shell.
-///
-/// `cx` is the GPUI context used to create command action listeners and obtain
-/// a weak app entity for resize callbacks.
+/// * `workspace` is the currently opened project workspace. When `None`, the
+///   sidebar renders an empty-workspace message instead of a tree.
+/// * `state` contains expansion, loading, selection, focus, and resize state used
+///   by the sidebar and tree.
+/// * `focus_handle` is the GPUI focus handle associated with the `"ProjectTree"`
+///   key context.
+/// * `theme` supplies the UI colors and spacing used by the sidebar shell.
+/// * `cx` is the GPUI context used to create command action listeners and obtain
+///   a weak app entity for resize callbacks.
 ///
 /// # Returns
 ///
@@ -277,7 +275,7 @@ pub fn render_project_sidebar(
 
 #[cfg(test)]
 mod tests {
-  use chitin_ui::components::sidebar::DEFAULT_SIDEBAR_WIDTH;
+  use chitin_ui::primitive::sidebar::DEFAULT_SIDEBAR_WIDTH;
 
   use super::*;
 

@@ -20,7 +20,7 @@ impl RetryPolicy {
   ///
   /// # Parameters
   ///
-  /// `attempt` is the one-based attempt count that just failed.
+  /// * `attempt` is the one-based attempt count that just failed.
   ///
   /// # Returns
   ///
@@ -33,9 +33,8 @@ impl RetryPolicy {
   ///
   /// # Parameters
   ///
-  /// `attempt` is the one-based attempt count that just failed.
-  ///
-  /// `headers` are optional response headers used to honor `Retry-After`.
+  /// * `attempt` is the one-based attempt count that just failed.
+  /// * `headers` are optional response headers used to honor `Retry-After`.
   ///
   /// # Returns
   ///
@@ -64,7 +63,7 @@ impl Default for RetryPolicy {
 ///
 /// # Parameters
 ///
-/// `status` is the response status code.
+/// * `status` is the response status code.
 ///
 /// # Returns
 ///
@@ -84,7 +83,7 @@ pub(crate) fn is_retryable_status(status: StatusCode) -> bool {
 ///
 /// # Parameters
 ///
-/// `headers` is the optional response header map.
+/// * `headers` is the optional response header map.
 ///
 /// # Returns
 ///

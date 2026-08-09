@@ -11,7 +11,7 @@ pub trait HttpTransport: Send + Sync {
   ///
   /// # Parameters
   ///
-  /// `request` is the transport-neutral request to execute.
+  /// * `request` is the transport-neutral request to execute.
   ///
   /// # Returns
   ///
@@ -37,7 +37,7 @@ impl ReqwestTransport {
   ///
   /// # Parameters
   ///
-  /// `config` contains timeouts, user agent, and response limits.
+  /// * `config` contains timeouts, user agent, and response limits.
   ///
   /// # Returns
   ///
@@ -103,7 +103,7 @@ impl HttpTransport for ReqwestTransport {
 ///
 /// # Parameters
 ///
-/// `method` is the transport-neutral method.
+/// * `method` is the transport-neutral method.
 ///
 /// # Returns
 ///
@@ -119,7 +119,7 @@ fn to_reqwest_method(method: HttpMethod) -> reqwest::Method {
 ///
 /// # Parameters
 ///
-/// `error` is the reqwest error.
+/// * `error` is the reqwest error.
 ///
 /// # Returns
 ///

@@ -1,3 +1,5 @@
+//! Error types returned by workspace discovery and loading operations.
+
 use core::fmt;
 use std::{
   error::Error,
@@ -70,9 +72,8 @@ impl ProjectWorkspaceError {
   ///
   /// # Parameters
   ///
-  /// `path` is the workspace path that could not be canonicalized.
-  ///
-  /// `source` is the underlying filesystem error.
+  /// * `path` is the workspace path that could not be canonicalized.
+  /// * `source` is the underlying filesystem error.
   ///
   /// # Returns
   ///
@@ -91,9 +92,8 @@ impl ProjectWorkspaceError {
   ///
   /// # Parameters
   ///
-  /// `path` is the directory that could not be read.
-  ///
-  /// `source` is the underlying filesystem error.
+  /// * `path` is the directory that could not be read.
+  /// * `source` is the underlying filesystem error.
   ///
   /// # Returns
   ///
@@ -113,9 +113,8 @@ impl ProjectWorkspaceError {
   ///
   /// # Parameters
   ///
-  /// `path` is the parent directory being iterated when the entry read failed.
-  ///
-  /// `source` is the underlying filesystem error.
+  /// * `path` is the parent directory being iterated when the entry read failed.
+  /// * `source` is the underlying filesystem error.
   ///
   /// # Returns
   ///
@@ -134,9 +133,8 @@ impl ProjectWorkspaceError {
   ///
   /// # Parameters
   ///
-  /// `path` is the entry path whose file type could not be determined.
-  ///
-  /// `source` is the underlying filesystem error.
+  /// * `path` is the entry path whose file type could not be determined.
+  /// * `source` is the underlying filesystem error.
   ///
   /// # Returns
   ///
@@ -179,7 +177,7 @@ impl fmt::Display for ProjectWorkspaceError {
   ///
   /// # Parameters
   ///
-  /// `formatter` is the formatter provided by Rust's formatting machinery.
+  /// * `formatter` is the formatter provided by Rust's formatting machinery.
   ///
   /// # Returns
   ///
