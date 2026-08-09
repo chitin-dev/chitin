@@ -402,6 +402,7 @@ struct TextInputContentPrepaint {
   selection_line: Option<ShapedLine>,
   hitbox: Hitbox,
   text_is_empty: bool,
+  horizontal_scroll_offset: Pixels,
   selection: Option<PaintQuad>,
   selection_bounds: Option<Bounds<Pixels>>,
   caret: Option<PaintQuad>,
@@ -459,7 +460,7 @@ impl Element for TextInputContent {
     bounds: Bounds<Pixels>,
     _: &mut Self::RequestLayoutState,
     window: &mut Window,
-    _: &mut App,
+    cx: &mut App,
   ) -> Self::PrepaintState {
     // Fall back to the placeholder when there is no real text yet.
     let empty = self.text.is_empty();
@@ -483,6 +484,15 @@ impl Element for TextInputContent {
     // Shape the whole logical line once; x_for_index maps byte offsets to pixels.
     let runs = text_runs(run.clone(), (!empty).then_some(self.marked_range.clone()).flatten());
     let line = window.text_system().shape_line(display_text, font_size, &runs, None);
+    let horizontal_scroll_offset = self.state.update(cx, |state, _| {
+      state.update_horizontal_scroll_offset(
+        line.x_for_index(self.selection.head()),
+        line.width,
+        bounds.size.width,
+        CARET_WIDTH,
+      )
+    });
+    let line_origin = point(bounds.left() - horizontal_scroll_offset, bounds.top());
 
     // Selection highlight spans the shaped range and is vertically centered.
     let selection_bounds = (!empty && !range.is_empty()).then(|| {
@@ -491,7 +501,7 @@ impl Element for TextInputContent {
       let selection_height = line.ascent + line.descent;
       let selection_top = bounds.top() + (bounds.size.height - selection_height) / 2.0;
       Bounds::new(
-        point(bounds.left() + start, selection_top),
+        point(line_origin.x + start, selection_top),
         size(end - start, selection_height),
       )
     });
@@ -512,7 +522,7 @@ impl Element for TextInputContent {
       let caret_top = bounds.top() + (bounds.size.height - self.metrics.caret_height) / 2.0;
       fill(
         Bounds::new(
-          point(bounds.left() + x, caret_top),
+          point(line_origin.x + x, caret_top),
           size(CARET_WIDTH, self.metrics.caret_height),
         ),
         self.colors.caret,
@@ -523,6 +533,7 @@ impl Element for TextInputContent {
       selection_line,
       hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
       text_is_empty: empty,
+      horizontal_scroll_offset,
       selection,
       selection_bounds,
       caret,
@@ -544,9 +555,9 @@ impl Element for TextInputContent {
     cx: &mut App,
   ) {
     let focus_handle = self.state.read(cx).focus_handle().clone();
-    self
-      .state
-      .update(cx, |state, _| state.update_layout_cache(prepaint.line.clone(), bounds));
+    self.state.update(cx, |state, _| {
+      state.update_layout_cache(prepaint.line.clone(), bounds, prepaint.horizontal_scroll_offset)
+    });
     window.handle_input(&focus_handle, ElementInputHandler::new(bounds, self.state.clone()), cx);
 
     register_pointer_selection_handlers(
@@ -554,6 +565,7 @@ impl Element for TextInputContent {
       prepaint.hitbox.clone(),
       prepaint.line.clone(),
       prepaint.text_is_empty,
+      prepaint.horizontal_scroll_offset,
       window,
     );
 
@@ -562,7 +574,8 @@ impl Element for TextInputContent {
       window.paint_quad(selection);
     }
     // Text glyphs in the middle.
-    let _ = prepaint.line.paint(bounds.origin, bounds.size.height, window, cx);
+    let line_origin = point(bounds.left() - prepaint.horizontal_scroll_offset, bounds.top());
+    let _ = prepaint.line.paint(line_origin, bounds.size.height, window, cx);
     // Repaint the complete shaped line through the selected bounds. This changes glyph color
     // without splitting the base layout at selection boundaries.
     if let (Some(selection_line), Some(selection_bounds)) = (&prepaint.selection_line, prepaint.selection_bounds) {
@@ -571,7 +584,7 @@ impl Element for TextInputContent {
           bounds: selection_bounds,
         }),
         |window| {
-          let _ = selection_line.paint(bounds.origin, bounds.size.height, window, cx);
+          let _ = selection_line.paint(line_origin, bounds.size.height, window, cx);
         },
       );
     }
@@ -632,6 +645,7 @@ fn text_runs(mut run: TextRun, marked_range: Option<std::ops::Range<usize>>) -> 
 /// * `hitbox` identifies the interactive text viewport.
 /// * `line` maps pointer x coordinates to shaped-text offsets.
 /// * `text_is_empty` prevents placeholder glyphs from becoming input offsets.
+/// * `horizontal_scroll_offset` translates the shaped line into the visible viewport.
 /// * `window` registers handlers for the current rendered frame.
 ///
 /// # Returns
@@ -642,6 +656,7 @@ fn register_pointer_selection_handlers(
   hitbox: Hitbox,
   line: ShapedLine,
   text_is_empty: bool,
+  horizontal_scroll_offset: Pixels,
   window: &mut Window,
 ) {
   window.on_mouse_event({
@@ -657,7 +672,13 @@ fn register_pointer_selection_handlers(
         return;
       }
 
-      let offset = pointer_offset_for_position(event.position, hitbox.bounds, &line, text_is_empty);
+      let offset = pointer_offset_for_position(
+        event.position,
+        hitbox.bounds,
+        &line,
+        text_is_empty,
+        horizontal_scroll_offset,
+      );
       let focus_handle = state.read(cx).focus_handle().clone();
       window.focus(&focus_handle, cx);
       state.update(cx, |state, cx| {
@@ -677,7 +698,7 @@ fn register_pointer_selection_handlers(
         return;
       }
 
-      let offset = pointer_offset_for_position(event.position, bounds, &line, text_is_empty);
+      let offset = pointer_offset_for_position(event.position, bounds, &line, text_is_empty, horizontal_scroll_offset);
       if state.update(cx, |state, cx| state.update_pointer_selection(offset, cx)) {
         window.invalidate_character_coordinates();
         cx.stop_propagation();
@@ -700,6 +721,7 @@ fn register_pointer_selection_handlers(
 /// * `bounds` supplies the text viewport's window bounds.
 /// * `line` supplies the complete shaped input line.
 /// * `text_is_empty` identifies placeholder-only layouts.
+/// * `horizontal_scroll_offset` translates viewport coordinates into line coordinates.
 ///
 /// # Returns
 ///
@@ -709,12 +731,13 @@ fn pointer_offset_for_position(
   bounds: Bounds<Pixels>,
   line: &ShapedLine,
   text_is_empty: bool,
+  horizontal_scroll_offset: Pixels,
 ) -> usize {
   if text_is_empty {
     return 0;
   }
 
-  line.closest_index_for_x((position.x - bounds.left()).max(px(0.0)))
+  line.closest_index_for_x((position.x - bounds.left() + horizontal_scroll_offset).max(px(0.0)))
 }
 
 /// Resolved visual colors for one rendered text-input state.

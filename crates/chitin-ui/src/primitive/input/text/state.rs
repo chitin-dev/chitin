@@ -22,6 +22,7 @@ pub const CARET_VISIBLE_DURATION: Duration = Duration::from_millis(500);
 struct TextInputLayoutCache {
   line: Option<ShapedLine>,
   bounds: Option<Bounds<Pixels>>,
+  horizontal_scroll_offset: Pixels,
 }
 
 /// Persistent state for a reusable single-line text input.
@@ -38,6 +39,7 @@ pub struct TextInputState {
   pointer_selection_anchor: Option<usize>,
   marked_range: Option<Range<usize>>,
   layout: TextInputLayoutCache,
+  horizontal_scroll_offset: Pixels,
   focused: bool,
   caret_epoch: Instant,
 }
@@ -63,6 +65,7 @@ impl TextInputState {
       pointer_selection_anchor: None,
       marked_range: None,
       layout: TextInputLayoutCache::default(),
+      horizontal_scroll_offset: Pixels::ZERO,
       focused: false,
       caret_epoch: Instant::now(),
     }
@@ -473,20 +476,56 @@ impl TextInputState {
     true
   }
 
-  /// Stores the shaped line and bounds used by the current platform input handler.
+  /// Updates the horizontal viewport so the selection head remains visible.
+  ///
+  /// # Parameters
+  ///
+  /// * `caret_x` supplies the selection head's x coordinate in the shaped line.
+  /// * `content_width` supplies the complete shaped-line width.
+  /// * `viewport_width` supplies the visible text viewport width.
+  /// * `caret_width` reserves visible width for the painted caret.
+  ///
+  /// # Returns
+  ///
+  /// The horizontal scroll offset applied to the current rendered frame.
+  pub(crate) fn update_horizontal_scroll_offset(
+    &mut self,
+    caret_x: Pixels,
+    content_width: Pixels,
+    viewport_width: Pixels,
+    caret_width: Pixels,
+  ) -> Pixels {
+    self.horizontal_scroll_offset = horizontal_scroll_offset_for_caret(
+      self.horizontal_scroll_offset,
+      caret_x,
+      content_width,
+      viewport_width,
+      caret_width,
+    );
+    self.horizontal_scroll_offset
+  }
+
+  /// Stores the shaped line and viewport geometry used by the platform input handler.
   ///
   /// # Parameters
   ///
   /// * `line` is the complete shaped text line from the current render pass.
   /// * `bounds` is the text viewport in window coordinates.
+  /// * `horizontal_scroll_offset` is the translation from line coordinates into the viewport.
   ///
   /// # Returns
   ///
   /// This function returns `()` after replacing the transient layout cache.
-  pub(crate) fn update_layout_cache(&mut self, line: ShapedLine, bounds: Bounds<Pixels>) {
+  pub(crate) fn update_layout_cache(
+    &mut self,
+    line: ShapedLine,
+    bounds: Bounds<Pixels>,
+    horizontal_scroll_offset: Pixels,
+  ) {
     self.layout = TextInputLayoutCache {
       line: Some(line),
       bounds: Some(bounds),
+      horizontal_scroll_offset,
     };
   }
 
@@ -711,11 +750,11 @@ impl EntityInputHandler for TextInputState {
     let range = range_from_utf16(&self.text, range_utf16);
     Some(Bounds::from_corners(
       point(
-        element_bounds.left() + line.x_for_index(range.start),
+        element_bounds.left() + line.x_for_index(range.start) - self.layout.horizontal_scroll_offset,
         element_bounds.top(),
       ),
       point(
-        element_bounds.left() + line.x_for_index(range.end),
+        element_bounds.left() + line.x_for_index(range.end) - self.layout.horizontal_scroll_offset,
         element_bounds.bottom(),
       ),
     ))
@@ -730,7 +769,10 @@ impl EntityInputHandler for TextInputState {
     let bounds = self.layout.bounds?;
     let line = self.layout.line.as_ref()?;
     let point = bounds.localize(&point)?;
-    Some(offset_to_utf16(&self.text, line.closest_index_for_x(point.x)))
+    Some(offset_to_utf16(
+      &self.text,
+      line.closest_index_for_x(point.x + self.layout.horizontal_scroll_offset),
+    ))
   }
 
   fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
@@ -739,6 +781,40 @@ impl EntityInputHandler for TextInputState {
 }
 
 impl EventEmitter<TextInputEvent> for TextInputState {}
+
+/// Adjusts a horizontal line viewport to keep one caret position visible.
+///
+/// # Parameters
+///
+/// * `current_offset` is the existing line-to-viewport translation.
+/// * `caret_x` is the caret's x coordinate in shaped-line coordinates.
+/// * `content_width` is the complete shaped-line width.
+/// * `viewport_width` is the visible text viewport width.
+/// * `caret_width` reserves visible width for the painted caret.
+///
+/// # Returns
+///
+/// The clamped offset that keeps the caret inside the viewport.
+fn horizontal_scroll_offset_for_caret(
+  current_offset: Pixels,
+  caret_x: Pixels,
+  content_width: Pixels,
+  viewport_width: Pixels,
+  caret_width: Pixels,
+) -> Pixels {
+  let max_offset = (content_width - viewport_width).max(Pixels::ZERO);
+  let visible_width = (viewport_width - caret_width).max(Pixels::ZERO);
+  let current_offset = current_offset.clamp(Pixels::ZERO, max_offset);
+  let offset = if caret_x < current_offset {
+    caret_x
+  } else if caret_x > current_offset + visible_width {
+    caret_x - visible_width
+  } else {
+    current_offset
+  };
+
+  offset.clamp(Pixels::ZERO, max_offset)
+}
 
 /// Replaces line-break characters so the control always stores one logical line.
 fn normalize_single_line(text: SharedString) -> SharedString {
@@ -958,6 +1034,34 @@ mod tests {
   #[test]
   fn normalize_single_line_should_replace_line_breaks() {
     assert_eq!(normalize_single_line("a\nb\rc".into()), "a b c");
+  }
+
+  #[test]
+  fn horizontal_scroll_offset_should_reveal_a_caret_beyond_the_viewport() {
+    assert_eq!(
+      horizontal_scroll_offset_for_caret(
+        gpui::px(0.0),
+        gpui::px(160.0),
+        gpui::px(300.0),
+        gpui::px(100.0),
+        gpui::px(2.0)
+      ),
+      gpui::px(62.0)
+    );
+  }
+
+  #[test]
+  fn horizontal_scroll_offset_should_reveal_a_caret_before_the_viewport() {
+    assert_eq!(
+      horizontal_scroll_offset_for_caret(
+        gpui::px(62.0),
+        gpui::px(40.0),
+        gpui::px(300.0),
+        gpui::px(100.0),
+        gpui::px(2.0)
+      ),
+      gpui::px(40.0)
+    );
   }
 
   #[test]
