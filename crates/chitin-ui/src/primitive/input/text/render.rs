@@ -41,182 +41,79 @@ pub struct TextInputStyle {
 }
 
 impl TextInputStyle {
-  /// Creates a style with no overrides.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no Rust parameters.
-  ///
-  /// # Returns
-  ///
-  /// A visual style that preserves the selected [`TextInputVariant`] defaults.
+  /// Creates a style with no overrides, a visual style that preserves the
+  /// selected [`TextInputVariant`] defaults.
   pub fn new() -> Self {
     Self::default()
   }
 
   /// Overrides the input background color.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use for the input surface.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn background(mut self, color: gpui::Rgba) -> Self {
     self.appearance.background = Some(color);
     self
   }
 
   /// Overrides the input text color.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use for entered text.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn foreground(mut self, color: gpui::Rgba) -> Self {
     self.appearance.foreground = Some(color);
     self
   }
 
   /// Overrides the placeholder text color.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use for placeholder text.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn placeholder_foreground(mut self, color: gpui::Rgba) -> Self {
     self.appearance.placeholder_foreground = Some(color);
     self
   }
 
   /// Overrides the selected-range background color.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use behind selected text.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn selection_background(mut self, color: gpui::Rgba) -> Self {
     self.appearance.selection_background = Some(color);
     self
   }
 
   /// Overrides the selected-range text color.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use for selected glyphs.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn selection_foreground(mut self, color: gpui::Rgba) -> Self {
     self.appearance.selection_foreground = Some(color);
     self
   }
 
   /// Overrides the caret color.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use for the insertion caret.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn caret(mut self, color: gpui::Rgba) -> Self {
     self.appearance.caret = Some(color);
     self
   }
 
   /// Overrides the default border color.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use for the idle border.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn border(mut self, color: gpui::Rgba) -> Self {
     self.appearance.border = Some(color);
     self
   }
 
   /// Overrides the border color while the input is focused.
-  ///
-  /// # Parameters
-  ///
-  /// * `color` is the semantic theme token to use for the focused border.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn focus_border(mut self, color: gpui::Rgba) -> Self {
     self.appearance.focus_border = Some(color);
     self
   }
 
   /// Sets an explicit visual width.
-  ///
-  /// # Parameters
-  ///
-  /// * `width` is the fixed rendered width before `full_width` expansion.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn width(mut self, width: Pixels) -> Self {
     self.appearance.width = Some(width);
     self
   }
 
   /// Sets an explicit visual height.
-  ///
-  /// # Parameters
-  ///
-  /// * `height` is the fixed rendered height for the input shell.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn height(mut self, height: Pixels) -> Self {
     self.appearance.height = Some(height);
     self
   }
 
   /// Sets horizontal padding.
-  ///
-  /// # Parameters
-  ///
-  /// * `padding` is the inline spacing around the text viewport.
-  ///
-  /// # Returns
-  ///
-  /// The updated visual-only style.
   pub fn horizontal_padding(mut self, padding: Pixels) -> Self {
     self.appearance.horizontal_padding = Some(padding);
     self
   }
 
   /// Creates a text-input style from shared input appearance fields.
-  ///
-  /// # Parameters
-  ///
-  /// * `appearance` supplies crate-private input visual overrides.
-  ///
-  /// # Returns
-  ///
-  /// A text-input style with the supplied visual overrides.
   pub(crate) fn from_appearance(appearance: InputAppearanceStyle) -> Self {
     Self { appearance }
   }
@@ -275,28 +172,12 @@ impl TextInput {
   }
 
   /// Sets one of the built-in theme-based appearance variants.
-  ///
-  /// # Parameters
-  ///
-  /// * `variant` selects a semantic visual treatment.
-  ///
-  /// # Returns
-  ///
-  /// The updated text input builder.
   pub fn variant(mut self, variant: TextInputVariant) -> Self {
     self.variant = variant;
     self
   }
 
   /// Applies visual-only appearance overrides.
-  ///
-  /// # Parameters
-  ///
-  /// * `style` supplies component-specific visual overrides.
-  ///
-  /// # Returns
-  ///
-  /// The updated text input builder.
   pub fn style(mut self, style: TextInputStyle) -> Self {
     self.style = style;
     self
@@ -548,7 +429,7 @@ impl Element for TextInputContent {
 
   /// Requests a box that fills the parent so clipping matches the content area.
   ///
-  /// - `window`: used to register the requested layout box.
+  /// * `window`: used to register the requested layout box.
   ///
   /// Returns the layout id and no custom layout state.
   fn request_layout(
@@ -567,8 +448,8 @@ impl Element for TextInputContent {
 
   /// Shapes the line and computes the selection and caret quads for painting.
   ///
-  /// - `bounds`: the layout box returned by [`Self::request_layout`].
-  /// - `window`: provides the base text style and the text system used to shape the line.
+  /// * `bounds`: the layout box returned by [`Self::request_layout`].
+  /// * `window`: provides the base text style and the text system used to shape the line.
   ///
   /// Returns the prepared paint state consumed by [`Self::paint`].
   fn prepaint(
@@ -962,14 +843,6 @@ impl TextInputSize {
   }
 
   /// Returns the text size used by this input-size variant.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the selected text-input size variant.
-  ///
-  /// # Returns
-  ///
-  /// The font size used for text and placeholder layout.
   pub(crate) fn font_size(self) -> Pixels {
     self.metrics().font_size
   }

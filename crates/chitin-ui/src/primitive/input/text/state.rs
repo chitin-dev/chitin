@@ -230,20 +230,22 @@ impl TextInputState {
     true
   }
 
-  /// Ends the active pointer-selection gesture.
-  ///
-  /// # Parameters
-  ///
-  /// This method clears the stored pointer anchor.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a pointer-selection gesture was active.
+  /// Ends the active pointer-selection gesture, `true` when a pointer-selection
+  /// gesture was active.
   pub(crate) fn end_pointer_selection(&mut self) -> bool {
     self.pointer_selection_anchor.take().is_some()
   }
 
   /// Replaces the current selection with one logical line of `inserted` text.
+  ///
+  /// # Parameters
+  ///
+  /// * `inserted` supplies text that is normalized to one logical line.
+  /// * `cx` emits semantic text and selection changes.
+  ///
+  /// # Returns
+  ///
+  /// `true` when editable text or selection state was updated.
   pub fn insert_text(&mut self, inserted: &str, cx: &mut Context<Self>) -> bool {
     if self.disabled || self.readonly {
       return false;
@@ -264,6 +266,14 @@ impl TextInputState {
   }
 
   /// Deletes the selection or one complete Unicode scalar before the caret.
+  ///
+  /// # Parameters
+  ///
+  /// * `cx` emits semantic text and selection changes.
+  ///
+  /// # Returns
+  ///
+  /// `true` when editable selected text or a preceding scalar was removed.
   pub fn delete_backward(&mut self, cx: &mut Context<Self>) -> bool {
     if self.disabled || self.readonly {
       return false;
@@ -277,6 +287,14 @@ impl TextInputState {
   }
 
   /// Deletes the selection or one complete Unicode scalar after the caret.
+  ///
+  /// # Parameters
+  ///
+  /// * `cx` emits semantic text and selection changes.
+  ///
+  /// # Returns
+  ///
+  /// `true` when editable selected text or a following scalar was removed.
   pub fn delete_forward(&mut self, cx: &mut Context<Self>) -> bool {
     if self.disabled || self.readonly {
       return false;
@@ -296,6 +314,15 @@ impl TextInputState {
   }
 
   /// Synchronizes focus state from the rendered GPUI focus handle.
+  ///
+  /// # Parameters
+  ///
+  /// * `focused` supplies the current focus-handle state.
+  /// * `cx` emits focus events and refreshes observers when the state changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after applying a changed focus state.
   pub(crate) fn sync_focus(&mut self, focused: bool, cx: &mut Context<Self>) {
     if self.focused == focused {
       return;
@@ -316,12 +343,29 @@ impl TextInputState {
   }
 
   /// Returns whether the caret is currently in its visible blink phase.
+  ///
+  /// # Parameters
+  ///
+  /// * `now` supplies the instant used to evaluate the current blink phase.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the caret should be visible at `now`.
   pub(crate) fn caret_visible(&self, now: Instant) -> bool {
     let elapsed = now.saturating_duration_since(self.caret_epoch);
     elapsed.as_millis() % CARET_BLINK_PERIOD.as_millis() < CARET_VISIBLE_DURATION.as_millis()
   }
 
   /// Applies a focused key event and returns whether this input consumed it.
+  ///
+  /// # Parameters
+  ///
+  /// * `event` supplies the focused keyboard event from GPUI.
+  /// * `cx` emits semantic text, selection, and command events.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the event was handled by this enabled text input.
   pub(crate) fn handle_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
     if self.disabled {
       return false;
@@ -583,27 +627,11 @@ impl TextInputState {
   }
 
   /// Restarts the caret blink interval after a handled interaction.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutates the input state's blink epoch.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after recording the current instant.
   fn reset_caret_blink(&mut self) {
     self.caret_epoch = Instant::now();
   }
 
   /// Reports whether one byte offset is within the current text at a UTF-8 boundary.
-  ///
-  /// # Parameters
-  ///
-  /// * `offset` supplies the candidate UTF-8 byte offset.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the offset is valid for cursor or selection placement.
   fn is_valid_offset(&self, offset: usize) -> bool {
     offset <= self.text.len() && self.text.is_char_boundary(offset)
   }
