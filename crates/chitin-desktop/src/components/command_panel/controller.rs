@@ -77,79 +77,31 @@ impl CommandPanelController {
   }
 
   /// Returns whether the command panel is visible.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the quick-pick overlay should render.
   pub(crate) fn is_open(&self) -> bool {
     self.is_open
   }
 
   /// Returns the current command metadata registry.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// The registry used for command lookup and search.
   pub(crate) fn registry(&self) -> &CommandRegistry {
     &self.registry
   }
 
   /// Returns the active panel interaction mode.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// Search mode or the identity of the command whose form is open.
   pub(crate) fn mode(&self) -> &CommandPanelMode {
     &self.mode
   }
 
   /// Returns the current search text or form input.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// The current input line.
   pub(crate) fn query(&self) -> &str {
     &self.query
   }
 
   /// Returns the selected command result index.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// The zero-based selected search result index.
   pub(crate) fn selected_index(&self) -> usize {
     self.selected_index
   }
 
   /// Returns the scroll handle for command result virtualization.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state.
-  ///
-  /// # Returns
-  ///
-  /// A cloned GPUI uniform-list handle for the rendered command rows.
   pub(crate) fn result_scroll_handle(&self) -> UniformListScrollHandle {
     self.result_scroll.clone()
   }
@@ -185,13 +137,6 @@ impl CommandPanelController {
   }
 
   /// Returns the descriptor for the command whose form is open.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state and command registry.
-  ///
-  /// # Returns
-  ///
   /// The form command descriptor when the current mode identifies one.
   pub(crate) fn form_descriptor(&self) -> Option<&CommandDescriptor> {
     let CommandPanelMode::Form(command) = &self.mode else {
