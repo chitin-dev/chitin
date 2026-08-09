@@ -27,10 +27,10 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
-            executable_suffix: ""
+            archive: chitin-linux-x86_64.tar.gz
           - os: windows-latest
             target: windows-x86_64
-            executable_suffix: ".exe"
+            archive: chitin-windows-x86_64.zip
 
     steps:
       - name: Checkout
@@ -61,11 +61,28 @@ jobs:
       - name: Build desktop release
         run: cargo build -p chitin-desktop --release --locked
 
-      - name: Upload release executable
+      - name: Package Linux release
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/chitin-linux-x86_64
+          cp target/release/chitin-desktop dist/chitin-linux-x86_64/
+          cp -R assets dist/chitin-linux-x86_64/
+          tar -C dist -czf dist/chitin-linux-x86_64.tar.gz chitin-linux-x86_64
+
+      - name: Package Windows release
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/chitin-windows-x86_64/assets
+          Copy-Item target/release/chitin-desktop.exe dist/chitin-windows-x86_64/
+          Copy-Item assets/* dist/chitin-windows-x86_64/assets/ -Recurse -Force
+          Compress-Archive -Path dist/chitin-windows-x86_64 -DestinationPath dist/chitin-windows-x86_64.zip -Force
+
+      - name: Upload release package
         uses: actions/upload-artifact@v4
         with:
           name: chitin-${{ matrix.target }}
-          path: target/release/chitin-desktop${{ matrix.executable_suffix }}
+          path: dist/${{ matrix.archive }}
           if-no-files-found: error
 
   release:
@@ -85,7 +102,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download release executables
+      - name: Download release packages
         uses: actions/download-artifact@v4
         with:
           pattern: chitin-*
@@ -107,6 +124,6 @@ jobs:
           body: |
             Automated nightly build for commit ${{ github.sha }}.
           files: |
-            release/chitin-desktop
-            release/chitin-desktop.exe
+            release/chitin-linux-x86_64.tar.gz
+            release/chitin-windows-x86_64.zip
           fail_on_unmatched_files: true
