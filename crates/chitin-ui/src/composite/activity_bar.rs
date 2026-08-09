@@ -66,11 +66,9 @@ impl ActivityBarItem {
   ///
   /// # Parameters
   ///
-  /// `id` is the stable item identifier used for selection and command routing.
-  ///
-  /// `label` is the human-readable item name.
-  ///
-  /// `icon_path` is the asset-relative SVG path rendered by this item.
+  /// * `id` is the stable item identifier used for selection and command routing.
+  /// * `label` is the human-readable item name.
+  /// * `icon_path` is the asset-relative SVG path rendered by this item.
   ///
   /// # Returns
   ///
@@ -131,7 +129,7 @@ impl ActivityBarItem {
   ///
   /// # Parameters
   ///
-  /// `badge` is the short badge text to render over the activity item.
+  /// * `badge` is the short badge text to render over the activity item.
   ///
   /// # Returns
   ///
@@ -148,7 +146,7 @@ impl ActivityBarItem {
   ///
   /// # Parameters
   ///
-  /// `theme` is the UI theme used for colors in this item.
+  /// * `theme` is the UI theme used for colors in this item.
   ///
   /// # Returns
   ///
@@ -166,7 +164,7 @@ impl ActivityBarItem {
   ///
   /// # Parameters
   ///
-  /// `selected` controls whether selected styling is applied.
+  /// * `selected` controls whether selected styling is applied.
   ///
   /// # Returns
   ///
@@ -183,7 +181,7 @@ impl ActivityBarItem {
   ///
   /// # Parameters
   ///
-  /// `disabled` controls whether the item can be clicked or hovered.
+  /// * `disabled` controls whether the item can be clicked or hovered.
   ///
   /// # Returns
   ///
@@ -341,7 +339,7 @@ impl ActivityBar {
   ///
   /// # Parameters
   ///
-  /// `width` is the desired fixed bar width.
+  /// * `width` is the desired fixed bar width.
   ///
   /// # Returns
   ///
@@ -358,7 +356,7 @@ impl ActivityBar {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies colors used by the bar and all contained items.
+  /// * `theme` supplies colors used by the bar and all contained items.
   ///
   /// # Returns
   ///
@@ -376,7 +374,7 @@ impl ActivityBar {
   ///
   /// # Parameters
   ///
-  /// `id` is the item identifier that should receive selected styling.
+  /// * `id` is the item identifier that should receive selected styling.
   ///
   /// # Returns
   ///
@@ -390,7 +388,7 @@ impl ActivityBar {
   ///
   /// # Parameters
   ///
-  /// `item` is the activity item appended to the top section.
+  /// * `item` is the activity item appended to the top section.
   ///
   /// # Returns
   ///
@@ -404,7 +402,7 @@ impl ActivityBar {
   ///
   /// # Parameters
   ///
-  /// `items` is the collection of activity items appended to the top section.
+  /// * `items` is the collection of activity items appended to the top section.
   ///
   /// # Returns
   ///
@@ -418,7 +416,7 @@ impl ActivityBar {
   ///
   /// # Parameters
   ///
-  /// `item` is the activity item appended to the bottom section.
+  /// * `item` is the activity item appended to the bottom section.
   ///
   /// # Returns
   ///
@@ -432,7 +430,7 @@ impl ActivityBar {
   ///
   /// # Parameters
   ///
-  /// `items` is the collection of activity items appended to the bottom
+  /// * `items` is the collection of activity items appended to the bottom
   /// section.
   ///
   /// # Returns

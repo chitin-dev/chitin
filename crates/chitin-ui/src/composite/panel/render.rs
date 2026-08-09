@@ -83,7 +83,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `resize` configures resize handle size and resize-start callbacks.
+  /// * `resize` configures resize handle size and resize-start callbacks.
   ///
   /// # Returns
   ///
@@ -98,7 +98,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `panel_id` configures current focused panel id
+  /// * `panel_id` configures current focused panel id
   ///
   /// # Returns
   ///
@@ -112,7 +112,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `handler` is invoked when a rendered tab is pressed.
+  /// * `handler` is invoked when a rendered tab is pressed.
   ///
   /// # Returns
   ///
@@ -126,7 +126,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `handler` is invoked when a rendered tab close button is pressed.
+  /// * `handler` is invoked when a rendered tab close button is pressed.
   ///
   /// # Returns
   ///
@@ -140,7 +140,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `renderer` produces the visual icon inside the reusable close button slot.
+  /// * `renderer` produces the visual icon inside the reusable close button slot.
   ///
   /// # Returns
   ///
@@ -154,7 +154,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `renderer` produces caller-owned controls at the right end of each panel
+  /// * `renderer` produces caller-owned controls at the right end of each panel
   /// tab strip.
   ///
   /// # Returns
@@ -169,7 +169,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `tab_drag` supplies temporary state plus start, target, and drop callbacks.
+  /// * `tab_drag` supplies temporary state plus start, target, and drop callbacks.
   ///
   /// # Returns
   ///
@@ -183,7 +183,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `tab_scroll` owns per-panel scroll handles reused across render passes.
+  /// * `tab_scroll` owns per-panel scroll handles reused across render passes.
   ///
   /// # Returns
   ///
@@ -197,7 +197,7 @@ impl PanelContainerConfig {
   ///
   /// # Parameters
   ///
-  /// `now` is the timestamp used to evaluate temporary chrome visibility.
+  /// * `now` is the timestamp used to evaluate temporary chrome visibility.
   ///
   /// # Returns
   ///
@@ -231,9 +231,8 @@ impl Render for PanelTabDragPreview {
   ///
   /// # Parameters
   ///
-  /// `window` is unused because the preview has no window-specific state.
-  ///
-  /// `cx` is unused because the preview has no mutable entity state.
+  /// * `window` is unused because the preview has no window-specific state.
+  /// * `cx` is unused because the preview has no mutable entity state.
   ///
   /// # Returns
   ///
@@ -264,14 +263,11 @@ impl Render for PanelTabDragPreview {
 ///
 /// # Parameters
 ///
-/// `tree` is the panel tree to render.
-///
-/// `theme` supplies visual tokens for panel chrome.
-///
-/// `config` contains optional resize, tab activation, close, icon, and
+/// * `tree` is the panel tree to render.
+/// * `theme` supplies visual tokens for panel chrome.
+/// * `config` contains optional resize, tab activation, close, icon, and
 /// tab-strip action behavior.
-///
-/// `render_body` renders the body for one active tab.
+/// * `render_body` renders the body for one active tab.
 ///
 /// # Returns
 ///
@@ -301,9 +297,8 @@ pub fn render_panel_container<T>(
 ///
 /// # Parameters
 ///
-/// `node` is the panel node to traverse.
-///
-/// `panel_ids` receives leaf panel identifiers in visual order.
+/// * `node` is the panel node to traverse.
+/// * `panel_ids` receives leaf panel identifiers in visual order.
 ///
 /// # Returns
 ///
@@ -322,11 +317,9 @@ fn collect_panel_ids<T>(node: &PanelNode<T>, panel_ids: &mut Vec<PanelId>) {
 ///
 /// # Parameters
 ///
-/// `node` is the current panel node to render.
-///
-/// `path` is the split path to `node`.
-///
-/// `context` contains theme tokens, callbacks, and active tab body rendering.
+/// * `node` is the current panel node to render.
+/// * `path` is the split path to `node`.
+/// * `context` contains theme tokens, callbacks, and active tab body rendering.
 ///
 /// # Returns
 ///
@@ -342,11 +335,9 @@ fn render_panel_node<T>(node: &PanelNode<T>, path: &PanelSplitPath, context: &Pa
 ///
 /// # Parameters
 ///
-/// `split` is the split node to render.
-///
-/// `path` identifies `split` for resize callbacks.
-///
-/// `context` contains theme tokens, callbacks, and active tab body rendering.
+/// * `split` is the split node to render.
+/// * `path` identifies `split` for resize callbacks.
+/// * `context` contains theme tokens, callbacks, and active tab body rendering.
 ///
 /// # Returns
 ///
@@ -384,13 +375,10 @@ fn render_panel_split<T>(split: &PanelSplit<T>, path: &PanelSplitPath, context: 
 ///
 /// # Parameters
 ///
-/// `axis` controls handle orientation and cursor.
-///
-/// `path` identifies the split for resize callbacks.
-///
-/// `theme` supplies visual tokens.
-///
-/// `resize` optionally enables resize-start behavior.
+/// * `axis` controls handle orientation and cursor.
+/// * `path` identifies the split for resize callbacks.
+/// * `theme` supplies visual tokens.
+/// * `resize` optionally enables resize-start behavior.
 ///
 /// # Returns
 ///
@@ -433,9 +421,8 @@ fn render_panel_split_handle(
 ///
 /// # Parameters
 ///
-/// `leaf` is the leaf panel to render.
-///
-/// `context` contains theme tokens, callbacks, and active tab body rendering.
+/// * `leaf` is the leaf panel to render.
+/// * `context` contains theme tokens, callbacks, and active tab body rendering.
 ///
 /// # Returns
 ///
@@ -456,9 +443,8 @@ fn render_panel_leaf<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'_, T>
 ///
 /// # Parameters
 ///
-/// `leaf` is the leaf panel whose tabs are rendered.
-///
-/// `context` contains theme tokens, callbacks, and optional tab-strip actions.
+/// * `leaf` is the leaf panel whose tabs are rendered.
+/// * `context` contains theme tokens, callbacks, and optional tab-strip actions.
 ///
 /// # Returns
 ///
@@ -594,9 +580,8 @@ fn render_panel_tab_strip<T>(leaf: &PanelLeaf<T>, context: &PanelRenderContext<'
 ///
 /// # Parameters
 ///
-/// `scroll_handle` provides the scroll position and maximum horizontal offset.
-///
-/// `theme` supplies the semantic low-emphasis indicator color.
+/// * `scroll_handle` provides the scroll position and maximum horizontal offset.
+/// * `theme` supplies the semantic low-emphasis indicator color.
 ///
 /// # Returns
 ///
@@ -633,13 +618,10 @@ fn render_panel_tab_scroll_progress(scroll_handle: &ScrollHandle, theme: UITheme
 ///
 /// # Parameters
 ///
-/// `panel_id` identifies the leaf panel containing the tab.
-///
-/// `tab` is the tab metadata to render.
-///
-/// `active` controls active tab styling.
-///
-/// `context` contains theme tokens, callbacks, and optional icon rendering.
+/// * `panel_id` identifies the leaf panel containing the tab.
+/// * `tab` is the tab metadata to render.
+/// * `active` controls active tab styling.
+/// * `context` contains theme tokens, callbacks, and optional icon rendering.
 ///
 /// # Returns
 ///
@@ -783,7 +765,7 @@ fn render_panel_tab<T>(
 ///
 /// # Parameters
 ///
-/// `color` is the theme color painted by the insertion marker.
+/// * `color` is the theme color painted by the insertion marker.
 ///
 /// # Returns
 ///
@@ -801,7 +783,7 @@ fn render_panel_tab_insertion_marker(color: gpui::Hsla) -> Div {
 ///
 /// # Parameters
 ///
-/// `color` is the theme color painted by the insertion marker.
+/// * `color` is the theme color painted by the insertion marker.
 ///
 /// # Returns
 ///
@@ -819,15 +801,11 @@ fn render_panel_tab_leading_insertion_marker(color: gpui::Hsla) -> Div {
 ///
 /// # Parameters
 ///
-/// `panel_id` identifies the leaf panel that owns the tab.
-///
-/// `tab_id` identifies the tab that should close when the button is pressed.
-///
-/// `active` controls whether the close glyph is visible by default.
-///
-/// `tab_hover_group` identifies the GPUI hover group shared with the tab.
-///
-/// `context` contains theme tokens, close callbacks, and optional icon
+/// * `panel_id` identifies the leaf panel that owns the tab.
+/// * `tab_id` identifies the tab that should close when the button is pressed.
+/// * `active` controls whether the close glyph is visible by default.
+/// * `tab_hover_group` identifies the GPUI hover group shared with the tab.
+/// * `context` contains theme tokens, close callbacks, and optional icon
 /// rendering.
 ///
 /// # Returns
@@ -884,11 +862,9 @@ fn render_panel_tab_close_button<T>(
 ///
 /// # Parameters
 ///
-/// `leaf` is the leaf panel whose active tab body should render.
-///
-/// `theme` supplies visual tokens.
-///
-/// `render_body` renders active tab content.
+/// * `leaf` is the leaf panel whose active tab body should render.
+/// * `theme` supplies visual tokens.
+/// * `render_body` renders active tab content.
 ///
 /// # Returns
 ///

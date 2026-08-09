@@ -26,9 +26,8 @@ fn four_tab_tree() -> PanelTree<&'static str> {
 ///
 /// # Parameters
 ///
-/// `tree` is the test panel tree to inspect.
-///
-/// `panel_id` identifies the leaf whose tab order should be returned.
+/// * `tree` is the test panel tree to inspect.
+/// * `panel_id` identifies the leaf whose tab order should be returned.
 ///
 /// # Returns
 ///

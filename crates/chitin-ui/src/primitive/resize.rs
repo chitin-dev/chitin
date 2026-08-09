@@ -23,12 +23,10 @@ impl<TAnchor, TValue> ResizeGesture<TAnchor, TValue> {
   ///
   /// # Parameters
   ///
-  /// `anchor` identifies the resized target.
-  ///
-  /// `start_position` is the cursor position on the resize axis where dragging
+  /// * `anchor` identifies the resized target.
+  /// * `start_position` is the cursor position on the resize axis where dragging
   /// began.
-  ///
-  /// `start_value` is the target value when dragging began.
+  /// * `start_value` is the target value when dragging began.
   ///
   /// # Returns
   ///
@@ -86,7 +84,7 @@ impl<TAnchor, TValue: Copy> ResizeGesture<TAnchor, TValue> {
   ///
   /// # Parameters
   ///
-  /// `current_position` is the latest cursor position on the resize axis.
+  /// * `current_position` is the latest cursor position on the resize axis.
   ///
   /// # Returns
   ///

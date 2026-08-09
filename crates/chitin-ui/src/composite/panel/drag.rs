@@ -62,11 +62,9 @@ impl PanelTabDragConfig {
   ///
   /// # Parameters
   ///
-  /// `on_start` begins the application's temporary drag session.
-  ///
-  /// `on_target` records the current panel and raw insertion position.
-  ///
-  /// `on_drop` commits a payload released over a valid tab strip.
+  /// * `on_start` begins the application's temporary drag session.
+  /// * `on_target` records the current panel and raw insertion position.
+  /// * `on_drop` commits a payload released over a valid tab strip.
   ///
   /// # Returns
   ///
@@ -88,7 +86,7 @@ impl PanelTabDragConfig {
   ///
   /// # Parameters
   ///
-  /// `state` identifies the dragged tab and current valid insertion target.
+  /// * `state` identifies the dragged tab and current valid insertion target.
   ///
   /// # Returns
   ///
@@ -107,9 +105,8 @@ impl PanelTabDragConfig {
 ///
 /// # Parameters
 ///
-/// `tab_bounds` contains actual logical-pixel bounds in strip order.
-///
-/// `pointer_x` is the pointer's horizontal logical-pixel coordinate.
+/// * `tab_bounds` contains actual logical-pixel bounds in strip order.
+/// * `pointer_x` is the pointer's horizontal logical-pixel coordinate.
 ///
 /// # Returns
 ///

@@ -13,7 +13,7 @@ impl PdbId {
   ///
   /// # Parameters
   ///
-  /// `value` is the raw identifier string, such as `"4hhb"` or `"6VXX"`.
+  /// * `value` is the raw identifier string, such as `"4hhb"` or `"6VXX"`.
   ///
   /// # Returns
   ///
@@ -39,14 +39,6 @@ impl PdbId {
   }
 
   /// Returns the canonical uppercase PDB identifier.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The four-character identifier as a string slice.
   pub fn as_str(&self) -> &str {
     self.0.as_str()
   }

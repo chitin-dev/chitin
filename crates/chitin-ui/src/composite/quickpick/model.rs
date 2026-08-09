@@ -23,11 +23,9 @@ impl QuickPickItem {
   ///
   /// # Parameters
   ///
-  /// `title` is the primary row label.
-  ///
-  /// `subtitle` is the secondary row metadata.
-  ///
-  /// `shortcut` is optional trailing shortcut text.
+  /// * `title` is the primary row label.
+  /// * `subtitle` is the secondary row metadata.
+  /// * `shortcut` is optional trailing shortcut text.
   ///
   /// # Returns
   ///
@@ -66,7 +64,7 @@ impl QuickPickSearchInput {
   ///
   /// # Parameters
   ///
-  /// `state` stores the reusable text input state.
+  /// * `state` stores the reusable text input state.
   ///
   /// # Returns
   ///

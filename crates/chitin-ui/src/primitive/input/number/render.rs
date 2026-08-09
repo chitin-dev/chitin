@@ -85,7 +85,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the input surface.
+  /// * `color` is the semantic theme token to use for the input surface.
   ///
   /// # Returns
   ///
@@ -99,7 +99,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for entered text.
+  /// * `color` is the semantic theme token to use for entered text.
   ///
   /// # Returns
   ///
@@ -113,7 +113,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for placeholder text.
+  /// * `color` is the semantic theme token to use for placeholder text.
   ///
   /// # Returns
   ///
@@ -127,7 +127,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use behind selected text.
+  /// * `color` is the semantic theme token to use behind selected text.
   ///
   /// # Returns
   ///
@@ -141,7 +141,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for selected glyphs.
+  /// * `color` is the semantic theme token to use for selected glyphs.
   ///
   /// # Returns
   ///
@@ -155,7 +155,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the insertion caret.
+  /// * `color` is the semantic theme token to use for the insertion caret.
   ///
   /// # Returns
   ///
@@ -169,7 +169,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the idle border.
+  /// * `color` is the semantic theme token to use for the idle border.
   ///
   /// # Returns
   ///
@@ -183,7 +183,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the focused border.
+  /// * `color` is the semantic theme token to use for the focused border.
   ///
   /// # Returns
   ///
@@ -197,7 +197,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for validation errors.
+  /// * `color` is the semantic theme token to use for validation errors.
   ///
   /// # Returns
   ///
@@ -211,7 +211,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for prefix text.
+  /// * `color` is the semantic theme token to use for prefix text.
   ///
   /// # Returns
   ///
@@ -225,7 +225,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for suffix text.
+  /// * `color` is the semantic theme token to use for suffix text.
   ///
   /// # Returns
   ///
@@ -239,7 +239,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `width` is the fixed rendered width before `full_width` expansion.
+  /// * `width` is the fixed rendered width before `full_width` expansion.
   ///
   /// # Returns
   ///
@@ -253,7 +253,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `height` is the fixed rendered height for the input shell.
+  /// * `height` is the fixed rendered height for the input shell.
   ///
   /// # Returns
   ///
@@ -267,7 +267,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `padding` is the inline spacing around the text viewport.
+  /// * `padding` is the inline spacing around the text viewport.
   ///
   /// # Returns
   ///
@@ -281,7 +281,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the stepper separator.
+  /// * `color` is the semantic theme token to use for the stepper separator.
   ///
   /// # Returns
   ///
@@ -295,7 +295,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for an enabled hover surface.
+  /// * `color` is the semantic theme token to use for an enabled hover surface.
   ///
   /// # Returns
   ///
@@ -309,7 +309,7 @@ impl NumberInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the stepper icons.
+  /// * `color` is the semantic theme token to use for the stepper icons.
   ///
   /// # Returns
   ///
@@ -340,7 +340,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `state` owns numeric editing, focus, and semantic events.
+  /// * `state` owns numeric editing, focus, and semantic events.
   ///
   /// # Returns
   ///
@@ -364,7 +364,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `prefix` supplies the visual prefix text.
+  /// * `prefix` supplies the visual prefix text.
   ///
   /// # Returns
   ///
@@ -378,7 +378,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `suffix` supplies the visual suffix text.
+  /// * `suffix` supplies the visual suffix text.
   ///
   /// # Returns
   ///
@@ -392,7 +392,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `placeholder` supplies the visual empty-state text.
+  /// * `placeholder` supplies the visual empty-state text.
   ///
   /// # Returns
   ///
@@ -406,7 +406,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies semantic colors for the control.
+  /// * `theme` supplies semantic colors for the control.
   ///
   /// # Returns
   ///
@@ -420,7 +420,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `variant` selects a semantic visual treatment.
+  /// * `variant` selects a semantic visual treatment.
   ///
   /// # Returns
   ///
@@ -434,7 +434,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `size` selects a predefined control size.
+  /// * `size` selects a predefined control size.
   ///
   /// # Returns
   ///
@@ -448,7 +448,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `controls` selects the pointer controls rendered by this input.
+  /// * `controls` selects the pointer controls rendered by this input.
   ///
   /// # Returns
   ///
@@ -462,7 +462,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `style` supplies component-specific visual overrides.
+  /// * `style` supplies component-specific visual overrides.
   ///
   /// # Returns
   ///
@@ -476,7 +476,7 @@ impl NumberInput {
   ///
   /// # Parameters
   ///
-  /// `full_width` selects whether the control fills its parent width.
+  /// * `full_width` selects whether the control fills its parent width.
   ///
   /// # Returns
   ///
@@ -492,7 +492,7 @@ impl RenderOnce for NumberInput {
   ///
   /// # Parameters
   ///
-  /// `cx` reads the numeric state and creates the child text input.
+  /// * `cx` reads the numeric state and creates the child text input.
   ///
   /// # Returns
   ///
@@ -578,10 +578,10 @@ impl RenderOnce for NumberInput {
 ///
 /// # Parameters
 ///
-/// `state` owns numeric stepping behavior.
-/// `focus_handle` identifies the nested text editor that must retain focus.
-/// `colors` supplies resolved semantic visual tokens.
-/// `disabled` prevents pointer-driven stepping when editing is unavailable.
+/// * `state` owns numeric stepping behavior.
+/// * `focus_handle` identifies the nested text editor that must retain focus.
+/// * `colors` supplies resolved semantic visual tokens.
+/// * `disabled` prevents pointer-driven stepping when editing is unavailable.
 ///
 /// # Returns
 ///
@@ -622,12 +622,12 @@ fn render_stepper(
 ///
 /// # Parameters
 ///
-/// `state` owns numeric stepping behavior.
-/// `focus_handle` identifies the nested text editor that must retain focus.
-/// `colors` supplies resolved semantic visual tokens.
-/// `disabled` prevents pointer-driven stepping when editing is unavailable.
-/// `count` supplies the signed step count.
-/// `icon_path` identifies the visual-only step direction icon.
+/// * `state` owns numeric stepping behavior.
+/// * `focus_handle` identifies the nested text editor that must retain focus.
+/// * `colors` supplies resolved semantic visual tokens.
+/// * `disabled` prevents pointer-driven stepping when editing is unavailable.
+/// * `count` supplies the signed step count.
+/// * `icon_path` identifies the visual-only step direction icon.
 ///
 /// # Returns
 ///
@@ -693,10 +693,10 @@ impl NumberInputColors {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies semantic UI color tokens.
-  /// `variant` selects the built-in visual treatment.
-  /// `style` supplies visual-only component overrides.
-  /// `disabled` describes whether the input should use disabled visuals.
+  /// * `theme` supplies semantic UI color tokens.
+  /// * `variant` selects the built-in visual treatment.
+  /// * `style` supplies visual-only component overrides.
+  /// * `disabled` describes whether the input should use disabled visuals.
   ///
   /// # Returns
   ///

@@ -180,7 +180,7 @@ impl ProjectTreeEntry {
 ///
 /// # Parameters
 ///
-/// `path` is the filesystem path whose final component should be displayed.
+/// * `path` is the filesystem path whose final component should be displayed.
 ///
 /// # Returns
 ///
@@ -207,7 +207,7 @@ fn display_name(path: &Path) -> String {
 ///
 /// # Parameters
 ///
-/// `path` is the filesystem path to test against the hidden-directory list.
+/// * `path` is the filesystem path to test against the hidden-directory list.
 ///
 /// # Returns
 ///
@@ -242,9 +242,8 @@ fn is_not_displayed_directory(path: &Path) -> bool {
 ///
 /// # Parameters
 ///
-/// `left` is the first entry being compared.
-///
-/// `right` is the second entry being compared.
+/// * `left` is the first entry being compared.
+/// * `right` is the second entry being compared.
 ///
 /// # Returns
 ///
@@ -298,7 +297,7 @@ fn compare_entries(left: &ProjectTreeEntry, right: &ProjectTreeEntry) -> Orderin
 ///
 /// # Parameters
 ///
-/// `path` is the directory path to read.
+/// * `path` is the directory path to read.
 ///
 /// # Returns
 ///
@@ -374,7 +373,7 @@ fn build_directory_entry(path: &Path) -> Result<ProjectTreeEntry, ProjectWorkspa
 ///
 /// # Parameters
 ///
-/// `path` is the filesystem path to classify and convert into a tree entry.
+/// * `path` is the filesystem path to classify and convert into a tree entry.
 ///
 /// # Returns
 ///
@@ -421,7 +420,7 @@ impl ProjectWorkspace {
   ///
   /// # Parameters
   ///
-  /// `path` is a filesystem path to the workspace root directory.
+  /// * `path` is a filesystem path to the workspace root directory.
   ///
   /// # Returns
   ///
@@ -471,7 +470,7 @@ impl ProjectWorkspace {
   ///
   /// # Parameters
   ///
-  /// `path` is the directory whose direct children should be loaded.
+  /// * `path` is the directory whose direct children should be loaded.
   ///
   /// # Returns
   ///
@@ -506,7 +505,7 @@ mod tests {
     ///
     /// # Parameters
     ///
-    /// `name` is a human-readable test name included in the directory prefix.
+    /// * `name` is a human-readable test name included in the directory prefix.
     ///
     /// # Returns
     ///
@@ -537,7 +536,7 @@ mod tests {
     ///
     /// # Parameters
     ///
-    /// `path` is the project-relative directory path to create.
+    /// * `path` is the project-relative directory path to create.
     ///
     /// # Returns
     ///
@@ -551,7 +550,7 @@ mod tests {
     ///
     /// # Parameters
     ///
-    /// `path` is the project-relative file path to create.
+    /// * `path` is the project-relative file path to create.
     ///
     /// # Returns
     ///
@@ -588,9 +587,8 @@ mod tests {
   ///
   /// # Parameters
   ///
-  /// `name` is used as both the entry display name and path.
-  ///
-  /// `kind` is the file/directory kind assigned to the entry.
+  /// * `name` is used as both the entry display name and path.
+  /// * `kind` is the file/directory kind assigned to the entry.
   ///
   /// # Returns
   ///
@@ -608,7 +606,7 @@ mod tests {
   ///
   /// # Parameters
   ///
-  /// `entry` is the tree node whose direct children should be inspected.
+  /// * `entry` is the tree node whose direct children should be inspected.
   ///
   /// # Returns
   ///

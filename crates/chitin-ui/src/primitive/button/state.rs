@@ -97,9 +97,8 @@ impl ButtonState {
   ///
   /// # Parameters
   ///
-  /// `pressed` selects the next pointer-activation state.
-  ///
-  /// `cx` emits the state-change event and refreshes observers.
+  /// * `pressed` selects the next pointer-activation state.
+  /// * `cx` emits the state-change event and refreshes observers.
   ///
   /// # Returns
   ///
@@ -118,7 +117,7 @@ impl ButtonState {
   ///
   /// # Parameters
   ///
-  /// `cx` emits the click event and refreshes observers.
+  /// * `cx` emits the click event and refreshes observers.
   ///
   /// # Returns
   ///

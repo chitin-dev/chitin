@@ -35,7 +35,7 @@ impl PanelResizeConfig {
   ///
   /// # Parameters
   ///
-  /// `on_resize_start` is invoked with the split path, split axis, cursor
+  /// * `on_resize_start` is invoked with the split path, split axis, cursor
   /// position on the resize axis, window, and app context.
   ///
   /// # Returns
@@ -54,7 +54,7 @@ impl PanelResizeConfig {
   ///
   /// # Parameters
   ///
-  /// `handle_size` is the width or height of rendered resize handles.
+  /// * `handle_size` is the width or height of rendered resize handles.
   ///
   /// # Returns
   ///
@@ -70,7 +70,7 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `leaf` is the root leaf panel.
+  /// * `leaf` is the root leaf panel.
   ///
   /// # Returns
   ///
@@ -85,9 +85,8 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the leaf panel that owns the tab.
-  ///
-  /// `tab_id` identifies the tab to activate.
+  /// * `panel_id` identifies the leaf panel that owns the tab.
+  /// * `tab_id` identifies the tab to activate.
   ///
   /// # Returns
   ///
@@ -103,9 +102,8 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the leaf panel that owns the tab.
-  ///
-  /// `tab_id` identifies the tab to close.
+  /// * `panel_id` identifies the leaf panel that owns the tab.
+  /// * `tab_id` identifies the tab to close.
   ///
   /// # Returns
   ///
@@ -131,11 +129,9 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `source_panel_id` identifies the panel that currently owns `tab_id`.
-  ///
-  /// `tab_id` identifies the existing tab object to transfer.
-  ///
-  /// `target` identifies the receiving panel and raw insertion position.
+  /// * `source_panel_id` identifies the panel that currently owns `tab_id`.
+  /// * `tab_id` identifies the existing tab object to transfer.
+  /// * `target` identifies the receiving panel and raw insertion position.
   ///
   /// # Returns
   ///
@@ -202,7 +198,7 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the leaf panel to remove.
+  /// * `panel_id` identifies the leaf panel to remove.
   ///
   /// # Returns
   ///
@@ -217,7 +213,7 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the leaf panel to find.
+  /// * `panel_id` identifies the leaf panel to find.
   ///
   /// # Returns
   ///
@@ -230,7 +226,7 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the leaf panel to find.
+  /// * `panel_id` identifies the leaf panel to find.
   ///
   /// # Returns
   ///
@@ -243,15 +239,11 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the existing leaf to split.
-  ///
-  /// `axis` controls whether the resulting leaves are side-by-side or stacked.
-  ///
-  /// `new_leaf` is the new leaf inserted before or after the existing leaf.
-  ///
-  /// `placement` controls whether `new_leaf` becomes the first or second child.
-  ///
-  /// `ratio` is the fraction of available space assigned to the first child.
+  /// * `panel_id` identifies the existing leaf to split.
+  /// * `axis` controls whether the resulting leaves are side-by-side or stacked.
+  /// * `new_leaf` is the new leaf inserted before or after the existing leaf.
+  /// * `placement` controls whether `new_leaf` becomes the first or second child.
+  /// * `ratio` is the fraction of available space assigned to the first child.
   ///
   /// # Returns
   ///
@@ -272,9 +264,8 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `path` identifies the split node to resize.
-  ///
-  /// `ratio` is the new first-child space ratio.
+  /// * `path` identifies the split node to resize.
+  /// * `ratio` is the new first-child space ratio.
   ///
   /// # Returns
   ///
@@ -287,7 +278,7 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `path` identifies the split node to inspect.
+  /// * `path` identifies the split node to inspect.
   ///
   /// # Returns
   ///
@@ -301,11 +292,9 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `path` identifies the split node to inspect.
-  ///
-  /// `root_width` is the rendered width available to the root panel node.
-  ///
-  /// `root_height` is the rendered height available to the root panel node.
+  /// * `path` identifies the split node to inspect.
+  /// * `root_width` is the rendered width available to the root panel node.
+  /// * `root_height` is the rendered height available to the root panel node.
   ///
   /// # Returns
   ///
@@ -362,9 +351,8 @@ impl<T> PanelTree<T> {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the leaf panel that should contain the tab.
-  ///
-  /// `tab_id` identifies the tab to find.
+  /// * `panel_id` identifies the leaf panel that should contain the tab.
+  /// * `tab_id` identifies the tab to find.
   ///
   /// # Returns
   ///
@@ -394,7 +382,7 @@ impl<T> PanelTree<T> {
 ///
 /// # Parameters
 ///
-/// `ratio` is the requested first-child split ratio.
+/// * `ratio` is the requested first-child split ratio.
 ///
 /// # Returns
 ///
@@ -411,12 +399,10 @@ pub(super) fn clamp_split_ratio(ratio: f32) -> f32 {
 ///
 /// # Parameters
 ///
-/// `source_index` is the tab position before removal.
-///
-/// `raw_insertion_index` is the visual insertion position in the original
+/// * `source_index` is the tab position before removal.
+/// * `raw_insertion_index` is the visual insertion position in the original
 /// strip.
-///
-/// `tab_count` is the source panel's tab count before removal.
+/// * `tab_count` is the source panel's tab count before removal.
 ///
 /// # Returns
 ///
@@ -436,9 +422,8 @@ fn normalize_same_panel_insertion_index(source_index: usize, raw_insertion_index
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being searched.
-///
-/// `panel_id` is the leaf panel identifier to find.
+/// * `node` is the current tree node being searched.
+/// * `panel_id` is the leaf panel identifier to find.
 ///
 /// # Returns
 ///
@@ -455,9 +440,8 @@ fn find_leaf<T>(node: &PanelNode<T>, panel_id: PanelId) -> Option<&PanelLeaf<T>>
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being searched.
-///
-/// `panel_id` is the leaf panel identifier to find.
+/// * `node` is the current tree node being searched.
+/// * `panel_id` is the leaf panel identifier to find.
 ///
 /// # Returns
 ///
@@ -476,9 +460,8 @@ fn find_leaf_mut<T>(node: &mut PanelNode<T>, panel_id: PanelId) -> Option<&mut P
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being searched.
-///
-/// `path` is the remaining branch path to the target split.
+/// * `node` is the current tree node being searched.
+/// * `path` is the remaining branch path to the target split.
 ///
 /// # Returns
 ///
@@ -503,13 +486,10 @@ fn find_split<'a, T>(node: &'a PanelNode<T>, path: &[PanelSplitBranch]) -> Optio
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being searched.
-///
-/// `path` is the remaining branch path to the target split.
-///
-/// `width` is the rendered width available to `node`.
-///
-/// `height` is the rendered height available to `node`.
+/// * `node` is the current tree node being searched.
+/// * `path` is the remaining branch path to the target split.
+/// * `width` is the rendered width available to `node`.
+/// * `height` is the rendered height available to `node`.
 ///
 /// # Returns
 ///
@@ -552,17 +532,12 @@ fn split_axis_size_in_node<T>(
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being searched.
-///
-/// `panel_id` identifies the leaf to split.
-///
-/// `axis` controls the new split orientation.
-///
-/// `new_leaf` is the new leaf inserted around the existing leaf.
-///
-/// `placement` controls whether `new_leaf` is first or second.
-///
-/// `ratio` controls the first-child split ratio.
+/// * `node` is the current tree node being searched.
+/// * `panel_id` identifies the leaf to split.
+/// * `axis` controls the new split orientation.
+/// * `new_leaf` is the new leaf inserted around the existing leaf.
+/// * `placement` controls whether `new_leaf` is first or second.
+/// * `ratio` controls the first-child split ratio.
 ///
 /// # Returns
 ///
@@ -605,9 +580,8 @@ fn split_leaf_node<T>(
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being searched.
-///
-/// `panel_id` identifies the leaf panel to remove.
+/// * `node` is the current tree node being searched.
+/// * `panel_id` identifies the leaf panel to remove.
 ///
 /// # Returns
 ///
@@ -643,7 +617,7 @@ fn remove_leaf_node<T>(node: &mut PanelNode<T>, panel_id: PanelId) -> Option<Pan
 ///
 /// # Parameters
 ///
-/// `node` is the tree node whose first leaf should be found.
+/// * `node` is the tree node whose first leaf should be found.
 ///
 /// # Returns
 ///
@@ -659,11 +633,9 @@ fn first_leaf_id<T>(node: &PanelNode<T>) -> Option<PanelId> {
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being searched.
-///
-/// `path` is the remaining branch path to the target split.
-///
-/// `ratio` is the requested split ratio.
+/// * `node` is the current tree node being searched.
+/// * `path` is the remaining branch path to the target split.
+/// * `ratio` is the requested split ratio.
 ///
 /// # Returns
 ///
@@ -688,7 +660,7 @@ fn resize_split_node<T>(node: &mut PanelNode<T>, path: &[PanelSplitBranch], rati
 ///
 /// # Parameters
 ///
-/// `node` is the current tree node being counted.
+/// * `node` is the current tree node being counted.
 ///
 /// # Returns
 ///
@@ -704,9 +676,8 @@ fn count_leaves<T>(node: &PanelNode<T>) -> usize {
 ///
 /// # Parameters
 ///
-/// `node` is the panel tree node to traverse.
-///
-/// `tabs` receives panel and tab identifiers in visual order.
+/// * `node` is the panel tree node to traverse.
+/// * `tabs` receives panel and tab identifiers in visual order.
 ///
 /// # Returns
 ///
@@ -727,9 +698,8 @@ fn collect_tab_ids<T>(node: &PanelNode<T>, tabs: &mut Vec<(PanelId, PanelTabId)>
 ///
 /// # Parameters
 ///
-/// `node` is the panel tree node to traverse.
-///
-/// `tabs` receives panel and active-tab identifiers in visual order.
+/// * `node` is the panel tree node to traverse.
+/// * `tabs` receives panel and active-tab identifiers in visual order.
 ///
 /// # Returns
 ///
@@ -752,7 +722,7 @@ fn collect_active_tab_ids<T>(node: &PanelNode<T>, tabs: &mut Vec<(PanelId, Panel
 ///
 /// # Parameters
 ///
-/// `node` is the panel tree node to traverse.
+/// * `node` is the panel tree node to traverse.
 ///
 /// # Returns
 ///

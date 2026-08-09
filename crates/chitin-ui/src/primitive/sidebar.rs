@@ -94,7 +94,7 @@ impl SidebarResizeState {
   ///
   /// # Parameters
   ///
-  /// `width` is the requested sidebar width. It is clamped to the configured
+  /// * `width` is the requested sidebar width. It is clamped to the configured
   /// bounds.
   ///
   /// # Returns
@@ -109,7 +109,7 @@ impl SidebarResizeState {
   ///
   /// # Parameters
   ///
-  /// `min_width` is the smallest width allowed during resize.
+  /// * `min_width` is the smallest width allowed during resize.
   ///
   /// # Returns
   ///
@@ -124,7 +124,7 @@ impl SidebarResizeState {
   ///
   /// # Parameters
   ///
-  /// `max_width` is the largest width allowed during resize.
+  /// * `max_width` is the largest width allowed during resize.
   ///
   /// # Returns
   ///
@@ -165,7 +165,7 @@ impl SidebarResizeState {
   ///
   /// # Parameters
   ///
-  /// `start_x` is the horizontal cursor position where dragging began.
+  /// * `start_x` is the horizontal cursor position where dragging began.
   ///
   /// # Returns
   ///
@@ -178,7 +178,7 @@ impl SidebarResizeState {
   ///
   /// # Parameters
   ///
-  /// `current_x` is the latest horizontal cursor position during the drag.
+  /// * `current_x` is the latest horizontal cursor position during the drag.
   ///
   /// # Returns
   ///
@@ -212,7 +212,7 @@ impl SidebarResizeState {
   ///
   /// # Parameters
   ///
-  /// `width` is the requested sidebar width before clamping.
+  /// * `width` is the requested sidebar width before clamping.
   ///
   /// # Returns
   ///
@@ -225,7 +225,7 @@ impl SidebarResizeState {
   ///
   /// # Parameters
   ///
-  /// `width` is the requested width before bounds are applied.
+  /// * `width` is the requested width before bounds are applied.
   ///
   /// # Returns
   ///
@@ -274,7 +274,7 @@ impl SidebarResizeConfig {
   ///
   /// # Parameters
   ///
-  /// `on_resize_start` is invoked when the user presses the resize handle. It
+  /// * `on_resize_start` is invoked when the user presses the resize handle. It
   /// receives the cursor x-position, window, and app context.
   ///
   /// # Returns
@@ -291,7 +291,7 @@ impl SidebarResizeConfig {
   ///
   /// # Parameters
   ///
-  /// `handle_width` is the width of the interactive resize handle.
+  /// * `handle_width` is the width of the interactive resize handle.
   ///
   /// # Returns
   ///
@@ -356,7 +356,7 @@ impl SidebarHeader {
   ///
   /// # Parameters
   ///
-  /// `child` is appended to the header content.
+  /// * `child` is appended to the header content.
   ///
   /// # Returns
   ///
@@ -370,7 +370,7 @@ impl SidebarHeader {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies colors for the header.
+  /// * `theme` supplies colors for the header.
   ///
   /// # Returns
   ///
@@ -384,7 +384,7 @@ impl SidebarHeader {
   ///
   /// # Parameters
   ///
-  /// `hidden` controls whether the header renders as hidden.
+  /// * `hidden` controls whether the header renders as hidden.
   ///
   /// # Returns
   ///
@@ -509,7 +509,7 @@ impl SidebarBody {
   ///
   /// # Parameters
   ///
-  /// `child` is appended to the body content.
+  /// * `child` is appended to the body content.
   ///
   /// # Returns
   ///
@@ -526,7 +526,7 @@ impl SidebarBody {
   ///
   /// # Parameters
   ///
-  /// `id` is the stable GPUI element identifier.
+  /// * `id` is the stable GPUI element identifier.
   ///
   /// # Returns
   ///
@@ -540,7 +540,7 @@ impl SidebarBody {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies colors for the body.
+  /// * `theme` supplies colors for the body.
   ///
   /// # Returns
   ///
@@ -554,7 +554,7 @@ impl SidebarBody {
   ///
   /// # Parameters
   ///
-  /// `scrollable` controls whether overflow-y scrolling is enabled.
+  /// * `scrollable` controls whether overflow-y scrolling is enabled.
   ///
   /// # Returns
   ///
@@ -568,7 +568,7 @@ impl SidebarBody {
   ///
   /// # Parameters
   ///
-  /// `hidden` controls whether the body renders as hidden.
+  /// * `hidden` controls whether the body renders as hidden.
   ///
   /// # Returns
   ///
@@ -689,7 +689,7 @@ impl SidebarFooter {
   ///
   /// # Parameters
   ///
-  /// `child` is appended to the footer content.
+  /// * `child` is appended to the footer content.
   ///
   /// # Returns
   ///
@@ -703,7 +703,7 @@ impl SidebarFooter {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies colors for the footer.
+  /// * `theme` supplies colors for the footer.
   ///
   /// # Returns
   ///
@@ -717,7 +717,7 @@ impl SidebarFooter {
   ///
   /// # Parameters
   ///
-  /// `hidden` controls whether the footer renders as hidden.
+  /// * `hidden` controls whether the footer renders as hidden.
   ///
   /// # Returns
   ///
@@ -815,7 +815,7 @@ impl SidebarSection {
   ///
   /// # Parameters
   ///
-  /// `child` is appended to the section content.
+  /// * `child` is appended to the section content.
   ///
   /// # Returns
   ///
@@ -829,7 +829,7 @@ impl SidebarSection {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies colors for the section.
+  /// * `theme` supplies colors for the section.
   ///
   /// # Returns
   ///
@@ -845,7 +845,7 @@ impl SidebarSection {
   ///
   /// # Parameters
   ///
-  /// `fill` controls whether the section expands to fill remaining height.
+  /// * `fill` controls whether the section expands to fill remaining height.
   ///
   /// # Returns
   ///
@@ -859,7 +859,7 @@ impl SidebarSection {
   ///
   /// # Parameters
   ///
-  /// `hidden` controls whether the section renders as hidden.
+  /// * `hidden` controls whether the section renders as hidden.
   ///
   /// # Returns
   ///
@@ -923,7 +923,7 @@ impl SidebarTitle {
   ///
   /// # Parameters
   ///
-  /// `label` is the text rendered by the title.
+  /// * `label` is the text rendered by the title.
   ///
   /// # Returns
   ///
@@ -939,7 +939,7 @@ impl SidebarTitle {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies text color for the title.
+  /// * `theme` supplies text color for the title.
   ///
   /// # Returns
   ///
@@ -1007,7 +1007,7 @@ impl SidebarAction {
   ///
   /// # Parameters
   ///
-  /// `child` is appended to the action content.
+  /// * `child` is appended to the action content.
   ///
   /// # Returns
   ///
@@ -1021,7 +1021,7 @@ impl SidebarAction {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies colors for the action.
+  /// * `theme` supplies colors for the action.
   ///
   /// # Returns
   ///
@@ -1035,7 +1035,7 @@ impl SidebarAction {
   ///
   /// # Parameters
   ///
-  /// `hidden` controls whether the action renders as hidden.
+  /// * `hidden` controls whether the action renders as hidden.
   ///
   /// # Returns
   ///
@@ -1136,7 +1136,7 @@ impl Sidebar {
   ///
   /// # Parameters
   ///
-  /// `child` is appended to the sidebar content.
+  /// * `child` is appended to the sidebar content.
   ///
   /// # Returns
   ///
@@ -1150,7 +1150,7 @@ impl Sidebar {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies colors for the sidebar frame and resize handle.
+  /// * `theme` supplies colors for the sidebar frame and resize handle.
   ///
   /// # Returns
   ///
@@ -1164,7 +1164,7 @@ impl Sidebar {
   ///
   /// # Parameters
   ///
-  /// `width` is the fixed width used by the sidebar shell.
+  /// * `width` is the fixed width used by the sidebar shell.
   ///
   /// # Returns
   ///
@@ -1178,7 +1178,7 @@ impl Sidebar {
   ///
   /// # Parameters
   ///
-  /// `resize` configures handle width and resize-start behavior.
+  /// * `resize` configures handle width and resize-start behavior.
   ///
   /// # Returns
   ///
@@ -1192,7 +1192,7 @@ impl Sidebar {
   ///
   /// # Parameters
   ///
-  /// `hidden` controls whether the sidebar renders as hidden.
+  /// * `hidden` controls whether the sidebar renders as hidden.
   ///
   /// # Returns
   ///
@@ -1268,9 +1268,8 @@ impl IntoElement for Sidebar {
 ///
 /// # Parameters
 ///
-/// `theme` supplies colors for hover feedback.
-///
-/// `resize` provides handle width and the resize-start callback.
+/// * `theme` supplies colors for hover feedback.
+/// * `resize` provides handle width and the resize-start callback.
 ///
 /// # Returns
 ///

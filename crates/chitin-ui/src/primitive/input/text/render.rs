@@ -58,7 +58,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the input surface.
+  /// * `color` is the semantic theme token to use for the input surface.
   ///
   /// # Returns
   ///
@@ -72,7 +72,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for entered text.
+  /// * `color` is the semantic theme token to use for entered text.
   ///
   /// # Returns
   ///
@@ -86,7 +86,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for placeholder text.
+  /// * `color` is the semantic theme token to use for placeholder text.
   ///
   /// # Returns
   ///
@@ -100,7 +100,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use behind selected text.
+  /// * `color` is the semantic theme token to use behind selected text.
   ///
   /// # Returns
   ///
@@ -114,7 +114,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for selected glyphs.
+  /// * `color` is the semantic theme token to use for selected glyphs.
   ///
   /// # Returns
   ///
@@ -128,7 +128,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the insertion caret.
+  /// * `color` is the semantic theme token to use for the insertion caret.
   ///
   /// # Returns
   ///
@@ -142,7 +142,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the idle border.
+  /// * `color` is the semantic theme token to use for the idle border.
   ///
   /// # Returns
   ///
@@ -156,7 +156,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `color` is the semantic theme token to use for the focused border.
+  /// * `color` is the semantic theme token to use for the focused border.
   ///
   /// # Returns
   ///
@@ -170,7 +170,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `width` is the fixed rendered width before `full_width` expansion.
+  /// * `width` is the fixed rendered width before `full_width` expansion.
   ///
   /// # Returns
   ///
@@ -184,7 +184,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `height` is the fixed rendered height for the input shell.
+  /// * `height` is the fixed rendered height for the input shell.
   ///
   /// # Returns
   ///
@@ -198,7 +198,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `padding` is the inline spacing around the text viewport.
+  /// * `padding` is the inline spacing around the text viewport.
   ///
   /// # Returns
   ///
@@ -212,7 +212,7 @@ impl TextInputStyle {
   ///
   /// # Parameters
   ///
-  /// `appearance` supplies crate-private input visual overrides.
+  /// * `appearance` supplies crate-private input visual overrides.
   ///
   /// # Returns
   ///
@@ -278,7 +278,7 @@ impl TextInput {
   ///
   /// # Parameters
   ///
-  /// `variant` selects a semantic visual treatment.
+  /// * `variant` selects a semantic visual treatment.
   ///
   /// # Returns
   ///
@@ -292,7 +292,7 @@ impl TextInput {
   ///
   /// # Parameters
   ///
-  /// `style` supplies component-specific visual overrides.
+  /// * `style` supplies component-specific visual overrides.
   ///
   /// # Returns
   ///
@@ -432,9 +432,8 @@ impl RenderOnce for TextInput {
 ///
 /// # Parameters
 ///
-/// `event` supplies the normalized GPUI key event.
-///
-/// `key` supplies the lower-case clipboard key to match.
+/// * `event` supplies the normalized GPUI key event.
+/// * `key` supplies the lower-case clipboard key to match.
 ///
 /// # Returns
 ///
@@ -448,9 +447,8 @@ fn is_clipboard_shortcut(event: &KeyDownEvent, key: &str) -> bool {
 ///
 /// # Parameters
 ///
-/// `state` supplies the text input state entity.
-///
-/// `cx` provides platform clipboard access.
+/// * `state` supplies the text input state entity.
+/// * `cx` provides platform clipboard access.
 ///
 /// # Returns
 ///
@@ -472,9 +470,8 @@ fn copy_selection_to_clipboard(state: &Entity<TextInputState>, cx: &mut App) -> 
 ///
 /// # Parameters
 ///
-/// `state` supplies the text input state entity.
-///
-/// `cx` provides platform clipboard access and state mutation.
+/// * `state` supplies the text input state entity.
+/// * `cx` provides platform clipboard access and state mutation.
 ///
 /// # Returns
 ///
@@ -491,9 +488,8 @@ fn cut_selection_to_clipboard(state: &Entity<TextInputState>, cx: &mut App) -> b
 ///
 /// # Parameters
 ///
-/// `state` supplies the text input state entity.
-///
-/// `cx` provides platform clipboard access and state mutation.
+/// * `state` supplies the text input state entity.
+/// * `cx` provides platform clipboard access and state mutation.
 ///
 /// # Returns
 ///
@@ -711,9 +707,8 @@ impl Element for TextInputContent {
 ///
 /// # Parameters
 ///
-/// `run` supplies the base text styling for the complete line.
-///
-/// `marked_range` optionally identifies the active IME composition range.
+/// * `run` supplies the base text styling for the complete line.
+/// * `marked_range` optionally identifies the active IME composition range.
 ///
 /// # Returns
 ///
@@ -752,15 +747,11 @@ fn text_runs(mut run: TextRun, marked_range: Option<std::ops::Range<usize>>) -> 
 ///
 /// # Parameters
 ///
-/// `state` owns the selection and active pointer anchor.
-///
-/// `hitbox` identifies the interactive text viewport.
-///
-/// `line` maps pointer x coordinates to shaped-text offsets.
-///
-/// `text_is_empty` prevents placeholder glyphs from becoming input offsets.
-///
-/// `window` registers handlers for the current rendered frame.
+/// * `state` owns the selection and active pointer anchor.
+/// * `hitbox` identifies the interactive text viewport.
+/// * `line` maps pointer x coordinates to shaped-text offsets.
+/// * `text_is_empty` prevents placeholder glyphs from becoming input offsets.
+/// * `window` registers handlers for the current rendered frame.
 ///
 /// # Returns
 ///
@@ -824,13 +815,10 @@ fn register_pointer_selection_handlers(
 ///
 /// # Parameters
 ///
-/// `position` supplies the pointer location in window coordinates.
-///
-/// `bounds` supplies the text viewport's window bounds.
-///
-/// `line` supplies the complete shaped input line.
-///
-/// `text_is_empty` identifies placeholder-only layouts.
+/// * `position` supplies the pointer location in window coordinates.
+/// * `bounds` supplies the text viewport's window bounds.
+/// * `line` supplies the complete shaped input line.
+/// * `text_is_empty` identifies placeholder-only layouts.
 ///
 /// # Returns
 ///
@@ -866,13 +854,10 @@ impl TextInputColors {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies semantic UI color tokens.
-  ///
-  /// `variant` selects the built-in visual treatment.
-  ///
-  /// `style` supplies visual-only component overrides.
-  ///
-  /// `disabled` describes whether the input should use disabled visuals.
+  /// * `theme` supplies semantic UI color tokens.
+  /// * `variant` selects the built-in visual treatment.
+  /// * `style` supplies visual-only component overrides.
+  /// * `disabled` describes whether the input should use disabled visuals.
   ///
   /// # Returns
   ///

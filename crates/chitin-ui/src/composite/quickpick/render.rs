@@ -33,11 +33,9 @@ pub const DEFAULT_QUICK_PICK_BODY_MAX_HEIGHT: Pixels = px(512.0);
 ///
 /// # Parameters
 ///
-/// `overlay` is the query line and body data to render.
-///
-/// `theme` supplies workbench colors.
-///
-/// `on_select` is invoked with the row index and current GPUI window selected by pointer.
+/// * `overlay` is the query line and body data to render.
+/// * `theme` supplies workbench colors.
+/// * `on_select` is invoked with the row index and current GPUI window selected by pointer.
 ///
 /// # Returns
 ///
@@ -106,11 +104,9 @@ pub fn render_quick_pick_overlay(
 ///
 /// # Parameters
 ///
-/// `query` is the current text.
-///
-/// `placeholder` is shown when `query` is empty.
-///
-/// `theme` supplies colors.
+/// * `query` is the current text.
+/// * `placeholder` is shown when `query` is empty.
+/// * `theme` supplies colors.
 ///
 /// # Returns
 ///
@@ -160,17 +156,12 @@ fn render_query_line(
 ///
 /// # Parameters
 ///
-/// `items` are ranked rows.
-///
-/// `selected_index` controls highlight state.
-///
-/// `scroll_handle` optionally preserves and controls virtual-list scroll state.
-///
-/// `empty_message` is shown when no rows exist.
-///
-/// `theme` supplies colors.
-///
-/// `on_select` handles pointer selection.
+/// * `items` are ranked rows.
+/// * `selected_index` controls highlight state.
+/// * `scroll_handle` optionally preserves and controls virtual-list scroll state.
+/// * `empty_message` is shown when no rows exist.
+/// * `theme` supplies colors.
+/// * `on_select` handles pointer selection.
 ///
 /// # Returns
 ///
@@ -227,15 +218,11 @@ fn render_items(
 ///
 /// # Parameters
 ///
-/// `index` is the row index passed to selection callbacks.
-///
-/// `item` is the row content.
-///
-/// `selected` controls highlight state.
-///
-/// `theme` supplies colors.
-///
-/// `on_select` handles pointer selection.
+/// * `index` is the row index passed to selection callbacks.
+/// * `item` is the row content.
+/// * `selected` controls highlight state.
+/// * `theme` supplies colors.
+/// * `on_select` handles pointer selection.
 ///
 /// # Returns
 ///
@@ -281,9 +268,8 @@ fn render_item(
 ///
 /// # Parameters
 ///
-/// `form` is the form content.
-///
-/// `theme` supplies colors.
+/// * `form` is the form content.
+/// * `theme` supplies colors.
 ///
 /// # Returns
 ///

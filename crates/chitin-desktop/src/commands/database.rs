@@ -17,9 +17,8 @@ impl crate::app::ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `command` is the database command to execute.
-  ///
-  /// `cx` is the GPUI app context notified when state changes.
+  /// * `command` is the database command to execute.
+  /// * `cx` is the GPUI app context notified when state changes.
   pub(crate) fn dispatch_database_command(&mut self, command: DatabaseCommand, cx: &mut gpui::Context<Self>) {
     match command {
       DatabaseCommand::DownloadRcsbStructure => {
@@ -33,8 +32,8 @@ impl crate::app::ChitinApp {
 }
 
 /// Builds command panel descriptors for database commands.
-///
 /// # Parameters
+///
 ///
 /// This function takes no parameters.
 ///

@@ -78,7 +78,7 @@ impl WgpuPanelScene for ExampleCubeScene {
   ///
   /// # Parameters
   ///
-  /// `frame` contains the current surface target and camera state.
+  /// * `frame` contains the current surface target and camera state.
   ///
   /// # Returns
   ///
@@ -140,13 +140,10 @@ impl ExampleCubeRenderer {
   ///
   /// # Parameters
   ///
-  /// `device` creates WGPU resources and command encoders.
-  ///
-  /// `queue` submits command buffers.
-  ///
-  /// `size` is the initial render target size in physical pixels.
-  ///
-  /// `color_format` is the render target texture format.
+  /// * `device` creates WGPU resources and command encoders.
+  /// * `queue` submits command buffers.
+  /// * `size` is the initial render target size in physical pixels.
+  /// * `color_format` is the render target texture format.
   ///
   /// # Returns
   ///
@@ -273,7 +270,7 @@ impl ExampleCubeRenderer {
   ///
   /// # Parameters
   ///
-  /// `size` is the latest render target size in physical pixels.
+  /// * `size` is the latest render target size in physical pixels.
   ///
   /// # Returns
   ///
@@ -300,9 +297,8 @@ impl ExampleCubeRenderer {
   ///
   /// # Parameters
   ///
-  /// `view` is the WGPU color render target.
-  ///
-  /// `mvp` transforms cube vertices into WGPU clip space.
+  /// * `view` is the WGPU color render target.
+  /// * `mvp` transforms cube vertices into WGPU clip space.
   ///
   /// # Returns
   ///
@@ -359,7 +355,7 @@ impl ExampleCubeRenderer {
 ///
 /// # Parameters
 ///
-/// `elapsed_seconds` is the animation time in seconds.
+/// * `elapsed_seconds` is the animation time in seconds.
 ///
 /// # Returns
 ///

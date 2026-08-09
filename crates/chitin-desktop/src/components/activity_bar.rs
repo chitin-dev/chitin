@@ -108,9 +108,8 @@ impl ActivityBarControls {
 ///
 /// # Parameters
 ///
-/// `activity` is the workbench area selected when the item is clicked.
-///
-/// `icon_path` is the asset-relative SVG path rendered by the item.
+/// * `activity` is the workbench area selected when the item is clicked.
+/// * `icon_path` is the asset-relative SVG path rendered by the item.
 ///
 /// # Returns
 ///
@@ -158,9 +157,8 @@ fn subscribe_workspace_activity(button: &Entity<ButtonState>, window: &mut Windo
 ///
 /// # Parameters
 ///
-/// `active_activity` is the currently selected top-level workbench area.
-///
-/// `theme` supplies colors for the activity bar component.
+/// * `active_activity` is the currently selected top-level workbench area.
+/// * `theme` supplies colors for the activity bar component.
 ///
 /// # Returns
 ///

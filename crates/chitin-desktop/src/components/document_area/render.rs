@@ -44,16 +44,12 @@ const TAB_CLOSE_ICON_SIZE: Pixels = px(12.0);
 ///
 /// # Parameters
 ///
-/// `document_panels` contains the current document panel layout.
-///
-/// `theme` supplies colors for the document area.
-///
-/// `focus_handle` is the focus handle used to track and direct keyboard focus
+/// * `document_panels` contains the current document panel layout.
+/// * `theme` supplies colors for the document area.
+/// * `focus_handle` is the focus handle used to track and direct keyboard focus
 /// for the document area element.
-///
-/// `app` is the weak app entity used by document panel callbacks.
-///
-/// `cx` is the GPUI context used by action listeners and callbacks to update
+/// * `app` is the weak app entity used by document panel callbacks.
+/// * `cx` is the GPUI context used by action listeners and callbacks to update
 /// application state.
 ///
 /// # Returns
@@ -73,16 +69,12 @@ pub fn render_document_area(
 ///
 /// # Parameters
 ///
-/// `document_panels` contains the panel tree and tab state to render.
-///
-/// `theme` supplies colors for the placeholder document surface.
-///
-/// `focus_handle` is the focus handle used to track and direct keyboard focus
+/// * `document_panels` contains the panel tree and tab state to render.
+/// * `theme` supplies colors for the placeholder document surface.
+/// * `focus_handle` is the focus handle used to track and direct keyboard focus
 /// for the panel container element.
-///
-/// `app` is the weak app entity used by tab and split button callbacks.
-///
-/// `cx` is the GPUI context used by action listeners and callbacks to update
+/// * `app` is the weak app entity used by tab and split button callbacks.
+/// * `cx` is the GPUI context used by action listeners and callbacks to update
 /// application state.
 ///
 /// # Returns
@@ -201,11 +193,9 @@ fn render_opened_document_panels(
 ///
 /// # Parameters
 ///
-/// `document_panels` owns the presentation-only scroll indicator state.
-///
-/// `now` is the current UI clock timestamp.
-///
-/// `cx` schedules the wake-up task and receives the redraw notification.
+/// * `document_panels` owns the presentation-only scroll indicator state.
+/// * `now` is the current UI clock timestamp.
+/// * `cx` schedules the wake-up task and receives the redraw notification.
 ///
 /// # Returns
 ///
@@ -229,11 +219,9 @@ fn schedule_tab_scroll_indicator_hide(document_panels: &DocumentPanelState, now:
 ///
 /// # Parameters
 ///
-/// `panel_id` identifies the panel controlled by the split buttons.
-///
-/// `theme` supplies colors for the action buttons.
-///
-/// `app` is the weak app entity updated by button clicks.
+/// * `panel_id` identifies the panel controlled by the split buttons.
+/// * `theme` supplies colors for the action buttons.
+/// * `app` is the weak app entity updated by button clicks.
 ///
 /// # Returns
 ///
@@ -267,15 +255,11 @@ fn render_panel_tab_strip_actions(panel_id: PanelId, theme: UIThemes, app: WeakE
 ///
 /// # Parameters
 ///
-/// `panel_id` identifies the panel that should be split when clicked.
-///
-/// `axis` controls the orientation of the created split.
-///
-/// `icon_path` is the desktop asset path for the button icon.
-///
-/// `theme` supplies colors for the button.
-///
-/// `app` is the weak app entity updated by button clicks.
+/// * `panel_id` identifies the panel that should be split when clicked.
+/// * `axis` controls the orientation of the created split.
+/// * `icon_path` is the desktop asset path for the button icon.
+/// * `theme` supplies colors for the button.
+/// * `app` is the weak app entity updated by button clicks.
 ///
 /// # Returns
 ///
@@ -314,9 +298,8 @@ fn render_panel_split_button(
 ///
 /// # Parameters
 ///
-/// `content` is the tab payload selected by the panel container.
-///
-/// `theme` supplies colors for placeholder project-document content.
+/// * `content` is the tab payload selected by the panel container.
+/// * `theme` supplies colors for placeholder project-document content.
 ///
 /// # Returns
 ///
@@ -332,9 +315,8 @@ fn render_document_panel_content(content: &DocumentPanelContent, theme: UIThemes
 ///
 /// # Parameters
 ///
-/// `document` is the opened file descriptor to display.
-///
-/// `theme` supplies colors for the document body.
+/// * `document` is the opened file descriptor to display.
+/// * `theme` supplies colors for the document body.
 ///
 /// # Returns
 ///

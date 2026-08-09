@@ -31,14 +31,6 @@ pub struct RcsbEndpoints {
 
 impl StructureFormat {
   /// Returns the RCSB download extension.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A file extension without a leading dot.
   pub fn extension(self) -> &'static str {
     match self {
       Self::Pdb => "pdb",
@@ -49,14 +41,6 @@ impl StructureFormat {
 
 impl RcsbEndpoints {
   /// Creates endpoint configuration for public RCSB services.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// Default RCSB endpoint configuration.
   pub fn new() -> Self {
     Self {
       data_api_base_url: DEFAULT_DATA_API_BASE_URL.to_string(),
@@ -68,9 +52,8 @@ impl RcsbEndpoints {
   ///
   /// # Parameters
   ///
-  /// `data_api_base_url` is the base URL for metadata endpoints.
-  ///
-  /// `file_download_base_url` is the base URL for structure downloads.
+  /// * `data_api_base_url` is the base URL for metadata endpoints.
+  /// * `file_download_base_url` is the base URL for structure downloads.
   ///
   /// # Returns
   ///
@@ -92,7 +75,7 @@ impl RcsbEndpoints {
   ///
   /// # Parameters
   ///
-  /// `id` identifies the requested PDB entry.
+  /// * `id` identifies the requested PDB entry.
   ///
   /// # Returns
   ///
@@ -110,9 +93,8 @@ impl RcsbEndpoints {
   ///
   /// # Parameters
   ///
-  /// `id` identifies the requested PDB entry.
-  ///
-  /// `format` selects the raw structure format.
+  /// * `id` identifies the requested PDB entry.
+  /// * `format` selects the raw structure format.
   ///
   /// # Returns
   ///
@@ -131,7 +113,7 @@ impl RcsbEndpoints {
   ///
   /// # Parameters
   ///
-  /// `query` is the GraphQL JSON payload.
+  /// * `query` is the GraphQL JSON payload.
   ///
   /// # Returns
   ///
@@ -157,7 +139,7 @@ impl Default for RcsbEndpoints {
 ///
 /// # Parameters
 ///
-/// `value` is the base URL string.
+/// * `value` is the base URL string.
 ///
 /// # Returns
 ///
@@ -172,7 +154,7 @@ fn normalize_base_url(value: &str) -> Result<String, TransportError> {
 ///
 /// # Parameters
 ///
-/// `value` is the full URL string.
+/// * `value` is the full URL string.
 ///
 /// # Returns
 ///

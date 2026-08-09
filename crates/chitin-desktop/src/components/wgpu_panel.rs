@@ -43,7 +43,7 @@ pub trait WgpuPanelScene {
   ///
   /// # Parameters
   ///
-  /// `frame` contains the GPUI surface resources and current camera state.
+  /// * `frame` contains the GPUI surface resources and current camera state.
   ///
   /// # Returns
   ///
@@ -90,7 +90,7 @@ impl WgpuPanelScene for ClearScene {
   ///
   /// # Parameters
   ///
-  /// `frame` contains the GPUI surface resources and back-buffer target.
+  /// * `frame` contains the GPUI surface resources and back-buffer target.
   ///
   /// # Returns
   ///
@@ -140,7 +140,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// `surface` is the GPUI-owned WGPU surface created by the desktop window.
+  /// * `surface` is the GPUI-owned WGPU surface created by the desktop window.
   ///
   /// # Returns
   ///
@@ -154,9 +154,8 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// `surface` is the GPUI-owned WGPU surface created by the desktop window.
-  ///
-  /// `scene` renders each frame using the surface resources supplied by this
+  /// * `surface` is the GPUI-owned WGPU surface created by the desktop window.
+  /// * `scene` renders each frame using the surface resources supplied by this
   /// panel.
   ///
   /// # Returns
@@ -224,7 +223,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI mouse-down event over the WGPU panel.
+  /// * `event` is the GPUI mouse-down event over the WGPU panel.
   ///
   /// # Returns
   ///
@@ -258,7 +257,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI mouse-move event over the WGPU panel.
+  /// * `event` is the GPUI mouse-move event over the WGPU panel.
   ///
   /// # Returns
   ///
@@ -292,7 +291,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// `_event` is the GPUI mouse-up event ending the gesture.
+  /// * `_event` is the GPUI mouse-up event ending the gesture.
   ///
   /// # Returns
   ///
@@ -306,7 +305,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI scroll-wheel event over the WGPU panel.
+  /// * `event` is the GPUI scroll-wheel event over the WGPU panel.
   ///
   /// # Returns
   ///
@@ -322,9 +321,8 @@ impl Render for ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// `window` is used to request animation frames while the panel is visible.
-  ///
-  /// `cx` is notified so GPUI keeps repainting the panel.
+  /// * `window` is used to request animation frames while the panel is visible.
+  /// * `cx` is notified so GPUI keeps repainting the panel.
   ///
   /// # Returns
   ///
@@ -409,7 +407,7 @@ impl Render for ChitinWgpuDocumentPanel {
 ///
 /// # Parameters
 ///
-/// `pixels` is a GPUI pixel value from an input event.
+/// * `pixels` is a GPUI pixel value from an input event.
 ///
 /// # Returns
 ///

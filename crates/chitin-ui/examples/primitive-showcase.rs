@@ -38,7 +38,7 @@ impl AssetSource for PrimitiveShowcaseAssets {
   ///
   /// # Parameters
   ///
-  /// `path` is the asset-relative path requested by a primitive.
+  /// * `path` is the asset-relative path requested by a primitive.
   ///
   /// # Returns
   ///
@@ -53,7 +53,7 @@ impl AssetSource for PrimitiveShowcaseAssets {
   ///
   /// # Parameters
   ///
-  /// `path` is the asset-relative directory path requested by GPUI.
+  /// * `path` is the asset-relative directory path requested by GPUI.
   ///
   /// # Returns
   ///
@@ -133,7 +133,7 @@ impl PrimitiveShowcase {
   ///
   /// # Parameters
   ///
-  /// `cx` allocates the input state entities and subscriptions.
+  /// * `cx` allocates the input state entities and subscriptions.
   ///
   /// # Returns
   ///
@@ -196,8 +196,8 @@ impl PrimitiveShowcase {
   ///
   /// # Parameters
   ///
-  /// `example` provides the input state, explanatory copy, and latest event.
-  /// `theme` supplies semantic colors.
+  /// * `example` provides the input state, explanatory copy, and latest event.
+  /// * `theme` supplies semantic colors.
   ///
   /// # Returns
   ///
@@ -230,8 +230,8 @@ impl PrimitiveShowcase {
   ///
   /// # Parameters
   ///
-  /// `example` provides numeric input state, display copy, and the latest event.
-  /// `theme` supplies semantic colors.
+  /// * `example` provides numeric input state, display copy, and the latest event.
+  /// * `theme` supplies semantic colors.
   ///
   /// # Returns
   ///
@@ -462,7 +462,7 @@ impl Render for PrimitiveShowcase {
 ///
 /// # Parameters
 ///
-/// `event` is the semantic event emitted by a [`TextInputState`].
+/// * `event` is the semantic event emitted by a [`TextInputState`].
 ///
 /// # Returns
 ///
@@ -496,7 +496,7 @@ fn text_input_event_summary(event: &TextInputEvent) -> SharedString {
 ///
 /// # Parameters
 ///
-/// `event` is the semantic event emitted by a [`NumberInputState`].
+/// * `event` is the semantic event emitted by a [`NumberInputState`].
 ///
 /// # Returns
 ///
@@ -539,7 +539,7 @@ fn number_input_event_summary(event: &NumberInputEvent) -> SharedString {
 ///
 /// # Parameters
 ///
-/// `state` is the current semantic numeric draft state.
+/// * `state` is the current semantic numeric draft state.
 ///
 /// # Returns
 ///

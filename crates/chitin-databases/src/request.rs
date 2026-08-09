@@ -33,7 +33,7 @@ impl HttpRequest {
   ///
   /// # Parameters
   ///
-  /// `url` is the fully qualified endpoint URL.
+  /// * `url` is the fully qualified endpoint URL.
   ///
   /// # Returns
   ///
@@ -52,9 +52,8 @@ impl HttpRequest {
   ///
   /// # Parameters
   ///
-  /// `url` is the fully qualified endpoint URL.
-  ///
-  /// `body` is the buffered request body.
+  /// * `url` is the fully qualified endpoint URL.
+  /// * `body` is the buffered request body.
   ///
   /// # Returns
   ///

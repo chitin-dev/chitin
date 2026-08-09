@@ -79,8 +79,8 @@ impl NumberBounds {
   ///
   /// # Parameters
   ///
-  /// `minimum` supplies an optional lower limit.
-  /// `maximum` supplies an optional upper limit.
+  /// * `minimum` supplies an optional lower limit.
+  /// * `maximum` supplies an optional upper limit.
   ///
   /// # Returns
   ///
@@ -126,7 +126,7 @@ impl NumberBounds {
   ///
   /// # Parameters
   ///
-  /// `value` supplies the finite value to constrain.
+  /// * `value` supplies the finite value to constrain.
   ///
   /// # Returns
   ///
@@ -140,7 +140,7 @@ impl NumberBounds {
   ///
   /// # Parameters
   ///
-  /// `value` supplies the finite value to validate.
+  /// * `value` supplies the finite value to validate.
   ///
   /// # Returns
   ///
@@ -187,7 +187,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `cx` allocates the nested input entity and event subscription.
+  /// * `cx` allocates the nested input entity and event subscription.
   ///
   /// # Returns
   ///
@@ -331,8 +331,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `disabled` selects the editing availability.
-  /// `cx` forwards the state update to the nested text input.
+  /// * `disabled` selects the editing availability.
+  /// * `cx` forwards the state update to the nested text input.
   ///
   /// # Returns
   ///
@@ -351,8 +351,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `readonly` selects whether mutation is permitted.
-  /// `cx` forwards the state update to the nested text input.
+  /// * `readonly` selects whether mutation is permitted.
+  /// * `cx` forwards the state update to the nested text input.
   ///
   /// # Returns
   ///
@@ -371,8 +371,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `bounds` supplies a previously validated inclusive range.
-  /// `cx` emits validation changes caused by the new range.
+  /// * `bounds` supplies a previously validated inclusive range.
+  /// * `cx` emits validation changes caused by the new range.
   ///
   /// # Returns
   ///
@@ -392,8 +392,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `minimum` supplies a finite lower bound, or clears the lower bound.
-  /// `cx` emits validation changes caused by the new range.
+  /// * `minimum` supplies a finite lower bound, or clears the lower bound.
+  /// * `cx` emits validation changes caused by the new range.
   ///
   /// # Returns
   ///
@@ -410,8 +410,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `maximum` supplies a finite upper bound, or clears the upper bound.
-  /// `cx` emits validation changes caused by the new range.
+  /// * `maximum` supplies a finite upper bound, or clears the upper bound.
+  /// * `cx` emits validation changes caused by the new range.
   ///
   /// # Returns
   ///
@@ -428,7 +428,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `step` supplies the new finite positive increment.
+  /// * `step` supplies the new finite positive increment.
   ///
   /// # Returns
   ///
@@ -446,7 +446,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `format` supplies the next output format.
+  /// * `format` supplies the next output format.
   ///
   /// # Returns
   ///
@@ -464,8 +464,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `value` supplies the programmatic finite value, or clears the input.
-  /// `cx` updates the nested text input and emits semantic events.
+  /// * `value` supplies the programmatic finite value, or clears the input.
+  /// * `cx` updates the nested text input and emits semantic events.
   ///
   /// # Returns
   ///
@@ -481,8 +481,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `count` supplies the signed number of configured increments to apply.
-  /// `cx` updates the nested text input and emits semantic events.
+  /// * `count` supplies the signed number of configured increments to apply.
+  /// * `cx` updates the nested text input and emits semantic events.
   ///
   /// # Returns
   ///
@@ -511,8 +511,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `event` supplies the focused GPUI key event.
-  /// `cx` updates stepped values and emits semantic events.
+  /// * `event` supplies the focused GPUI key event.
+  /// * `cx` updates stepped values and emits semantic events.
   ///
   /// # Returns
   ///
@@ -529,8 +529,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `event` is the semantic event emitted by the nested text input.
-  /// `cx` updates numeric state and emits numeric events.
+  /// * `event` is the semantic event emitted by the nested text input.
+  /// * `cx` updates numeric state and emits numeric events.
   ///
   /// # Returns
   ///
@@ -559,8 +559,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `draft` supplies the new raw numeric editing text.
-  /// `cx` emits draft and parsed-value events when their values change.
+  /// * `draft` supplies the new raw numeric editing text.
+  /// * `cx` emits draft and parsed-value events when their values change.
   ///
   /// # Returns
   ///
@@ -582,7 +582,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `cx` emits draft-state and parsed-value events when they change.
+  /// * `cx` emits draft-state and parsed-value events when they change.
   ///
   /// # Returns
   ///
@@ -606,7 +606,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `cx` updates the nested editor and emits the completion event.
+  /// * `cx` updates the nested editor and emits the completion event.
   ///
   /// # Returns
   ///
@@ -631,7 +631,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `cx` updates the nested editor and emits the cancellation event.
+  /// * `cx` updates the nested editor and emits the cancellation event.
   ///
   /// # Returns
   ///
@@ -646,8 +646,8 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `value` supplies the next already-bounded committed value, or clears it.
-  /// `cx` updates the nested text input and emits draft-state changes.
+  /// * `value` supplies the next already-bounded committed value, or clears it.
+  /// * `cx` updates the nested text input and emits draft-state changes.
   ///
   /// # Returns
   ///
@@ -667,7 +667,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `value` supplies the bounded stepped value.
+  /// * `value` supplies the bounded stepped value.
   ///
   /// # Returns
   ///
@@ -680,7 +680,7 @@ impl NumberInputState {
   ///
   /// # Parameters
   ///
-  /// `value` supplies the finite value to display.
+  /// * `value` supplies the finite value to display.
   ///
   /// # Returns
   ///
@@ -696,8 +696,8 @@ impl EventEmitter<NumberInputEvent> for NumberInputState {}
 ///
 /// # Parameters
 ///
-/// `draft` supplies the raw editor text.
-/// `bounds` supplies the range used to classify parsed values.
+/// * `draft` supplies the raw editor text.
+/// * `bounds` supplies the range used to classify parsed values.
 ///
 /// # Returns
 ///
@@ -724,7 +724,7 @@ fn classify_number_draft(draft: &str, bounds: NumberBounds) -> NumberDraftState 
 ///
 /// # Parameters
 ///
-/// `draft` supplies the raw editor text.
+/// * `draft` supplies the raw editor text.
 ///
 /// # Returns
 ///
@@ -748,8 +748,8 @@ fn is_incomplete_number_draft(draft: &str) -> bool {
 ///
 /// # Parameters
 ///
-/// `value` supplies the bounded stepped value.
-/// `format` selects whether fixed decimal normalization is required.
+/// * `value` supplies the bounded stepped value.
+/// * `format` selects whether fixed decimal normalization is required.
 ///
 /// # Returns
 ///
@@ -770,8 +770,8 @@ fn normalize_stepped_value(value: f64, format: NumberFormat) -> f64 {
 ///
 /// # Parameters
 ///
-/// `value` supplies the finite value to format.
-/// `format` selects the output representation.
+/// * `value` supplies the finite value to format.
+/// * `format` selects the output representation.
 ///
 /// # Returns
 ///
@@ -788,7 +788,7 @@ fn format_number(value: f64, format: NumberFormat) -> SharedString {
 ///
 /// # Parameters
 ///
-/// `state` supplies the current semantic numeric draft state.
+/// * `state` supplies the current semantic numeric draft state.
 ///
 /// # Returns
 ///

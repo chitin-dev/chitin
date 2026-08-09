@@ -81,9 +81,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `command` is the panel-tab command to execute.
-  ///
-  /// `cx` is the GPUI app context notified when the command mutates state.
+  /// * `command` is the panel-tab command to execute.
+  /// * `cx` is the GPUI app context notified when the command mutates state.
   ///
   /// # Returns
   ///
@@ -176,7 +175,7 @@ impl From<PanelTabCommand> for crate::commands::ChitinCommand {
   ///
   /// # Parameters
   ///
-  /// `command` is the panel-tab command to expose as a generic command.
+  /// * `command` is the panel-tab command to expose as a generic command.
   ///
   /// # Returns
   ///

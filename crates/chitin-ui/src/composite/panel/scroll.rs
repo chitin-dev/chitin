@@ -33,7 +33,7 @@ impl PanelTabScrollEntry {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the panel whose tab bar owns the scroll handle.
+  /// * `panel_id` identifies the panel whose tab bar owns the scroll handle.
   ///
   /// # Returns
   ///
@@ -53,7 +53,7 @@ impl PanelTabScrollEntry {
   ///
   /// # Parameters
   ///
-  /// `now` is the current UI clock timestamp.
+  /// * `now` is the current UI clock timestamp.
   ///
   /// # Returns
   ///
@@ -93,7 +93,7 @@ impl PanelTabScrollState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the panel whose tab bar should be scrolled.
+  /// * `panel_id` identifies the panel whose tab bar should be scrolled.
   ///
   /// # Returns
   ///
@@ -113,7 +113,7 @@ impl PanelTabScrollState {
   ///
   /// # Parameters
   ///
-  /// `live_panel_ids` contains the panel identifiers present in the current
+  /// * `live_panel_ids` contains the panel identifiers present in the current
   /// panel tree.
   ///
   /// # Returns
@@ -131,11 +131,9 @@ impl PanelTabScrollState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the panel whose tab bar owns the tab.
-  ///
-  /// `tab_index` is the tab's zero-based position in that panel's tab list.
-  ///
-  /// `now` is the current UI clock timestamp.
+  /// * `panel_id` identifies the panel whose tab bar owns the tab.
+  /// * `tab_index` is the tab's zero-based position in that panel's tab list.
+  /// * `now` is the current UI clock timestamp.
   ///
   /// # Returns
   ///
@@ -171,11 +169,9 @@ impl PanelTabScrollState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the panel whose tab bar owns the scroll handle.
-  ///
-  /// `scroll_handle` provides the current GPUI scroll offset.
-  ///
-  /// `now` is the current UI clock timestamp.
+  /// * `panel_id` identifies the panel whose tab bar owns the scroll handle.
+  /// * `scroll_handle` provides the current GPUI scroll offset.
+  /// * `now` is the current UI clock timestamp.
   ///
   /// # Returns
   ///
@@ -219,9 +215,8 @@ impl PanelTabScrollState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the panel whose tab bar owns the scroll handle.
-  ///
-  /// `now` is the current UI clock timestamp.
+  /// * `panel_id` identifies the panel whose tab bar owns the scroll handle.
+  /// * `now` is the current UI clock timestamp.
   ///
   /// # Returns
   ///
@@ -241,11 +236,9 @@ impl PanelTabScrollState {
   ///
   /// # Parameters
   ///
-  /// `panel_id` identifies the panel whose tab bar owns the scroll handle.
-  ///
-  /// `now` is the current UI clock timestamp.
-  ///
-  /// `base_opacity` is the fully visible opacity before fading starts.
+  /// * `panel_id` identifies the panel whose tab bar owns the scroll handle.
+  /// * `now` is the current UI clock timestamp.
+  /// * `base_opacity` is the fully visible opacity before fading starts.
   ///
   /// # Returns
   ///
@@ -275,7 +268,7 @@ impl PanelTabScrollState {
   ///
   /// # Parameters
   ///
-  /// `now` is the current UI clock timestamp.
+  /// * `now` is the current UI clock timestamp.
   ///
   /// # Returns
   ///

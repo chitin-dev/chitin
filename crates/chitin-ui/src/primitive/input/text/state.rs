@@ -187,11 +187,9 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `offset` supplies the UTF-8 byte offset under the pointer.
-  ///
-  /// `extend` retains the current selection anchor when true.
-  ///
-  /// `cx` emits selection-change events and refreshes observers.
+  /// * `offset` supplies the UTF-8 byte offset under the pointer.
+  /// * `extend` retains the current selection anchor when true.
+  /// * `cx` emits selection-change events and refreshes observers.
   ///
   /// # Returns
   ///
@@ -212,9 +210,8 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `offset` supplies the UTF-8 byte offset under the pointer.
-  ///
-  /// `cx` emits selection-change events and refreshes observers.
+  /// * `offset` supplies the UTF-8 byte offset under the pointer.
+  /// * `cx` emits selection-change events and refreshes observers.
   ///
   /// # Returns
   ///
@@ -368,11 +365,9 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `forward` selects movement toward increasing byte offsets.
-  ///
-  /// `extend` selects whether the existing selection anchor is retained.
-  ///
-  /// `cx` emits a selection-change event when the cursor position changes.
+  /// * `forward` selects movement toward increasing byte offsets.
+  /// * `extend` selects whether the existing selection anchor is retained.
+  /// * `cx` emits a selection-change event when the cursor position changes.
   ///
   /// # Returns
   ///
@@ -404,11 +399,9 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `target` supplies the destination UTF-8 byte offset.
-  ///
-  /// `extend` selects whether the existing selection anchor is retained.
-  ///
-  /// `cx` emits a selection-change event when the cursor position changes.
+  /// * `target` supplies the destination UTF-8 byte offset.
+  /// * `extend` selects whether the existing selection anchor is retained.
+  /// * `cx` emits a selection-change event when the cursor position changes.
   ///
   /// # Returns
   ///
@@ -423,11 +416,9 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `range` identifies a valid UTF-8 range in the current text.
-  ///
-  /// `replacement` supplies normalized replacement text.
-  ///
-  /// `cx` emits selection and text-change events.
+  /// * `range` identifies a valid UTF-8 range in the current text.
+  /// * `replacement` supplies normalized replacement text.
+  /// * `cx` emits selection and text-change events.
   ///
   /// # Returns
   ///
@@ -442,9 +433,8 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `line` is the complete shaped text line from the current render pass.
-  ///
-  /// `bounds` is the text viewport in window coordinates.
+  /// * `line` is the complete shaped text line from the current render pass.
+  /// * `bounds` is the text viewport in window coordinates.
   ///
   /// # Returns
   ///
@@ -460,11 +450,9 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `range_utf16` optionally identifies the platform replacement range.
-  ///
-  /// `text` is the committed platform text.
-  ///
-  /// `cx` emits semantic text and selection changes.
+  /// * `range_utf16` optionally identifies the platform replacement range.
+  /// * `text` is the committed platform text.
+  /// * `cx` emits semantic text and selection changes.
   ///
   /// # Returns
   ///
@@ -484,13 +472,10 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `range_utf16` optionally identifies the platform replacement range.
-  ///
-  /// `text` is the current composition text.
-  ///
-  /// `selected_range_utf16` is the composition-local selection supplied by the platform.
-  ///
-  /// `cx` emits semantic text and selection changes.
+  /// * `range_utf16` optionally identifies the platform replacement range.
+  /// * `text` is the current composition text.
+  /// * `selected_range_utf16` is the composition-local selection supplied by the platform.
+  /// * `cx` emits semantic text and selection changes.
   ///
   /// # Returns
   ///
@@ -520,7 +505,7 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `range_utf16` optionally identifies a platform-provided replacement range.
+  /// * `range_utf16` optionally identifies a platform-provided replacement range.
   ///
   /// # Returns
   ///
@@ -536,15 +521,11 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `range` identifies the text to replace.
-  ///
-  /// `replacement` is the normalized replacement text.
-  ///
-  /// `selection` is the post-replacement directional selection.
-  ///
-  /// `marked_range` identifies active composition text, when present.
-  ///
-  /// `cx` emits semantic updates.
+  /// * `range` identifies the text to replace.
+  /// * `replacement` is the normalized replacement text.
+  /// * `selection` is the post-replacement directional selection.
+  /// * `marked_range` identifies active composition text, when present.
+  /// * `cx` emits semantic updates.
   ///
   /// # Returns
   ///
@@ -569,9 +550,8 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `selection` supplies the next UTF-8 byte-offset selection.
-  ///
-  /// `cx` emits the selection-change event and refreshes observers.
+  /// * `selection` supplies the next UTF-8 byte-offset selection.
+  /// * `cx` emits the selection-change event and refreshes observers.
   ///
   /// # Returns
   ///
@@ -590,7 +570,7 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `cx` emits the text-change event and refreshes observers.
+  /// * `cx` emits the text-change event and refreshes observers.
   ///
   /// # Returns
   ///
@@ -619,7 +599,7 @@ impl TextInputState {
   ///
   /// # Parameters
   ///
-  /// `offset` supplies the candidate UTF-8 byte offset.
+  /// * `offset` supplies the candidate UTF-8 byte offset.
   ///
   /// # Returns
   ///
@@ -744,11 +724,9 @@ fn normalize_single_line(text: SharedString) -> SharedString {
 ///
 /// # Parameters
 ///
-/// `text` supplies the current input contents.
-///
-/// `selection` supplies the byte-offset selection to extract.
-///
-/// `disabled` controls whether selection should be copyable.
+/// * `text` supplies the current input contents.
+/// * `selection` supplies the byte-offset selection to extract.
+/// * `disabled` controls whether selection should be copyable.
 ///
 /// # Returns
 ///
@@ -766,7 +744,7 @@ fn selected_text_from(text: &str, selection: TextSelection, disabled: bool) -> O
 ///
 /// # Parameters
 ///
-/// `key` supplies the normalized GPUI key name.
+/// * `key` supplies the normalized GPUI key name.
 ///
 /// # Returns
 ///
@@ -783,7 +761,7 @@ fn cursor_direction(key: &str) -> Option<bool> {
 ///
 /// # Parameters
 ///
-/// `event` supplies the focused keyboard event from GPUI.
+/// * `event` supplies the focused keyboard event from GPUI.
 ///
 /// # Returns
 ///
@@ -801,9 +779,8 @@ fn key_text(event: &KeyDownEvent) -> Option<&str> {
 ///
 /// # Parameters
 ///
-/// `text` supplies the source string.
-///
-/// `offset` supplies the current valid UTF-8 byte offset.
+/// * `text` supplies the source string.
+/// * `offset` supplies the current valid UTF-8 byte offset.
 ///
 /// # Returns
 ///
@@ -816,9 +793,8 @@ fn previous_char_boundary(text: &str, offset: usize) -> Option<usize> {
 ///
 /// # Parameters
 ///
-/// `text` supplies the source string.
-///
-/// `selection` supplies the current UTF-8 byte-offset selection.
+/// * `text` supplies the source string.
+/// * `selection` supplies the current UTF-8 byte-offset selection.
 ///
 /// # Returns
 ///
@@ -836,9 +812,8 @@ fn backward_deletion_range(text: &str, selection: TextSelection) -> Option<std::
 ///
 /// # Parameters
 ///
-/// `text` supplies the source string.
-///
-/// `offset` supplies the current valid UTF-8 byte offset.
+/// * `text` supplies the source string.
+/// * `offset` supplies the current valid UTF-8 byte offset.
 ///
 /// # Returns
 ///
@@ -854,11 +829,9 @@ fn next_char_boundary(text: &str, offset: usize) -> Option<usize> {
 ///
 /// # Parameters
 ///
-/// `selection` supplies the existing cursor or selected range.
-///
-/// `offset` supplies the UTF-8 byte offset under the pressed pointer.
-///
-/// `extend` retains the existing anchor when true.
+/// * `selection` supplies the existing cursor or selected range.
+/// * `offset` supplies the UTF-8 byte offset under the pressed pointer.
+/// * `extend` retains the existing anchor when true.
 ///
 /// # Returns
 ///
@@ -871,9 +844,8 @@ fn pointer_selection_anchor(selection: TextSelection, offset: usize, extend: boo
 ///
 /// # Parameters
 ///
-/// `anchor` supplies the persistent UTF-8 byte offset from the press event.
-///
-/// `head` supplies the current UTF-8 byte offset under the pointer.
+/// * `anchor` supplies the persistent UTF-8 byte offset from the press event.
+/// * `head` supplies the current UTF-8 byte offset under the pointer.
 ///
 /// # Returns
 ///
@@ -886,9 +858,8 @@ fn selection_from_pointer_anchor(anchor: usize, head: usize) -> TextSelection {
 ///
 /// # Parameters
 ///
-/// `text` supplies the current input text.
-///
-/// `offset` identifies a UTF-8 byte boundary in `text`.
+/// * `text` supplies the current input text.
+/// * `offset` identifies a UTF-8 byte boundary in `text`.
 ///
 /// # Returns
 ///
@@ -905,9 +876,8 @@ fn offset_to_utf16(text: &str, offset: usize) -> usize {
 ///
 /// # Parameters
 ///
-/// `text` supplies the current input text.
-///
-/// `offset` identifies a UTF-16 code-unit position in `text`.
+/// * `text` supplies the current input text.
+/// * `offset` identifies a UTF-16 code-unit position in `text`.
 ///
 /// # Returns
 ///
@@ -929,9 +899,8 @@ fn offset_from_utf16(text: &str, offset: usize) -> usize {
 ///
 /// # Parameters
 ///
-/// `text` supplies the current input text.
-///
-/// `range` identifies valid UTF-8 byte boundaries in `text`.
+/// * `text` supplies the current input text.
+/// * `range` identifies valid UTF-8 byte boundaries in `text`.
 ///
 /// # Returns
 ///
@@ -944,9 +913,8 @@ fn range_to_utf16(text: &str, range: Range<usize>) -> Range<usize> {
 ///
 /// # Parameters
 ///
-/// `text` supplies the current input text.
-///
-/// `range` identifies UTF-16 code-unit positions in `text`.
+/// * `text` supplies the current input text.
+/// * `range` identifies UTF-16 code-unit positions in `text`.
 ///
 /// # Returns
 ///

@@ -301,13 +301,10 @@ impl ButtonColors {
   ///
   /// # Parameters
   ///
-  /// `theme` supplies semantic UI color tokens.
-  ///
-  /// `variant` selects the built-in visual treatment.
-  ///
-  /// `style` supplies visual-only component overrides.
-  ///
-  /// `pressed` and `disabled` describe the current interaction state.
+  /// * `theme` supplies semantic UI color tokens.
+  /// * `variant` selects the built-in visual treatment.
+  /// * `style` supplies visual-only component overrides.
+  /// * `pressed` and `disabled` describe the current interaction state.
   ///
   /// # Returns
   ///

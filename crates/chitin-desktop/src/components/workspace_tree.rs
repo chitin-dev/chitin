@@ -43,10 +43,9 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `navigation` identifies the requested keyboard behavior, such as moving to
+  /// * `navigation` identifies the requested keyboard behavior, such as moving to
   /// the next visible row or activating the focused row.
-  ///
-  /// `cx` is the GPUI context used to spawn lazy directory loading and notify
+  /// * `cx` is the GPUI context used to spawn lazy directory loading and notify
   /// the UI after command handling.
   ///
   /// # Returns
@@ -70,7 +69,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `navigation` identifies the tree navigation behavior to apply.
+  /// * `navigation` identifies the tree navigation behavior to apply.
   ///
   /// # Returns
   ///
@@ -138,10 +137,9 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `target` describes whether focus should move relatively
+  /// * `target` describes whether focus should move relatively
   /// (`Previous`/`Next`) or jump absolutely (`First`/`Last`).
-  ///
-  /// `scroll_strategy` controls which viewport edge GPUI should use if the
+  /// * `scroll_strategy` controls which viewport edge GPUI should use if the
   /// focused row is outside the current virtual-list viewport.
   ///
   /// # Returns
@@ -180,9 +178,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `path` is the original filesystem path of the tree entry to activate.
-  ///
-  /// `cx` is the GPUI context used to spawn directory loading when the
+  /// * `path` is the original filesystem path of the tree entry to activate.
+  /// * `cx` is the GPUI context used to spawn directory loading when the
   /// activated entry is an unloaded directory.
   ///
   /// # Returns
@@ -203,7 +200,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path of the tree entry to activate.
+  /// * `path` is the filesystem path of the tree entry to activate.
   ///
   /// # Returns
   ///
@@ -232,7 +229,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path of the file to show in the document area.
+  /// * `path` is the filesystem path of the file to show in the document area.
   ///
   /// # Returns
   ///
@@ -247,7 +244,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path to locate in the current project tree.
+  /// * `path` is the filesystem path to locate in the current project tree.
   ///
   /// # Returns
   ///
@@ -269,7 +266,7 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path of the directory entry to toggle.
+  /// * `path` is the filesystem path of the directory entry to toggle.
   ///
   /// # Returns
   ///
@@ -312,9 +309,8 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `path` is the directory path whose children were requested.
-  ///
-  /// `result` is the outcome of loading direct children on the background
+  /// * `path` is the directory path whose children were requested.
+  /// * `result` is the outcome of loading direct children on the background
   /// executor.
   ///
   /// # Returns
@@ -395,7 +391,7 @@ impl From<ProjectTreeToggle> for ProjectTreeActivation {
   ///
   /// # Parameters
   ///
-  /// `value` is the directory-toggle result to convert.
+  /// * `value` is the directory-toggle result to convert.
   ///
   /// # Returns
   ///
@@ -418,9 +414,8 @@ impl From<ProjectTreeToggle> for ProjectTreeActivation {
 ///
 /// # Parameters
 ///
-/// `path` is the directory path whose direct children should be loaded.
-///
-/// `cx` is the GPUI context used to spawn the async task and later update the
+/// * `path` is the directory path whose direct children should be loaded.
+/// * `cx` is the GPUI context used to spawn the async task and later update the
 /// app entity.
 ///
 /// # Returns
@@ -454,9 +449,8 @@ fn spawn_project_children_load(path: PathBuf, cx: &mut Context<ChitinApp>) -> Ta
 ///
 /// # Parameters
 ///
-/// `entry` is the tree node where recursive search starts.
-///
-/// `path` is the filesystem path to find.
+/// * `entry` is the tree node where recursive search starts.
+/// * `path` is the filesystem path to find.
 ///
 /// # Returns
 ///
@@ -477,9 +471,8 @@ fn find_project_entry_mut<'a>(entry: &'a mut ProjectTreeEntry, path: &Path) -> O
 ///
 /// # Parameters
 ///
-/// `entry` is the tree node where recursive search starts.
-///
-/// `path` is the filesystem path to find.
+/// * `entry` is the tree node where recursive search starts.
+/// * `path` is the filesystem path to find.
 ///
 /// # Returns
 ///
@@ -520,13 +513,10 @@ struct WorkspaceEntryRow {
 ///
 /// # Parameters
 ///
-/// `root` is the root project tree entry to render.
-///
-/// `state` contains expansion, loading, selection, and focus state.
-///
-/// `theme` supplies UI colors.
-///
-/// `cx` is the GPUI context used to create row event handlers.
+/// * `root` is the root project tree entry to render.
+/// * `state` contains expansion, loading, selection, and focus state.
+/// * `theme` supplies UI colors.
+/// * `cx` is the GPUI context used to create row event handlers.
 ///
 /// # Returns
 ///
@@ -554,9 +544,8 @@ pub fn render_workspace_tree(
 ///
 /// # Parameters
 ///
-/// `entry` is the root tree entry to flatten.
-///
-/// `state` determines which descendants are visible and which rows are focused
+/// * `entry` is the root tree entry to flatten.
+/// * `state` determines which descendants are visible and which rows are focused
 /// or selected.
 ///
 /// # Returns
@@ -578,9 +567,8 @@ fn visible_workspace_tree_rows(
 ///
 /// # Parameters
 ///
-/// `entry` is the root tree entry used to build the visible row list.
-///
-/// `state` contains expansion and loading state that determines which
+/// * `entry` is the root tree entry used to build the visible row list.
+/// * `state` contains expansion and loading state that determines which
 /// descendants are visible.
 ///
 /// # Returns
@@ -603,7 +591,7 @@ fn visible_workspace_entry_paths(entry: &ProjectTreeEntry, state: &ProjectSideba
 ///
 /// # Parameters
 ///
-/// `rows` is the flattened visible tree row list.
+/// * `rows` is the flattened visible tree row list.
 ///
 /// # Returns
 ///
@@ -628,14 +616,11 @@ fn focusable_workspace_tree_rows(rows: &[TreeRow<WorkspaceEntryRow>]) -> Vec<(us
 ///
 /// # Parameters
 ///
-/// `paths` is the ordered list of visible, focusable tree entry paths.
-///
-/// `focused_path` is the current keyboard focus path, if any.
-///
-/// `selected_path` is the current selected/opened file path, used as a fallback
+/// * `paths` is the ordered list of visible, focusable tree entry paths.
+/// * `focused_path` is the current keyboard focus path, if any.
+/// * `selected_path` is the current selected/opened file path, used as a fallback
 /// navigation anchor when no focused path exists.
-///
-/// `target` is the relative or absolute focus movement to resolve.
+/// * `target` is the relative or absolute focus movement to resolve.
 ///
 /// # Returns
 ///
@@ -670,13 +655,10 @@ fn project_tree_focus_target_index(
 ///
 /// # Parameters
 ///
-/// `entry` is the current tree node being collected.
-///
-/// `state` contains expansion and loading flags.
-///
-/// `depth` is the visual nesting depth for the current node.
-///
-/// `rows` is the flattened output collection being appended to.
+/// * `entry` is the current tree node being collected.
+/// * `state` contains expansion and loading flags.
+/// * `depth` is the visual nesting depth for the current node.
+/// * `rows` is the flattened output collection being appended to.
 ///
 /// # Returns
 ///
@@ -726,11 +708,9 @@ fn collect_visible_workspace_tree_rows(
 ///
 /// # Parameters
 ///
-/// `row` is the flattened row to render.
-///
-/// `theme` supplies UI colors.
-///
-/// `app` is a weak reference used by item row event handlers.
+/// * `row` is the flattened row to render.
+/// * `theme` supplies UI colors.
+/// * `app` is a weak reference used by item row event handlers.
 ///
 /// # Returns
 ///
@@ -749,11 +729,9 @@ fn render_workspace_row(row: TreeRow<WorkspaceEntryRow>, theme: UIThemes, app: &
 ///
 /// # Parameters
 ///
-/// `row` is the tree item row and desktop-specific payload to render.
-///
-/// `theme` supplies UI colors.
-///
-/// `app` is a weak app entity used to dispatch activation on click.
+/// * `row` is the tree item row and desktop-specific payload to render.
+/// * `theme` supplies UI colors.
+/// * `app` is a weak app entity used to dispatch activation on click.
 ///
 /// # Returns
 ///
@@ -855,11 +833,9 @@ fn render_workspace_entry_row(
 ///
 /// # Parameters
 ///
-/// `message` is the status text displayed on the row.
-///
-/// `theme` supplies UI colors.
-///
-/// `depth` controls indentation for the message row.
+/// * `message` is the status text displayed on the row.
+/// * `theme` supplies UI colors.
+/// * `depth` controls indentation for the message row.
 ///
 /// # Returns
 ///
@@ -901,7 +877,7 @@ mod tests {
     ///
     /// # Parameters
     ///
-    /// `name` is a human-readable label included in the directory name.
+    /// * `name` is a human-readable label included in the directory name.
     ///
     /// # Returns
     ///

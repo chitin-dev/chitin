@@ -35,7 +35,7 @@ impl MockTransport {
   ///
   /// # Parameters
   ///
-  /// `responses` are returned in order, one per request.
+  /// * `responses` are returned in order, one per request.
   ///
   /// # Returns
   ///
@@ -54,7 +54,7 @@ impl MockTransport {
   ///
   /// # Parameters
   ///
-  /// `delay` is awaited before returning each queued response.
+  /// * `delay` is awaited before returning each queued response.
   ///
   /// # Returns
   ///
@@ -64,28 +64,13 @@ impl MockTransport {
     self
   }
 
-  /// Returns the number of captured requests.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The request count, or zero if the capture lock is poisoned.
+  /// Returns the number of captured requests, the request count, or zero if the
+  /// capture lock is poisoned.
   pub fn request_count(&self) -> usize {
     self.requests.lock().map(|requests| requests.len()).unwrap_or_default()
   }
 
   /// Returns the first captured request URL.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `Some(String)` when at least one request was captured.
   pub fn first_request_url(&self) -> Option<String> {
     self
       .requests
@@ -94,15 +79,8 @@ impl MockTransport {
       .and_then(|requests| requests.first().map(|request| request.url.to_string()))
   }
 
-  /// Returns the maximum number of active requests observed.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// Maximum concurrent calls to [`HttpTransport::execute`].
+  /// Returns the maximum number of active requests observed. Maximum concurrent
+  /// calls to [`HttpTransport::execute`].
   pub fn max_active(&self) -> usize {
     self.max_active.load(Ordering::SeqCst)
   }
@@ -138,9 +116,8 @@ impl HttpTransport for MockTransport {
 ///
 /// # Parameters
 ///
-/// `status` is the HTTP response status.
-///
-/// `body` is the static response body.
+/// * `status` is the HTTP response status.
+/// * `body` is the static response body.
 ///
 /// # Returns
 ///
@@ -157,11 +134,9 @@ pub fn response(status: StatusCode, body: &'static [u8]) -> HttpResponse {
 ///
 /// # Parameters
 ///
-/// `status` is the HTTP response status.
-///
-/// `body` is the static response body.
-///
-/// `headers` is the response header map.
+/// * `status` is the HTTP response status.
+/// * `body` is the static response body.
+/// * `headers` is the response header map.
 ///
 /// # Returns
 ///

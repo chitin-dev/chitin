@@ -61,7 +61,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `root` is the optional workspace root path to mark as expanded.
+  /// * `root` is the optional workspace root path to mark as expanded.
   ///
   /// # Returns
   ///
@@ -82,7 +82,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path to store as the selected project entry.
+  /// * `path` is the filesystem path to store as the selected project entry.
   ///
   /// # Returns
   ///
@@ -95,7 +95,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `path` is the filesystem path to store as the focused project entry.
+  /// * `path` is the filesystem path to store as the focused project entry.
   ///
   /// # Returns
   ///
@@ -108,10 +108,9 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `row_index` is the zero-based index in the rendered virtual tree row
+  /// * `row_index` is the zero-based index in the rendered virtual tree row
   /// list, including non-focusable message rows.
-  ///
-  /// `strategy` controls which viewport edge should be used when the row is
+  /// * `strategy` controls which viewport edge should be used when the row is
   /// outside the visible range.
   ///
   /// # Returns
@@ -125,7 +124,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `start_x` is the horizontal cursor position where dragging began.
+  /// * `start_x` is the horizontal cursor position where dragging began.
   ///
   /// # Returns
   ///
@@ -139,7 +138,7 @@ impl ProjectSidebarState {
   ///
   /// # Parameters
   ///
-  /// `current_x` is the latest horizontal cursor position during the drag.
+  /// * `current_x` is the latest horizontal cursor position during the drag.
   ///
   /// # Returns
   ///
@@ -201,18 +200,14 @@ impl Default for ProjectSidebarState {
 ///
 /// # Parameters
 ///
-/// `workspace` is the currently opened project workspace. When `None`, the
+/// * `workspace` is the currently opened project workspace. When `None`, the
 /// sidebar renders an empty-workspace message instead of a tree.
-///
-/// `state` contains expansion, loading, selection, focus, and resize state used
+/// * `state` contains expansion, loading, selection, focus, and resize state used
 /// by the sidebar and tree.
-///
-/// `focus_handle` is the GPUI focus handle associated with the `"ProjectTree"`
+/// * `focus_handle` is the GPUI focus handle associated with the `"ProjectTree"`
 /// key context.
-///
-/// `theme` supplies the UI colors and spacing used by the sidebar shell.
-///
-/// `cx` is the GPUI context used to create command action listeners and obtain
+/// * `theme` supplies the UI colors and spacing used by the sidebar shell.
+/// * `cx` is the GPUI context used to create command action listeners and obtain
 /// a weak app entity for resize callbacks.
 ///
 /// # Returns

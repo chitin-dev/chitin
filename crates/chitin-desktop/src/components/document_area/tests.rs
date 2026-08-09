@@ -20,7 +20,7 @@ use super::{
 ///
 /// # Parameters
 ///
-/// `name` is the file name used for the document path and title.
+/// * `name` is the file name used for the document path and title.
 ///
 /// # Returns
 ///
@@ -33,7 +33,7 @@ fn test_document(name: &str) -> OpenedProjectDocument {
 ///
 /// # Parameters
 ///
-/// `name` is the file name used for the document path and title.
+/// * `name` is the file name used for the document path and title.
 ///
 /// # Returns
 ///
@@ -80,11 +80,9 @@ fn two_tab_document_panel_state() -> DocumentPanelState {
 ///
 /// # Parameters
 ///
-/// `panel_id` identifies the source panel.
-///
-/// `tab_id` identifies the source tab.
-///
-/// `source_index` is the tab's original position.
+/// * `panel_id` identifies the source panel.
+/// * `tab_id` identifies the source tab.
+/// * `source_index` is the tab's original position.
 ///
 /// # Returns
 ///

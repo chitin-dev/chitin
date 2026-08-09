@@ -17,7 +17,7 @@ impl PanelId {
   ///
   /// # Parameters
   ///
-  /// `value` is the caller-owned identifier value.
+  /// * `value` is the caller-owned identifier value.
   ///
   /// # Returns
   ///
@@ -52,7 +52,7 @@ impl PanelTabId {
   ///
   /// # Parameters
   ///
-  /// `value` is the caller-owned identifier value.
+  /// * `value` is the caller-owned identifier value.
   ///
   /// # Returns
   ///
@@ -128,7 +128,7 @@ impl PanelSplitPath {
   ///
   /// # Parameters
   ///
-  /// `branch` identifies the split child to append.
+  /// * `branch` identifies the split child to append.
   ///
   /// # Returns
   ///
@@ -169,11 +169,9 @@ impl<T> PanelTab<T> {
   ///
   /// # Parameters
   ///
-  /// `id` is the stable tab identifier.
-  ///
-  /// `title` is the label rendered in the tab strip.
-  ///
-  /// `payload` is the caller-owned view payload associated with the tab.
+  /// * `id` is the stable tab identifier.
+  /// * `title` is the label rendered in the tab strip.
+  /// * `payload` is the caller-owned view payload associated with the tab.
   ///
   /// # Returns
   ///
@@ -203,7 +201,7 @@ impl<T> PanelLeaf<T> {
   ///
   /// # Parameters
   ///
-  /// `id` is the stable panel identifier.
+  /// * `id` is the stable panel identifier.
   ///
   /// # Returns
   ///
@@ -222,7 +220,7 @@ impl<T> PanelLeaf<T> {
   ///
   /// # Parameters
   ///
-  /// `tab` is the tab to append.
+  /// * `tab` is the tab to append.
   ///
   /// # Returns
   ///
@@ -236,7 +234,7 @@ impl<T> PanelLeaf<T> {
   ///
   /// # Parameters
   ///
-  /// `tab` is the tab to append.
+  /// * `tab` is the tab to append.
   ///
   /// # Returns
   ///
@@ -253,9 +251,8 @@ impl<T> PanelLeaf<T> {
   ///
   /// # Parameters
   ///
-  /// `index` is clamped to the current tab count, so `usize::MAX` appends.
-  ///
-  /// `tab` is the existing tab object transferred into this panel.
+  /// * `index` is clamped to the current tab count, so `usize::MAX` appends.
+  /// * `tab` is the existing tab object transferred into this panel.
   ///
   /// # Returns
   ///
@@ -271,7 +268,7 @@ impl<T> PanelLeaf<T> {
   ///
   /// # Parameters
   ///
-  /// `tab_id` is the tab identifier to activate.
+  /// * `tab_id` is the tab identifier to activate.
   ///
   /// # Returns
   ///
@@ -293,7 +290,7 @@ impl<T> PanelLeaf<T> {
   ///
   /// # Parameters
   ///
-  /// `tab_id` is the tab identifier to remove.
+  /// * `tab_id` is the tab identifier to remove.
   ///
   /// # Returns
   ///
@@ -310,7 +307,7 @@ impl<T> PanelLeaf<T> {
   ///
   /// # Parameters
   ///
-  /// `tab_id` identifies the tab whose ownership should leave this panel.
+  /// * `tab_id` identifies the tab whose ownership should leave this panel.
   ///
   /// # Returns
   ///
@@ -366,13 +363,10 @@ impl<T> PanelSplit<T> {
   ///
   /// # Parameters
   ///
-  /// `axis` controls whether children are placed side-by-side or stacked.
-  ///
-  /// `ratio` is the fraction of available space assigned to the first child.
-  ///
-  /// `first` is the first split child.
-  ///
-  /// `second` is the second split child.
+  /// * `axis` controls whether children are placed side-by-side or stacked.
+  /// * `ratio` is the fraction of available space assigned to the first child.
+  /// * `first` is the first split child.
+  /// * `second` is the second split child.
   ///
   /// # Returns
   ///

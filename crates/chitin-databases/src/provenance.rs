@@ -36,15 +36,11 @@ impl Provenance {
   ///
   /// # Parameters
   ///
-  /// `provider` identifies the database provider.
-  ///
-  /// `resource_identifier` identifies the provider-native resource.
-  ///
-  /// `requested_at` is the request start timestamp.
-  ///
-  /// `resolved_url` is the URL used for the request.
-  ///
-  /// `headers` are response headers used to populate transport metadata.
+  /// * `provider` identifies the database provider.
+  /// * `resource_identifier` identifies the provider-native resource.
+  /// * `requested_at` is the request start timestamp.
+  /// * `resolved_url` is the URL used for the request.
+  /// * `headers` are response headers used to populate transport metadata.
   ///
   /// # Returns
   ///
@@ -75,9 +71,8 @@ impl Provenance {
 ///
 /// # Parameters
 ///
-/// `headers` is the response header map.
-///
-/// `name` is the header name to read.
+/// * `headers` is the response header map.
+/// * `name` is the header name to read.
 ///
 /// # Returns
 ///

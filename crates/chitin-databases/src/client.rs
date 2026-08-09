@@ -31,7 +31,7 @@ impl Client {
   ///
   /// # Parameters
   ///
-  /// `config` controls timeouts, retry policy, response limits, and
+  /// * `config` controls timeouts, retry policy, response limits, and
   /// concurrency.
   ///
   /// # Returns
@@ -51,9 +51,8 @@ impl Client {
   ///
   /// # Parameters
   ///
-  /// `config` controls retry policy, response limits, and concurrency.
-  ///
-  /// `transport` executes transport-neutral HTTP requests.
+  /// * `config` controls retry policy, response limits, and concurrency.
+  /// * `transport` executes transport-neutral HTTP requests.
   ///
   /// # Returns
   ///
@@ -70,14 +69,6 @@ impl Client {
   }
 
   /// Creates an RCSB PDB provider client.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads shared runtime state from `self`.
-  ///
-  /// # Returns
-  ///
-  /// A cheap RCSB client clone backed by the top-level runtime.
   pub fn rcsb(&self) -> RcsbClient {
     RcsbClient::new(self.runtime.clone())
   }
@@ -88,7 +79,7 @@ impl ClientRuntime {
   ///
   /// # Parameters
   ///
-  /// `request` is the request to execute.
+  /// * `request` is the request to execute.
   ///
   /// # Returns
   ///
@@ -141,7 +132,7 @@ impl ClientRuntime {
   ///
   /// # Parameters
   ///
-  /// `response` is the buffered response.
+  /// * `response` is the buffered response.
   ///
   /// # Returns
   ///
@@ -154,11 +145,9 @@ impl ClientRuntime {
   ///
   /// # Parameters
   ///
-  /// `retry_policy` controls backoff timing.
-  ///
-  /// `attempt` is the one-based failed attempt.
-  ///
-  /// `response` is the optional response that triggered the retry.
+  /// * `retry_policy` controls backoff timing.
+  /// * `attempt` is the one-based failed attempt.
+  /// * `response` is the optional response that triggered the retry.
   async fn sleep_before_retry(&self, retry_policy: RetryPolicy, attempt: u32, response: Option<&HttpResponse>) {
     let delay = retry_policy.backoff_after_attempt(attempt, response.map(|response| &response.headers));
     if !delay.is_zero() {
@@ -169,14 +158,6 @@ impl ClientRuntime {
 
 impl TransportError {
   /// Returns whether a transport error appears transient.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` for connection, timeout, and generic transient failures.
   fn is_retryable(&self) -> bool {
     matches!(self, Self::Timeout | Self::Connection | Self::Other { .. })
   }

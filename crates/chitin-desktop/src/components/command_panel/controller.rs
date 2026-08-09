@@ -204,9 +204,8 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `window` supplies the focus snapshot and receives the focus request.
-  ///
-  /// `cx` allocates the overlay focus handle when necessary.
+  /// * `window` supplies the focus snapshot and receives the focus request.
+  /// * `cx` allocates the overlay focus handle when necessary.
   ///
   /// # Returns
   ///
@@ -231,9 +230,8 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `window` supplies focus state for opening and closing.
-  ///
-  /// `cx` allocates or restores GPUI focus handles.
+  /// * `window` supplies focus state for opening and closing.
+  /// * `cx` allocates or restores GPUI focus handles.
   ///
   /// # Returns
   ///
@@ -272,9 +270,8 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `window` receives the focus restoration request.
-  ///
-  /// `cx` is used by GPUI focus APIs.
+  /// * `window` receives the focus restoration request.
+  /// * `cx` is used by GPUI focus APIs.
   ///
   /// # Returns
   ///
@@ -303,7 +300,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `command` identifies the command that owns the form metadata.
+  /// * `command` identifies the command that owns the form metadata.
   ///
   /// # Returns
   ///
@@ -324,7 +321,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI key event received by the workbench root.
+  /// * `event` is the GPUI key event received by the workbench root.
   ///
   /// # Returns
   ///
@@ -345,7 +342,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI key event received by the workbench root.
+  /// * `event` is the GPUI key event received by the workbench root.
   ///
   /// # Returns
   ///
@@ -373,7 +370,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI key event received by the workbench root.
+  /// * `event` is the GPUI key event received by the workbench root.
   ///
   /// # Returns
   ///
@@ -456,7 +453,7 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// `strategy` controls which viewport edge GPUI should use when scrolling is needed.
+  /// * `strategy` controls which viewport edge GPUI should use when scrolling is needed.
   ///
   /// # Returns
   ///
@@ -501,7 +498,7 @@ impl Default for CommandPanelController {
 ///
 /// # Parameters
 ///
-/// `event` is the key event received by the command panel.
+/// * `event` is the key event received by the command panel.
 ///
 /// # Returns
 ///

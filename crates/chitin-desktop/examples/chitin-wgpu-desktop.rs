@@ -33,7 +33,7 @@ impl AssetSource for DesktopAssets {
   ///
   /// # Parameters
   ///
-  /// `path` is the asset-relative path requested by GPUI.
+  /// * `path` is the asset-relative path requested by GPUI.
   ///
   /// # Returns
   ///
@@ -48,7 +48,7 @@ impl AssetSource for DesktopAssets {
   ///
   /// # Parameters
   ///
-  /// `path` is the asset-relative directory path requested by GPUI.
+  /// * `path` is the asset-relative directory path requested by GPUI.
   ///
   /// # Returns
   ///

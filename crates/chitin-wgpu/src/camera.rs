@@ -40,7 +40,7 @@ impl ViewerCamera {
   ///
   /// # Parameters
   ///
-  /// `aspect` is the render target width divided by height.
+  /// * `aspect` is the render target width divided by height.
   ///
   /// # Returns
   ///
@@ -54,7 +54,7 @@ impl ViewerCamera {
   ///
   /// # Parameters
   ///
-  /// `delta_x` and `delta_y` are logical pixel deltas from UI input events.
+  /// * `delta_x` and `delta_y` are logical pixel deltas from UI input events.
   ///
   /// # Returns
   ///
@@ -68,7 +68,7 @@ impl ViewerCamera {
   ///
   /// # Parameters
   ///
-  /// `delta_x` and `delta_y` are logical pixel deltas from UI input events.
+  /// * `delta_x` and `delta_y` are logical pixel deltas from UI input events.
   ///
   /// # Returns
   ///
@@ -84,7 +84,7 @@ impl ViewerCamera {
   ///
   /// # Parameters
   ///
-  /// `delta_y` is the vertical input delta in logical pixels.
+  /// * `delta_y` is the vertical input delta in logical pixels.
   ///
   /// # Returns
   ///

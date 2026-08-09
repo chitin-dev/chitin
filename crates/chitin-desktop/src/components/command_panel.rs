@@ -30,11 +30,9 @@ type CommandPanelSelectHandler = dyn for<'a, 'b> Fn(usize, &'a mut Window, &'b m
 ///
 /// # Parameters
 ///
-/// `controller` owns the current panel state, command registry, and focus handle.
-///
-/// `theme` supplies workbench colors.
-///
-/// `app` is updated by pointer selection.
+/// * `controller` owns the current panel state, command registry, and focus handle.
+/// * `theme` supplies workbench colors.
+/// * `app` is updated by pointer selection.
 ///
 /// # Returns
 ///
@@ -130,11 +128,9 @@ impl ChitinApp {
   ///
   /// # Parameters
   ///
-  /// `event` is the GPUI key-down event.
-  ///
-  /// `window` is used to suppress default key handling after panel input.
-  ///
-  /// `cx` is notified when panel state or app state changes.
+  /// * `event` is the GPUI key-down event.
+  /// * `window` is used to suppress default key handling after panel input.
+  /// * `cx` is notified when panel state or app state changes.
   pub(crate) fn handle_command_panel_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
     let Some(panel_event) = self.command_panel.handle_key(event) else {
       return;
@@ -156,14 +152,11 @@ impl ChitinApp {
   }
 
   /// Invokes one command selected from the command panel.
-  ///
   /// # Parameters
   ///
-  /// `command` is the typed command selected by the controller.
-  ///
-  /// `window` receives focus restoration when an immediate command closes the panel.
-  ///
-  /// `cx` is used to dispatch or notify state changes.
+  /// * `command` is the typed command selected by the controller.
+  /// * `window` receives focus restoration when an immediate command closes the panel.
+  /// * `cx` is used to dispatch or notify state changes.
   pub(crate) fn invoke_command_from_panel(
     &mut self,
     command: ChitinCommand,
@@ -198,12 +191,10 @@ impl ChitinApp {
 }
 
 /// Returns the visible form value.
-///
 /// # Parameters
 ///
-/// `controller` contains form input.
-///
-/// `descriptor` is the command being configured.
+/// * `controller` contains form input.
+/// * `descriptor` is the command being configured.
 ///
 /// # Returns
 ///
@@ -220,7 +211,7 @@ fn form_value(controller: &CommandPanelController, descriptor: &CommandDescripto
 ///
 /// # Parameters
 ///
-/// `controller` owns the current form command and input value.
+/// * `controller` owns the current form command and input value.
 ///
 /// # Returns
 ///

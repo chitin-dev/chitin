@@ -16,7 +16,7 @@ impl RenderTargetSize {
   ///
   /// # Parameters
   ///
-  /// `width` and `height` are physical pixel dimensions.
+  /// * `width` and `height` are physical pixel dimensions.
   ///
   /// # Returns
   ///
@@ -54,9 +54,8 @@ impl DepthTarget {
   ///
   /// # Parameters
   ///
-  /// `device` creates the backing depth texture.
-  ///
-  /// `size` is the physical pixel size of the render target.
+  /// * `device` creates the backing depth texture.
+  /// * `size` is the physical pixel size of the render target.
   ///
   /// # Returns
   ///
@@ -69,11 +68,9 @@ impl DepthTarget {
   ///
   /// # Parameters
   ///
-  /// `device` creates the backing depth texture.
-  ///
-  /// `size` is the physical pixel size of the render target.
-  ///
-  /// `format` is the WGPU texture format for the depth target.
+  /// * `device` creates the backing depth texture.
+  /// * `size` is the physical pixel size of the render target.
+  /// * `format` is the WGPU texture format for the depth target.
   ///
   /// # Returns
   ///
@@ -90,9 +87,8 @@ impl DepthTarget {
   ///
   /// # Parameters
   ///
-  /// `device` creates a replacement texture when needed.
-  ///
-  /// `size` is the latest physical pixel size.
+  /// * `device` creates a replacement texture when needed.
+  /// * `size` is the latest physical pixel size.
   ///
   /// # Returns
   ///
@@ -137,13 +133,10 @@ impl ClearRenderer {
   ///
   /// # Parameters
   ///
-  /// `device` creates WGPU resources and command encoders.
-  ///
-  /// `queue` submits command buffers.
-  ///
-  /// `size` is the initial render target size in physical pixels.
-  ///
-  /// `clear_color` is the color used for the color attachment clear operation.
+  /// * `device` creates WGPU resources and command encoders.
+  /// * `queue` submits command buffers.
+  /// * `size` is the initial render target size in physical pixels.
+  /// * `clear_color` is the color used for the color attachment clear operation.
   ///
   /// # Returns
   ///
@@ -168,7 +161,7 @@ impl ClearRenderer {
   ///
   /// # Parameters
   ///
-  /// `size` is the latest render target size in physical pixels.
+  /// * `size` is the latest render target size in physical pixels.
   ///
   /// # Returns
   ///
@@ -181,7 +174,7 @@ impl ClearRenderer {
   ///
   /// # Parameters
   ///
-  /// `view` is the color render target.
+  /// * `view` is the color render target.
   ///
   /// # Returns
   ///
@@ -224,11 +217,9 @@ impl ClearRenderer {
 ///
 /// # Parameters
 ///
-/// `device` creates the texture.
-///
-/// `size` is the physical pixel size of the texture.
-///
-/// `format` is the WGPU texture format for the depth target.
+/// * `device` creates the texture.
+/// * `size` is the physical pixel size of the texture.
+/// * `format` is the WGPU texture format for the depth target.
 ///
 /// # Returns
 ///
