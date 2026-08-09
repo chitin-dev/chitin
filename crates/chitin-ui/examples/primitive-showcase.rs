@@ -2,7 +2,7 @@
 //!
 //! Run with `cargo run -p chitin-ui --example primitive-showcase`.
 
-use std::{borrow::Cow, fs, path::PathBuf};
+use std::{borrow::Cow, fs, io, path::PathBuf};
 
 use chitin_ui::{
   primitive::input::{
@@ -42,11 +42,13 @@ impl AssetSource for PrimitiveShowcaseAssets {
   ///
   /// # Returns
   ///
-  /// `Ok(Some(bytes))` when the requested asset is readable.
+  /// `Ok(Some(bytes))` when the requested asset is readable, or `Ok(None)` when it is absent.
   fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-    fs::read(self.base.join(path))
-      .map(|data| Some(Cow::Owned(data)))
-      .map_err(Into::into)
+    match fs::read(self.base.join(path)) {
+      Ok(data) => Ok(Some(Cow::Owned(data))),
+      Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+      Err(error) => Err(error.into()),
+    }
   }
 
   /// Lists child asset names for GPUI asset enumeration.
