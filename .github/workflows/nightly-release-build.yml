@@ -67,3 +67,46 @@ jobs:
           name: chitin-${{ matrix.target }}
           path: target/release/chitin-desktop${{ matrix.executable_suffix }}
           if-no-files-found: error
+
+  release:
+    name: Publish nightly prerelease
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: nightly-release
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release executables
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chitin-*
+          merge-multiple: true
+          path: release
+
+      - name: Update nightly tag
+        run: |
+          git tag --force nightly "$GITHUB_SHA"
+          git push origin --force refs/tags/nightly
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly build
+          prerelease: true
+          make_latest: false
+          body: |
+            Automated nightly build for commit ${{ github.sha }}.
+          files: |
+            release/chitin-desktop
+            release/chitin-desktop.exe
+          fail_on_unmatched_files: true
