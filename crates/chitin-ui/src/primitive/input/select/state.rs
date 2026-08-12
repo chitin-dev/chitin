@@ -342,6 +342,14 @@ impl SelectInputState {
       return false;
     }
 
+    let modifiers = &event.keystroke.modifiers;
+    if modifiers.control || modifiers.alt || modifiers.platform {
+      // ignore control- alt- and platform-modified keystrokes. Return false before
+      // matching event.keystroke.key when any of these modifier fields is set.
+      // This prevents the select from consuming application shortcuts.
+      return false;
+    }
+
     match event.keystroke.key.as_str() {
       "enter" | "space" => {
         if self.open {
