@@ -2,7 +2,12 @@
 
 use crate::{ClientConfig, HttpMethod, HttpRequest, HttpResponse, TransportError};
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
+use futures_util::StreamExt;
+use std::sync::Arc;
+
+/// Receives downloaded byte counts and the optional response length.
+pub type DownloadProgressCallback = Arc<dyn Fn(u64, Option<u64>) + Send + Sync>;
 
 /// Mockable HTTP transport boundary used by provider clients.
 #[async_trait]
@@ -22,6 +27,19 @@ pub trait HttpTransport: Send + Sync {
   /// Returns [`TransportError`] for request construction, timeout,
   /// connection, cancellation, or response-size failures.
   async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, TransportError>;
+
+  /// Executes a request and reports response-body progress when supported.
+  async fn execute_with_progress(
+    &self,
+    request: HttpRequest,
+    progress: Option<DownloadProgressCallback>,
+  ) -> Result<HttpResponse, TransportError> {
+    let response = self.execute(request).await?;
+    if let Some(progress) = progress {
+      progress(response.body.len() as u64, Some(response.body.len() as u64));
+    }
+    Ok(response)
+  }
 }
 
 /// Production HTTP transport backed by a shared reqwest client.
@@ -65,6 +83,25 @@ impl ReqwestTransport {
 impl HttpTransport for ReqwestTransport {
   /// Executes one request through reqwest.
   async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
+    self.execute_request(request, None).await
+  }
+
+  /// Executes one request while streaming response chunks to the progress callback.
+  async fn execute_with_progress(
+    &self,
+    request: HttpRequest,
+    progress: Option<DownloadProgressCallback>,
+  ) -> Result<HttpResponse, TransportError> {
+    self.execute_request(request, progress).await
+  }
+}
+
+impl ReqwestTransport {
+  async fn execute_request(
+    &self,
+    request: HttpRequest,
+    progress: Option<DownloadProgressCallback>,
+  ) -> Result<HttpResponse, TransportError> {
     let mut builder = self
       .client
       .request(to_reqwest_method(request.method), request.url.clone());
@@ -78,7 +115,15 @@ impl HttpTransport for ReqwestTransport {
     let response = builder.send().await.map_err(map_reqwest_error)?;
     let status = response.status();
     let headers = response.headers().clone();
-    if let Some(content_length) = response.content_length()
+    let response_length = response.content_length();
+    log::debug!(
+      "database HTTP response: method={:?}, url={}, status={}, content_length={response_length:?}, streaming={}",
+      request.method,
+      request.url,
+      status,
+      progress.is_some()
+    );
+    if let Some(content_length) = response_length
       && content_length > self.max_response_bytes
     {
       return Err(TransportError::ResponseTooLarge {
@@ -87,7 +132,37 @@ impl HttpTransport for ReqwestTransport {
       });
     }
 
-    let body = response.bytes().await.map_err(map_reqwest_error)?;
+    let body = if let Some(progress) = progress {
+      let total = response_length;
+      let mut stream = response.bytes_stream();
+      let mut body = BytesMut::new();
+      let mut chunk_count = 0_u64;
+      while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(map_reqwest_error)?;
+        chunk_count = chunk_count.saturating_add(1);
+        body.extend_from_slice(&chunk);
+        if body.len() as u64 > self.max_response_bytes {
+          return Err(TransportError::ResponseTooLarge {
+            limit: self.max_response_bytes,
+            observed: Some(body.len() as u64),
+          });
+        }
+        log::trace!(
+          "database HTTP response chunk: chunks={chunk_count}, received={}, total={total:?}",
+          body.len()
+        );
+        if status.is_success() {
+          progress(body.len() as u64, total);
+        }
+      }
+      log::debug!(
+        "database HTTP response stream completed: chunks={chunk_count}, received={}, total={total:?}",
+        body.len()
+      );
+      body.freeze()
+    } else {
+      response.bytes().await.map_err(map_reqwest_error)?
+    };
     if body.len() as u64 > self.max_response_bytes {
       return Err(TransportError::ResponseTooLarge {
         limit: self.max_response_bytes,

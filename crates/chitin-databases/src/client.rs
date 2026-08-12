@@ -5,8 +5,8 @@ use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 use crate::{
-  ClientConfig, HttpRequest, HttpResponse, HttpTransport, RetryPolicy, TransportError, providers::rcsb::RcsbClient,
-  retry::is_retryable_status, transport::ReqwestTransport,
+  ClientConfig, DownloadProgressCallback, HttpRequest, HttpResponse, HttpTransport, RetryPolicy, TransportError,
+  providers::rcsb::RcsbClient, retry::is_retryable_status, transport::ReqwestTransport,
 };
 
 /// Top-level database client.
@@ -90,6 +90,15 @@ impl ClientRuntime {
   /// Returns [`TransportError`] for transport failures, cancellation, or
   /// response-size-limit failures.
   pub(crate) async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, TransportError> {
+    self.execute_with_progress(request, None).await
+  }
+
+  /// Executes a request while forwarding response-body progress.
+  pub(crate) async fn execute_with_progress(
+    &self,
+    request: HttpRequest,
+    progress: Option<DownloadProgressCallback>,
+  ) -> Result<HttpResponse, TransportError> {
     let _permit = self
       .semaphore
       .clone()
@@ -100,7 +109,10 @@ impl ClientRuntime {
     let mut attempt = 1;
 
     loop {
-      let response = self.transport.execute(request.clone()).await;
+      let response = self
+        .transport
+        .execute_with_progress(request.clone(), progress.clone())
+        .await;
       match response {
         Ok(response) if self.response_too_large(&response) => {
           return Err(TransportError::ResponseTooLarge {

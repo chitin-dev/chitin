@@ -5,7 +5,8 @@ use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrateg
 
 use crate::{
   app::ChitinApp,
-  commands::{ChitinCommand, CommandDescriptor, CommandRegistry},
+  commands::{ChitinCommand, CommandDescriptor, CommandRegistry, DatabaseCommand},
+  components::command_panel::form::rcsb::RcsbFormPanel,
 };
 
 /// Current interaction mode of the command panel.
@@ -50,6 +51,12 @@ pub(crate) struct CommandPanelController {
   mode: CommandPanelMode,
   /// Focus target active before the overlay opened.
   previous_focus: Option<FocusHandle>,
+  /// Singleton RCSB form state used by the database command.
+  rcsb_form: Option<RcsbFormPanel>,
+  /// Whether the next RCSB form render should claim focus.
+  rcsb_focus_pending: bool,
+  /// Whether RCSB form event subscriptions have been installed.
+  rcsb_form_subscribed: bool,
 }
 
 impl CommandPanelController {
@@ -73,6 +80,9 @@ impl CommandPanelController {
       search_input_subscribed: false,
       mode: CommandPanelMode::Search,
       previous_focus: None,
+      rcsb_form: None,
+      rcsb_focus_pending: false,
+      rcsb_form_subscribed: false,
     }
   }
 
@@ -256,9 +266,34 @@ impl CommandPanelController {
     }
 
     self.mode = CommandPanelMode::Form(command);
+    self.rcsb_focus_pending = true;
     self.query.clear();
     self.selected_index = 0;
     self.reveal_selected(ScrollStrategy::Top);
+    true
+  }
+
+  /// Returns or creates the singleton RCSB form state.
+  pub(crate) fn rcsb_form(&mut self, cx: &mut Context<ChitinApp>) -> RcsbFormPanel {
+    self.rcsb_form.get_or_insert_with(|| RcsbFormPanel::new(cx)).clone()
+  }
+
+  /// Returns the already-created RCSB form state.
+  pub(crate) fn rcsb_form_if_created(&self) -> Option<RcsbFormPanel> {
+    self.rcsb_form.clone()
+  }
+
+  /// Marks the RCSB form focus request as handled.
+  pub(crate) fn take_rcsb_focus_request(&mut self) -> bool {
+    std::mem::take(&mut self.rcsb_focus_pending)
+  }
+
+  /// Marks the RCSB form event subscriptions as installed.
+  pub(crate) fn take_rcsb_form_subscription(&mut self) -> bool {
+    if self.rcsb_form_subscribed {
+      return false;
+    }
+    self.rcsb_form_subscribed = true;
     true
   }
 
@@ -280,7 +315,19 @@ impl CommandPanelController {
       return self.handle_search_key(event);
     }
 
+    if self.is_rcsb_form() {
+      return (event.keystroke.key == "escape").then_some(CommandPanelEvent::Close);
+    }
+
     self.handle_form_key(event)
+  }
+
+  /// Reports whether the active form belongs to the RCSB download workflow.
+  fn is_rcsb_form(&self) -> bool {
+    matches!(
+      self.mode,
+      CommandPanelMode::Form(ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure))
+    )
   }
 
   /// Handles navigation keys while the search input owns query editing.

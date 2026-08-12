@@ -1,6 +1,11 @@
 //! Read-only progress indicators for long-running work.
 
-use gpui::{App, IntoElement, ParentElement, RenderOnce, SharedString, Window, div, prelude::*, px, relative};
+use std::time::Duration;
+
+use gpui::{
+  Animation, AnimationExt, App, IntoElement, ParentElement, RenderOnce, SharedString, Window, div, prelude::*, px,
+  relative,
+};
 
 use crate::themes::{UIThemes, builtins};
 
@@ -12,6 +17,7 @@ pub struct Progress {
   value: f32,
   label: Option<ProgressLabel>,
   theme: UIThemes,
+  indeterminate: bool,
 }
 
 impl Progress {
@@ -21,6 +27,7 @@ impl Progress {
       value,
       label: None,
       theme: builtins::dark(),
+      indeterminate: false,
     }
   }
 
@@ -35,12 +42,17 @@ impl Progress {
     self.theme = theme;
     self
   }
+
+  /// Shows an animated track without claiming a known completion percentage.
+  pub fn indeterminate(mut self) -> Self {
+    self.indeterminate = true;
+    self
+  }
 }
 
 impl RenderOnce for Progress {
   fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-    let value = ProgressValue::new(self.value);
-    let track = ProgressTrack::new(self.value);
+    let track = ProgressTrack::new(self.value).indeterminate(self.indeterminate);
 
     div()
       .flex()
@@ -59,7 +71,11 @@ impl RenderOnce for Progress {
               .label
               .map_or_else(|| div().into_any_element(), |label| label.into_any_element()),
           )
-          .child(value.theme(self.theme)),
+          .child(if self.indeterminate {
+            div().flex_none().into_any_element()
+          } else {
+            ProgressValue::new(self.value).theme(self.theme).into_any_element()
+          }),
       )
       .child(track.theme(self.theme))
   }
@@ -125,6 +141,7 @@ impl RenderOnce for ProgressValue {
 pub struct ProgressTrack {
   value: f32,
   theme: UIThemes,
+  indeterminate: bool,
 }
 
 impl ProgressTrack {
@@ -133,12 +150,19 @@ impl ProgressTrack {
     Self {
       value,
       theme: builtins::dark(),
+      indeterminate: false,
     }
   }
 
   /// Sets the semantic theme used for this progress track.
   pub fn theme(mut self, theme: UIThemes) -> Self {
     self.theme = theme;
+    self
+  }
+
+  /// Switches the track to an animated indeterminate state.
+  pub fn indeterminate(mut self, indeterminate: bool) -> Self {
+    self.indeterminate = indeterminate;
     self
   }
 
@@ -150,19 +174,45 @@ impl ProgressTrack {
 
 impl RenderOnce for ProgressTrack {
   fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    log::debug!(
+      "ProgressTrack render: value={:.2}, indeterminate={}, completion_ratio={:.4}",
+      self.value,
+      self.indeterminate,
+      self.completion_ratio()
+    );
+    let segment = div().h_full().rounded_sm().bg(self.theme.text.primary);
+    let segment = if self.indeterminate {
+      segment
+        .absolute()
+        .left(relative(-0.3))
+        .w(relative(0.3))
+        .with_animation(
+          "progress-indeterminate",
+          Animation::new(Duration::from_millis(1200)).repeat(),
+          |segment, delta| {
+            let left = -0.3 + delta * 1.3;
+            let right = left + 0.3;
+            log::trace!(
+              "ProgressTrack animation frame: delta={delta:.4}, left={left:.4}, right={right:.4}, visible_left={:.4}, visible_right={:.4}",
+              left.max(0.0),
+              right.min(1.0)
+            );
+            segment.left(relative(left))
+          },
+        )
+        .into_any_element()
+    } else {
+      segment.w(relative(self.completion_ratio())).into_any_element()
+    };
+
     div()
+      .relative()
       .h(TRACK_HEIGHT)
       .w_full()
       .overflow_hidden()
       .rounded_sm()
       .bg(self.theme.background.tertiary)
-      .child(
-        div()
-          .h_full()
-          .w(relative(self.completion_ratio()))
-          .rounded_sm()
-          .bg(self.theme.text.primary),
-      )
+      .child(segment)
   }
 }
 

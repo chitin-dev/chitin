@@ -423,6 +423,7 @@ impl Render for ChitinApp {
     let window_bar_controls = self.window_bar_controls(window, cx);
     let activity_bar_controls = self.activity_bar_controls(window, cx);
     let command_panel_search_input = self.command_panel_search_input(window, cx);
+    self.command_panel_rcsb_form(window, cx);
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);

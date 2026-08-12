@@ -5,8 +5,8 @@ use std::{sync::Arc, time::SystemTime};
 use http::StatusCode;
 
 use crate::{
-  ArtifactFormat, DecodeError, DownloadedArtifact, HttpResponse, Provenance, ProviderId, TransportError,
-  client::ClientRuntime,
+  ArtifactFormat, DecodeError, DownloadProgressCallback, DownloadedArtifact, HttpResponse, Provenance, ProviderId,
+  TransportError, client::ClientRuntime,
 };
 
 use super::{PdbId, RcsbEndpoints, RcsbError, StructureFormat, dto::RcsbEntryDto};
@@ -68,10 +68,21 @@ impl RcsbClient {
   /// Returns [`RcsbError`] for transport failures, missing entries, rate
   /// limits, or other malformed provider responses.
   pub async fn download_structure(&self, id: PdbId, format: StructureFormat) -> Result<DownloadedArtifact, RcsbError> {
+    self.download_structure_with_progress(id, format, |_, _| {}).await
+  }
+
+  /// Downloads a structure and reports received response bytes.
+  pub async fn download_structure_with_progress(
+    &self,
+    id: PdbId,
+    format: StructureFormat,
+    progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
+  ) -> Result<DownloadedArtifact, RcsbError> {
     let requested_at = SystemTime::now();
     let request = self.endpoints.structure_download_request(&id, format)?;
     let resolved_url = request.url.clone();
-    let response = self.runtime.execute(request).await?;
+    let progress: DownloadProgressCallback = Arc::new(progress);
+    let response = self.runtime.execute_with_progress(request, Some(progress)).await?;
     let response = map_status(response, &id)?;
     let provenance = Provenance::from_headers(
       ProviderId::Rcsb,

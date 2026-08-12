@@ -644,7 +644,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "futures-util",
  "http",
+ "log",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -658,6 +660,7 @@ name = "chitin-desktop"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "chitin-databases",
  "chitin-ui",
  "chitin-utils",
  "chitin-wgpu",
@@ -666,6 +669,7 @@ dependencies = [
  "gpui-ce",
  "log",
  "rust-embed",
+ "tokio",
  "wgpu",
 ]
 
