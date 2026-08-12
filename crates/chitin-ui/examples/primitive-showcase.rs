@@ -601,7 +601,8 @@ impl PrimitiveShowcase {
           .theme(theme)
           .style(SelectInputStyle::new().menu_max_height(px(240.0)))
           .trigger(SelectTrigger::new().value(SelectValue::new().placeholder("Choose model")))
-          .content(long_select_content()),
+          .content(long_select_content())
+          .full_width(true),
       )
       .child(
         div()
@@ -646,7 +647,7 @@ impl Render for PrimitiveShowcase {
               .mx_auto()
               .px_6()
               .pt_6()
-              .pb_32()
+              .pb_48()
               .flex()
               .flex_col()
               .gap_5()

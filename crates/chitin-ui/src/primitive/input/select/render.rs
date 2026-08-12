@@ -220,7 +220,7 @@ impl RenderOnce for Select {
     let width = self.style.width.unwrap_or(DEFAULT_SELECT_WIDTH);
     let popup_layout = SelectPopupLayout {
       trigger: metrics,
-      width,
+      configured_width: width,
       trigger_bounds,
       viewport_size,
     };
@@ -665,7 +665,14 @@ fn render_content(
   theme: UIThemes,
   interaction: SelectPopupInteraction,
 ) -> Popover {
-  let placement = layout.resolve_placement(content.position, content.content_height(), menu_max_height);
+  let configured_height = content.content_height().min(menu_max_height);
+  let candidate_item_alignment = content.item_alignment(selected_id, configured_height);
+  let placement = layout.resolve_placement(
+    content.position,
+    content.content_height(),
+    menu_max_height,
+    candidate_item_alignment.map(|alignment| alignment.visible_center),
+  );
   let popup_height = placement.popup_height();
   let item_alignment = content.item_alignment(selected_id, popup_height);
   if interaction.align_selected_on_open
@@ -683,7 +690,7 @@ fn render_content(
   }
   let mut item_index = 0;
   // Popover owns the stable element ID and persistent scroll position.
-  let mut popup = div().w(layout.width).text_size(layout.trigger.font_size);
+  let mut popup = div().w(layout.popup_width()).text_size(layout.trigger.font_size);
 
   for child in content.children {
     match child {
@@ -711,12 +718,12 @@ fn render_content(
   }
   let popover = Popover::new(("select-popup", interaction.state.entity_id()), popup)
     .anchor_size(Size {
-      width: layout.width,
-      height: layout.trigger.height,
+      width: layout.popup_width(),
+      height: layout.popup_anchor_height(),
     })
     .style(
       PopoverStyle::new()
-        .width(layout.width)
+        .width(layout.popup_width())
         .max_height(popup_height)
         .background(theme.background.secondary)
         .border_color(theme.border.primary)
@@ -869,8 +876,8 @@ struct SelectInputMetrics {
 struct SelectPopupLayout {
   /// Trigger height and option font size for the selected size variant.
   trigger: SelectInputMetrics,
-  /// Popup width kept equal to the rendered trigger width.
-  width: Pixels,
+  /// Configured width used until the trigger has been measured.
+  configured_width: Pixels,
   /// Trigger bounds measured during the previous prepaint pass.
   trigger_bounds: Option<Bounds<Pixels>>,
   /// Current window size used to constrain item-aligned content.
@@ -939,6 +946,7 @@ impl SelectPopupLayout {
     requested_position: SelectContentPosition,
     content_height: Pixels,
     menu_max_height: Pixels,
+    selected_visible_center: Option<Pixels>,
   ) -> SelectPopupPlacement {
     let configured_height = content_height.min(menu_max_height);
     if requested_position == SelectContentPosition::Popper {
@@ -948,12 +956,14 @@ impl SelectPopupLayout {
     let Some(trigger_bounds) = self.trigger_bounds else {
       return self.edge_placement(configured_height);
     };
-    let trigger_center = (trigger_bounds.top() + trigger_bounds.bottom()) / 2.0;
-    let centered_height = (trigger_center * 2.0)
-      .min((self.viewport_size.height - trigger_center) * 2.0)
-      .max(px(0.0));
+    let Some(selected_visible_center) = selected_visible_center else {
+      return self.edge_placement(configured_height);
+    };
+    let popup_top =
+      (trigger_bounds.top() + trigger_bounds.bottom()) / 2.0 - selected_visible_center - POPUP_BORDER_WIDTH;
+    let popup_bottom = popup_top + configured_height;
 
-    if configured_height <= centered_height {
+    if popup_top >= px(0.0) && popup_bottom <= self.viewport_size.height {
       SelectPopupPlacement::ItemAligned {
         height: configured_height,
       }
@@ -1003,6 +1013,20 @@ impl SelectPopupLayout {
       top,
     );
     top
+  }
+
+  /// Returns the measured trigger width, falling back before the first prepaint pass.
+  fn popup_width(self) -> Pixels {
+    self
+      .trigger_bounds
+      .map_or(self.configured_width, |trigger_bounds| trigger_bounds.size.width)
+  }
+
+  /// Returns the measured trigger height used by conventional anchor placement.
+  fn popup_anchor_height(self) -> Pixels {
+    self
+      .trigger_bounds
+      .map_or(self.trigger.height, |trigger_bounds| trigger_bounds.size.height)
   }
 }
 
@@ -1139,7 +1163,7 @@ mod tests {
         height: px(30.0),
         font_size: px(13.0),
       },
-      width: px(240.0),
+      configured_width: px(240.0),
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(20.0)),
         size: Size {
@@ -1154,7 +1178,12 @@ mod tests {
     };
 
     assert_eq!(
-      layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0)),
+      layout.resolve_placement(
+        SelectContentPosition::ItemAligned,
+        px(240.0),
+        px(240.0),
+        Some(px(120.0)),
+      ),
       SelectPopupPlacement::Popover {
         placement: PopoverPlacement::Below,
         height: px(240.0),
@@ -1169,7 +1198,7 @@ mod tests {
         height: px(30.0),
         font_size: px(13.0),
       },
-      width: px(240.0),
+      configured_width: px(240.0),
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(650.0)),
         size: Size {
@@ -1184,7 +1213,12 @@ mod tests {
     };
 
     assert_eq!(
-      layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0)),
+      layout.resolve_placement(
+        SelectContentPosition::ItemAligned,
+        px(240.0),
+        px(240.0),
+        Some(px(120.0)),
+      ),
       SelectPopupPlacement::Popover {
         placement: PopoverPlacement::Above,
         height: px(240.0),
@@ -1199,7 +1233,7 @@ mod tests {
         height: px(30.0),
         font_size: px(13.0),
       },
-      width: px(240.0),
+      configured_width: px(240.0),
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(300.0)),
         size: Size {
@@ -1214,9 +1248,68 @@ mod tests {
     };
 
     assert_eq!(
-      layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0)),
+      layout.resolve_placement(
+        SelectContentPosition::ItemAligned,
+        px(240.0),
+        px(240.0),
+        Some(px(120.0)),
+      ),
       SelectPopupPlacement::ItemAligned { height: px(240.0) }
     );
+  }
+
+  #[test]
+  fn item_aligned_position_should_fall_back_before_window_snapping_changes_the_alignment() {
+    let layout = SelectPopupLayout {
+      trigger: SelectInputMetrics {
+        height: px(30.0),
+        font_size: px(13.0),
+      },
+      configured_width: px(240.0),
+      trigger_bounds: Some(Bounds {
+        origin: point(px(0.0), px(580.0)),
+        size: Size {
+          width: px(560.0),
+          height: px(30.0),
+        },
+      }),
+      viewport_size: Size {
+        width: px(800.0),
+        height: px(768.0),
+      },
+    };
+
+    assert_eq!(
+      layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0), Some(px(39.0)),),
+      SelectPopupPlacement::Popover {
+        placement: PopoverPlacement::Above,
+        height: px(240.0),
+      }
+    );
+  }
+
+  #[test]
+  fn popup_width_should_prefer_the_measured_trigger_width() {
+    let layout = SelectPopupLayout {
+      trigger: SelectInputMetrics {
+        height: px(30.0),
+        font_size: px(13.0),
+      },
+      configured_width: px(240.0),
+      trigger_bounds: Some(Bounds {
+        origin: point(px(0.0), px(0.0)),
+        size: Size {
+          width: px(560.0),
+          height: px(30.0),
+        },
+      }),
+      viewport_size: Size {
+        width: px(800.0),
+        height: px(768.0),
+      },
+    };
+
+    assert_eq!(layout.popup_width(), px(560.0));
   }
 
   #[test]
@@ -1226,7 +1319,7 @@ mod tests {
         height: px(30.0),
         font_size: px(13.0),
       },
-      width: px(240.0),
+      configured_width: px(240.0),
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(300.0)),
         size: Size {
