@@ -67,6 +67,8 @@ pub struct SelectInputState {
   selected_id: Option<SharedString>,
   /// Flattened option index used by keyboard navigation.
   highlighted_index: Option<usize>,
+  /// Keyboard-highlighted option that must be scrolled into the popup viewport.
+  pending_highlight_scroll: Option<usize>,
   /// Focus ownership shared by the trigger and popup interaction.
   focus_handle: FocusHandle,
   /// Persistent scroll position for the popup option viewport.
@@ -104,6 +106,7 @@ impl SelectInputState {
       options,
       selected_id: None,
       highlighted_index,
+      pending_highlight_scroll: None,
       focus_handle: cx.focus_handle(),
       popup_scroll_handle: ScrollHandle::new(),
       trigger_bounds: None,
@@ -156,6 +159,11 @@ impl SelectInputState {
   /// Returns the option currently highlighted for keyboard navigation.
   pub(crate) fn highlighted_index(&self) -> Option<usize> {
     self.highlighted_index
+  }
+
+  /// Takes the keyboard-highlighted option that must be revealed in the popup.
+  pub(crate) fn take_highlight_scroll_request(&mut self) -> Option<usize> {
+    self.pending_highlight_scroll.take()
   }
 
   /// Takes the pending selected-item alignment request for one viewport.
@@ -452,6 +460,7 @@ impl SelectInputState {
     };
     if self.highlighted_index != Some(index) {
       self.highlighted_index = Some(index);
+      self.pending_highlight_scroll = Some(index);
       cx.notify();
     }
     true
@@ -475,6 +484,7 @@ impl SelectInputState {
     };
     if self.highlighted_index != index {
       self.highlighted_index = index;
+      self.pending_highlight_scroll = index;
       cx.notify();
     }
     true

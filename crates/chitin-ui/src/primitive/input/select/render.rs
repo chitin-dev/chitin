@@ -210,6 +210,9 @@ impl RenderOnce for Select {
       && self
         .state
         .update(cx, |state, _| state.take_selected_alignment_request(viewport_size));
+    let highlight_scroll_request = open
+      .then(|| self.state.update(cx, |state, _| state.take_highlight_scroll_request()))
+      .flatten();
     let colors = SelectInputColors::new(self.theme, self.variant, disabled);
     let pointer_state = self.state.clone();
     let key_state = self.state.clone();
@@ -291,6 +294,7 @@ impl RenderOnce for Select {
             state: self.state,
             scroll_handle: popup_scroll_handle,
             align_selected_on_open,
+            highlight_scroll_request,
           },
         )
         .on_dismiss(move |window, cx| {
@@ -462,6 +466,51 @@ impl SelectContent {
       visible_center: selected_top + ITEM_HEIGHT / 2.0 - scroll_offset,
     })
   }
+
+  /// Returns the top edge of a flattened option in popup content coordinates.
+  fn option_top(&self, option_index: usize) -> Option<Pixels> {
+    let mut selectable_index = 0;
+    let mut top = px(0.0);
+    for child in &self.children {
+      match child {
+        SelectContentChild::Group(group) => {
+          if group.label.is_some() {
+            top += LABEL_HEIGHT;
+          }
+          for _ in &group.items {
+            if selectable_index == option_index {
+              return Some(top);
+            }
+            selectable_index += 1;
+            top += ITEM_HEIGHT;
+          }
+        }
+        SelectContentChild::Separator(_) => top += SEPARATOR_HEIGHT,
+      }
+    }
+    None
+  }
+
+  /// Returns the minimum scroll offset that makes one option fully visible.
+  fn scroll_offset_to_reveal_option(
+    &self,
+    option_index: usize,
+    popup_height: Pixels,
+    current_offset: Pixels,
+  ) -> Option<Pixels> {
+    let option_top = self.option_top(option_index)?;
+    let option_bottom = option_top + ITEM_HEIGHT;
+    let content_height = self.content_height();
+    let maximum_offset = (content_height - popup_height).max(px(0.0));
+    let offset = if option_top + current_offset < px(0.0) {
+      -option_top
+    } else if option_bottom + current_offset > popup_height {
+      popup_height - option_bottom
+    } else {
+      current_offset
+    };
+    Some(offset.clamp(-maximum_offset, px(0.0)))
+  }
 }
 
 #[derive(Clone)]
@@ -626,6 +675,12 @@ fn render_content(
       .scroll_handle
       .set_offset(point(px(0.0), -item_alignment.scroll_offset));
   }
+  if let Some(item_index) = interaction.highlight_scroll_request
+    && let Some(offset) =
+      content.scroll_offset_to_reveal_option(item_index, popup_height, interaction.scroll_handle.offset().y)
+  {
+    interaction.scroll_handle.set_offset(point(px(0.0), offset));
+  }
   let mut item_index = 0;
   // Popover owns the stable element ID and persistent scroll position.
   let mut popup = div().w(layout.width).text_size(layout.trigger.font_size);
@@ -738,8 +793,8 @@ fn render_item(
     .justify_between()
     .h(ITEM_HEIGHT)
     .px(DEFAULT_PADDING_X)
-    .bg(if highlighted && !selected {
-      theme.background.selection
+    .bg(if highlighted {
+      theme.background.hover
     } else {
       theme.background.secondary
     })
@@ -853,6 +908,8 @@ struct SelectPopupInteraction {
   scroll_handle: ScrollHandle,
   /// Whether this render must reveal and align the selected option.
   align_selected_on_open: bool,
+  /// Flattened option index that keyboard navigation must reveal.
+  highlight_scroll_request: Option<usize>,
 }
 
 impl SelectInputSize {
@@ -1051,6 +1108,27 @@ mod tests {
         content_center: px(75.0),
         visible_center: px(30.0),
       })
+    );
+  }
+
+  #[test]
+  fn keyboard_scroll_should_include_labels_and_separators() {
+    let content = SelectContent::new()
+      .group(
+        SelectGroup::new()
+          .label(SelectLabel::new("Force fields"))
+          .item(SelectItem::new("amber", "Amber")),
+      )
+      .separator(SelectSeparator::new())
+      .group(
+        SelectGroup::new()
+          .label(SelectLabel::new("No force field"))
+          .item(SelectItem::new("none", "None")),
+      );
+
+    assert_eq!(
+      content.scroll_offset_to_reveal_option(1, px(60.0), px(0.0)),
+      Some(px(-57.0))
     );
   }
 
