@@ -56,6 +56,13 @@ pub(crate) struct RcsbDownloadState {
   pub(crate) active: bool,
   /// Whether the response did not provide a total size.
   pub(crate) indeterminate: bool,
+  /// Whether the completed track is animating its final fill.
+  pub(crate) finishing: bool,
+  /// Percentage at which the completion animation starts.
+  pub(crate) finishing_from: f32,
+  /// Identity shared by the indeterminate and finishing animation phases.
+  pub(crate) animation_id: String,
+  animation_generation: u64,
   /// Bytes received for an indeterminate download.
   pub(crate) received_bytes: u64,
   /// Error message from the most recent failed download.
@@ -68,6 +75,9 @@ impl RcsbDownloadState {
     self.progress = 0.0;
     self.active = false;
     self.indeterminate = false;
+    self.finishing = false;
+    self.finishing_from = 0.0;
+    self.animation_id.clear();
     self.received_bytes = 0;
     self.error = None;
     cx.notify();
@@ -78,6 +88,10 @@ impl RcsbDownloadState {
     self.progress = 0.0;
     self.active = true;
     self.indeterminate = true;
+    self.finishing = false;
+    self.finishing_from = 0.0;
+    self.animation_generation = self.animation_generation.wrapping_add(1);
+    self.animation_id = format!("rcsb-progress-{}", self.animation_generation);
     self.received_bytes = 0;
     self.error = None;
     cx.notify();
@@ -87,6 +101,8 @@ impl RcsbDownloadState {
   pub(crate) fn set_progress(&mut self, progress: f32, cx: &mut Context<Self>) {
     self.progress = progress.clamp(0.0, 100.0);
     self.indeterminate = false;
+    self.finishing = false;
+    self.finishing_from = 0.0;
     cx.notify();
   }
 
@@ -97,11 +113,16 @@ impl RcsbDownloadState {
     cx.notify();
   }
 
-  /// Marks the download as completed successfully.
+  /// Starts the short completion animation after a successful download.
   pub(crate) fn finish(&mut self, cx: &mut Context<Self>) {
+    let starting_progress = self.progress;
     self.progress = 100.0;
     self.active = false;
     self.indeterminate = false;
+    self.finishing = true;
+    // An indeterminate track is 30% wide, so preserve that visible amount
+    // while it transitions into the completed track.
+    self.finishing_from = starting_progress.max(30.0);
     cx.notify();
   }
 
@@ -110,6 +131,8 @@ impl RcsbDownloadState {
     self.active = false;
     self.progress = 0.0;
     self.indeterminate = false;
+    self.finishing = false;
+    self.finishing_from = 0.0;
     self.received_bytes = 0;
     self.error = Some(error);
     cx.notify();
@@ -214,12 +237,21 @@ impl RcsbFormPanel {
       .child(if download.indeterminate {
         Progress::new(download.progress)
           .theme(theme)
+          .animation_id(download.animation_id.clone())
           .indeterminate()
           .label(ProgressLabel::new(progress_label))
+          .into_any_element()
+      } else if download.finishing {
+        Progress::new(download.progress)
+          .theme(theme)
+          .animation_id(download.animation_id.clone())
+          .finishing_from(download.finishing_from)
+          .label(ProgressLabel::new(format!("Download completed {} KB", download.received_bytes / 1024)))
           .into_any_element()
       } else {
         Progress::new(download.progress)
           .theme(theme)
+          .animation_id(download.animation_id.clone())
           .label(ProgressLabel::new(progress_label))
           .into_any_element()
       })
