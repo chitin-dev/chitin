@@ -3,7 +3,7 @@
 
 //! Persistent selection and keyboard behavior for the selector input primitive.
 
-use gpui::{Context, EventEmitter, FocusHandle, KeyDownEvent, SharedString};
+use gpui::{Bounds, Context, EventEmitter, FocusHandle, KeyDownEvent, Pixels, ScrollHandle, SharedString, Size};
 
 use super::SelectInputEvent;
 
@@ -69,8 +69,16 @@ pub struct SelectInputState {
   highlighted_index: Option<usize>,
   /// Focus ownership shared by the trigger and popup interaction.
   focus_handle: FocusHandle,
+  /// Persistent scroll position for the popup option viewport.
+  popup_scroll_handle: ScrollHandle,
+  /// Last measured window bounds of the rendered trigger.
+  trigger_bounds: Option<Bounds<Pixels>>,
   /// Whether the content popup is currently visible.
   open: bool,
+  /// Whether the next item-aligned render must reveal the selected option.
+  align_selected_on_open: bool,
+  /// Viewport used for the most recent selected-item alignment.
+  alignment_viewport: Option<Size<Pixels>>,
   /// Whether all selection interaction is unavailable.
   disabled: bool,
   /// Last focus state observed by the rendered trigger.
@@ -97,7 +105,11 @@ impl SelectInputState {
       selected_id: None,
       highlighted_index,
       focus_handle: cx.focus_handle(),
+      popup_scroll_handle: ScrollHandle::new(),
+      trigger_bounds: None,
       open: false,
+      align_selected_on_open: false,
+      alignment_viewport: None,
       disabled: false,
       focused: false,
     }
@@ -106,6 +118,16 @@ impl SelectInputState {
   /// Returns the focus handle tracked by this selector.
   pub fn focus_handle(&self) -> &FocusHandle {
     &self.focus_handle
+  }
+
+  /// Returns the scroll handle shared by popup render passes.
+  pub(crate) fn popup_scroll_handle(&self) -> &ScrollHandle {
+    &self.popup_scroll_handle
+  }
+
+  /// Returns the trigger bounds measured during the previous prepaint pass.
+  pub(crate) fn trigger_bounds(&self) -> Option<Bounds<Pixels>> {
+    self.trigger_bounds
   }
 
   /// Returns all current application-neutral options.
@@ -134,6 +156,29 @@ impl SelectInputState {
   /// Returns the option currently highlighted for keyboard navigation.
   pub(crate) fn highlighted_index(&self) -> Option<usize> {
     self.highlighted_index
+  }
+
+  /// Takes the pending selected-item alignment request for one viewport.
+  pub(crate) fn take_selected_alignment_request(&mut self, viewport_size: Size<Pixels>) -> bool {
+    let viewport_changed = self.alignment_viewport != Some(viewport_size);
+    let requested = std::mem::take(&mut self.align_selected_on_open) || (self.open && viewport_changed);
+    if requested {
+      self.alignment_viewport = Some(viewport_size);
+    }
+    requested
+  }
+
+  /// Stores trigger bounds when layout changes.
+  pub(crate) fn set_trigger_bounds(&mut self, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+    if self.trigger_bounds == Some(bounds) {
+      return;
+    }
+
+    self.trigger_bounds = Some(bounds);
+    if self.open {
+      self.align_selected_on_open = true;
+    }
+    cx.notify();
   }
 
   /// Reports whether selector interaction is disabled.
@@ -354,6 +399,10 @@ impl SelectInputState {
       self.highlighted_index = self
         .selected_option_index()
         .or_else(|| first_enabled_option_index(&self.options));
+      self.align_selected_on_open = self.selected_option_index().is_some();
+    } else {
+      self.align_selected_on_open = false;
+      self.alignment_viewport = None;
     }
     cx.emit(SelectInputEvent::OpenChange { open });
     cx.notify();

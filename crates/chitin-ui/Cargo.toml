@@ -12,6 +12,7 @@ log = "0.4.33"
 
 [dev-dependencies]
 criterion = "0.5"
+env_logger = "0.10"
 
 [[bench]]
 name = "tree_virtualization"

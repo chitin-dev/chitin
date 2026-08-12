@@ -674,6 +674,7 @@ name = "chitin-ui"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "env_logger",
  "gpui-ce",
  "log",
 ]

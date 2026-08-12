@@ -143,6 +143,8 @@ struct PrimitiveShowcase {
   numeric_status: SharedString,
   mass_status: SharedString,
   precision_bounds_status: SharedString,
+
+  // select inputs status
   select_status: SharedString,
   long_select_status: SharedString,
 
@@ -808,6 +810,7 @@ fn number_draft_state_summary(state: NumberDraftState) -> SharedString {
 ///
 /// This function returns after the GPUI application exits.
 fn main() {
+  env_logger::init();
   Application::new()
     .with_assets(PrimitiveShowcaseAssets {
       base: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),

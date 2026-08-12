@@ -4,13 +4,14 @@
 //! Rendering and composition for the select input primitive.
 
 use gpui::{
-  Anchored, AnchoredPositionMode, App, Corner, CursorStyle, Div, Entity, InteractiveElement, IntoElement, MouseButton,
-  ParentElement, Pixels, RenderOnce, SharedString, Size, Window, anchored, deferred, div, point, prelude::*, px,
+  App, Bounds, CursorStyle, Div, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+  RenderOnce, ScrollHandle, SharedString, Size, Window, div, point, prelude::*, px,
 };
 
 use super::{SelectInputState, SelectOption};
 use crate::{
   primitive::icon::Icon,
+  primitive::popover::{Popover, PopoverPlacement, PopoverStyle},
   themes::{UIThemes, builtins},
 };
 
@@ -28,6 +29,8 @@ const ITEM_HEIGHT: Pixels = px(30.0);
 const LABEL_HEIGHT: Pixels = px(24.0);
 /// Default height of separator
 const SEPARATOR_HEIGHT: Pixels = px(9.0);
+/// Border inset between the popup surface and its scrollable option content.
+const POPUP_BORDER_WIDTH: Pixels = px(1.0);
 
 /// Built-in theme-based appearance variants for a [`Select`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -190,7 +193,7 @@ impl RenderOnce for Select {
     let focused = focus_handle.is_focused(window);
     self.state.update(cx, |state, cx| state.sync_focus(focused, cx));
 
-    let (selected_id, selected_label, highlighted_index, open, disabled) = {
+    let (selected_id, selected_label, highlighted_index, open, disabled, popup_scroll_handle, trigger_bounds) = {
       let state = self.state.read(cx);
       (
         state.selected_id().map(SharedString::from),
@@ -198,19 +201,27 @@ impl RenderOnce for Select {
         state.highlighted_index(),
         state.is_open(),
         state.is_disabled(),
+        state.popup_scroll_handle().clone(),
+        state.trigger_bounds(),
       )
     };
+    let viewport_size = window.viewport_size();
+    let align_selected_on_open = open
+      && self
+        .state
+        .update(cx, |state, _| state.take_selected_alignment_request(viewport_size));
     let colors = SelectInputColors::new(self.theme, self.variant, disabled);
     let pointer_state = self.state.clone();
     let key_state = self.state.clone();
-    let backdrop_state = self.state.clone();
+    let trigger_bounds_state = self.state.clone();
     let width = self.style.width.unwrap_or(DEFAULT_SELECT_WIDTH);
     let popup_layout = SelectPopupLayout {
       trigger: metrics,
       width,
+      trigger_bounds,
+      viewport_size,
     };
     let value = self.trigger.value;
-    let viewport_size = window.viewport_size();
 
     div()
       .relative()
@@ -218,64 +229,78 @@ impl RenderOnce for Select {
       .when(self.full_width, |style| style.w_full())
       .child(
         div()
-          .flex()
-          .items_center()
-          .justify_between()
-          .h(metrics.height)
-          .px(DEFAULT_PADDING_X)
-          .rounded_sm()
-          .border_1()
-          .border_color(colors.border)
-          .bg(colors.background)
-          .text_size(metrics.font_size)
-          .cursor(if disabled {
-            CursorStyle::Arrow
-          } else {
-            CursorStyle::PointingHand
-          })
-          .when(!disabled, |style| {
-            style
-              .hover(move |style| style.bg(colors.hover_background))
-              .focus(move |style| style.border_color(colors.focus_border))
-          })
-          .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            let focus_handle = pointer_state.read(cx).focus_handle().clone();
-            if pointer_state.update(cx, |state, cx| state.toggle_open(cx)) {
-              window.focus(&focus_handle, cx);
-              cx.stop_propagation();
+          .on_children_prepainted(move |children_bounds, _, cx| {
+            if let Some(bounds) = children_bounds.first().copied() {
+              trigger_bounds_state.update(cx, |state, cx| state.set_trigger_bounds(bounds, cx));
             }
           })
-          .on_key_down(move |event, _, cx| {
-            if key_state.update(cx, |state, cx| state.handle_key_down(event, cx)) {
-              cx.stop_propagation();
-            }
-          })
-          .track_focus(&focus_handle)
-          .child(render_value(
-            value,
-            selected_label,
-            colors.foreground,
-            self.theme.text.disabled,
-          ))
-          .child(Icon::new("icons/tree-expand.svg").theme(self.theme)),
+          .child(
+            div()
+              .flex()
+              .items_center()
+              .justify_between()
+              .h(metrics.height)
+              .px(DEFAULT_PADDING_X)
+              .rounded_sm()
+              .border_1()
+              .border_color(colors.border)
+              .bg(colors.background)
+              .text_size(metrics.font_size)
+              .cursor(if disabled {
+                CursorStyle::Arrow
+              } else {
+                CursorStyle::PointingHand
+              })
+              .when(!disabled, |style| {
+                style
+                  .hover(move |style| style.bg(colors.hover_background))
+                  .focus(move |style| style.border_color(colors.focus_border))
+              })
+              .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                let focus_handle = pointer_state.read(cx).focus_handle().clone();
+                if pointer_state.update(cx, |state, cx| state.toggle_open(cx)) {
+                  window.focus(&focus_handle, cx);
+                  cx.stop_propagation();
+                }
+              })
+              .on_key_down(move |event, _, cx| {
+                if key_state.update(cx, |state, cx| state.handle_key_down(event, cx)) {
+                  cx.stop_propagation();
+                }
+              })
+              .track_focus(&focus_handle)
+              .child(render_value(
+                value,
+                selected_label,
+                colors.foreground,
+                self.theme.text.disabled,
+              ))
+              .child(Icon::new("icons/tree-expand.svg").theme(self.theme)),
+          ),
       )
       .when(open, |parent| {
-        // An item-aligned popup can extend above its trigger. Deferred drawing
-        // keeps it above sibling content and outside normal paint ordering.
+        let dismiss_state = self.state.clone();
+        let popover = render_content(
+          self.content,
+          selected_id.as_deref(),
+          highlighted_index,
+          self.style.menu_max_height.unwrap_or(DEFAULT_MENU_MAX_HEIGHT),
+          popup_layout,
+          self.theme,
+          SelectPopupInteraction {
+            state: self.state,
+            scroll_handle: popup_scroll_handle,
+            align_selected_on_open,
+          },
+        )
+        .on_dismiss(move |window, cx| {
+          dismiss_state.update(cx, |state, cx| state.dismiss_popup(cx));
+          window.blur();
+        });
+
         parent
-          .child(deferred(render_popup_backdrop(viewport_size, backdrop_state)).with_priority(0))
-          .child(
-            deferred(render_content(
-              self.content,
-              selected_id.as_deref(),
-              highlighted_index,
-              self.style.menu_max_height.unwrap_or(DEFAULT_MENU_MAX_HEIGHT),
-              popup_layout,
-              self.theme,
-              self.state,
-            ))
-            .with_priority(1),
-          )
+          .child(popover.deferred_backdrop(viewport_size))
+          .child(popover.deferred_content())
       })
   }
 }
@@ -383,37 +408,59 @@ impl SelectContent {
       .collect()
   }
 
-  /// Finds the selected item's vertical center within popup content.
+  /// Returns the total vertical extent of the popup's direct children.
+  fn content_height(&self) -> Pixels {
+    self.children.iter().fold(px(0.0), |height, child| match child {
+      SelectContentChild::Group(group) => {
+        height + if group.label.is_some() { LABEL_HEIGHT } else { px(0.0) } + ITEM_HEIGHT * group.items.len() as f32
+      }
+      SelectContentChild::Separator(_) => height + SEPARATOR_HEIGHT,
+    })
+  }
+
+  /// Resolves the selected item's visible center within a height-constrained popup.
   ///
   /// # Parameters
   ///
   /// * `selected_id` identifies the selected item, when one exists.
+  /// * `popup_height` is the viewport height resolved for this popup placement.
   ///
   /// # Returns
   ///
-  /// The item's center offset from the content top, or `None` when it is absent.
-  fn selected_item_offset(&self, selected_id: Option<&str>) -> Option<Pixels> {
+  /// Geometry required to align the selected item, or `None` when it is absent.
+  fn item_alignment(&self, selected_id: Option<&str>, popup_height: Pixels) -> Option<ItemAlignment> {
     let selected_id = selected_id?;
-    let mut offset = px(0.0);
+    let mut content_height = px(0.0);
+    let mut selected_item = None;
     for child in &self.children {
       match child {
         SelectContentChild::Group(group) => {
-          // Labels and separators occupy real popup rows, so they must be
-          // included before aligning a later selected item with the trigger.
           if group.label.is_some() {
-            offset += LABEL_HEIGHT;
+            content_height += LABEL_HEIGHT;
           }
           for item in &group.items {
             if item.id == selected_id {
-              return Some(offset + ITEM_HEIGHT / 2.0);
+              selected_item = Some(content_height);
             }
-            offset += ITEM_HEIGHT;
+            content_height += ITEM_HEIGHT;
           }
         }
-        SelectContentChild::Separator(_) => offset += SEPARATOR_HEIGHT,
+        SelectContentChild::Separator(_) => {
+          content_height += SEPARATOR_HEIGHT;
+        }
       }
     }
-    None
+    let selected_top = selected_item?;
+    let viewport_height = content_height.min(popup_height);
+    let maximum_scroll_offset = (content_height - viewport_height).max(px(0.0));
+    let desired_scroll_offset = (selected_top + ITEM_HEIGHT / 2.0 - viewport_height / 2.0).max(px(0.0));
+    let scroll_offset = desired_scroll_offset.min(maximum_scroll_offset);
+
+    Some(ItemAlignment {
+      scroll_offset,
+      content_center: selected_top + ITEM_HEIGHT / 2.0,
+      visible_center: selected_top + ITEM_HEIGHT / 2.0 - scroll_offset,
+    })
   }
 }
 
@@ -423,6 +470,33 @@ enum SelectContentChild {
   Group(SelectGroup),
   /// A non-selectable visual boundary between groups.
   Separator(SelectSeparator),
+}
+
+/// Geometry used to align one selected option with a trigger.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ItemAlignment {
+  /// Downward content offset needed to reveal the selected option.
+  scroll_offset: Pixels,
+  /// Selected option center in the unscrolled popup content.
+  content_center: Pixels,
+  /// Selected option center after its scroll offset is clamped.
+  visible_center: Pixels,
+}
+
+/// Selected-item geometry resolved against the popup's current scroll position.
+#[derive(Clone, Copy, Debug)]
+struct ActualItemAlignment {
+  /// Selected option center in the unscrolled popup content.
+  content_center: Pixels,
+  /// Current vertical content offset reported by GPUI.
+  scroll_offset: Pixels,
+}
+
+impl ActualItemAlignment {
+  /// Returns the selected option center within the popup's scrollable content viewport.
+  fn visible_center(self) -> Pixels {
+    self.content_center + self.scroll_offset
+  }
 }
 
 /// A labelled set of selectable [`SelectItem`] values.
@@ -544,11 +618,11 @@ fn render_value(
 /// * `menu_max_height` limits the visible scrollable popup height.
 /// * `layout` provides the trigger dimensions, popup width, and matching option font size.
 /// * `theme` supplies the popup color tokens.
-/// * `state` receives pointer selection events from rendered items.
+/// * `interaction` supplies popup state, scrolling, and one-time alignment behavior.
 ///
 /// # Returns
 ///
-/// An anchored popup that is wrapped in a deferred overlay by [`Select::render`].
+/// A modal popover wrapped in deferred overlays by [`Select::render`].
 fn render_content(
   content: SelectContent,
   selected_id: Option<&str>,
@@ -556,31 +630,53 @@ fn render_content(
   menu_max_height: Pixels,
   layout: SelectPopupLayout,
   theme: UIThemes,
-  state: Entity<SelectInputState>,
-) -> Anchored {
-  let top = match content.position {
-    // Align centers rather than row tops so every trigger size has the same
-    // visual relationship to its selected item.
-    SelectContentPosition::ItemAligned => content
-      .selected_item_offset(selected_id)
-      .map_or(layout.trigger.height + px(2.0), |offset| {
-        layout.trigger.height / 2.0 - offset
-      }),
-    SelectContentPosition::Popper => layout.trigger.height + px(2.0),
-  };
+  interaction: SelectPopupInteraction,
+) -> Popover {
+  let placement = layout.resolve_placement(content.position, content.content_height(), menu_max_height);
+  let popup_height = placement.popup_height();
+  let item_alignment = content.item_alignment(selected_id, popup_height);
+  if interaction.align_selected_on_open
+    && let Some(item_alignment) = item_alignment
+  {
+    interaction
+      .scroll_handle
+      .set_offset(point(px(0.0), -item_alignment.scroll_offset));
+  }
+  let actual_item_alignment = item_alignment.map(|item_alignment| ActualItemAlignment {
+    content_center: item_alignment.content_center,
+    scroll_offset: interaction.scroll_handle.offset().y,
+  });
+  if let (SelectPopupPlacement::ItemAligned { .. }, Some(item_alignment)) = (placement, actual_item_alignment) {
+    let popup_top = layout.item_aligned_top(item_alignment.visible_center());
+    let trigger_center = layout.trigger.height / 2.0;
+    let aligned_item_center = popup_top + POPUP_BORDER_WIDTH + item_alignment.visible_center();
+    log::debug!(
+      "Select ItemAligned alignment: content_center={:?}, actual_scroll_offset={:?}, actual_visible_center={:?}, \
+       popup_top={:?}, trigger_center={:?}, aligned_item_center={:?}, center_error={:?}",
+      item_alignment.content_center,
+      item_alignment.scroll_offset,
+      item_alignment.visible_center(),
+      popup_top,
+      trigger_center,
+      aligned_item_center,
+      aligned_item_center - trigger_center,
+    );
+  }
+  log::debug!(
+    "Select popup: requested_position={:?}, resolved_placement={:?}, trigger_bounds={:?}, viewport={:?}, popup_height={:?}, item_alignment={:?}, \
+     scroll_offset={:?}, align_on_open={}",
+    content.position,
+    placement,
+    layout.trigger_bounds,
+    layout.viewport_size,
+    popup_height,
+    item_alignment,
+    interaction.scroll_handle.offset(),
+    interaction.align_selected_on_open,
+  );
   let mut item_index = 0;
-  // GPUI stores the scroll offset in element state keyed by this stable ID.
-  let mut popup = div()
-    .id(("select-popup", state.entity_id()))
-    .w(layout.width)
-    .max_h(menu_max_height)
-    .overflow_y_scroll()
-    .text_size(layout.trigger.font_size)
-    .rounded_sm()
-    .border_1()
-    .border_color(theme.border.primary)
-    .bg(theme.background.secondary)
-    .occlude();
+  // Popover owns the stable element ID and persistent scroll position.
+  let mut popup = div().w(layout.width).text_size(layout.trigger.font_size);
 
   for child in content.children {
     match child {
@@ -591,12 +687,14 @@ fn render_content(
         for item in group.items {
           // State navigation sees a flattened option list. Increment only for
           // items so pointer and keyboard indices always refer to the same row.
+          let selected = selected_id == Some(item.id.as_ref());
           popup = popup.child(render_item(
             item,
             item_index,
             highlighted_index == Some(item_index),
+            selected,
             theme,
-            state.clone(),
+            interaction.state.clone(),
           ));
           item_index += 1;
         }
@@ -604,42 +702,37 @@ fn render_content(
       SelectContentChild::Separator(_) => popup = popup.child(render_separator(theme)),
     }
   }
-  // `anchored` flips the popup above the trigger when the requested lower
-  // position exceeds the window viewport, then snaps it into view if needed.
-  anchored()
-    .anchor(Corner::TopLeft)
-    .position_mode(AnchoredPositionMode::Local)
-    .offset(point(px(0.0), top))
-    .child(popup)
-}
-
-/// Renders the transparent modal surface behind an open popup.
-///
-/// # Parameters
-///
-/// * `viewport_size` supplies the window area that must block background interaction.
-/// * `state` closes the popup after an outside interaction.
-///
-/// # Returns
-///
-/// A window-anchored backdrop that blocks background scrolling and clears focus on outside clicks.
-fn render_popup_backdrop(viewport_size: Size<Pixels>, state: Entity<SelectInputState>) -> Anchored {
-  anchored()
-    .anchor(Corner::TopLeft)
-    .position(point(px(0.0), px(0.0)))
-    .position_mode(AnchoredPositionMode::Window)
-    .child(
-      div()
-        .w(viewport_size.width)
-        .h(viewport_size.height)
-        .occlude()
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-        .on_any_mouse_down(move |_, window, cx| {
-          state.update(cx, |state, cx| state.dismiss_popup(cx));
-          window.blur();
-          cx.stop_propagation();
-        }),
+  let popover = Popover::new(("select-popup", interaction.state.entity_id()), popup)
+    .anchor_size(Size {
+      width: layout.width,
+      height: layout.trigger.height,
+    })
+    .style(
+      PopoverStyle::new()
+        .width(layout.width)
+        .max_height(popup_height)
+        .background(theme.background.secondary)
+        .border_color(theme.border.primary)
+        .border_width(POPUP_BORDER_WIDTH),
     )
+    .theme(theme)
+    .scroll_handle(interaction.scroll_handle);
+  let popover = if let Some(trigger_bounds) = layout.trigger_bounds {
+    popover.anchor_position(trigger_bounds.origin)
+  } else {
+    popover
+  };
+
+  match placement {
+    SelectPopupPlacement::ItemAligned { .. } => {
+      let top = actual_item_alignment.map_or(layout.trigger.height + px(2.0), |item_alignment| {
+        layout.item_aligned_top(item_alignment.visible_center())
+      });
+      log::debug!("Select ItemAligned: custom popup top offset={:?}", top);
+      popover.offset(point(px(0.0), top))
+    }
+    SelectPopupPlacement::Popover { placement, .. } => popover.placement(placement),
+  }
 }
 
 /// Renders a non-selectable group heading.
@@ -679,11 +772,13 @@ fn render_item(
   item: SelectItem,
   index: usize,
   highlighted: bool,
+  selected: bool,
   theme: UIThemes,
   state: Entity<SelectInputState>,
 ) -> Div {
   let disabled = item.disabled;
-  div()
+  let selection_state = state.clone();
+  let item = div()
     .flex()
     .items_center()
     .h(ITEM_HEIGHT)
@@ -709,12 +804,38 @@ fn render_item(
     .when(!disabled, |style| {
       style.on_mouse_down(MouseButton::Left, move |_, _, cx| {
         // Selection closes the popup in state before propagation is stopped.
-        if state.update(cx, |state, cx| state.select_index(index, cx)) {
+        if selection_state.update(cx, |state, cx| state.select_index(index, cx)) {
           cx.stop_propagation();
         }
       })
     })
-    .child(item.label)
+    .child(item.label);
+
+  if !selected {
+    return item;
+  }
+
+  div()
+    .on_children_prepainted(move |children_bounds, _, cx| {
+      let Some(selected_bounds) = children_bounds.first().copied() else {
+        return;
+      };
+      let trigger_bounds = state.read(cx).trigger_bounds();
+      let Some(trigger_bounds) = trigger_bounds else {
+        return;
+      };
+      let selected_center = (selected_bounds.top() + selected_bounds.bottom()) / 2.0;
+      let trigger_center = (trigger_bounds.top() + trigger_bounds.bottom()) / 2.0;
+      log::debug!(
+        "Select ItemAligned measured: selected_bounds={:?}, trigger_bounds={:?}, selected_center={:?}, trigger_center={:?}, center_error={:?}",
+        selected_bounds,
+        trigger_bounds,
+        selected_center,
+        trigger_center,
+        selected_center - trigger_center,
+      );
+    })
+    .child(item)
 }
 
 /// Resolved dimensions shared by the trigger and item-alignment calculation.
@@ -733,6 +854,43 @@ struct SelectPopupLayout {
   trigger: SelectInputMetrics,
   /// Popup width kept equal to the rendered trigger width.
   width: Pixels,
+  /// Trigger bounds measured during the previous prepaint pass.
+  trigger_bounds: Option<Bounds<Pixels>>,
+  /// Current window size used to constrain item-aligned content.
+  viewport_size: Size<Pixels>,
+}
+
+/// Placement selected after applying select-specific item-alignment fallback rules.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SelectPopupPlacement {
+  /// The selected option can share the trigger's vertical center without clipping the popup.
+  ItemAligned { height: Pixels },
+  /// The popup uses a conventional anchor edge after item alignment cannot fit.
+  Popover {
+    /// Built-in edge placement chosen from available window space.
+    placement: PopoverPlacement,
+    /// Visible popup height constrained to that edge's available space.
+    height: Pixels,
+  },
+}
+
+impl SelectPopupPlacement {
+  /// Returns the resolved visible popup height.
+  fn popup_height(self) -> Pixels {
+    match self {
+      Self::ItemAligned { height } | Self::Popover { height, .. } => height,
+    }
+  }
+}
+
+/// Persistent interaction values consumed by one popup render pass.
+struct SelectPopupInteraction {
+  /// Entity that receives option selection events and identifies popup element state.
+  state: Entity<SelectInputState>,
+  /// Shared viewport position for the scrollable option list.
+  scroll_handle: ScrollHandle,
+  /// Whether this render must reveal and align the selected option.
+  align_selected_on_open: bool,
 }
 
 impl SelectInputSize {
@@ -752,6 +910,80 @@ impl SelectInputSize {
         font_size: px(14.0),
       },
     }
+  }
+}
+
+impl SelectPopupLayout {
+  /// Resolves item alignment when it fits, otherwise chooses the roomier popup edge.
+  fn resolve_placement(
+    self,
+    requested_position: SelectContentPosition,
+    content_height: Pixels,
+    menu_max_height: Pixels,
+  ) -> SelectPopupPlacement {
+    let configured_height = content_height.min(menu_max_height);
+    if requested_position == SelectContentPosition::Popper {
+      return self.edge_placement(configured_height);
+    }
+
+    let Some(trigger_bounds) = self.trigger_bounds else {
+      return self.edge_placement(configured_height);
+    };
+    let trigger_center = (trigger_bounds.top() + trigger_bounds.bottom()) / 2.0;
+    let centered_height = (trigger_center * 2.0)
+      .min((self.viewport_size.height - trigger_center) * 2.0)
+      .max(px(0.0));
+
+    if configured_height <= centered_height {
+      SelectPopupPlacement::ItemAligned {
+        height: configured_height,
+      }
+    } else {
+      self.edge_placement(configured_height)
+    }
+  }
+
+  /// Chooses an edge and constrains the popup to the available space on that edge.
+  fn edge_placement(self, configured_height: Pixels) -> SelectPopupPlacement {
+    let Some(trigger_bounds) = self.trigger_bounds else {
+      return SelectPopupPlacement::Popover {
+        placement: PopoverPlacement::Below,
+        height: configured_height,
+      };
+    };
+    let above = trigger_bounds.top().max(px(0.0));
+    let below = (self.viewport_size.height - trigger_bounds.bottom()).max(px(0.0));
+    let placement = if above > below {
+      PopoverPlacement::Above
+    } else {
+      PopoverPlacement::Below
+    };
+    let height = configured_height.min(if placement == PopoverPlacement::Above {
+      above
+    } else {
+      below
+    });
+
+    SelectPopupPlacement::Popover { placement, height }
+  }
+
+  /// Converts an option-content center into a trigger-local popup surface offset.
+  fn item_aligned_top(self, visible_center: Pixels) -> Pixels {
+    let top = self
+      .trigger_bounds
+      .map_or(self.trigger.height / 2.0 - visible_center, |trigger_bounds| {
+        (trigger_bounds.top() + trigger_bounds.bottom()) / 2.0 - visible_center - trigger_bounds.top()
+      })
+      - POPUP_BORDER_WIDTH;
+    log::debug!(
+      "Select ItemAligned geometry: trigger_bounds={:?}, trigger_height={:?}, visible_center={:?}, border_inset={:?}, popup_top={:?}",
+      self.trigger_bounds,
+      self.trigger.height,
+      visible_center,
+      POPUP_BORDER_WIDTH,
+      top,
+    );
+    top
   }
 }
 
@@ -816,16 +1048,134 @@ mod tests {
   use super::*;
 
   #[test]
-  fn select_content_should_place_selected_item_after_group_label() {
+  fn item_alignment_should_account_for_labels_separators_and_scroll_limits() {
+    let content = SelectContent::new()
+      .group(
+        SelectGroup::new()
+          .label(SelectLabel::new("Molecular mechanics"))
+          .item(SelectItem::new("amber", "Amber")),
+      )
+      .separator(SelectSeparator::new())
+      .group(
+        SelectGroup::new()
+          .label(SelectLabel::new("No force field"))
+          .item(SelectItem::new("none", "None")),
+      );
+
+    assert_eq!(
+      content.item_alignment(Some("none"), px(60.0)),
+      Some(ItemAlignment {
+        scroll_offset: px(57.0),
+        content_center: px(102.0),
+        visible_center: px(45.0),
+      })
+    );
+  }
+
+  #[test]
+  fn item_alignment_should_center_selected_item_when_content_allows_it() {
     let content = SelectContent::new().group(
       SelectGroup::new()
-        .label(SelectLabel::new("Force field"))
-        .item(SelectItem::new("amber", "Amber")),
+        .item(SelectItem::new("one", "One"))
+        .item(SelectItem::new("two", "Two"))
+        .item(SelectItem::new("three", "Three"))
+        .item(SelectItem::new("four", "Four")),
     );
 
     assert_eq!(
-      content.selected_item_offset(Some("amber")),
-      Some(LABEL_HEIGHT + ITEM_HEIGHT / 2.0)
+      content.item_alignment(Some("three"), px(60.0)),
+      Some(ItemAlignment {
+        scroll_offset: px(45.0),
+        content_center: px(75.0),
+        visible_center: px(30.0),
+      })
+    );
+  }
+
+  #[test]
+  fn item_aligned_position_should_fall_back_below_near_the_window_top() {
+    let layout = SelectPopupLayout {
+      trigger: SelectInputMetrics {
+        height: px(30.0),
+        font_size: px(13.0),
+      },
+      width: px(240.0),
+      trigger_bounds: Some(Bounds {
+        origin: point(px(0.0), px(20.0)),
+        size: Size {
+          width: px(240.0),
+          height: px(30.0),
+        },
+      }),
+      viewport_size: Size {
+        width: px(800.0),
+        height: px(700.0),
+      },
+    };
+
+    assert_eq!(
+      layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0)),
+      SelectPopupPlacement::Popover {
+        placement: PopoverPlacement::Below,
+        height: px(240.0),
+      }
+    );
+  }
+
+  #[test]
+  fn item_aligned_position_should_fall_back_above_near_the_window_bottom() {
+    let layout = SelectPopupLayout {
+      trigger: SelectInputMetrics {
+        height: px(30.0),
+        font_size: px(13.0),
+      },
+      width: px(240.0),
+      trigger_bounds: Some(Bounds {
+        origin: point(px(0.0), px(650.0)),
+        size: Size {
+          width: px(240.0),
+          height: px(30.0),
+        },
+      }),
+      viewport_size: Size {
+        width: px(800.0),
+        height: px(700.0),
+      },
+    };
+
+    assert_eq!(
+      layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0)),
+      SelectPopupPlacement::Popover {
+        placement: PopoverPlacement::Above,
+        height: px(240.0),
+      }
+    );
+  }
+
+  #[test]
+  fn item_aligned_position_should_remain_centered_when_it_fits() {
+    let layout = SelectPopupLayout {
+      trigger: SelectInputMetrics {
+        height: px(30.0),
+        font_size: px(13.0),
+      },
+      width: px(240.0),
+      trigger_bounds: Some(Bounds {
+        origin: point(px(0.0), px(300.0)),
+        size: Size {
+          width: px(240.0),
+          height: px(30.0),
+        },
+      }),
+      viewport_size: Size {
+        width: px(800.0),
+        height: px(700.0),
+      },
+    };
+
+    assert_eq!(
+      layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0)),
+      SelectPopupPlacement::ItemAligned { height: px(240.0) }
     );
   }
 }
