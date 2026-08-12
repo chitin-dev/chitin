@@ -762,6 +762,7 @@ fn render_separator(theme: UIThemes) -> Div {
 /// * `item` supplies the row label, id, and disabled state.
 /// * `index` identifies the item in the flattened selection state.
 /// * `highlighted` selects the keyboard-navigation background.
+/// * `selected` controls the selected-item checkmark.
 /// * `theme` supplies semantic colors.
 /// * `state` receives pointer selection interaction.
 ///
@@ -781,9 +782,10 @@ fn render_item(
   let item = div()
     .flex()
     .items_center()
+    .justify_between()
     .h(ITEM_HEIGHT)
     .px(DEFAULT_PADDING_X)
-    .bg(if highlighted {
+    .bg(if highlighted && !selected {
       theme.background.selection
     } else {
       theme.background.secondary
@@ -809,7 +811,14 @@ fn render_item(
         }
       })
     })
-    .child(item.label);
+    .child(item.label)
+    .when(selected, |style| {
+      style.child(Icon::new("icons/check.svg").size(px(14.0)).color(if disabled {
+        theme.text.disabled
+      } else {
+        theme.text.primary
+      }))
+    });
 
   if !selected {
     return item;
