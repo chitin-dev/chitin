@@ -6,6 +6,8 @@ pub mod button;
 pub mod icon;
 /// Input controls and their state models.
 pub mod input;
+/// Window-bounded modal popovers with arbitrary scrollable content.
+pub mod popover;
 /// Generic resize gesture state.
 pub mod resize;
 /// Sidebar layout and resize controls.

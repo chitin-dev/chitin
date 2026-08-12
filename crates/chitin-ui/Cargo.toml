@@ -7,11 +7,12 @@ repository.workspace = true
 description = "Reusable GPUI components for chitin desktop application"
 
 [dependencies]
-gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "70e45b549634e6c1cea07370b7e12e3a79c31c03" }
+gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "d01b063d0dce9df2be24a53f59201e010712fc01" }
 log = "0.4.33"
 
 [dev-dependencies]
 criterion = "0.5"
+env_logger = "0.10"
 
 [[bench]]
 name = "tree_virtualization"

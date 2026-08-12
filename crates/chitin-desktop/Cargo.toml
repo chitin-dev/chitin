@@ -11,7 +11,7 @@ env_logger = "0.10"
 chitin-utils = { path = "../chitin-utils" }
 chitin-ui = { path = "../chitin-ui" }
 chitin-wgpu = { path = "../chitin-wgpu" }
-gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "70e45b549634e6c1cea07370b7e12e3a79c31c03" }
+gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "d01b063d0dce9df2be24a53f59201e010712fc01" }
 wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
 rust-embed = { version = "8.12.0", features = ["debug-embed", "interpolate-folder-path"] }
 

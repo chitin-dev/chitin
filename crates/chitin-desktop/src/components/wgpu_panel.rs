@@ -358,12 +358,7 @@ impl Render for ChitinWgpuDocumentPanel {
             });
           }
         })
-        .child(
-          wgpu_surface(surface)
-            .absolute()
-            .inset_0()
-            .defer_resize_until_mouse_up(true),
-        )
+        .child(wgpu_surface(surface).absolute().inset_0())
         .child(
           div()
             .absolute()

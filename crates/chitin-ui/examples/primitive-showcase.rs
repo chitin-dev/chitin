@@ -10,6 +10,10 @@ use chitin_ui::{
       NumberDraftState, NumberFormat, NumberInput, NumberInputEvent, NumberInputSize, NumberInputState,
       NumberInputStyle, NumberInputVariant,
     },
+    select::{
+      Select, SelectContent, SelectContentPosition, SelectGroup, SelectInputEvent, SelectInputState, SelectInputStyle,
+      SelectItem, SelectLabel, SelectOption, SelectSeparator, SelectTrigger, SelectValue,
+    },
     text::{TextInput, TextInputEvent, TextInputSize, TextInputState, TextInputStyle, TextInputVariant},
   },
   themes::{UIThemes, builtins},
@@ -26,6 +30,40 @@ macro_rules! subscribe_status {
       cx.notify();
     })
   };
+}
+
+/// Creates the option data shared by the long scrollable select example.
+///
+/// # Parameters
+///
+/// This function takes no parameters.
+///
+/// # Returns
+///
+/// Twelve application-neutral options in display order.
+fn long_select_options() -> Vec<SelectOption> {
+  (1..=12)
+    .map(|index| SelectOption::new(format!("model-{index}"), format!("Model {index}")))
+    .collect()
+}
+
+/// Creates content that exceeds the showcase select popup's maximum height.
+///
+/// # Parameters
+///
+/// This function takes no parameters.
+///
+/// # Returns
+///
+/// One labelled group containing the long option list.
+fn long_select_content() -> SelectContent {
+  let mut group = SelectGroup::new().label(SelectLabel::new("Available models"));
+  for option in long_select_options() {
+    group = group.item(SelectItem::new(option.id(), option.label()));
+  }
+  SelectContent::new()
+    .position(SelectContentPosition::ItemAligned)
+    .group(group)
 }
 
 /// GPUI asset source backed by the workspace icon directory for this standalone example.
@@ -90,6 +128,8 @@ struct PrimitiveShowcase {
   numeric_input: Entity<NumberInputState>,
   mass_input: Entity<NumberInputState>,
   precision_bounds_input: Entity<NumberInputState>,
+  select_input: Entity<SelectInputState>,
+  long_select_input: Entity<SelectInputState>,
 
   // text inputs status string representation
   default_status: SharedString,
@@ -103,6 +143,10 @@ struct PrimitiveShowcase {
   numeric_status: SharedString,
   mass_status: SharedString,
   precision_bounds_status: SharedString,
+
+  // select inputs status
+  select_status: SharedString,
+  long_select_status: SharedString,
 
   _input_subscriptions: Vec<Subscription>,
 }
@@ -172,6 +216,24 @@ impl PrimitiveShowcase {
       input.set_value(Some(0.9), cx);
       input
     });
+    let select_input = cx.new(|cx| {
+      let mut input = SelectInputState::new(
+        [
+          SelectOption::new("amber", "Amber"),
+          SelectOption::new("charmm", "CHARMM"),
+          SelectOption::new("opls", "OPLS"),
+          SelectOption::new("none", "None"),
+        ],
+        cx,
+      );
+      input.select("amber", cx);
+      input
+    });
+    let long_select_input = cx.new(|cx| {
+      let mut input = SelectInputState::new(long_select_options(), cx);
+      input.select("model-1", cx);
+      input
+    });
     let input_subscriptions = vec![
       subscribe_status!(cx, default_input, default_status, text_input_event_summary),
       subscribe_status!(cx, primary_input, primary_status, text_input_event_summary),
@@ -187,6 +249,8 @@ impl PrimitiveShowcase {
         precision_bounds_status,
         number_input_event_summary
       ),
+      subscribe_status!(cx, select_input, select_status, select_input_event_summary),
+      subscribe_status!(cx, long_select_input, long_select_status, select_input_event_summary),
     ];
 
     Self {
@@ -199,6 +263,8 @@ impl PrimitiveShowcase {
       numeric_input,
       mass_input,
       precision_bounds_input,
+      select_input,
+      long_select_input,
       default_status: "Ready".into(),
       primary_status: "Ready".into(),
       placeholder_status: "Ready".into(),
@@ -208,6 +274,8 @@ impl PrimitiveShowcase {
       numeric_status: "Ready".into(),
       mass_status: "Ready".into(),
       precision_bounds_status: "Ready".into(),
+      select_status: "Ready".into(),
+      long_select_status: "Ready".into(),
       _input_subscriptions: input_subscriptions,
     }
   }
@@ -280,11 +348,282 @@ impl PrimitiveShowcase {
       )
       .child(div().text_xs().text_color(theme.text.secondary).child(example.status))
   }
+
+  /// Renders the text-input examples panel.
+  ///
+  /// # Parameters
+  ///
+  /// * `theme` supplies the showcase color tokens.
+  ///
+  /// # Returns
+  ///
+  /// A bordered panel containing all text-input examples.
+  fn text_input_panel(&self, theme: UIThemes) -> Div {
+    div()
+      .flex()
+      .flex_col()
+      .gap_4()
+      .p_4()
+      .border_1()
+      .border_color(theme.border.primary)
+      .rounded_sm()
+      .bg(theme.background.secondary)
+      .child(div().text_sm().child("Text Input"))
+      .child(Self::text_input_example(
+        TextInputExample {
+          title: "Default",
+          description: "Editable, medium-sized input.",
+          placeholder: None,
+          input: self.default_input.clone(),
+          status: self.default_status.clone(),
+          size: TextInputSize::Medium,
+          variant: TextInputVariant::Secondary,
+          style: TextInputStyle::new(),
+        },
+        theme,
+      ))
+      .child(Self::text_input_example(
+        TextInputExample {
+          title: "Primary variant",
+          description: "Uses the built-in primary input treatment.",
+          placeholder: None,
+          input: self.primary_input.clone(),
+          status: self.primary_status.clone(),
+          size: TextInputSize::Medium,
+          variant: TextInputVariant::Primary,
+          style: TextInputStyle::new(),
+        },
+        theme,
+      ))
+      .child(Self::text_input_example(
+        TextInputExample {
+          title: "Placeholder",
+          description: "Shows guidance while its value is empty.",
+          placeholder: Some("Search structures"),
+          input: self.placeholder_input.clone(),
+          status: self.placeholder_status.clone(),
+          size: TextInputSize::Small,
+          variant: TextInputVariant::Secondary,
+          style: TextInputStyle::new(),
+        },
+        theme,
+      ))
+      .child(Self::text_input_example(
+        TextInputExample {
+          title: "Custom style",
+          description: "Overrides visual tokens while keeping TextInput behavior.",
+          placeholder: None,
+          input: self.custom_style_input.clone(),
+          status: self.custom_style_status.clone(),
+          size: TextInputSize::Medium,
+          variant: TextInputVariant::Secondary,
+          style: TextInputStyle::new()
+            .background(theme.background.primary)
+            .border(theme.border.primary)
+            .focus_border(theme.accent.primary)
+            .foreground(theme.text.primary)
+            .placeholder_foreground(theme.text.secondary)
+            .selection_background(theme.background.selection)
+            .caret(theme.accent.primary)
+            .height(px(34.0))
+            .horizontal_padding(px(12.0)),
+        },
+        theme,
+      ))
+      .child(Self::text_input_example(
+        TextInputExample {
+          title: "Read-only",
+          description: "Allows selection without text mutation.",
+          placeholder: None,
+          input: self.readonly_input.clone(),
+          status: self.readonly_status.clone(),
+          size: TextInputSize::Large,
+          variant: TextInputVariant::Secondary,
+          style: TextInputStyle::new(),
+        },
+        theme,
+      ))
+      .child(Self::text_input_example(
+        TextInputExample {
+          title: "Disabled",
+          description: "Does not receive focus or input events.",
+          placeholder: None,
+          input: self.disabled_input.clone(),
+          status: self.disabled_status.clone(),
+          size: TextInputSize::Medium,
+          variant: TextInputVariant::Secondary,
+          style: TextInputStyle::new(),
+        },
+        theme,
+      ))
+  }
+
+  /// Renders the number-input examples panel.
+  ///
+  /// # Parameters
+  ///
+  /// * `theme` supplies the showcase color tokens.
+  ///
+  /// # Returns
+  ///
+  /// A bordered panel containing all number-input examples.
+  fn number_input_panel(&self, theme: UIThemes) -> Div {
+    div()
+      .flex()
+      .flex_col()
+      .gap_4()
+      .p_4()
+      .border_1()
+      .border_color(theme.border.primary)
+      .rounded_sm()
+      .bg(theme.background.secondary)
+      .child(div().text_sm().child("Number Input"))
+      .child(Self::number_input_example(
+        NumberInputExample {
+          title: "Numeric draft",
+          description: "Preserves incomplete numeric text while it is being edited.",
+          placeholder: Some("Enter a value"),
+          suffix: None,
+          input: self.numeric_input.clone(),
+          status: self.numeric_status.clone(),
+          variant: NumberInputVariant::Secondary,
+          size: NumberInputSize::Medium,
+          style: NumberInputStyle::new(),
+        },
+        theme,
+      ))
+      .child(Self::number_input_example(
+        NumberInputExample {
+          title: "Molecular mass",
+          description: "Uses fixed precision, a unit suffix, and semantic visual overrides.",
+          placeholder: None,
+          suffix: Some("g/mol"),
+          input: self.mass_input.clone(),
+          status: self.mass_status.clone(),
+          variant: NumberInputVariant::Primary,
+          size: NumberInputSize::Small,
+          style: NumberInputStyle::new()
+            .background(theme.background.primary)
+            .border(theme.border.muted)
+            .focus_border(theme.accent.primary)
+            .suffix_foreground(theme.text.primary)
+            .stepper_border(theme.border.muted)
+            .stepper_hover_background(theme.background.active)
+            .stepper_foreground(theme.text.primary),
+        },
+        theme,
+      ))
+      .child(Self::number_input_example(
+        NumberInputExample {
+          title: "Fixed precision boundary",
+          description: "Starts at 0.9 with maximum 0.95, one decimal place, and a 0.1 step. \
+            Increment to verify normalization occurs before the final clamp.",
+          placeholder: None,
+          suffix: None,
+          input: self.precision_bounds_input.clone(),
+          status: self.precision_bounds_status.clone(),
+          variant: NumberInputVariant::Secondary,
+          size: NumberInputSize::Small,
+          style: NumberInputStyle::new(),
+        },
+        theme,
+      ))
+  }
+
+  /// Renders the grouped select-input example panel.
+  ///
+  /// # Parameters
+  ///
+  /// * `theme` supplies the showcase color tokens.
+  ///
+  /// # Returns
+  ///
+  /// A bordered panel demonstrating groups, labels, separators, and popper positioning.
+  fn select_input_panel(&self, theme: UIThemes) -> Div {
+    div()
+      .flex()
+      .flex_col()
+      .gap_4()
+      .p_4()
+      .border_1()
+      .border_color(theme.border.primary)
+      .rounded_sm()
+      .bg(theme.background.secondary)
+      .child(div().text_sm().child("Select Input"))
+      .child(
+        div()
+          .text_xs()
+          .text_color(theme.text.secondary)
+          .child("ItemAligned keeps the selected item aligned with the trigger; Popper places content below it."),
+      )
+      .child(
+        Select::new(self.select_input.clone())
+          .theme(theme)
+          .trigger(SelectTrigger::new().value(SelectValue::new().placeholder("Choose force field")))
+          .content(
+            SelectContent::new()
+              .position(SelectContentPosition::ItemAligned)
+              .group(
+                SelectGroup::new()
+                  .label(SelectLabel::new("Molecular mechanics"))
+                  .item(SelectItem::new("amber", "Amber"))
+                  .item(SelectItem::new("charmm", "CHARMM"))
+                  .item(SelectItem::new("opls", "OPLS")),
+              )
+              .separator(SelectSeparator::new())
+              .group(
+                SelectGroup::new()
+                  .label(SelectLabel::new("No force field"))
+                  .item(SelectItem::new("none", "None")),
+              ),
+          ),
+      )
+      .child(
+        div()
+          .text_xs()
+          .text_color(theme.text.secondary)
+          .child(self.select_status.clone()),
+      )
+      .child(
+        div()
+          .text_sm()
+          .text_color(theme.text.primary)
+          .child("Scrollable options"),
+      )
+      .child(
+        div()
+          .text_xs()
+          .text_color(theme.text.secondary)
+          .child("Twelve options are constrained to a 240px popup to verify vertical scrolling."),
+      )
+      .child(
+        Select::new(self.long_select_input.clone())
+          .theme(theme)
+          .style(SelectInputStyle::new().menu_max_height(px(240.0)))
+          .trigger(SelectTrigger::new().value(SelectValue::new().placeholder("Choose model")))
+          .content(long_select_content())
+          .full_width(true),
+      )
+      .child(
+        div()
+          .text_xs()
+          .text_color(theme.text.secondary)
+          .child(self.long_select_status.clone()),
+      )
+  }
 }
 
 impl Render for PrimitiveShowcase {
-  /// Renders the text-input portion of the growing primitive component gallery.
-  /// A scrollable, theme-based gallery layout.
+  /// Renders the scrollable primitive component gallery.
+  ///
+  /// # Parameters
+  ///
+  /// * `_window` supplies the current GPUI window.
+  /// * `_cx` supplies the showcase context.
+  ///
+  /// # Returns
+  ///
+  /// The root showcase layout containing independently rendered primitive panels.
   fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
     let theme = builtins::dark();
 
@@ -306,187 +645,28 @@ impl Render for PrimitiveShowcase {
             div()
               .w(px(640.0))
               .mx_auto()
-              .p_6()
+              .px_6()
+              .pt_6()
+              .pb_48()
               .flex()
               .flex_col()
               .gap_5()
               .child(div().text_lg().child("Primitive Showcase"))
-              // TextInput showcase title
               .child(
                 div()
                   .text_sm()
                   .text_color(theme.text.secondary)
                   .child("TextInput owns editing, focus, and semantic events."),
               )
-              // TextInput showcase panel
-              .child(
-                div()
-                  .flex()
-                  .flex_col()
-                  .gap_4()
-                  .p_4()
-                  .border_1()
-                  .border_color(theme.border.primary)
-                  .rounded_sm()
-                  .bg(theme.background.secondary)
-                  .child(div().text_sm().child("Text Input"))
-                  .child(Self::text_input_example(
-                    TextInputExample {
-                      title: "Default",
-                      description: "Editable, medium-sized input.",
-                      placeholder: None,
-                      input: self.default_input.clone(),
-                      status: self.default_status.clone(),
-                      size: TextInputSize::Medium,
-                      variant: TextInputVariant::Secondary,
-                      style: TextInputStyle::new(),
-                    },
-                    theme,
-                  ))
-                  .child(Self::text_input_example(
-                    TextInputExample {
-                      title: "Primary variant",
-                      description: "Uses the built-in primary input treatment.",
-                      placeholder: None,
-                      input: self.primary_input.clone(),
-                      status: self.primary_status.clone(),
-                      size: TextInputSize::Medium,
-                      variant: TextInputVariant::Primary,
-                      style: TextInputStyle::new(),
-                    },
-                    theme,
-                  ))
-                  .child(Self::text_input_example(
-                    TextInputExample {
-                      title: "Placeholder",
-                      description: "Shows guidance while its value is empty.",
-                      placeholder: Some("Search structures"),
-                      input: self.placeholder_input.clone(),
-                      status: self.placeholder_status.clone(),
-                      size: TextInputSize::Small,
-                      variant: TextInputVariant::Secondary,
-                      style: TextInputStyle::new(),
-                    },
-                    theme,
-                  ))
-                  .child(Self::text_input_example(
-                    TextInputExample {
-                      title: "Custom style",
-                      description: "Overrides visual tokens while keeping TextInput behavior.",
-                      placeholder: None,
-                      input: self.custom_style_input.clone(),
-                      status: self.custom_style_status.clone(),
-                      size: TextInputSize::Medium,
-                      variant: TextInputVariant::Secondary,
-                      style: TextInputStyle::new()
-                        .background(theme.background.primary)
-                        .border(theme.border.primary)
-                        .focus_border(theme.accent.primary)
-                        .foreground(theme.text.primary)
-                        .placeholder_foreground(theme.text.secondary)
-                        .selection_background(theme.background.selection)
-                        .caret(theme.accent.primary)
-                        .height(px(34.0))
-                        .horizontal_padding(px(12.0)),
-                    },
-                    theme,
-                  ))
-                  .child(Self::text_input_example(
-                    TextInputExample {
-                      title: "Read-only",
-                      description: "Allows selection without text mutation.",
-                      placeholder: None,
-                      input: self.readonly_input.clone(),
-                      status: self.readonly_status.clone(),
-                      size: TextInputSize::Large,
-                      variant: TextInputVariant::Secondary,
-                      style: TextInputStyle::new(),
-                    },
-                    theme,
-                  ))
-                  .child(Self::text_input_example(
-                    TextInputExample {
-                      title: "Disabled",
-                      description: "Does not receive focus or input events.",
-                      placeholder: None,
-                      input: self.disabled_input.clone(),
-                      status: self.disabled_status.clone(),
-                      size: TextInputSize::Medium,
-                      variant: TextInputVariant::Secondary,
-                      style: TextInputStyle::new(),
-                    },
-                    theme,
-                  )),
-              )
-              // NumberInput showcase title
+              .child(self.text_input_panel(theme))
               .child(
                 div()
                   .text_sm()
                   .text_color(theme.text.secondary)
                   .child("NumberInput owns numeric drafts, parsing, and commits."),
               )
-              // NumberInput showcase panel
-              .child(
-                div()
-                  .flex()
-                  .flex_col()
-                  .gap_4()
-                  .p_4()
-                  .border_1()
-                  .border_color(theme.border.primary)
-                  .rounded_sm()
-                  .bg(theme.background.secondary)
-                  .child(div().text_sm().child("Number Input"))
-                  .child(Self::number_input_example(
-                    NumberInputExample {
-                      title: "Numeric draft",
-                      description: "Preserves incomplete numeric text while it is being edited.",
-                      placeholder: Some("Enter a value"),
-                      suffix: None,
-                      input: self.numeric_input.clone(),
-                      status: self.numeric_status.clone(),
-                      variant: NumberInputVariant::Secondary,
-                      size: NumberInputSize::Medium,
-                      style: NumberInputStyle::new(),
-                    },
-                    theme,
-                  ))
-                  .child(Self::number_input_example(
-                    NumberInputExample {
-                      title: "Molecular mass",
-                      description: "Uses fixed precision, a unit suffix, and semantic visual overrides.",
-                      placeholder: None,
-                      suffix: Some("g/mol"),
-                      input: self.mass_input.clone(),
-                      status: self.mass_status.clone(),
-                      variant: NumberInputVariant::Primary,
-                      size: NumberInputSize::Small,
-                      style: NumberInputStyle::new()
-                        .background(theme.background.primary)
-                        .border(theme.border.muted)
-                        .focus_border(theme.accent.primary)
-                        .suffix_foreground(theme.text.primary)
-                        .stepper_border(theme.border.muted)
-                        .stepper_hover_background(theme.background.active)
-                        .stepper_foreground(theme.text.primary),
-                    },
-                    theme,
-                  ))
-                  .child(Self::number_input_example(
-                    NumberInputExample {
-                      title: "Fixed precision boundary",
-                      description: "Starts at 0.9 with maximum 0.95, one decimal place, and a 0.1 step. Increment to verify normalization occurs before the final clamp.",
-                      placeholder: None,
-                      suffix: None,
-                      input: self.precision_bounds_input.clone(),
-                      status: self.precision_bounds_status.clone(),
-                      variant: NumberInputVariant::Secondary,
-                      size: NumberInputSize::Small,
-                      style: NumberInputStyle::new(),
-                    },
-                    theme,
-                  )),
-              ),
+              .child(self.number_input_panel(theme))
+              .child(self.select_input_panel(theme)),
           ),
       )
   }
@@ -569,6 +749,39 @@ fn number_input_event_summary(event: &NumberInputEvent) -> SharedString {
   }
 }
 
+/// Converts one select event into concise status text for the showcase.
+///
+/// # Parameters
+///
+/// * `event` is the semantic event emitted by a [`SelectInputState`].
+///
+/// # Returns
+///
+/// A status string suitable for display beneath the select that emitted it.
+fn select_input_event_summary(event: &SelectInputEvent) -> SharedString {
+  match event {
+    SelectInputEvent::SelectionChange { selected_id } => selected_id
+      .as_ref()
+      .map_or_else(|| "Selection cleared".into(), |id| format!("Selected: {id}").into()),
+    SelectInputEvent::OpenChange { open } => {
+      if *open {
+        "Opened".into()
+      } else {
+        "Closed".into()
+      }
+    }
+    SelectInputEvent::DisabledChange { disabled } => {
+      if *disabled {
+        "Disabled".into()
+      } else {
+        "Enabled".into()
+      }
+    }
+    SelectInputEvent::Focus => "Focused".into(),
+    SelectInputEvent::Blur => "Blurred".into(),
+  }
+}
+
 /// Converts one numeric draft state into concise validation status text.
 ///
 /// # Parameters
@@ -598,6 +811,7 @@ fn number_draft_state_summary(state: NumberDraftState) -> SharedString {
 ///
 /// This function returns after the GPUI application exits.
 fn main() {
+  env_logger::init();
   Application::new()
     .with_assets(PrimitiveShowcaseAssets {
       base: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
