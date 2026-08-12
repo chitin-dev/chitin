@@ -8,6 +8,8 @@ pub mod icon;
 pub mod input;
 /// Window-bounded modal popovers with arbitrary scrollable content.
 pub mod popover;
+/// Read-only progress indicators for long-running work.
+pub mod progress;
 /// Generic resize gesture state.
 pub mod resize;
 /// Sidebar layout and resize controls.

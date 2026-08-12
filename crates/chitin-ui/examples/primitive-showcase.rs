@@ -16,6 +16,7 @@ use chitin_ui::{
     },
     text::{TextInput, TextInputEvent, TextInputSize, TextInputState, TextInputStyle, TextInputVariant},
   },
+  primitive::progress::{Progress, ProgressLabel},
   themes::{UIThemes, builtins},
 };
 use gpui::{
@@ -611,6 +612,36 @@ impl PrimitiveShowcase {
           .child(self.long_select_status.clone()),
       )
   }
+
+  /// Renders read-only progress indicator examples.
+  fn progress_panel(&self, theme: UIThemes) -> Div {
+    div()
+      .flex()
+      .flex_col()
+      .gap_4()
+      .p_4()
+      .border_1()
+      .border_color(theme.border.primary)
+      .rounded_sm()
+      .bg(theme.background.secondary)
+      .child(div().text_sm().child("Progress"))
+      .child(
+        div()
+          .text_xs()
+          .text_color(theme.text.secondary)
+          .child("A label and percentage sit above a completed segment colored with primary text."),
+      )
+      .child(
+        Progress::new(68.0)
+          .theme(theme)
+          .label(ProgressLabel::new("Downloading RCSB structure")),
+      )
+      .child(
+        Progress::new(100.0)
+          .theme(theme)
+          .label(ProgressLabel::new("Preparing workspace")),
+      )
+  }
 }
 
 impl Render for PrimitiveShowcase {
@@ -666,7 +697,8 @@ impl Render for PrimitiveShowcase {
                   .child("NumberInput owns numeric drafts, parsing, and commits."),
               )
               .child(self.number_input_panel(theme))
-              .child(self.select_input_panel(theme)),
+              .child(self.select_input_panel(theme))
+              .child(self.progress_panel(theme)),
           ),
       )
   }

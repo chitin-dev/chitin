@@ -1,0 +1,182 @@
+//! Read-only progress indicators for long-running work.
+
+use gpui::{App, IntoElement, ParentElement, RenderOnce, SharedString, Window, div, prelude::*, px, relative};
+
+use crate::themes::{UIThemes, builtins};
+
+const TRACK_HEIGHT: gpui::Pixels = px(6.0);
+
+/// A read-only progress indicator composed from a label, value, and track.
+#[derive(IntoElement)]
+pub struct Progress {
+  value: f32,
+  label: Option<ProgressLabel>,
+  theme: UIThemes,
+}
+
+impl Progress {
+  /// Creates a progress indicator from a percentage value.
+  pub fn new(value: f32) -> Self {
+    Self {
+      value,
+      label: None,
+      theme: builtins::dark(),
+    }
+  }
+
+  /// Sets the label displayed above the track.
+  pub fn label(mut self, label: ProgressLabel) -> Self {
+    self.label = Some(label);
+    self
+  }
+
+  /// Sets the semantic theme used for this progress indicator.
+  pub fn theme(mut self, theme: UIThemes) -> Self {
+    self.theme = theme;
+    self
+  }
+}
+
+impl RenderOnce for Progress {
+  fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    let value = ProgressValue::new(self.value);
+    let track = ProgressTrack::new(self.value);
+
+    div()
+      .flex()
+      .flex_col()
+      .gap_1()
+      .w_full()
+      .child(
+        div()
+          .flex()
+          .items_center()
+          .justify_between()
+          .gap_3()
+          .min_w_0()
+          .child(
+            self
+              .label
+              .map_or_else(|| div().into_any_element(), |label| label.into_any_element()),
+          )
+          .child(value.theme(self.theme)),
+      )
+      .child(track.theme(self.theme))
+  }
+}
+
+/// Text that explains the work represented by a [`Progress`] indicator.
+#[derive(IntoElement)]
+pub struct ProgressLabel(SharedString);
+
+impl ProgressLabel {
+  /// Creates a progress label.
+  pub fn new(label: impl Into<SharedString>) -> Self {
+    Self(label.into())
+  }
+}
+
+impl RenderOnce for ProgressLabel {
+  fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    div().min_w_0().truncate().text_sm().child(self.0)
+  }
+}
+
+/// Percentage text shown at the upper-right of a [`Progress`] indicator.
+#[derive(IntoElement)]
+pub struct ProgressValue {
+  value: f32,
+  theme: UIThemes,
+}
+
+impl ProgressValue {
+  /// Creates a percentage value display.
+  pub fn new(value: f32) -> Self {
+    Self {
+      value,
+      theme: builtins::dark(),
+    }
+  }
+
+  /// Sets the semantic theme used for this progress value.
+  pub fn theme(mut self, theme: UIThemes) -> Self {
+    self.theme = theme;
+    self
+  }
+
+  /// Returns the clamped percentage displayed by this value.
+  pub fn percentage(&self) -> u8 {
+    self.value.clamp(0.0, 100.0).round() as u8
+  }
+}
+
+impl RenderOnce for ProgressValue {
+  fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    div()
+      .flex_none()
+      .text_sm()
+      .text_color(self.theme.text.secondary)
+      .child(format!("{}%", self.percentage()))
+  }
+}
+
+/// Horizontal track and completed segment shown below a [`Progress`] heading.
+#[derive(IntoElement)]
+pub struct ProgressTrack {
+  value: f32,
+  theme: UIThemes,
+}
+
+impl ProgressTrack {
+  /// Creates a progress track from a percentage value.
+  pub fn new(value: f32) -> Self {
+    Self {
+      value,
+      theme: builtins::dark(),
+    }
+  }
+
+  /// Sets the semantic theme used for this progress track.
+  pub fn theme(mut self, theme: UIThemes) -> Self {
+    self.theme = theme;
+    self
+  }
+
+  /// Returns the clamped completion ratio used by the filled segment.
+  pub fn completion_ratio(&self) -> f32 {
+    (self.value / 100.0).clamp(0.0, 1.0)
+  }
+}
+
+impl RenderOnce for ProgressTrack {
+  fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    div()
+      .h(TRACK_HEIGHT)
+      .w_full()
+      .overflow_hidden()
+      .rounded_sm()
+      .bg(self.theme.background.tertiary)
+      .child(
+        div()
+          .h_full()
+          .w(relative(self.completion_ratio()))
+          .rounded_sm()
+          .bg(self.theme.text.primary),
+      )
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn progress_value_should_round_and_clamp_the_displayed_percentage() {
+    assert_eq!(ProgressValue::new(99.6).percentage(), 100);
+  }
+
+  #[test]
+  fn progress_track_should_clamp_the_completion_ratio() {
+    assert_eq!(ProgressTrack::new(120.0).completion_ratio(), 1.0);
+  }
+}
