@@ -594,7 +594,7 @@ impl PrimitiveShowcase {
         div()
           .text_xs()
           .text_color(theme.text.secondary)
-          .child("Twelve options are constrained to a 120px popup to verify vertical scrolling."),
+          .child("Twelve options are constrained to a 240px popup to verify vertical scrolling."),
       )
       .child(
         Select::new(self.long_select_input.clone())
