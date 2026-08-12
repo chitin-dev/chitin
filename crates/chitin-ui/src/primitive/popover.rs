@@ -256,6 +256,7 @@ impl RenderOnce for Popover {
       .id(self.id)
       .overflow_y_scroll()
       .track_scroll(&self.scroll_handle)
+      .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
       .rounded_sm()
       .border_color(self.style.border_color.unwrap_or(self.theme.border.primary))
       .bg(self.style.background.unwrap_or(self.theme.background.secondary))

@@ -483,22 +483,6 @@ struct ItemAlignment {
   visible_center: Pixels,
 }
 
-/// Selected-item geometry resolved against the popup's current scroll position.
-#[derive(Clone, Copy, Debug)]
-struct ActualItemAlignment {
-  /// Selected option center in the unscrolled popup content.
-  content_center: Pixels,
-  /// Current vertical content offset reported by GPUI.
-  scroll_offset: Pixels,
-}
-
-impl ActualItemAlignment {
-  /// Returns the selected option center within the popup's scrollable content viewport.
-  fn visible_center(self) -> Pixels {
-    self.content_center + self.scroll_offset
-  }
-}
-
 /// A labelled set of selectable [`SelectItem`] values.
 #[derive(Clone, Default)]
 pub struct SelectGroup {
@@ -642,38 +626,6 @@ fn render_content(
       .scroll_handle
       .set_offset(point(px(0.0), -item_alignment.scroll_offset));
   }
-  let actual_item_alignment = item_alignment.map(|item_alignment| ActualItemAlignment {
-    content_center: item_alignment.content_center,
-    scroll_offset: interaction.scroll_handle.offset().y,
-  });
-  if let (SelectPopupPlacement::ItemAligned { .. }, Some(item_alignment)) = (placement, actual_item_alignment) {
-    let popup_top = layout.item_aligned_top(item_alignment.visible_center());
-    let trigger_center = layout.trigger.height / 2.0;
-    let aligned_item_center = popup_top + POPUP_BORDER_WIDTH + item_alignment.visible_center();
-    log::debug!(
-      "Select ItemAligned alignment: content_center={:?}, actual_scroll_offset={:?}, actual_visible_center={:?}, \
-       popup_top={:?}, trigger_center={:?}, aligned_item_center={:?}, center_error={:?}",
-      item_alignment.content_center,
-      item_alignment.scroll_offset,
-      item_alignment.visible_center(),
-      popup_top,
-      trigger_center,
-      aligned_item_center,
-      aligned_item_center - trigger_center,
-    );
-  }
-  log::debug!(
-    "Select popup: requested_position={:?}, resolved_placement={:?}, trigger_bounds={:?}, viewport={:?}, popup_height={:?}, item_alignment={:?}, \
-     scroll_offset={:?}, align_on_open={}",
-    content.position,
-    placement,
-    layout.trigger_bounds,
-    layout.viewport_size,
-    popup_height,
-    item_alignment,
-    interaction.scroll_handle.offset(),
-    interaction.align_selected_on_open,
-  );
   let mut item_index = 0;
   // Popover owns the stable element ID and persistent scroll position.
   let mut popup = div().w(layout.width).text_size(layout.trigger.font_size);
@@ -725,10 +677,11 @@ fn render_content(
 
   match placement {
     SelectPopupPlacement::ItemAligned { .. } => {
-      let top = actual_item_alignment.map_or(layout.trigger.height + px(2.0), |item_alignment| {
-        layout.item_aligned_top(item_alignment.visible_center())
+      // ItemAligned establishes selected-item/trigger alignment when opening.
+      // Later wheel input moves only the list's scroll viewport, never this surface.
+      let top = item_alignment.map_or(layout.trigger.height + px(2.0), |item_alignment| {
+        layout.item_aligned_top(item_alignment.visible_center)
       });
-      log::debug!("Select ItemAligned: custom popup top offset={:?}", top);
       popover.offset(point(px(0.0), top))
     }
     SelectPopupPlacement::Popover { placement, .. } => popover.placement(placement),
@@ -1186,5 +1139,34 @@ mod tests {
       layout.resolve_placement(SelectContentPosition::ItemAligned, px(240.0), px(240.0)),
       SelectPopupPlacement::ItemAligned { height: px(240.0) }
     );
+  }
+
+  #[test]
+  fn item_aligned_popup_top_should_use_the_initial_selected_item_center() {
+    let layout = SelectPopupLayout {
+      trigger: SelectInputMetrics {
+        height: px(30.0),
+        font_size: px(13.0),
+      },
+      width: px(240.0),
+      trigger_bounds: Some(Bounds {
+        origin: point(px(0.0), px(300.0)),
+        size: Size {
+          width: px(240.0),
+          height: px(30.0),
+        },
+      }),
+      viewport_size: Size {
+        width: px(800.0),
+        height: px(700.0),
+      },
+    };
+    let alignment = ItemAlignment {
+      scroll_offset: px(45.0),
+      content_center: px(75.0),
+      visible_center: px(30.0),
+    };
+
+    assert_eq!(layout.item_aligned_top(alignment.visible_center), px(-16.0));
   }
 }

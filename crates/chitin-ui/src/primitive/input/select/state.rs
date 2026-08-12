@@ -161,7 +161,8 @@ impl SelectInputState {
   /// Takes the pending selected-item alignment request for one viewport.
   pub(crate) fn take_selected_alignment_request(&mut self, viewport_size: Size<Pixels>) -> bool {
     let viewport_changed = self.alignment_viewport != Some(viewport_size);
-    let requested = std::mem::take(&mut self.align_selected_on_open) || (self.open && viewport_changed);
+    let explicit_request = std::mem::take(&mut self.align_selected_on_open);
+    let requested = explicit_request || (self.open && viewport_changed);
     if requested {
       self.alignment_viewport = Some(viewport_size);
     }
