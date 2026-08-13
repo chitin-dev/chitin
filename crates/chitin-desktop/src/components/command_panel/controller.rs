@@ -1,6 +1,6 @@
 //! Desktop-owned command-panel state and focus management.
 
-use chitin_ui::primitive::input::text::TextInputState;
+use chitin_ui::{composite::quickpick::QuickPickState, primitive::input::text::TextInputState};
 use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
 
 use crate::{
@@ -37,12 +37,8 @@ pub(crate) struct CommandPanelController {
   registry: CommandRegistry,
   /// Whether the quick-pick overlay is currently visible.
   is_open: bool,
-  /// Current search text or form value.
-  query: String,
-  /// Selected search result index.
-  selected_index: usize,
-  /// Scroll handle for the virtualized command result list.
-  result_scroll: UniformListScrollHandle,
+  /// Search and selection state for the command result quick-pick.
+  quickpick: QuickPickState,
   /// Primitive text-input state for quick-pick search.
   search_input: Option<Entity<TextInputState>>,
   /// Whether desktop routing has subscribed to search input events.
@@ -73,9 +69,7 @@ impl CommandPanelController {
     Self {
       registry: CommandRegistry::new(),
       is_open: false,
-      query: String::new(),
-      selected_index: 0,
-      result_scroll: UniformListScrollHandle::new(),
+      quickpick: QuickPickState::new(),
       search_input: None,
       search_input_subscribed: false,
       mode: CommandPanelMode::Search,
@@ -103,17 +97,17 @@ impl CommandPanelController {
 
   /// Returns the current search text or form input.
   pub(crate) fn query(&self) -> &str {
-    &self.query
+    self.quickpick.query()
   }
 
   /// Returns the selected command result index.
   pub(crate) fn selected_index(&self) -> usize {
-    self.selected_index
+    self.quickpick.selected_index()
   }
 
   /// Returns the scroll handle for command result virtualization.
   pub(crate) fn result_scroll_handle(&self) -> UniformListScrollHandle {
-    self.result_scroll.clone()
+    self.quickpick.scroll_handle()
   }
 
   /// Returns persistent primitive state for the quick-pick search input.
@@ -136,9 +130,7 @@ impl CommandPanelController {
 
   /// Updates the query after a primitive text-input change event.
   pub(crate) fn set_query(&mut self, query: impl Into<String>) {
-    self.query = query.into();
-    self.selected_index = 0;
-    self.reveal_selected(ScrollStrategy::Top);
+    self.quickpick.set_query(query);
   }
 
   /// Resolves the current search selection or form value into a panel event.
@@ -202,8 +194,7 @@ impl CommandPanelController {
   pub(crate) fn toggle_without_focus(&mut self) -> bool {
     if self.is_open {
       self.is_open = false;
-      self.query.clear();
-      self.selected_index = 0;
+      self.quickpick.reset();
       self.mode = CommandPanelMode::Search;
       self.previous_focus = None;
     } else {
@@ -228,13 +219,12 @@ impl CommandPanelController {
     }
 
     self.is_open = false;
-    self.query.clear();
+    self.quickpick.reset();
     if let Some(search_input) = self.search_input.as_ref() {
       search_input.update(cx, |state, cx| {
         state.set_text("", cx);
       });
     }
-    self.selected_index = 0;
     self.mode = CommandPanelMode::Search;
     if let Some(previous_focus) = self.previous_focus.take() {
       window.focus(&previous_focus, cx);
@@ -258,9 +248,7 @@ impl CommandPanelController {
 
     self.mode = CommandPanelMode::Form(command);
     self.rcsb_focus_pending = true;
-    self.query.clear();
-    self.selected_index = 0;
-    self.reveal_selected(ScrollStrategy::Top);
+    self.quickpick.reset();
     true
   }
 
@@ -334,13 +322,14 @@ impl CommandPanelController {
     match event.keystroke.key.as_str() {
       "escape" => Some(CommandPanelEvent::Close),
       "up" => {
-        self.select_previous();
-        self.reveal_selected(ScrollStrategy::Top);
+        self.quickpick.select_previous();
+        self.quickpick.reveal_selected(ScrollStrategy::Top);
         Some(CommandPanelEvent::StateChanged)
       }
       "down" => {
-        self.select_next();
-        self.reveal_selected(ScrollStrategy::Bottom);
+        let result_count = self.registry.search(self.quickpick.query()).len();
+        self.quickpick.select_next(result_count);
+        self.quickpick.reveal_selected(ScrollStrategy::Bottom);
         Some(CommandPanelEvent::StateChanged)
       }
       // TextInputState owns Search-mode typing, deletion, cursor movement,
@@ -363,16 +352,16 @@ impl CommandPanelController {
       "escape" => Some(CommandPanelEvent::Close),
       "enter" => Some(self.submit()),
       "backspace" => {
-        self.query.pop();
-        self.selected_index = 0;
-        self.reveal_selected(ScrollStrategy::Top);
+        let mut query = self.quickpick.query().to_owned();
+        query.pop();
+        self.quickpick.set_query(query);
         Some(CommandPanelEvent::StateChanged)
       }
       _ => {
         let character = printable_character(event)?;
-        self.query.push_str(character);
-        self.selected_index = 0;
-        self.reveal_selected(ScrollStrategy::Top);
+        let mut query = self.quickpick.query().to_owned();
+        query.push_str(character);
+        self.quickpick.set_query(query);
         Some(CommandPanelEvent::StateChanged)
       }
     }
@@ -389,60 +378,9 @@ impl CommandPanelController {
   /// This function returns `()` after preparing search mode.
   fn reset_for_open(&mut self) {
     self.is_open = true;
-    self.query.clear();
-    self.selected_index = 0;
+    self.quickpick.reset();
     self.mode = CommandPanelMode::Search;
-    self.reveal_selected(ScrollStrategy::Top);
-  }
-
-  /// Moves selection to the previous visible search result.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after clamping the selected index.
-  fn select_previous(&mut self) {
-    if !matches!(self.mode, CommandPanelMode::Search) {
-      return;
-    }
-
-    self.selected_index = self.selected_index.saturating_sub(1);
-  }
-
-  /// Moves selection to the next visible search result.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after clamping the selected index.
-  fn select_next(&mut self) {
-    if !matches!(self.mode, CommandPanelMode::Search) {
-      return;
-    }
-
-    let result_count = self.registry.search(&self.query).len();
-    if result_count > 0 {
-      self.selected_index = (self.selected_index + 1).min(result_count - 1);
-    }
-  }
-
-  /// Scrolls the virtual result list so the selected row remains visible.
-  ///
-  /// # Parameters
-  ///
-  /// * `strategy` controls which viewport edge GPUI should use when scrolling is needed.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after recording a deferred GPUI scroll request.
-  fn reveal_selected(&self, strategy: ScrollStrategy) {
-    self.result_scroll.scroll_to_item(self.selected_index, strategy);
+    self.quickpick.reveal_selected(ScrollStrategy::Top);
   }
 
   /// Resolves the current input line into a command-panel operation.
@@ -458,13 +396,13 @@ impl CommandPanelController {
     match &self.mode {
       CommandPanelMode::Search => self
         .registry
-        .search(&self.query)
-        .get(self.selected_index)
+        .search(self.quickpick.query())
+        .get(self.quickpick.selected_index())
         .map(|result| CommandPanelEvent::Invoke(result.descriptor.command.clone()))
         .unwrap_or(CommandPanelEvent::StateChanged),
       CommandPanelMode::Form(command) => CommandPanelEvent::SubmitForm {
         command: command.clone(),
-        value: self.query.clone(),
+        value: self.quickpick.query().to_owned(),
       },
     }
   }
@@ -517,14 +455,14 @@ mod tests {
   #[test]
   fn reset_for_open_should_clear_query_and_selection() {
     let mut controller = CommandPanelController::new();
-    controller.query = "tab".to_string();
-    controller.selected_index = 2;
+    controller.set_query("tab");
+    controller.quickpick.select_next(3);
 
     controller.reset_for_open();
 
     assert!(controller.is_open);
-    assert!(controller.query.is_empty());
-    assert_eq!(controller.selected_index, 0);
+    assert!(controller.query().is_empty());
+    assert_eq!(controller.selected_index(), 0);
     assert_eq!(controller.mode, CommandPanelMode::Search);
   }
 
@@ -540,7 +478,7 @@ mod tests {
   #[test]
   fn set_query_should_reset_result_selection() {
     let mut controller = CommandPanelController::new();
-    controller.selected_index = 3;
+    controller.quickpick.select_next(4);
 
     controller.set_query("workspace");
 
