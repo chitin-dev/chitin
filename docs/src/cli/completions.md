@@ -69,17 +69,21 @@ source ~/.config/fish/completions/chitin.fish
 
 ## PowerShell
 
-Save the completion script to a profile directory:
+Save the completion script next to the active PowerShell profile. This works
+with Windows PowerShell 5.1, PowerShell 7 on Windows, and PowerShell 7 on
+Unix-like systems:
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME/Documents/PowerShell" | Out-Null
-chitin completions powershell > "$HOME/Documents/PowerShell/chitin.ps1"
+$profileDirectory = Split-Path -Parent $PROFILE
+$completionPath = Join-Path $profileDirectory "chitin.ps1"
+New-Item -ItemType Directory -Force $profileDirectory | Out-Null
+chitin completions powershell > $completionPath
 ```
 
 Add this line to your PowerShell profile (`$PROFILE`):
 
 ```powershell
-. "$HOME/Documents/PowerShell/chitin.ps1"
+. (Join-Path (Split-Path -Parent $PROFILE) "chitin.ps1")
 ```
 
 Then reload the profile:
