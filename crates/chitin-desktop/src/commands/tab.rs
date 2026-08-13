@@ -1,5 +1,6 @@
 //! Typed commands and key bindings for document tabs.
 
+use chitin_command::PanelTabCommand;
 use gpui::{KeyBinding, actions};
 
 use crate::{
@@ -41,40 +42,6 @@ actions!(
     CloseTab
   ]
 );
-
-/// Panel-tab-scoped commands supported by Chitin desktop.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PanelTabCommand {
-  /// Move panel tab focus to previous visual tab
-  FocusPrevious,
-  /// Move panel tab focus to next visual tab
-  FocusNext,
-  /// Close current focused / activated visual tab
-  Close,
-}
-
-impl PanelTabCommand {
-  /// Returns the stable dotted identifier for this panel-tab command.
-  ///
-  /// The ID is the string form that future text/config entry points should use
-  /// when they need to refer to panel-tab behavior without linking directly to
-  /// Rust enum variants.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, the panel-tab command variant being identified.
-  ///
-  /// # Returns
-  ///
-  /// A static command ID such as `"tab.focus_previous"`.
-  pub(crate) fn id(&self) -> &'static str {
-    match self {
-      Self::FocusPrevious => "tab.focus_previous",
-      Self::FocusNext => "tab.focus_next",
-      Self::Close => "tab.close",
-    }
-  }
-}
 
 impl ChitinApp {
   /// Executes a panel-tab command against the focused document panel.
@@ -141,8 +108,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["document", "panel", "tab", "previous"],
       shortcut: primary_shortcut_label(&FOCUS_PREVIOUS_TAB_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::PanelTab(PanelTabCommand::FocusPrevious).into(),
     },
     CommandDescriptor {
@@ -152,8 +117,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["document", "panel", "tab", "next"],
       shortcut: primary_shortcut_label(&FOCUS_NEXT_TAB_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::PanelTab(PanelTabCommand::FocusNext).into(),
     },
     CommandDescriptor {
@@ -163,26 +126,9 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["document", "panel", "tab", "close"],
       shortcut: primary_shortcut_label(&CLOSE_TAB_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::PanelTab(PanelTabCommand::Close).into(),
     },
   ]
-}
-
-impl From<PanelTabCommand> for crate::commands::ChitinCommand {
-  /// Wraps a panel-tab command in the top-level desktop command hierarchy.
-  ///
-  /// # Parameters
-  ///
-  /// * `command` is the panel-tab command to expose as a generic command.
-  ///
-  /// # Returns
-  ///
-  /// [`crate::commands::ChitinCommand::Workspace`] containing the command.
-  fn from(command: PanelTabCommand) -> Self {
-    Self::Workspace(crate::commands::WorkspaceCommand::PanelTab(command))
-  }
 }
 
 #[cfg(test)]

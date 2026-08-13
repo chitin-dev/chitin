@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+chitin-command = { path = "../chitin-command" }
 log = "0.4.33"
 env_logger = "0.10"
 chitin-databases = { path = "../chitin-databases" }

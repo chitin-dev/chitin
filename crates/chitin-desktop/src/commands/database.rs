@@ -4,13 +4,7 @@ use crate::commands::{
   ChitinCommand,
   command_panel::{CommandCategory, CommandDescriptor, CommandInvocationKind},
 };
-
-/// Database-scoped commands supported by Chitin desktop.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum DatabaseCommand {
-  /// Open a form for downloading an RCSB structure.
-  DownloadRcsbStructure,
-}
+use chitin_command::DatabaseCommand;
 
 impl crate::app::ChitinApp {
   /// Executes a database command.
@@ -48,25 +42,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
     keywords: &["pdb", "rcsb", "mmcif", "structure"],
     shortcut: None,
     invocation: CommandInvocationKind::Form,
-    form_prompt: Some("RCSB PDB ID"),
-    form_placeholder: Some("protein ID, eg: 1YTH"),
     command: DatabaseCommand::DownloadRcsbStructure.into(),
   }]
-}
-
-impl DatabaseCommand {
-  /// Returns the stable dotted identifier for this database command.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A static command ID.
-  pub(crate) fn id(&self) -> &'static str {
-    match self {
-      Self::DownloadRcsbStructure => "database.rcsb.download_structure",
-    }
-  }
 }

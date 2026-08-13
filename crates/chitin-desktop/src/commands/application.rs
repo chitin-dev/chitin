@@ -2,9 +2,9 @@
 
 use gpui::{KeyBinding, actions};
 
-use crate::commands::command_panel::{
-  CommandCategory, CommandDescriptor, CommandInvocationKind, CommandShortcut, primary_shortcut_label,
-};
+use crate::commands::command_panel::{CommandShortcut, primary_shortcut_label};
+use chitin_command::ApplicationCommand;
+use chitin_command::{CommandCategory, CommandDescriptor, CommandInvocationKind};
 
 const TOGGLE_COMMAND_PANEL_SHORTCUTS: [CommandShortcut; 1] =
   [CommandShortcut::new("secondary-shift-p", "Ctrl/Cmd+Shift+P", None)];
@@ -16,30 +16,6 @@ actions!(
     ToggleCommandPanel,
   ]
 );
-
-/// Application-scoped commands supported by Chitin desktop.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ApplicationCommand {
-  /// Show or hide the command panel.
-  ToggleCommandPanel,
-}
-
-impl ApplicationCommand {
-  /// Returns the stable dotted identifier for this application command.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A static command ID.
-  pub(crate) fn id(&self) -> &'static str {
-    match self {
-      Self::ToggleCommandPanel => "application.toggle_command_panel",
-    }
-  }
-}
 
 /// Builds application-level keybindings.
 ///
@@ -71,8 +47,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
     keywords: &["quick pick", "palette", "commands"],
     shortcut: primary_shortcut_label(&TOGGLE_COMMAND_PANEL_SHORTCUTS),
     invocation: CommandInvocationKind::Immediate,
-    form_prompt: None,
-    form_placeholder: None,
     command: ApplicationCommand::ToggleCommandPanel.into(),
   }]
 }

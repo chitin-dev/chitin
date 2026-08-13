@@ -399,7 +399,7 @@ mod tests {
   #[test]
   fn open_form_should_store_only_command_identity() {
     let mut controller = CommandPanelController::new();
-    let command = ChitinCommand::from(crate::commands::DatabaseCommand::DownloadRcsbStructure);
+    let command = ChitinCommand::from(chitin_command::DatabaseCommand::DownloadRcsbStructure);
 
     assert!(controller.open_form(command.clone()));
     assert_eq!(controller.mode, CommandPanelMode::Form(command));

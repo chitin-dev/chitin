@@ -639,6 +639,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin-command"
+version = "0.1.0"
+
+[[package]]
 name = "chitin-databases"
 version = "0.1.0"
 dependencies = [
@@ -660,6 +664,7 @@ name = "chitin-desktop"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "chitin-command",
  "chitin-databases",
  "chitin-ui",
  "chitin-utils",

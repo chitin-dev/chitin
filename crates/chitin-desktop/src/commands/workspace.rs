@@ -4,15 +4,13 @@
 //! events. The actual behavior remains in the workspace tree implementation so
 //! commands stay as a routing layer instead of becoming a second state owner.
 
+use chitin_command::WorkspaceCommand;
 use gpui::{KeyBinding, actions};
 
 use crate::{
   app::ChitinApp,
-  commands::{
-    PanelTabCommand,
-    command_panel::{
-      CommandCategory, CommandDescriptor, CommandInvocationKind, CommandShortcut, primary_shortcut_label,
-    },
+  commands::command_panel::{
+    CommandCategory, CommandDescriptor, CommandInvocationKind, CommandShortcut, primary_shortcut_label,
   },
   components::workspace_tree::WorkspaceTreeNavigation,
 };
@@ -111,51 +109,7 @@ actions!(
   ]
 );
 
-/// Workspace-scoped commands supported by Chitin desktop.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum WorkspaceCommand {
-  /// Move project tree focus to the previous visible entry.
-  FocusPrevious,
-  /// Move project tree focus to the next visible entry.
-  FocusNext,
-  /// Open a focused file or toggle a focused directory.
-  ActivateFocused,
-  /// Move project tree focus to the first visible entry.
-  FocusFirst,
-  /// Move project tree focus to the last visible entry.
-  FocusLast,
-  /// Show or hide the project workspace sidebar.
-  ToggleWorkspace,
-  /// Dispatch a document panel tab command.
-  PanelTab(PanelTabCommand),
-}
-
-impl WorkspaceCommand {
-  /// Returns the stable dotted identifier for this workspace command.
-  ///
-  /// The ID is the string form that future text/config entry points should use
-  /// when they need to refer to workspace behavior without linking directly to
-  /// Rust enum variants.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, the workspace command variant being identified.
-  ///
-  /// # Returns
-  ///
-  /// A static command ID such as `"workspace.activate_focused_entry"`.
-  pub(crate) fn id(&self) -> &'static str {
-    match self {
-      Self::FocusPrevious => "workspace.focus_previous_entry",
-      Self::FocusNext => "workspace.focus_next_entry",
-      Self::ActivateFocused => "workspace.activate_focused_entry",
-      Self::FocusFirst => "workspace.focus_first_entry",
-      Self::FocusLast => "workspace.focus_last_entry",
-      Self::ToggleWorkspace => "workspace.toggle_workspace",
-      Self::PanelTab(command) => command.id(),
-    }
-  }
-
+trait WorkspaceCommandDesktopExt {
   /// Converts this command into workspace tree navigation when applicable.
   ///
   /// Workspace commands are the command-bus representation, while
@@ -171,7 +125,11 @@ impl WorkspaceCommand {
   ///
   /// `Some(WorkspaceTreeNavigation)` for tree commands, or `None` for
   /// workspace commands handled by the broader app state.
-  pub(crate) fn tree_navigation(&self) -> Option<WorkspaceTreeNavigation> {
+  fn tree_navigation(&self) -> Option<WorkspaceTreeNavigation>;
+}
+
+impl WorkspaceCommandDesktopExt for WorkspaceCommand {
+  fn tree_navigation(&self) -> Option<WorkspaceTreeNavigation> {
     match self {
       Self::FocusPrevious => Some(WorkspaceTreeNavigation::FocusPrevious),
       Self::FocusNext => Some(WorkspaceTreeNavigation::FocusNext),
@@ -261,8 +219,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["files", "project", "sidebar", "explorer"],
       shortcut: primary_shortcut_label(&TOGGLE_WORKSPACE_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::ToggleWorkspace.into(),
     },
     CommandDescriptor {
@@ -272,8 +228,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["tree", "up", "previous"],
       shortcut: primary_shortcut_label(&FOCUS_PREVIOUS_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::FocusPrevious.into(),
     },
     CommandDescriptor {
@@ -283,8 +237,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["tree", "down", "next"],
       shortcut: primary_shortcut_label(&FOCUS_NEXT_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::FocusNext.into(),
     },
     CommandDescriptor {
@@ -294,8 +246,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["open", "tree", "file", "directory"],
       shortcut: primary_shortcut_label(&ACTIVATE_FOCUSED_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::ActivateFocused.into(),
     },
     CommandDescriptor {
@@ -305,8 +255,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["tree", "home", "first"],
       shortcut: primary_shortcut_label(&FOCUS_FIRST_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::FocusFirst.into(),
     },
     CommandDescriptor {
@@ -316,8 +264,6 @@ pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
       keywords: &["tree", "end", "last"],
       shortcut: primary_shortcut_label(&FOCUS_LAST_SHORTCUTS),
       invocation: CommandInvocationKind::Immediate,
-      form_prompt: None,
-      form_placeholder: None,
       command: WorkspaceCommand::FocusLast.into(),
     },
   ]

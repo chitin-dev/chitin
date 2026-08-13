@@ -4,6 +4,8 @@
 //! bindings, future command-palette entries, status-bar command input, and
 //! direct component controls.
 
+pub(crate) use chitin_command::{ApplicationCommand, ChitinCommand, PanelTabCommand, WorkspaceCommand};
+pub(crate) use command_panel::{CommandInvocationKind, CommandRegistry};
 use gpui::Context;
 
 use crate::app::ChitinApp;
@@ -13,78 +15,6 @@ pub(crate) mod command_panel;
 pub(crate) mod database;
 pub(crate) mod tab;
 pub(crate) mod workspace;
-
-pub(crate) use application::ApplicationCommand;
-pub(crate) use command_panel::{CommandInvocationKind, CommandRegistry};
-pub(crate) use database::DatabaseCommand;
-pub(crate) use tab::PanelTabCommand;
-pub(crate) use workspace::WorkspaceCommand;
-
-/// Top-level command hierarchy for Chitin desktop.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ChitinCommand {
-  /// Commands owned by the project workspace sidebar and tree.
-  Workspace(WorkspaceCommand),
-  /// Commands owned by external database provider workflows.
-  Database(DatabaseCommand),
-  /// Commands owned by the desktop application shell.
-  Application(ApplicationCommand),
-}
-
-impl ChitinCommand {
-  /// Returns the stable dotted identifier for this command.
-  ///
-  /// Command IDs are intended for text/config boundaries such as a future
-  /// command palette, status-bar command input, keybinding file, or plugin API.
-  /// Internal desktop code should prefer dispatching the typed enum variant
-  /// instead of parsing this string.
-  /// # Parameters
-  ///
-  ///
-  /// This method reads `self`, the typed command value whose external ID is
-  /// requested.
-  ///
-  /// # Returns
-  ///
-  /// A stable static command ID such as `"workspace.focus_next_entry"`.
-  pub(crate) fn id(&self) -> &'static str {
-    match self {
-      Self::Workspace(command) => command.id(),
-      Self::Database(command) => command.id(),
-      Self::Application(command) => command.id(),
-    }
-  }
-}
-
-impl From<WorkspaceCommand> for ChitinCommand {
-  /// Wraps a workspace command in the top-level desktop command hierarchy.
-  ///
-  /// # Parameters
-  ///
-  /// * `command` is the workspace-scoped command to expose as a generic
-  ///   [`ChitinCommand`].
-  ///
-  /// # Returns
-  ///
-  /// [`ChitinCommand::Workspace`] containing the provided workspace command.
-  fn from(command: WorkspaceCommand) -> Self {
-    Self::Workspace(command)
-  }
-}
-
-impl From<DatabaseCommand> for ChitinCommand {
-  /// Wraps a database command in the top-level desktop command hierarchy.
-  fn from(command: DatabaseCommand) -> Self {
-    Self::Database(command)
-  }
-}
-
-impl From<ApplicationCommand> for ChitinCommand {
-  /// Wraps an application command in the top-level desktop command hierarchy.
-  fn from(command: ApplicationCommand) -> Self {
-    Self::Application(command)
-  }
-}
 
 impl ChitinApp {
   /// Executes a typed desktop command against the app state.
