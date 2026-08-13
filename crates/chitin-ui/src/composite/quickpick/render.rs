@@ -43,6 +43,8 @@ pub fn render_quick_pick_overlay(
   theme: UIThemes,
   on_select: Rc<QuickPickSelectHandler>,
 ) -> Div {
+  let body_height = quick_pick_body_height(overlay.items.len());
+  let panel_height = px(48.0) + body_height;
   let panel_body = render_items(
     "quick-pick-result-list",
     overlay.items,
@@ -68,7 +70,9 @@ pub fn render_quick_pick_overlay(
         .mt(DEFAULT_QUICK_PICK_MARGIN_TOP)
         .w(DEFAULT_QUICK_PICK_WIDTH)
         .max_w(DEFAULT_QUICK_PICK_WIDTH)
+        .h(panel_height)
         .max_h(DEFAULT_QUICK_PICK_MAX_HEIGHT)
+        .flex_none()
         .rounded_md()
         .border_1()
         .border_color(theme.border.primary)
@@ -164,7 +168,7 @@ fn render_items(
 ) -> AnyElement {
   if items.is_empty() {
     return div()
-      .h(DEFAULT_QUICK_PICK_ITEM_HEIGHT)
+      .h(quick_pick_body_height(0))
       .flex()
       .items_center()
       .px_3()
@@ -173,8 +177,7 @@ fn render_items(
       .into_any_element();
   }
 
-  let visible_rows = items.len().min(DEFAULT_QUICK_PICK_VISIBLE_ROWS);
-  let body_height = DEFAULT_QUICK_PICK_ITEM_HEIGHT * visible_rows;
+  let body_height = quick_pick_body_height(items.len());
   let items = Rc::new(items);
   let item_count = items.len();
   let list = uniform_list(id, item_count, move |range, _window, _cx| {
@@ -196,9 +199,17 @@ fn render_items(
     .flex_col()
     .h(body_height)
     .max_h(DEFAULT_QUICK_PICK_BODY_MAX_HEIGHT)
+    .flex_none()
     .min_h_0()
     .child(Styled::scrollbar_width(list.size_full(), px(8.0)))
     .into_any_element()
+}
+
+/// Calculates the result-list height without allowing a short list to reserve
+/// the full scroll viewport.
+fn quick_pick_body_height(item_count: usize) -> Pixels {
+  let visible_rows = item_count.clamp(1, DEFAULT_QUICK_PICK_VISIBLE_ROWS);
+  DEFAULT_QUICK_PICK_ITEM_HEIGHT * visible_rows
 }
 
 /// Renders one quick-pick row.
