@@ -14,7 +14,7 @@ use std::{borrow::Cow, fs, path::PathBuf};
 
 use chitin_desktop::{
   app::{ChitinApp, WgpuDocumentViewFactory},
-  commands::default_key_bindings,
+  keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
 use cube::ExampleCubeScene;

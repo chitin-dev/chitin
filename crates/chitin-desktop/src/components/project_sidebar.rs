@@ -8,6 +8,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
+use chitin_command::WorkspaceCommand;
 use chitin_ui::{
   primitive::{
     sidebar::{
@@ -22,14 +23,10 @@ use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, div, prelu
 
 use crate::{
   app::ChitinApp,
-  commands::{
-    WorkspaceCommand,
-    workspace::{
-      ActivateFocusedEntry, FocusFirstEntry, FocusLastEntry, FocusNextEntry, FocusPreviousEntry,
-      PROJECT_TREE_KEY_CONTEXT,
-    },
-  },
   components::workspace_tree::render_workspace_tree,
+  keybindings::{
+    ActivateFocusedEntry, FocusFirstEntry, FocusLastEntry, FocusNextEntry, FocusPreviousEntry, PROJECT_TREE_KEY_CONTEXT,
+  },
 };
 
 /// Default title shown at the top of the project workspace sidebar.

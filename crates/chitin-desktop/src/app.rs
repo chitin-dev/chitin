@@ -19,7 +19,6 @@ use gpui::{
 };
 
 use crate::{
-  commands::{application::ToggleCommandPanel, workspace::ToggleWorkspace},
   components::{
     activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
@@ -27,6 +26,7 @@ use crate::{
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::{WindowBarControls, render_window_bar},
   },
+  keybindings::{ToggleCommandPanel, ToggleWorkspace},
 };
 
 pub use crate::components::document_area::state::WgpuDocumentViewFactory;

@@ -11,7 +11,9 @@ use chitin_ui::{
 };
 use gpui::{AppContext, Context, Entity, IntoElement, Subscription, Window};
 
-use crate::{app::ChitinApp, commands::WorkspaceCommand};
+use chitin_command::WorkspaceCommand;
+
+use crate::app::ChitinApp;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Top-level workbench area selected from the activity bar.

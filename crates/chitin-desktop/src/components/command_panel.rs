@@ -14,6 +14,7 @@ pub(crate) use controller::CommandPanelController;
 use controller::{CommandPanelEvent, CommandPanelMode};
 use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
 
+use chitin_command::{ApplicationCommand, ChitinCommand, CommandInvocationKind};
 use chitin_databases::{
   Client, ClientConfig, TransportError,
   providers::rcsb::{PdbId, RcsbError},
@@ -28,10 +29,7 @@ use gpui::{
   div,
 };
 
-use crate::{
-  app::ChitinApp,
-  commands::{ApplicationCommand, ChitinCommand, CommandInvocationKind},
-};
+use crate::app::ChitinApp;
 
 /// Callback invoked when a rendered command row is selected.
 type CommandPanelSelectHandler = dyn for<'a, 'b> Fn(usize, &'a mut Window, &'b mut App);

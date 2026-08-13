@@ -3,7 +3,7 @@
 
 use std::{borrow::Cow, collections::BTreeSet, path::PathBuf};
 
-use chitin_desktop::{app::ChitinApp, commands::default_key_bindings};
+use chitin_desktop::{app::ChitinApp, keybindings::default_key_bindings};
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
