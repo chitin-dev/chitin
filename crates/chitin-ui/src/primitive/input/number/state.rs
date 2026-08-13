@@ -25,14 +25,6 @@ pub enum NumberDraftState {
 
 impl NumberDraftState {
   /// Returns the finite value represented by this draft when one exists.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the draft state.
-  ///
-  /// # Returns
-  ///
-  /// The parsed value for valid and out-of-range drafts, or `None` otherwise.
   pub fn value(self) -> Option<f64> {
     match self {
       Self::Valid(value) | Self::OutOfRange { value } => Some(value),
@@ -41,27 +33,11 @@ impl NumberDraftState {
   }
 
   /// Returns whether this draft may replace the committed numeric value.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the draft state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the draft is empty or a valid in-range finite number.
   fn is_committable(self) -> bool {
     matches!(self, Self::Empty | Self::Valid(_))
   }
 
   /// Returns whether this draft should receive invalid-value visual treatment.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the draft state.
-  ///
-  /// # Returns
-  ///
-  /// `true` for invalid and out-of-range drafts.
   pub(crate) fn has_validation_error(self) -> bool {
     matches!(self, Self::Invalid | Self::OutOfRange { .. })
   }
@@ -97,27 +73,11 @@ impl NumberBounds {
   }
 
   /// Returns the optional inclusive lower limit.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the configured bounds.
-  ///
-  /// # Returns
-  ///
-  /// The configured finite lower limit, when present.
   pub fn minimum(self) -> Option<f64> {
     self.minimum
   }
 
   /// Returns the optional inclusive upper limit.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the configured bounds.
-  ///
-  /// # Returns
-  ///
-  /// The configured finite upper limit, when present.
   pub fn maximum(self) -> Option<f64> {
     self.maximum
   }
@@ -211,132 +171,51 @@ impl NumberInputState {
   }
 
   /// Returns the nested input state used internally for editing and focus management.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// A clone of the internal text-input entity.
   pub(crate) fn text_input(&self) -> Entity<TextInputState> {
     self.input.clone()
   }
 
   /// Returns the current editable text, including intermediate numeric drafts.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// The current raw editing draft.
   pub fn draft(&self) -> &str {
     &self.draft
   }
 
   /// Returns the semantic classification of the current editing draft.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// The current numeric draft classification.
   pub fn draft_state(&self) -> NumberDraftState {
     self.draft_state
   }
 
   /// Returns the finite parsed value, including values currently outside configured bounds.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// The parsed finite value, or `None` for empty, incomplete, and invalid drafts.
   pub fn value(&self) -> Option<f64> {
     self.draft_state.value()
   }
 
   /// Returns the most recently committed finite value, if any.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// The last committed finite value, or `None` when none has been committed.
   pub fn committed_value(&self) -> Option<f64> {
     self.committed_value
   }
 
   /// Returns the validated numeric bounds used for direct-edit validation and stepping.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// The current inclusive numeric bounds.
   pub fn bounds(&self) -> NumberBounds {
     self.bounds
   }
 
   /// Returns the output formatting applied after commits and steps.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// The active numeric format.
   pub fn format(&self) -> NumberFormat {
     self.format
   }
 
   /// Returns whether numeric editing is disabled.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the input cannot receive editing interaction.
   pub fn is_disabled(&self) -> bool {
     self.disabled
   }
 
   /// Returns whether numeric mutation is disabled while selection remains available.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the numeric input state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the input is read-only.
   pub fn is_readonly(&self) -> bool {
     self.readonly
   }
 
   /// Enables or disables numeric editing.
-  ///
-  /// # Parameters
-  ///
-  /// * `disabled` selects the editing availability.
-  /// * `cx` forwards the state update to the nested text input.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after forwarding the availability update.
   pub fn set_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
     if self.disabled == disabled {
       return;
@@ -348,15 +227,6 @@ impl NumberInputState {
   }
 
   /// Enables or disables numeric text mutation while keeping selection available.
-  ///
-  /// # Parameters
-  ///
-  /// * `readonly` selects whether mutation is permitted.
-  /// * `cx` forwards the state update to the nested text input.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after forwarding the availability update.
   pub fn set_readonly(&mut self, readonly: bool, cx: &mut Context<Self>) {
     if self.readonly == readonly {
       return;
@@ -368,15 +238,6 @@ impl NumberInputState {
   }
 
   /// Replaces both numeric bounds after validating their relationship.
-  ///
-  /// # Parameters
-  ///
-  /// * `bounds` supplies a previously validated inclusive range.
-  /// * `cx` emits validation changes caused by the new range.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the bounds changed.
   pub fn set_bounds(&mut self, bounds: NumberBounds, cx: &mut Context<Self>) -> bool {
     if self.bounds == bounds {
       return false;
@@ -389,15 +250,6 @@ impl NumberInputState {
   }
 
   /// Sets an optional inclusive lower bound without allowing an inverted range.
-  ///
-  /// # Parameters
-  ///
-  /// * `minimum` supplies a finite lower bound, or clears the lower bound.
-  /// * `cx` emits validation changes caused by the new range.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a valid changed bound was applied.
   pub fn set_minimum(&mut self, minimum: Option<f64>, cx: &mut Context<Self>) -> bool {
     let Some(bounds) = NumberBounds::new(minimum, self.bounds.maximum()) else {
       return false;
@@ -407,15 +259,6 @@ impl NumberInputState {
   }
 
   /// Sets an optional inclusive upper bound without allowing an inverted range.
-  ///
-  /// # Parameters
-  ///
-  /// * `maximum` supplies a finite upper bound, or clears the upper bound.
-  /// * `cx` emits validation changes caused by the new range.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a valid changed bound was applied.
   pub fn set_maximum(&mut self, maximum: Option<f64>, cx: &mut Context<Self>) -> bool {
     let Some(bounds) = NumberBounds::new(self.bounds.minimum(), maximum) else {
       return false;
@@ -425,14 +268,6 @@ impl NumberInputState {
   }
 
   /// Sets the positive increment used by [`Self::step_by`].
-  ///
-  /// # Parameters
-  ///
-  /// * `step` supplies the new finite positive increment.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a new increment was applied.
   pub fn set_step(&mut self, step: f64) -> bool {
     if !step.is_finite() || step <= 0.0 || self.step == step {
       return false;
@@ -443,14 +278,6 @@ impl NumberInputState {
   }
 
   /// Sets formatting used after programmatic updates, commits, and stepping.
-  ///
-  /// # Parameters
-  ///
-  /// * `format` supplies the next output format.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a new format was applied.
   pub fn set_format(&mut self, format: NumberFormat) -> bool {
     if self.format == format {
       return false;
@@ -461,15 +288,6 @@ impl NumberInputState {
   }
 
   /// Replaces the editor with a bounded programmatic value and records it as committed.
-  ///
-  /// # Parameters
-  ///
-  /// * `value` supplies the programmatic finite value, or clears the input.
-  /// * `cx` updates the nested text input and emits semantic events.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the committed value or visible draft changed.
   pub fn set_value(&mut self, value: Option<f64>, cx: &mut Context<Self>) -> bool {
     let value = value
       .filter(|value| value.is_finite())
@@ -555,15 +373,6 @@ impl NumberInputState {
   }
 
   /// Replaces the editable draft and synchronizes its numeric classification.
-  ///
-  /// # Parameters
-  ///
-  /// * `draft` supplies the new raw numeric editing text.
-  /// * `cx` emits draft and parsed-value events when their values change.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after synchronizing numeric draft state.
   fn set_draft(&mut self, draft: SharedString, cx: &mut Context<Self>) {
     if self.draft == draft {
       return;
@@ -642,15 +451,6 @@ impl NumberInputState {
   }
 
   /// Replaces the committed value and synchronizes the visible formatted editor text.
-  ///
-  /// # Parameters
-  ///
-  /// * `value` supplies the next already-bounded committed value, or clears it.
-  /// * `cx` updates the nested text input and emits draft-state changes.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the committed value or visible draft changed.
   fn set_committed_value(&mut self, value: Option<f64>, cx: &mut Context<Self>) -> bool {
     let committed_changed = self.committed_value != value;
     self.committed_value = value;
@@ -707,14 +507,6 @@ fn classify_number_draft(draft: &str, bounds: NumberBounds) -> NumberDraftState 
 }
 
 /// Returns whether a draft is a valid prefix of a finite decimal scientific number.
-///
-/// # Parameters
-///
-/// * `draft` supplies the raw editor text.
-///
-/// # Returns
-///
-/// `true` when additional text can complete the current numeric draft.
 fn is_incomplete_number_draft(draft: &str) -> bool {
   if matches!(draft, "+" | "-" | "." | "+." | "-.") || draft.ends_with('.') {
     return true;

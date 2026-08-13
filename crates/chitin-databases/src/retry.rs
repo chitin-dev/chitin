@@ -17,14 +17,6 @@ pub struct RetryPolicy {
 
 impl RetryPolicy {
   /// Returns whether this policy allows another attempt.
-  ///
-  /// # Parameters
-  ///
-  /// * `attempt` is the one-based attempt count that just failed.
-  ///
-  /// # Returns
-  ///
-  /// `true` when another attempt is permitted.
   pub(crate) fn should_retry_after_attempt(self, attempt: u32) -> bool {
     attempt < self.max_attempts
   }
@@ -60,14 +52,6 @@ impl Default for RetryPolicy {
 }
 
 /// Returns whether a status code represents a transient HTTP response.
-///
-/// # Parameters
-///
-/// * `status` is the response status code.
-///
-/// # Returns
-///
-/// `true` for status codes that are safe to retry for idempotent requests.
 pub(crate) fn is_retryable_status(status: StatusCode) -> bool {
   matches!(
     status,

@@ -305,27 +305,11 @@ impl<T> PanelTree<T> {
   }
 
   /// Returns the number of leaf panels in the tree.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The number of leaf panels below the root node.
   pub fn leaf_count(&self) -> usize {
     count_leaves(&self.root)
   }
 
   /// Returns every tab id in panel-tree visual order.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A vector of `(PanelId, PanelTabId)` pairs in render order.
   pub fn tabs_in_order(&self) -> Vec<(PanelId, PanelTabId)> {
     let mut tabs = Vec::new();
     collect_tab_ids(&self.root, &mut tabs);
@@ -333,14 +317,6 @@ impl<T> PanelTree<T> {
   }
 
   /// Returns every active tab id in panel-tree visual order.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A vector of `(PanelId, PanelTabId)` pairs for leaves with active tabs.
   pub fn active_tabs_in_order(&self) -> Vec<(PanelId, PanelTabId)> {
     let mut tabs = Vec::new();
     collect_active_tab_ids(&self.root, &mut tabs);
@@ -364,15 +340,6 @@ impl<T> PanelTree<T> {
   }
 
   /// Returns the first active tab in panel-tree visual order.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `Some((PanelId, &PanelTab<T>))` for the first active tab, or `None` when no
-  /// panel has an active tab.
   pub fn first_active_tab(&self) -> Option<(PanelId, &PanelTab<T>)> {
     first_active_tab_in_node(&self.root)
   }

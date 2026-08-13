@@ -27,14 +27,6 @@ impl PanelId {
   }
 
   /// Returns the raw numeric panel identifier.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The numeric identifier stored in this [`PanelId`].
   pub const fn value(self) -> u64 {
     self.0
   }
@@ -62,14 +54,6 @@ impl PanelTabId {
   }
 
   /// Returns the raw numeric tab identifier.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The numeric identifier stored in this [`PanelTabId`].
   pub const fn value(self) -> u64 {
     self.0
   }
@@ -111,14 +95,6 @@ pub struct PanelSplitPath {
 
 impl PanelSplitPath {
   /// Creates the root split path.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`PanelSplitPath`] that identifies the root node when it is a split.
   pub fn root() -> Self {
     Self { branches: Vec::new() }
   }
@@ -140,14 +116,6 @@ impl PanelSplitPath {
   }
 
   /// Returns the branches in this path.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A borrowed slice of branch selectors.
   pub fn branches(&self) -> &[PanelSplitBranch] {
     &self.branches
   }
@@ -330,14 +298,6 @@ impl<T> PanelLeaf<T> {
   }
 
   /// Returns this panel's active tab.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `Some(&PanelTab<T>)` when an active tab exists; otherwise `None`.
   pub fn active_tab(&self) -> Option<&PanelTab<T>> {
     self
       .active_tab

@@ -319,18 +319,6 @@ impl ChitinApp {
   }
 
   /// Applies the workspace-sidebar toggle state transition.
-  ///
-  /// This helper contains only synchronous state mutation so it can be tested
-  /// without constructing a GPUI window. Use [`ChitinApp::toggle_workspace`]
-  /// from UI actions so the app is notified after the transition.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after mutating activity/sidebar visibility.
   fn toggle_workspace_state(&mut self) {
     if self.active_activity == ActiveActivity::Workspace {
       self.project_sidebar_visible = !self.project_sidebar_visible;

@@ -113,18 +113,6 @@ impl ChitinApp {
   }
 
   /// Returns whether project-tree key actions may affect current app state.
-  ///
-  /// Keyboard navigation is only enabled when the user is actively viewing
-  /// the file explorer and a workspace is currently open.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, including `active_activity` and `workspace`.
-  ///
-  /// # Returns
-  ///
-  /// `true` if the file explorer is visible and a workspace exists; `false`
-  /// otherwise.
   fn project_tree_navigation_enabled(&self) -> bool {
     self.active_activity == ActiveActivity::Workspace && self.workspace.is_some()
   }
@@ -892,14 +880,6 @@ mod tests {
     }
 
     /// Returns the temporary project root path.
-    ///
-    /// # Parameters
-    ///
-    /// This method reads `self`.
-    ///
-    /// # Returns
-    ///
-    /// A borrowed [`Path`] pointing to the temporary project root.
     fn path(&self) -> &Path {
       &self.root
     }
@@ -907,28 +887,12 @@ mod tests {
 
   impl Drop for TestProject {
     /// Removes the temporary project directory after each test.
-    ///
-    /// # Parameters
-    ///
-    /// This method mutably borrows `self` during drop.
-    ///
-    /// # Returns
-    ///
-    /// This function returns `()` and ignores cleanup failures.
     fn drop(&mut self) {
       let _ = fs::remove_dir_all(&self.root);
     }
   }
 
   /// Builds a non-UTF-8 path component for Unix filesystem tests.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// An [`OsString`] containing bytes that are invalid UTF-8 on Unix.
   #[cfg(unix)]
   fn non_utf8_name() -> OsString {
     use std::os::unix::ffi::OsStringExt;

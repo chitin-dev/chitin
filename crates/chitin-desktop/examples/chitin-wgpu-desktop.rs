@@ -70,14 +70,6 @@ impl AssetSource for DesktopAssets {
 }
 
 /// Starts the desktop WGPU integration example.
-///
-/// # Parameters
-///
-/// This function reads an optional project path from `std::env::args_os`.
-///
-/// # Returns
-///
-/// This function returns `()` after handing control to GPUI's event loop.
 fn main() {
   env_logger::init();
   let project_path = std::env::args_os().nth(1).map(PathBuf::from);

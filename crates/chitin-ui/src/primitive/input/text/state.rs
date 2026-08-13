@@ -630,15 +630,6 @@ impl TextInputState {
   }
 
   /// Updates selection state and emits an event only when it changed.
-  ///
-  /// # Parameters
-  ///
-  /// * `selection` supplies the next UTF-8 byte-offset selection.
-  /// * `cx` emits the selection-change event and refreshes observers.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after applying a changed selection.
   fn set_selection_internal(&mut self, selection: TextSelection, cx: &mut Context<Self>) {
     if self.selection == selection {
       return;

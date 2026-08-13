@@ -25,6 +25,15 @@ impl WorkspaceCommandDesktopExt for WorkspaceCommand {
 
 impl ChitinApp {
   /// Executes a typed command against desktop state.
+  ///
+  /// # Parameters
+  ///
+  /// * `command` is the shared command translated from a UI input source.
+  /// * `cx` is the GPUI context used by the command handler.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after routing the command to its feature handler.
   pub(crate) fn dispatch_command(&mut self, command: ChitinCommand, cx: &mut Context<Self>) {
     log::debug!("Dispatch command {}", command.id());
 
@@ -36,6 +45,15 @@ impl ChitinApp {
   }
 
   /// Executes an application command.
+  ///
+  /// # Parameters
+  ///
+  /// * `command` identifies the application-level action.
+  /// * `cx` is the GPUI context used to refresh the application state.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after applying the application action.
   pub(crate) fn dispatch_application_command(&mut self, command: ApplicationCommand, cx: &mut Context<Self>) {
     match command {
       ApplicationCommand::ToggleCommandPanel => self.toggle_command_panel(cx),
@@ -43,6 +61,15 @@ impl ChitinApp {
   }
 
   /// Executes a database command.
+  ///
+  /// # Parameters
+  ///
+  /// * `command` identifies the database workflow to start.
+  /// * `cx` is the GPUI context notified when the form is opened.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after opening the corresponding form.
   pub(crate) fn dispatch_database_command(&mut self, command: DatabaseCommand, cx: &mut Context<Self>) {
     match command {
       DatabaseCommand::DownloadRcsbStructure => {
@@ -55,6 +82,15 @@ impl ChitinApp {
   }
 
   /// Executes a document panel-tab command.
+  ///
+  /// # Parameters
+  ///
+  /// * `command` identifies the tab operation to perform.
+  /// * `cx` is the GPUI context notified when panel state changes.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after applying the tab operation.
   pub(crate) fn dispatch_panel_tab_command(&mut self, command: PanelTabCommand, cx: &mut Context<Self>) {
     let changed = match command {
       PanelTabCommand::FocusPrevious => self.focus_previous_document_panel_tab(),
@@ -68,6 +104,15 @@ impl ChitinApp {
   }
 
   /// Executes a workspace command against workspace-sidebar state.
+  ///
+  /// # Parameters
+  ///
+  /// * `command` identifies workspace or nested panel-tab navigation.
+  /// * `cx` is the GPUI context used for focus, loading, and redraw updates.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after applying the workspace operation.
   pub(crate) fn dispatch_workspace_command(&mut self, command: WorkspaceCommand, cx: &mut Context<Self>) {
     match command {
       WorkspaceCommand::ToggleWorkspace => self.toggle_workspace(cx),

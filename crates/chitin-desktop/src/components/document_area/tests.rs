@@ -43,15 +43,6 @@ fn test_content(name: &str) -> DocumentPanelContent {
 }
 
 /// Creates document panel state containing two tabs in the root panel.
-///
-/// # Parameters
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// A [`DocumentPanelState`] whose root panel can exercise independent active
-/// tab state after splitting.
 fn two_tab_document_panel_state() -> DocumentPanelState {
   DocumentPanelState {
     tree: PanelTree::single_leaf(

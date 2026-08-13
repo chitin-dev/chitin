@@ -32,14 +32,6 @@ pub enum ActiveActivity {
 
 impl ActiveActivity {
   /// Stable id used for activity bar selection.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, the active workbench area.
-  ///
-  /// # Returns
-  ///
-  /// A stable lowercase identifier used for selection comparisons.
   pub fn id(self) -> &'static str {
     match self {
       Self::Workspace => "workspace",
@@ -51,14 +43,6 @@ impl ActiveActivity {
   }
 
   /// Human-readable activity label.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, the active workbench area.
-  ///
-  /// # Returns
-  ///
-  /// A user-facing label suitable for activity bar tooltips and placeholders.
   pub fn title(self) -> &'static str {
     match self {
       Self::Workspace => "Workspace",

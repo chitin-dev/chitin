@@ -60,14 +60,6 @@ pub struct ExampleCubeScene {
 
 impl ExampleCubeScene {
   /// Creates a lazy example cube scene.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A scene that allocates GPU resources on its first rendered frame.
   pub fn new() -> Self {
     Self { renderer: None }
   }
@@ -100,14 +92,6 @@ impl WgpuPanelScene for ExampleCubeScene {
   }
 
   /// Returns the cube-specific interaction hint.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// Static overlay text for the example scene.
   fn interaction_hint(&self) -> &'static str {
     "Example cube | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
   }
@@ -281,14 +265,6 @@ impl ExampleCubeRenderer {
   }
 
   /// Returns the current render target aspect ratio.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The width divided by height, with a non-zero height guard.
   pub fn aspect(&self) -> f32 {
     self.size.aspect()
   }

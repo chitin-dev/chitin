@@ -77,14 +77,6 @@ pub struct PanelTabScrollState {
 
 impl PanelTabScrollState {
   /// Creates empty tab scroll state.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`PanelTabScrollState`] with no tracked panel handles.
   pub fn new() -> Self {
     Self::default()
   }

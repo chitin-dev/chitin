@@ -145,28 +145,12 @@ impl ProjectSidebarState {
   }
 
   /// Stops the current sidebar resize drag.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self` to clear resize state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a drag was active and has been stopped; otherwise `false`.
   pub fn stop_resize(&mut self) -> bool {
     log::debug!("Project sidebar: stop width resizing from");
     self.resize.stop_resize()
   }
 
   /// Returns whether the sidebar is currently being resized.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a resize drag is active; otherwise `false`.
   pub fn is_resizing(&self) -> bool {
     self.resize.is_resizing()
   }
@@ -174,14 +158,6 @@ impl ProjectSidebarState {
 
 impl Default for ProjectSidebarState {
   /// Creates project sidebar state with no workspace root.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`ProjectSidebarState`] with no expanded root.
   fn default() -> Self {
     Self::with_workspace_root(None)
   }

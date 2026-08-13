@@ -34,14 +34,6 @@ macro_rules! subscribe_status {
 }
 
 /// Creates the option data shared by the long scrollable select example.
-///
-/// # Parameters
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// Twelve application-neutral options in display order.
 fn long_select_options() -> Vec<SelectOption> {
   (1..=12)
     .map(|index| SelectOption::new(format!("model-{index}"), format!("Model {index}")))
@@ -49,14 +41,6 @@ fn long_select_options() -> Vec<SelectOption> {
 }
 
 /// Creates content that exceeds the showcase select popup's maximum height.
-///
-/// # Parameters
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// One labelled group containing the long option list.
 fn long_select_content() -> SelectContent {
   let mut group = SelectGroup::new().label(SelectLabel::new("Available models"));
   for option in long_select_options() {
@@ -834,14 +818,6 @@ fn number_draft_state_summary(state: NumberDraftState) -> SharedString {
 }
 
 /// Opens the GPUI primitive component gallery.
-///
-/// # Parameters
-///
-/// This function takes no Rust parameters.
-///
-/// # Returns
-///
-/// This function returns after the GPUI application exits.
 fn main() {
   env_logger::init();
   Application::new()

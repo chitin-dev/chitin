@@ -52,14 +52,6 @@ pub(crate) struct CommandPanelController {
 
 impl CommandPanelController {
   /// Creates a closed command panel with the default command registry.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A controller ready to open and render the desktop command panel.
   pub(crate) fn new() -> Self {
     Self {
       registry: chitin_command::default_registry(),
@@ -178,14 +170,6 @@ impl CommandPanelController {
   }
 
   /// Toggles panel visibility when no GPUI window is available.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// `true` when panel visibility changed. Window-aware callers should prefer [`Self::toggle`].
   pub(crate) fn toggle_without_focus(&mut self) -> bool {
     if self.is_open {
       self.is_open = false;
@@ -322,14 +306,6 @@ impl CommandPanelController {
   }
 
   /// Resets transient state before an open transition.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after preparing search mode.
   fn reset_for_open(&mut self) {
     self.is_open = true;
     self.quickpick.reset();
@@ -338,14 +314,6 @@ impl CommandPanelController {
   }
 
   /// Resolves the current input line into a command-panel operation.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state and command registry.
-  ///
-  /// # Returns
-  ///
-  /// An invocation request or local state-change event.
   fn submit(&self) -> CommandPanelEvent {
     self
       .registry

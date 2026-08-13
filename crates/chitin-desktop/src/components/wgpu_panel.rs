@@ -51,14 +51,6 @@ pub trait WgpuPanelScene {
   fn render_frame(&mut self, frame: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex;
 
   /// Returns the viewport interaction hint displayed by the panel overlay.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// Static UI text describing scene-specific interactions.
   fn interaction_hint(&self) -> &'static str {
     DEFAULT_INTERACTION_HINT
   }
@@ -72,14 +64,6 @@ struct ClearScene {
 
 impl ClearScene {
   /// Creates a scene that clears the WGPU surface each frame.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A lazy clear renderer scene for backend smoke tests.
   fn new() -> Self {
     Self { renderer: None }
   }
@@ -175,15 +159,6 @@ impl ChitinWgpuDocumentPanel {
   }
 
   /// Renders one frame into the surface back buffer when available.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self` to update renderer and FPS state.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()`. If the surface is unavailable or has no back
-  /// buffer yet, it leaves the previous state unchanged.
   fn render_surface(&mut self) {
     let Some(surface) = self.surface.as_ref() else {
       return;

@@ -122,17 +122,6 @@ mod vscode_modern {
 }
 
 /// Returns the default dark UI theme.
-///
-/// The dark theme uses Visual Studio Code's Dark Modern colors, mapped into
-/// Chitin's semantic UI roles.
-///
-/// # Parameters
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// A [`UIThemes`] value using Chitin's default dark theme colors.
 pub fn dark() -> UIThemes {
   UIThemes {
     text: UITextColors {
@@ -173,17 +162,6 @@ pub fn dark() -> UIThemes {
 }
 
 /// Returns the default light UI theme.
-///
-/// The light theme uses Visual Studio Code's Light Modern colors, mapped into
-/// the same semantic UI roles as [`dark`].
-///
-/// # Parameters
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// A [`UIThemes`] value using Chitin's default light theme colors.
 pub fn light() -> UIThemes {
   UIThemes {
     text: UITextColors {
