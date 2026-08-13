@@ -683,7 +683,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "chitin-cli"
+name = "chitin"
 version = "0.1.0"
 dependencies = [
  "chitin-command",
