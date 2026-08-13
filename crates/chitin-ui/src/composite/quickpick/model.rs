@@ -15,49 +15,6 @@ pub struct QuickPickState {
   scroll_handle: UniformListScrollHandle,
 }
 
-#[cfg(test)]
-mod tests {
-  use super::QuickPickState;
-  use gpui::ScrollStrategy;
-
-  #[test]
-  fn query_changes_reset_selection() {
-    let mut state = QuickPickState::new();
-    state.select_next(4);
-
-    state.set_query("workspace");
-
-    assert_eq!(state.query(), "workspace");
-    assert_eq!(state.selected_index(), 0);
-  }
-
-  #[test]
-  fn navigation_stays_within_item_count() {
-    let mut state = QuickPickState::new();
-    state.select_next(2);
-    state.select_next(2);
-    state.select_previous();
-
-    assert_eq!(state.selected_index(), 0);
-
-    state.select_previous();
-    state.reveal_selected(ScrollStrategy::Top);
-    assert_eq!(state.selected_index(), 0);
-  }
-
-  #[test]
-  fn reset_clears_query_and_selection() {
-    let mut state = QuickPickState::new();
-    state.set_query("command");
-    state.select_next(3);
-
-    state.reset();
-
-    assert!(state.query().is_empty());
-    assert_eq!(state.selected_index(), 0);
-  }
-}
-
 impl QuickPickState {
   /// Creates an empty quick-pick interaction state.
   pub fn new() -> Self {
@@ -126,32 +83,24 @@ impl Default for QuickPickState {
 pub struct QuickPickItem {
   /// Main row label.
   pub title: SharedString,
-  /// Secondary row metadata.
-  pub subtitle: SharedString,
   /// Optional shortcut text shown on the trailing edge.
   pub shortcut: Option<SharedString>,
 }
 
 impl QuickPickItem {
-  /// Creates a quick-pick row.
+  /// Creates a quick-pick row without secondary metadata.
   ///
   /// # Parameters
   ///
   /// * `title` is the primary row label.
-  /// * `subtitle` is the secondary row metadata.
   /// * `shortcut` is optional trailing shortcut text.
   ///
   /// # Returns
   ///
   /// A reusable quick-pick row model.
-  pub fn new(
-    title: impl Into<SharedString>,
-    subtitle: impl Into<SharedString>,
-    shortcut: Option<impl Into<SharedString>>,
-  ) -> Self {
+  pub fn new(title: impl Into<SharedString>, shortcut: Option<impl Into<SharedString>>) -> Self {
     Self {
       title: title.into(),
-      subtitle: subtitle.into(),
       shortcut: shortcut.map(Into::into),
     }
   }
@@ -196,4 +145,47 @@ pub struct QuickPickOverlay {
   pub scroll_handle: Option<UniformListScrollHandle>,
   /// Empty-state text shown when `items` is empty.
   pub empty_message: SharedString,
+}
+
+#[cfg(test)]
+mod tests {
+  use super::QuickPickState;
+  use gpui::ScrollStrategy;
+
+  #[test]
+  fn query_changes_reset_selection() {
+    let mut state = QuickPickState::new();
+    state.select_next(4);
+
+    state.set_query("workspace");
+
+    assert_eq!(state.query(), "workspace");
+    assert_eq!(state.selected_index(), 0);
+  }
+
+  #[test]
+  fn navigation_stays_within_item_count() {
+    let mut state = QuickPickState::new();
+    state.select_next(2);
+    state.select_next(2);
+    state.select_previous();
+
+    assert_eq!(state.selected_index(), 0);
+
+    state.select_previous();
+    state.reveal_selected(ScrollStrategy::Top);
+    assert_eq!(state.selected_index(), 0);
+  }
+
+  #[test]
+  fn reset_clears_query_and_selection() {
+    let mut state = QuickPickState::new();
+    state.set_query("command");
+    state.select_next(3);
+
+    state.reset();
+
+    assert!(state.query().is_empty());
+    assert_eq!(state.selected_index(), 0);
+  }
 }

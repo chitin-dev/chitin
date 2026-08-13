@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use gpui::prelude::FluentBuilder;
 use gpui::{
   AnyElement, Div, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString,
   Styled, UniformListScrollHandle, div, px, uniform_list,
@@ -9,7 +10,6 @@ use gpui::{
 
 use super::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, QuickPickSelectHandler};
 use crate::{
-  primitive::icon::Icon,
   primitive::input::text::{TextInput, TextInputSize, TextInputVariant},
   themes::{UIThemes, builtins},
 };
@@ -17,11 +17,13 @@ use crate::{
 /// Maximum number of quick-pick rows visible before the body scrolls.
 pub const DEFAULT_QUICK_PICK_VISIBLE_ROWS: usize = 8;
 /// Default height of quick pick item
-pub const DEFAULT_QUICK_PICK_ITEM_HEIGHT: Pixels = px(60.0);
+pub const DEFAULT_QUICK_PICK_ITEM_HEIGHT: Pixels = px(34.0);
+/// Default height of the quick-pick query line.
+pub const DEFAULT_QUICK_PICK_QUERY_HEIGHT: Pixels = px(34.0);
 /// Default margin from top
 pub const DEFAULT_QUICK_PICK_MARGIN_TOP: Pixels = px(30.0);
 /// Default width of quick pick panel
-pub const DEFAULT_QUICK_PICK_WIDTH: Pixels = px(660.0);
+pub const DEFAULT_QUICK_PICK_WIDTH: Pixels = px(520.0);
 /// Default max height of quick pick panel
 pub const DEFAULT_QUICK_PICK_MAX_HEIGHT: Pixels = px(560.0);
 /// Default max height of the quick-pick result list.
@@ -44,7 +46,7 @@ pub fn render_quick_pick_overlay(
   on_select: Rc<QuickPickSelectHandler>,
 ) -> Div {
   let body_height = quick_pick_body_height(overlay.items.len());
-  let panel_height = px(48.0) + body_height;
+  let panel_height = DEFAULT_QUICK_PICK_QUERY_HEIGHT + body_height;
   let panel_body = render_items(
     "quick-pick-result-list",
     overlay.items,
@@ -115,17 +117,15 @@ fn render_query_line(
     .flex()
     .items_center()
     .gap_2()
-    .h(px(48.0))
-    .px_3()
+    .h(DEFAULT_QUICK_PICK_QUERY_HEIGHT)
     .border_b_1()
     .border_color(theme.border.muted)
     .text_color(theme.text.primary)
     // Though it's called tree-collapse, it's used here as a prompt indicator
-    .child(Icon::new("icons/tree-collapse.svg").theme(theme))
     .child(match search_input {
       Some(search_input) => TextInput::new(search_input.state)
         .theme(theme)
-        .size(TextInputSize::Large)
+        .size(TextInputSize::Medium)
         .full_width(true)
         .variant(TextInputVariant::Transparent)
         .placeholder(placeholder)
@@ -173,6 +173,7 @@ fn render_items(
       .items_center()
       .px_3()
       .text_color(theme.text.secondary)
+      .text_xs()
       .child(empty_message)
       .into_any_element();
   }
@@ -237,27 +238,28 @@ fn render_item(
   div()
     .flex()
     .items_center()
-    .justify_between()
     .h(DEFAULT_QUICK_PICK_ITEM_HEIGHT)
     .w_full()
-    .px_3()
-    .py_3()
-    .bg(if selected {
-      theme.background.hover
-    } else {
-      theme.background.secondary
-    })
-    .hover(move |style| style.bg(theme.background.hover))
+    .px_1()
     .on_mouse_up(MouseButton::Left, move |_, window, cx| {
       on_select(index, window, cx);
     })
     .child(
       div()
         .flex()
-        .flex_col()
-        .gap_1()
-        .child(div().text_sm().text_color(theme.text.primary).child(item.title))
-        .child(div().text_xs().text_color(theme.text.secondary).child(item.subtitle)),
+        .items_center()
+        .justify_between()
+        .h_full()
+        .w_full()
+        .px_2()
+        .rounded_sm()
+        .bg(if selected {
+          theme.background.hover
+        } else {
+          builtins::TRANSPARENT
+        })
+        .when(!selected, |style| style.hover(|style| style.bg(theme.background.hover)))
+        .child(div().text_xs().text_color(theme.text.primary).child(item.title))
+        .child(div().text_xs().text_color(theme.text.secondary).child(shortcut)),
     )
-    .child(div().text_xs().text_color(theme.text.secondary).child(shortcut))
 }

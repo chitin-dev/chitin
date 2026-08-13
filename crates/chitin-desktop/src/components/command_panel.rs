@@ -132,13 +132,7 @@ pub(crate) fn render_command_panel(
     search_input: Some(QuickPickSearchInput::new(search_input)),
     items: results
       .iter()
-      .map(|result| {
-        QuickPickItem::new(
-          result.descriptor.title,
-          format!("{} · {}", result.descriptor.category.label(), result.descriptor.id),
-          result.descriptor.shortcut,
-        )
-      })
+      .map(|result| QuickPickItem::new(result.descriptor.title, result.descriptor.shortcut))
       .collect(),
     selected_index: controller.selected_index(),
     scroll_handle: Some(controller.result_scroll_handle()),
