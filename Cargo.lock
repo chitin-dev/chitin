@@ -669,6 +669,7 @@ dependencies = [
  "gpui-ce",
  "log",
  "rust-embed",
+ "thiserror 2.0.18",
  "tokio",
  "wgpu",
 ]
@@ -686,6 +687,9 @@ dependencies = [
 [[package]]
 name = "chitin-utils"
 version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "chitin-wgpu"

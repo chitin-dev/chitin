@@ -7,3 +7,6 @@ repository.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+thiserror = "2.0"

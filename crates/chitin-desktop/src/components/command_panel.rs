@@ -5,7 +5,7 @@ use std::sync::{
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
-use std::{fmt, fs, path::PathBuf, rc::Rc};
+use std::{fs, path::PathBuf, rc::Rc};
 
 mod controller;
 mod form;
@@ -47,35 +47,24 @@ struct RcsbDownloadRequest {
 }
 
 /// Failure encountered while downloading or persisting an RCSB structure.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum RcsbDownloadError {
   /// Tokio could not create the runtime required by the HTTP transport.
+  #[error("failed to create download runtime: {0}")]
   Runtime(std::io::Error),
   /// The shared database client could not initialize its transport.
+  #[error("failed to create database client: {0}")]
   Client(TransportError),
   /// RCSB rejected the request or the network transfer failed.
+  #[error("RCSB download failed: {0}")]
   Provider(RcsbError),
   /// The format-specific destination directory could not be created.
+  #[error("failed to create '{path}': {source}")]
   CreateDirectory { path: PathBuf, source: std::io::Error },
   /// The downloaded bytes could not be written to their final path.
+  #[error("failed to write '{path}': {source}")]
   WriteFile { path: PathBuf, source: std::io::Error },
 }
-
-impl fmt::Display for RcsbDownloadError {
-  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-    match self {
-      Self::Runtime(error) => write!(formatter, "failed to create download runtime: {error}"),
-      Self::Client(error) => write!(formatter, "failed to create database client: {error}"),
-      Self::Provider(error) => write!(formatter, "RCSB download failed: {error}"),
-      Self::CreateDirectory { path, source } => {
-        write!(formatter, "failed to create '{}': {source}", path.display())
-      }
-      Self::WriteFile { path, source } => write!(formatter, "failed to write '{}': {source}", path.display()),
-    }
-  }
-}
-
-impl std::error::Error for RcsbDownloadError {}
 
 /// Renders the command panel overlay.
 ///
