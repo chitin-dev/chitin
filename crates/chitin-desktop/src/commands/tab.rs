@@ -3,15 +3,7 @@
 use chitin_command::PanelTabCommand;
 use gpui::{KeyBinding, actions};
 
-use crate::{
-  app::ChitinApp,
-  commands::{
-    WorkspaceCommand,
-    command_panel::{
-      CommandCategory, CommandDescriptor, CommandInvocationKind, CommandShortcut, primary_shortcut_label,
-    },
-  },
-};
+use crate::{app::ChitinApp, commands::command_panel::CommandShortcut};
 
 /// GPUI key context used by the document panel container.
 pub(crate) const PANEL_CONTAINER_KEY_CONTEXT: &str = "PanelContainer";
@@ -87,47 +79,6 @@ pub(crate) fn default_key_bindings() -> [KeyBinding; 3] {
     FOCUS_PREVIOUS_TAB_SHORTCUTS[0].binding(FocusPreviousPanelTab),
     FOCUS_NEXT_TAB_SHORTCUTS[0].binding(FocusNextPanelTab),
     CLOSE_TAB_SHORTCUTS[0].binding(CloseTab),
-  ]
-}
-
-/// Builds command panel descriptors for document panel tab commands.
-///
-/// # Parameters
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// Panel tab command metadata used by the command registry.
-pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
-  vec![
-    CommandDescriptor {
-      id: PanelTabCommand::FocusPrevious.id(),
-      title: "Focus Previous Tab",
-      category: CommandCategory::Workspace,
-      keywords: &["document", "panel", "tab", "previous"],
-      shortcut: primary_shortcut_label(&FOCUS_PREVIOUS_TAB_SHORTCUTS),
-      invocation: CommandInvocationKind::Immediate,
-      command: WorkspaceCommand::PanelTab(PanelTabCommand::FocusPrevious).into(),
-    },
-    CommandDescriptor {
-      id: PanelTabCommand::FocusNext.id(),
-      title: "Focus Next Tab",
-      category: CommandCategory::Workspace,
-      keywords: &["document", "panel", "tab", "next"],
-      shortcut: primary_shortcut_label(&FOCUS_NEXT_TAB_SHORTCUTS),
-      invocation: CommandInvocationKind::Immediate,
-      command: WorkspaceCommand::PanelTab(PanelTabCommand::FocusNext).into(),
-    },
-    CommandDescriptor {
-      id: PanelTabCommand::Close.id(),
-      title: "Close Active Tab",
-      category: CommandCategory::Workspace,
-      keywords: &["document", "panel", "tab", "close"],
-      shortcut: primary_shortcut_label(&CLOSE_TAB_SHORTCUTS),
-      invocation: CommandInvocationKind::Immediate,
-      command: WorkspaceCommand::PanelTab(PanelTabCommand::Close).into(),
-    },
   ]
 }
 

@@ -1,13 +1,10 @@
 //! Desktop-owned command-panel state and focus management.
 
+use chitin_command::{ChitinCommand, CommandRegistry};
 use chitin_ui::{composite::quickpick::QuickPickState, primitive::input::text::TextInputState};
 use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
 
-use crate::{
-  app::ChitinApp,
-  commands::{ChitinCommand, CommandRegistry},
-  components::command_panel::form::rcsb::RcsbFormPanel,
-};
+use crate::{app::ChitinApp, components::command_panel::form::rcsb::RcsbFormPanel};
 
 /// Current interaction mode of the command panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,7 +62,7 @@ impl CommandPanelController {
   /// A controller ready to open and render the desktop command panel.
   pub(crate) fn new() -> Self {
     Self {
-      registry: CommandRegistry::new(),
+      registry: chitin_command::default_registry(),
       is_open: false,
       quickpick: QuickPickState::new(),
       search_input: None,

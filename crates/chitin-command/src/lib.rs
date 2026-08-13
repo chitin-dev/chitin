@@ -154,6 +154,17 @@ impl CommandRegistry {
   }
 }
 
+/// Creates the built-in registry from all shared command descriptors.
+pub fn default_registry() -> CommandRegistry {
+  CommandRegistry::new(
+    workspace::command_descriptors()
+      .into_iter()
+      .chain(panel_tab::command_descriptors())
+      .chain(database::command_descriptors())
+      .chain(application::command_descriptors()),
+  )
+}
+
 fn score_descriptor(descriptor: &CommandDescriptor, query: &str) -> Option<i32> {
   if query.is_empty() {
     return Some(1);

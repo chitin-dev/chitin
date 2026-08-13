@@ -13,3 +13,16 @@ impl DatabaseCommand {
     }
   }
 }
+
+/// Returns the database command descriptors.
+pub fn command_descriptors() -> Vec<crate::CommandDescriptor> {
+  vec![crate::CommandDescriptor {
+    id: DatabaseCommand::DownloadRcsbStructure.id(),
+    title: "Download RCSB Structure",
+    category: crate::CommandCategory::Database,
+    keywords: &["pdb", "rcsb", "mmcif", "structure"],
+    shortcut: None,
+    invocation: crate::CommandInvocationKind::Form,
+    command: DatabaseCommand::DownloadRcsbStructure.into(),
+  }]
+}

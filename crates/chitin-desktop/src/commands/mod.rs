@@ -4,8 +4,8 @@
 //! bindings, future command-palette entries, status-bar command input, and
 //! direct component controls.
 
+pub(crate) use chitin_command::CommandInvocationKind;
 pub(crate) use chitin_command::{ApplicationCommand, ChitinCommand, PanelTabCommand, WorkspaceCommand};
-pub(crate) use command_panel::{CommandInvocationKind, CommandRegistry};
 use gpui::Context;
 
 use crate::app::ChitinApp;

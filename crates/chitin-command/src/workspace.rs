@@ -33,3 +33,56 @@ impl WorkspaceCommand {
     }
   }
 }
+
+/// Returns the project-workspace command descriptors.
+pub fn command_descriptors() -> Vec<crate::CommandDescriptor> {
+  [
+    (
+      WorkspaceCommand::ToggleWorkspace,
+      "Toggle Workspace Sidebar",
+      &["files", "project", "sidebar", "explorer"][..],
+      Some("Shift+E"),
+    ),
+    (
+      WorkspaceCommand::FocusPrevious,
+      "Focus Previous Project Entry",
+      &["tree", "up", "previous"][..],
+      Some("Up"),
+    ),
+    (
+      WorkspaceCommand::FocusNext,
+      "Focus Next Project Entry",
+      &["tree", "down", "next"][..],
+      Some("Down"),
+    ),
+    (
+      WorkspaceCommand::ActivateFocused,
+      "Activate Focused Project Entry",
+      &["open", "tree", "file", "directory"][..],
+      Some("Enter"),
+    ),
+    (
+      WorkspaceCommand::FocusFirst,
+      "Focus First Project Entry",
+      &["tree", "home", "first"][..],
+      Some("Home"),
+    ),
+    (
+      WorkspaceCommand::FocusLast,
+      "Focus Last Project Entry",
+      &["tree", "end", "last"][..],
+      Some("End"),
+    ),
+  ]
+  .into_iter()
+  .map(|(command, title, keywords, shortcut)| crate::CommandDescriptor {
+    id: command.id(),
+    title,
+    category: crate::CommandCategory::Workspace,
+    keywords,
+    shortcut,
+    invocation: crate::CommandInvocationKind::Immediate,
+    command: command.into(),
+  })
+  .collect()
+}

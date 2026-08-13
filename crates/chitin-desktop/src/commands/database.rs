@@ -1,9 +1,6 @@
 //! Database command definitions for provider workflows.
 
-use crate::commands::{
-  ChitinCommand,
-  command_panel::{CommandCategory, CommandDescriptor, CommandInvocationKind},
-};
+use crate::commands::ChitinCommand;
 use chitin_command::DatabaseCommand;
 
 impl crate::app::ChitinApp {
@@ -23,25 +20,4 @@ impl crate::app::ChitinApp {
       }
     }
   }
-}
-
-/// Builds command panel descriptors for database commands.
-/// # Parameters
-///
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// Database command metadata used by the command registry.
-pub(crate) fn command_descriptors() -> Vec<CommandDescriptor> {
-  vec![CommandDescriptor {
-    id: DatabaseCommand::DownloadRcsbStructure.id(),
-    title: "Download RCSB Structure",
-    category: CommandCategory::Database,
-    keywords: &["pdb", "rcsb", "mmcif", "structure"],
-    shortcut: None,
-    invocation: CommandInvocationKind::Form,
-    command: DatabaseCommand::DownloadRcsbStructure.into(),
-  }]
 }
