@@ -43,15 +43,6 @@ impl QuickPickItem {
   }
 }
 
-/// Content for a compact form shown inside the quick-pick shell.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct QuickPickForm {
-  /// Form title.
-  pub title: SharedString,
-  /// Current form value or placeholder.
-  pub value: SharedString,
-}
-
 /// Reusable search input configuration for a quick-pick overlay.
 #[derive(Clone)]
 pub struct QuickPickSearchInput {
@@ -74,24 +65,6 @@ impl QuickPickSearchInput {
   }
 }
 
-/// Body content rendered below the query line.
-#[derive(Clone, Debug)]
-pub enum QuickPickContent {
-  /// Ranked selectable rows.
-  Items {
-    /// Rows to render.
-    items: Vec<QuickPickItem>,
-    /// Currently selected row index.
-    selected_index: usize,
-    /// Optional virtual-list scroll handle used to reveal the selected row.
-    scroll_handle: Option<UniformListScrollHandle>,
-    /// Empty-state text.
-    empty_message: SharedString,
-  },
-  /// A command-specific form.
-  Form(QuickPickForm),
-}
-
 /// Data needed to render one quick-pick overlay.
 #[derive(Clone)]
 pub struct QuickPickOverlay {
@@ -101,6 +74,12 @@ pub struct QuickPickOverlay {
   pub placeholder: SharedString,
   /// Optional reusable text input state for the search field.
   pub search_input: Option<QuickPickSearchInput>,
-  /// Overlay body content.
-  pub content: QuickPickContent,
+  /// Ranked selectable rows.
+  pub items: Vec<QuickPickItem>,
+  /// Currently selected row index.
+  pub selected_index: usize,
+  /// Optional virtual-list scroll handle used to reveal the selected row.
+  pub scroll_handle: Option<UniformListScrollHandle>,
+  /// Empty-state text shown when `items` is empty.
+  pub empty_message: SharedString,
 }

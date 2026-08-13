@@ -4,12 +4,10 @@ use std::rc::Rc;
 
 use gpui::{
   AnyElement, Div, ElementId, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, SharedString,
-  Styled, UniformListScrollHandle, div, prelude::*, px, uniform_list,
+  Styled, UniformListScrollHandle, div, px, uniform_list,
 };
 
-use super::{
-  QuickPickContent, QuickPickForm, QuickPickItem, QuickPickOverlay, QuickPickSearchInput, QuickPickSelectHandler,
-};
+use super::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, QuickPickSelectHandler};
 use crate::{
   primitive::icon::Icon,
   primitive::input::text::{TextInput, TextInputSize, TextInputVariant},
@@ -45,24 +43,15 @@ pub fn render_quick_pick_overlay(
   theme: UIThemes,
   on_select: Rc<QuickPickSelectHandler>,
 ) -> Div {
-  let is_form = matches!(overlay.content, QuickPickContent::Form(_));
-  let panel_body = match overlay.content {
-    QuickPickContent::Items {
-      items,
-      selected_index,
-      scroll_handle,
-      empty_message,
-    } => render_items(
-      "quick-pick-result-list",
-      items,
-      selected_index,
-      scroll_handle,
-      empty_message,
-      theme,
-      on_select,
-    ),
-    QuickPickContent::Form(form) => render_form(form, theme),
-  };
+  let panel_body = render_items(
+    "quick-pick-result-list",
+    overlay.items,
+    overlay.selected_index,
+    overlay.scroll_handle,
+    overlay.empty_message,
+    theme,
+    on_select,
+  );
 
   div()
     .absolute()
@@ -88,14 +77,12 @@ pub fn render_quick_pick_overlay(
         .on_scroll_wheel(|_, _, cx| {
           cx.stop_propagation();
         })
-        .when(!is_form, |parent| {
-          parent.child(render_query_line(
-            overlay.query,
-            overlay.placeholder,
-            overlay.search_input,
-            theme,
-          ))
-        })
+        .child(render_query_line(
+          overlay.query,
+          overlay.placeholder,
+          overlay.search_input,
+          theme,
+        ))
         .child(panel_body),
     )
 }
@@ -262,38 +249,4 @@ fn render_item(
         .child(div().text_xs().text_color(theme.text.secondary).child(item.subtitle)),
     )
     .child(div().text_xs().text_color(theme.text.secondary).child(shortcut))
-}
-
-/// Renders quick-pick form content.
-///
-/// # Parameters
-///
-/// * `form` is the form content.
-/// * `theme` supplies colors.
-///
-/// # Returns
-///
-/// A quick-pick form element.
-fn render_form(form: QuickPickForm, theme: UIThemes) -> AnyElement {
-  div()
-    .flex()
-    .flex_col()
-    .gap_2()
-    .p_3()
-    .child(div().text_sm().text_color(theme.text.primary).child(form.title))
-    .child(
-      div()
-        .h(px(34.0))
-        .flex()
-        .items_center()
-        .rounded_sm()
-        .border_1()
-        .border_color(theme.border.primary)
-        .bg(theme.background.tertiary)
-        .px_2()
-        .text_xs()
-        .text_color(theme.text.secondary)
-        .child(form.value),
-    )
-    .into_any_element()
 }

@@ -5,7 +5,7 @@ use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrateg
 
 use crate::{
   app::ChitinApp,
-  commands::{ChitinCommand, CommandDescriptor, CommandRegistry, DatabaseCommand},
+  commands::{ChitinCommand, CommandRegistry, DatabaseCommand},
   components::command_panel::form::rcsb::RcsbFormPanel,
 };
 
@@ -144,15 +144,6 @@ impl CommandPanelController {
   /// Resolves the current search selection or form value into a panel event.
   pub(crate) fn submit_current(&self) -> CommandPanelEvent {
     self.submit()
-  }
-
-  /// Returns the descriptor for the command whose form is open.
-  /// The form command descriptor when the current mode identifies one.
-  pub(crate) fn form_descriptor(&self) -> Option<&CommandDescriptor> {
-    let CommandPanelMode::Form(command) = &self.mode else {
-      return None;
-    };
-    self.registry.descriptor_for(command)
   }
 
   /// Opens the command panel and focuses its overlay.

@@ -19,20 +19,18 @@ use chitin_databases::{
   providers::rcsb::{PdbId, RcsbError},
 };
 use chitin_ui::{
-  composite::quickpick::{
-    QuickPickContent, QuickPickForm, QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay,
-  },
+  composite::quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
   primitive::input::text::{TextInputEvent, TextInputState},
   themes::UIThemes,
 };
 use gpui::{
-  App, Context, Div, Entity, InteractiveElement, KeyDownEvent, ParentElement, SharedString, Styled, Subscription,
-  WeakEntity, Window, div,
+  App, Context, Div, Entity, InteractiveElement, KeyDownEvent, ParentElement, Styled, Subscription, WeakEntity, Window,
+  div,
 };
 
 use crate::{
   app::ChitinApp,
-  commands::{ApplicationCommand, ChitinCommand, CommandDescriptor, CommandInvocationKind},
+  commands::{ApplicationCommand, ChitinCommand, CommandInvocationKind},
 };
 
 /// Callback invoked when a rendered command row is selected.
@@ -123,36 +121,28 @@ pub(crate) fn render_command_panel(
       .track_focus(&focus_handle);
   }
 
-  let (overlay, selected_commands) = match controller.mode() {
-    CommandPanelMode::Search => {
-      let results = controller.registry().search(controller.query());
-      let selected_commands = results
-        .iter()
-        .map(|result| result.descriptor.command.clone())
-        .collect::<Vec<_>>();
-      let overlay = QuickPickOverlay {
-        query: controller.query().into(),
-        placeholder: "Type a command".into(),
-        search_input: Some(QuickPickSearchInput::new(search_input)),
-        content: QuickPickContent::Items {
-          items: results
-            .iter()
-            .map(|result| {
-              QuickPickItem::new(
-                result.descriptor.title,
-                format!("{} · {}", result.descriptor.category.label(), result.descriptor.id),
-                result.descriptor.shortcut,
-              )
-            })
-            .collect(),
-          selected_index: controller.selected_index(),
-          scroll_handle: Some(controller.result_scroll_handle()),
-          empty_message: "No commands found".into(),
-        },
-      };
-      (overlay, selected_commands)
-    }
-    CommandPanelMode::Form(_) => (render_command_form(controller), Vec::new()),
+  let results = controller.registry().search(controller.query());
+  let selected_commands = results
+    .iter()
+    .map(|result| result.descriptor.command.clone())
+    .collect::<Vec<_>>();
+  let overlay = QuickPickOverlay {
+    query: controller.query().into(),
+    placeholder: "Type a command".into(),
+    search_input: Some(QuickPickSearchInput::new(search_input)),
+    items: results
+      .iter()
+      .map(|result| {
+        QuickPickItem::new(
+          result.descriptor.title,
+          format!("{} · {}", result.descriptor.category.label(), result.descriptor.id),
+          result.descriptor.shortcut,
+        )
+      })
+      .collect(),
+    selected_index: controller.selected_index(),
+    scroll_handle: Some(controller.result_scroll_handle()),
+    empty_message: "No commands found".into(),
   };
   let on_select: Rc<CommandPanelSelectHandler> = Rc::new(move |index, window, cx: &mut App| {
     let Some(command) = selected_commands.get(index).cloned() else {
@@ -457,56 +447,4 @@ fn download_rcsb_structure(
     source,
   })?;
   Ok(destination)
-}
-
-/// Returns the visible form value.
-/// # Parameters
-///
-/// * `controller` contains form input.
-/// * `descriptor` is the command being configured.
-///
-/// # Returns
-///
-/// The current input, or the descriptor placeholder when input is empty.
-fn form_value(controller: &CommandPanelController, descriptor: &CommandDescriptor) -> SharedString {
-  if controller.query().is_empty() {
-    descriptor.form_placeholder.unwrap_or("").into()
-  } else {
-    controller.query().into()
-  }
-}
-
-/// Builds the quick-pick model for the active command form.
-///
-/// # Parameters
-///
-/// * `controller` owns the current form command and input value.
-///
-/// # Returns
-///
-/// A quick-pick overlay for the active form, or an empty-state overlay if the command was removed.
-fn render_command_form(controller: &CommandPanelController) -> QuickPickOverlay {
-  let Some(descriptor) = controller.form_descriptor() else {
-    return QuickPickOverlay {
-      query: controller.query().into(),
-      placeholder: "".into(),
-      search_input: None,
-      content: QuickPickContent::Items {
-        items: Vec::new(),
-        selected_index: 0,
-        scroll_handle: None,
-        empty_message: "Command is unavailable".into(),
-      },
-    };
-  };
-
-  QuickPickOverlay {
-    query: controller.query().into(),
-    placeholder: descriptor.form_placeholder.unwrap_or("").into(),
-    search_input: None,
-    content: QuickPickContent::Form(QuickPickForm {
-      title: descriptor.title.into(),
-      value: form_value(controller, descriptor),
-    }),
-  }
 }
