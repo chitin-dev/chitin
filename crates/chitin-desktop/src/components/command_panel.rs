@@ -4,7 +4,9 @@ use std::rc::Rc;
 use std::sync::{
   Arc, Mutex,
   atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+  mpsc,
 };
+use std::thread;
 use std::time::Duration;
 
 mod controller;
@@ -26,7 +28,7 @@ use chitin_ui::{
 };
 use gpui::{
   App, Context, Div, Entity, InteractiveElement, KeyDownEvent, ParentElement, Styled, Subscription, WeakEntity, Window,
-  div,
+  div, px,
 };
 
 use crate::app::ChitinApp;
@@ -77,8 +79,8 @@ pub(crate) fn render_command_panel(
       .justify_center()
       .child(
         div()
-          .mt(gpui::px(30.0))
-          .w(gpui::px(420.0))
+          .mt(px(30.0))
+          .w(px(420.0))
           .rounded_md()
           .border_1()
           .border_color(theme.border.primary)
@@ -245,6 +247,11 @@ impl ChitinApp {
     form.pdb_id.update(cx, |state, cx| state.set_disabled(true, cx));
     form.format.update(cx, |state, cx| state.set_disabled(true, cx));
     form.submit.update(cx, |state, cx| state.set_disabled(true, cx));
+    log::info!(
+      "RCSB download submitted from thread name={:?}, id={:?}, items={total_items}",
+      thread::current().name(),
+      thread::current().id()
+    );
 
     let progress = Arc::new(AtomicU64::new(0));
     let received_bytes = Arc::new(AtomicU64::new(0));
@@ -260,52 +267,82 @@ impl ChitinApp {
     let background_batch_index = batch_index.clone();
     let background_batch_total = batch_total.clone();
     let background_current_id = current_id.clone();
-    let download_task = cx.background_executor().spawn(async move {
-      let result = download_rcsb_structures(requests, move |event| match event {
-        RcsbBatchDownloadEvent::Started { index, total, id } => {
-          background_batch_index.store(index, Ordering::Release);
-          background_batch_total.store(total, Ordering::Release);
-          if let Ok(mut current) = background_current_id.lock() {
-            *current = id.to_string();
+    let (download_sender, download_receiver) = mpsc::channel();
+    let thread_sender = download_sender.clone();
+    let thread_result = thread::Builder::new()
+      .name("chitin-rcsb-download".to_string())
+      .spawn(move || {
+        log::info!(
+          "RCSB download worker started on thread name={:?}, id={:?}",
+          thread::current().name(),
+          thread::current().id()
+        );
+        let result = download_rcsb_structures(requests, move |event| match event {
+          RcsbBatchDownloadEvent::Started { index, total, id } => {
+            background_batch_index.store(index, Ordering::Release);
+            background_batch_total.store(total, Ordering::Release);
+            if let Ok(mut current) = background_current_id.lock() {
+              *current = id.to_string();
+            }
           }
-        }
-        RcsbBatchDownloadEvent::Progress {
-          received, total_bytes, ..
-        } => {
-          background_received_bytes.store(received, Ordering::Relaxed);
-          if let Some(total) = total_bytes
-            && let Some(value) = received.saturating_mul(10_000).checked_div(total)
-          {
-            background_has_total.store(true, Ordering::Release);
-            background_progress.store(value, Ordering::Relaxed);
+          RcsbBatchDownloadEvent::Progress {
+            received, total_bytes, ..
+          } => {
+            background_received_bytes.store(received, Ordering::Relaxed);
+            if let Some(total) = total_bytes
+              && let Some(value) = received.saturating_mul(10_000).checked_div(total)
+            {
+              background_has_total.store(true, Ordering::Release);
+              background_progress.store(value, Ordering::Relaxed);
+            }
           }
-        }
-        RcsbBatchDownloadEvent::Completed { .. } => {}
+          RcsbBatchDownloadEvent::Completed { .. } => {}
+        });
+        background_active.store(false, Ordering::Release);
+        log::info!(
+          "RCSB download worker finished on thread name={:?}, id={:?}, success={}",
+          thread::current().name(),
+          thread::current().id(),
+          result.is_ok()
+        );
+        let _ = thread_sender.send(result);
       });
-      background_active.store(false, Ordering::Release);
-      result
-    });
     let download_state = form.download.clone();
     let pdb_id_state = form.pdb_id.clone();
     let format_state = form.format.clone();
     let submit_state = form.submit.clone();
+    if let Err(error) = thread_result {
+      log::error!(
+        "failed to spawn RCSB download thread from thread name={:?}, id={:?}: {error}",
+        thread::current().name(),
+        thread::current().id()
+      );
+      active.store(false, Ordering::Release);
+      let _ = download_sender.send(Err(DesktopRcsbDownloadError::Runtime(error)));
+    }
     cx.spawn(async move |app, cx| {
-      let result = download_task.await;
-      let _ = app.update(cx, |_, cx| {
-        match result {
-          Ok(()) => {
-            log::info!("RCSB batch download completed");
-            download_state.update(cx, RcsbDownloadState::finish);
+      loop {
+        cx.background_executor().timer(Duration::from_millis(50)).await;
+        let Ok(result) = download_receiver.try_recv() else {
+          continue;
+        };
+        let _ = app.update(cx, |_, cx| {
+          match result {
+            Ok(()) => {
+              log::info!("RCSB batch download completed");
+              download_state.update(cx, RcsbDownloadState::finish);
+            }
+            Err(error) => {
+              log::error!("RCSB download failed: {error}");
+              download_state.update(cx, |state, cx| state.fail(error.to_string(), cx));
+            }
           }
-          Err(error) => {
-            log::error!("RCSB download failed: {error}");
-            download_state.update(cx, |state, cx| state.fail(error.to_string(), cx));
-          }
-        }
-        pdb_id_state.update(cx, |state, cx| state.set_disabled(false, cx));
-        format_state.update(cx, |state, cx| state.set_disabled(false, cx));
-        submit_state.update(cx, |state, cx| state.set_disabled(false, cx));
-      });
+          pdb_id_state.update(cx, |state, cx| state.set_disabled(false, cx));
+          format_state.update(cx, |state, cx| state.set_disabled(false, cx));
+          submit_state.update(cx, |state, cx| state.set_disabled(false, cx));
+        });
+        break;
+      }
     })
     .detach();
     let progress_state = form.download.clone();
