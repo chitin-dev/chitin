@@ -50,7 +50,7 @@ struct RcsbCommandArgs {
 enum RcsbSubcommand {
   /// Download a PDB or mmCIF structure.
   Download {
-    /// Four-character PDB identifier, such as 4HHB.
+    /// Comma-separated list of four-character PDB identifiers, such as 4HHB,1YTH.
     #[arg(long, value_name = "PDB_ID")]
     id: String,
     /// Structure format to download.

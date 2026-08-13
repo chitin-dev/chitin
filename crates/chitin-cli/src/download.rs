@@ -18,7 +18,8 @@ use crate::{error::CliError, output::resolve_output_path};
 ///
 /// # Parameters
 ///
-/// * `raw_id` is the user-provided four-character PDB identifier.
+/// * `raw_id` is the user-provided comma-separated list of four-character PDB
+///   identifiers such as 4HHB,1YTH.
 /// * `format` selects PDB or mmCIF content.
 /// * `output` is an optional file or directory override.
 ///
