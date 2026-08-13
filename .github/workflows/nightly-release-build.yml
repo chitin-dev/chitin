@@ -66,7 +66,7 @@ jobs:
         run: cargo build -p chitin-desktop --release --locked
 
       - name: Build CLI release
-        run: cargo build -p chitin-cli --release --locked
+        run: cargo build -p chitin --release --locked
 
       - name: Package Linux executable
         if: runner.os == 'Linux'
