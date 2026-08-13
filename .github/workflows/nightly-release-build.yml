@@ -27,10 +27,14 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
-            executable: chitin-desktop
+            archive: chitin-linux-x86_64
+            desktop_executable: chitin-desktop
+            cli_executable: chitin
           - os: windows-latest
             target: windows-x86_64
-            executable: chitin-desktop.exe
+            archive: chitin-windows-x86_64
+            desktop_executable: chitin-desktop.exe
+            cli_executable: chitin.exe
 
     steps:
       - name: Checkout
@@ -61,24 +65,36 @@ jobs:
       - name: Build desktop release
         run: cargo build -p chitin-desktop --release --locked
 
+      - name: Build CLI release
+        run: cargo build -p chitin-cli --release --locked
+
       - name: Package Linux executable
         if: runner.os == 'Linux'
         run: |
-          mkdir -p dist
-          cp target/release/chitin-desktop dist/chitin-desktop
+          mkdir -p dist/${{ matrix.archive }}
+          cp target/release/chitin-desktop dist/${{ matrix.archive }}/chitin-desktop
+          cp target/release/chitin dist/${{ matrix.archive }}/chitin
+          cp README.md LICENSE dist/${{ matrix.archive }}/
+          tar -C dist -czf dist/${{ matrix.archive }}.tar.gz ${{ matrix.archive }}
+          sha256sum dist/${{ matrix.archive }}.tar.gz > dist/${{ matrix.archive }}.sha256
 
       - name: Package Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Copy-Item target/release/chitin-desktop.exe dist/chitin-desktop.exe
+          New-Item -ItemType Directory -Force -Path dist/${{ matrix.archive }}
+          Copy-Item target/release/chitin-desktop.exe dist/${{ matrix.archive }}/chitin-desktop.exe
+          Copy-Item target/release/chitin.exe dist/${{ matrix.archive }}/chitin.exe
+          Copy-Item README.md,LICENSE dist/${{ matrix.archive }}/
+          Compress-Archive -Path dist/${{ matrix.archive }} -DestinationPath dist/${{ matrix.archive }}.zip -Force
+          $hash = (Get-FileHash dist/${{ matrix.archive }}.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.archive }}.zip" | Out-File -Encoding ascii dist/${{ matrix.archive }}.sha256
 
       - name: Upload release executable
         uses: actions/upload-artifact@v4
         with:
           name: chitin-${{ matrix.target }}
-          path: dist/${{ matrix.executable }}
+          path: dist/*
           if-no-files-found: error
 
   release:
@@ -120,6 +136,8 @@ jobs:
           body: |
             Automated nightly build for commit ${{ github.sha }}.
           files: |
-            release/chitin-desktop
-            release/chitin-desktop.exe
+            release/chitin-linux-x86_64.tar.gz
+            release/chitin-linux-x86_64.sha256
+            release/chitin-windows-x86_64.zip
+            release/chitin-windows-x86_64.sha256
           fail_on_unmatched_files: true
