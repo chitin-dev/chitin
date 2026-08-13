@@ -13,18 +13,18 @@ background work, so its orchestration belongs to `chitin-desktop`.
 
 ## Source map
 
-| Module | Responsibility |
-| --- | --- |
-| `components/command_panel.rs` | Renders the overlay, connects GPUI events to application behavior, invokes commands, and runs the RCSB download. |
-| `components/command_panel/controller.rs` | Owns visibility, mode, focus restoration, persistent input entities, and command-panel transitions while composing `QuickPickState`. |
-| `components/command_panel/form/rcsb.rs` | Owns and renders the RCSB form's primitive states and download-progress presentation. |
-| `commands/command_panel.rs` | Defines command metadata, invocation behavior, registration, search, and ranking. |
-| `commands/mod.rs` | Defines the typed `ChitinCommand` hierarchy and the application command bus. |
-| `commands/{application,database,tab,workspace}.rs` | Own the commands and descriptors for each feature area. |
-| `app.rs` | Owns `CommandPanelController`, installs the global action/key routes, and inserts the overlay into the root layout. |
-| `chitin-ui::composite::quickpick` | Provides reusable search-list presentation and `QuickPickState` for query, selection, and virtual-list scrolling. It has no knowledge of desktop commands. |
-| `chitin-ui::primitive` | Supplies `TextInput`, `Select`, `Button`, and `Progress` behavior used by the panel and its forms. |
-| `chitin-databases` | Supplies the RCSB client, request types, identifiers, formats, transport, and download progress callback. |
+| Module                                             | Responsibility                                                                                                                                             |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `components/command_panel.rs`                      | Renders the overlay, connects GPUI events to application behavior, invokes commands, and runs the RCSB download.                                           |
+| `components/command_panel/controller.rs`           | Owns visibility, mode, focus restoration, persistent input entities, and command-panel transitions while composing `QuickPickState`.                       |
+| `components/command_panel/form/rcsb.rs`            | Owns and renders the RCSB form's primitive states and download-progress presentation.                                                                      |
+| `commands/command_panel.rs`                        | Defines command metadata, invocation behavior, registration, search, and ranking.                                                                          |
+| `commands/mod.rs`                                  | Defines the typed `ChitinCommand` hierarchy and the application command bus.                                                                               |
+| `commands/{application,database,tab,workspace}.rs` | Own the commands and descriptors for each feature area.                                                                                                    |
+| `app.rs`                                           | Owns `CommandPanelController`, installs the global action/key routes, and inserts the overlay into the root layout.                                        |
+| `chitin-ui::composite::quickpick`                  | Provides reusable search-list presentation and `QuickPickState` for query, selection, and virtual-list scrolling. It has no knowledge of desktop commands. |
+| `chitin-ui::primitive`                             | Supplies `TextInput`, `Select`, `Button`, and `Progress` behavior used by the panel and its forms.                                                         |
+| `chitin-databases`                                 | Supplies the RCSB client, request types, identifiers, formats, transport, and download progress callback.                                                  |
 
 The dependency direction is:
 
@@ -59,15 +59,15 @@ keybinding, or future plugin boundaries.
 
 A descriptor connects searchable metadata to a typed command:
 
-| Field | Meaning |
-| --- | --- |
-| `id` | Stable dotted identifier. |
-| `title` | Main label shown in the result row. |
-| `category` | Workspace, Database, or Application. |
-| `keywords` | Additional search terms. |
-| `shortcut` | Optional display label for the primary shortcut. |
+| Field        | Meaning                                                 |
+| ------------ | ------------------------------------------------------- |
+| `id`         | Stable dotted identifier.                               |
+| `title`      | Main label shown in the result row.                     |
+| `category`   | Workspace, Database, or Application.                    |
+| `keywords`   | Additional search terms.                                |
+| `shortcut`   | Optional display label for the primary shortcut.        |
 | `invocation` | Whether selection executes immediately or opens a form. |
-| `command` | Typed `ChitinCommand` payload. |
+| `command`    | Typed `ChitinCommand` payload.                          |
 
 `form_prompt` and `form_placeholder` are still present in the descriptor, but
 the current RCSB form owns its labels and placeholder directly. They are not
@@ -108,16 +108,16 @@ ID prefixes, title matches, keywords, and category matches.
 `ChitinApp` owns one `CommandPanelController`. The controller is the persistent
 state machine for the overlay, not its renderer.
 
-| State | Purpose |
-| --- | --- |
-| `is_open` | Controls whether `ChitinApp::render` inserts the overlay. |
-| `mode` | Selects search or command-specific form behavior. |
-| `quickpick` | Composes the generic `QuickPickState` for query, selection, and result-list scrolling. |
-| `search_input` | Lazily created persistent `Entity<TextInputState>`. |
-| `previous_focus` | Restores the focus target when the modal closes. |
-| `rcsb_form` | Lazily created singleton `RcsbFormPanel`. |
-| subscription flags | Ensure GPUI entity subscriptions are installed once. |
-| `rcsb_focus_pending` | Transfers focus to the form after entering Form mode. |
+| State                | Purpose                                                                                |
+| -------------------- | -------------------------------------------------------------------------------------- |
+| `is_open`            | Controls whether `ChitinApp::render` inserts the overlay.                              |
+| `mode`               | Selects search or command-specific form behavior.                                      |
+| `quickpick`          | Composes the generic `QuickPickState` for query, selection, and result-list scrolling. |
+| `search_input`       | Lazily created persistent `Entity<TextInputState>`.                                    |
+| `previous_focus`     | Restores the focus target when the modal closes.                                       |
+| `rcsb_form`          | Lazily created singleton `RcsbFormPanel`.                                              |
+| subscription flags   | Ensure GPUI entity subscriptions are installed once.                                   |
+| `rcsb_focus_pending` | Transfers focus to the form after entering Form mode.                                  |
 
 The principal state transitions are:
 
@@ -172,10 +172,10 @@ to any searchable, selectable list:
 - the virtual-list scroll handle; and
 - bounded previous/next navigation plus reveal requests.
 
-The caller supplies the current item count and remains responsible for filtering,
-ranking, row presentation, and activation semantics. This keeps quick-pick
-independent from `ChitinCommand`, command descriptors, forms, and desktop event
-types.
+The caller supplies the current item count and remains responsible for
+filtering, ranking, row presentation, and activation semantics. This keeps
+quick-pick independent from `ChitinCommand`, command descriptors, forms, and
+desktop event types.
 
 ## Search-mode call flow
 
@@ -216,8 +216,8 @@ back into a command.
 
 Up and Down are handled by `CommandPanelController::handle_search_key`. They
 delegate bounded navigation and reveal requests to `QuickPickState`, using the
-appropriate GPUI scroll strategy. Text editing and Enter submission remain owned by the
-`TextInputState` primitive and arrive as `TextInputEvent`s.
+appropriate GPUI scroll strategy. Text editing and Enter submission remain owned
+by the `TextInputState` primitive and arrive as `TextInputEvent`s.
 
 ### Invoking a result
 
@@ -379,13 +379,14 @@ The following limitations describe the implementation as it exists now:
 
 - Form routing is specialized for RCSB rather than backed by a general form
   registry.
-- The controller still contains a generic `SubmitForm` event and legacy
-  form-key path, but the RCSB form submits through primitive semantic events and
-  does not use that path.
+- The controller still contains a generic `SubmitForm` event and legacy form-key
+  path, but the RCSB form submits through primitive semantic events and does not
+  use that path.
 - A download is background work relative to GPUI rendering, but there is not yet
   a global task center or toast notification system.
 - Download completion does not yet open a rendered molecular document tab.
-- The form is a singleton, while document tabs are expected to be multi-instance.
+- The form is a singleton, while document tabs are expected to be
+  multi-instance.
 
 These constraints are useful boundaries when extending the command panel: new
 work should not accidentally treat an RCSB-specific branch as a generic form or
