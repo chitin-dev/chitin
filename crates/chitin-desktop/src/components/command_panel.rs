@@ -1,11 +1,12 @@
 //! Desktop command panel rendering and input handling.
 
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::{
   Arc,
   atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
-use std::{fs, path::PathBuf, rc::Rc};
 
 mod controller;
 mod form;
@@ -15,10 +16,7 @@ use controller::{CommandPanelEvent, CommandPanelMode};
 use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
 
 use chitin_command::{ApplicationCommand, ChitinCommand, CommandInvocationKind};
-use chitin_databases::{
-  Client, ClientConfig, TransportError,
-  providers::rcsb::{PdbId, RcsbError},
-};
+use chitin_databases::{Client, ClientConfig, providers::rcsb::PdbId};
 use chitin_ui::{
   composite::quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
   primitive::input::text::{TextInputEvent, TextInputState},
@@ -46,22 +44,13 @@ struct RcsbDownloadRequest {
 
 /// Failure encountered while downloading or persisting an RCSB structure.
 #[derive(Debug, thiserror::Error)]
-enum RcsbDownloadError {
+enum DesktopRcsbDownloadError {
   /// Tokio could not create the runtime required by the HTTP transport.
   #[error("failed to create download runtime: {0}")]
   Runtime(std::io::Error),
-  /// The shared database client could not initialize its transport.
-  #[error("failed to create database client: {0}")]
-  Client(TransportError),
-  /// RCSB rejected the request or the network transfer failed.
+  /// The shared database client or local persistence step failed.
   #[error("RCSB download failed: {0}")]
-  Provider(RcsbError),
-  /// The format-specific destination directory could not be created.
-  #[error("failed to create '{path}': {source}")]
-  CreateDirectory { path: PathBuf, source: std::io::Error },
-  /// The downloaded bytes could not be written to their final path.
-  #[error("failed to write '{path}': {source}")]
-  WriteFile { path: PathBuf, source: std::io::Error },
+  Download(#[from] chitin_databases::providers::rcsb::RcsbDownloadError),
 }
 
 /// Renders the command panel overlay.
@@ -252,6 +241,7 @@ impl ChitinApp {
     let background_active = active.clone();
     let download_task = cx.background_executor().spawn(async move {
       let result = download_rcsb_structure(request, move |received, total| {
+        log::debug!("RCSB form progress callback: received={received}, total={total:?}");
         background_received_bytes.store(received, Ordering::Relaxed);
         if let Some(total) = total {
           if let Some(value) = received.saturating_mul(10_000).checked_div(total) {
@@ -296,7 +286,8 @@ impl ChitinApp {
         let rounded_percent = percent.round() as u8;
         if last_logged_percent != Some(rounded_percent) {
           log::debug!(
-            "RCSB download UI progress tick: percent={percent:.2}, active={}",
+            "RCSB download UI progress tick: percent={percent:.2}, received={received}, has_total={}, active={}",
+            has_total.load(Ordering::Acquire),
             progress_active.load(Ordering::Acquire)
           );
           last_logged_percent = Some(rounded_percent);
@@ -304,10 +295,9 @@ impl ChitinApp {
         let _ = app.update(cx, |_, cx| {
           let active = progress_state.read(cx).active;
           if active {
+            progress_state.update(cx, |state, cx| state.set_received_bytes(received, cx));
             if has_total.load(Ordering::Acquire) {
               progress_state.update(cx, |state, cx| state.set_progress(percent, cx));
-            } else {
-              progress_state.update(cx, |state, cx| state.set_received_bytes(received, cx));
             }
           }
         });
@@ -394,30 +384,24 @@ impl ChitinApp {
 fn download_rcsb_structure(
   request: RcsbDownloadRequest,
   report_progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
-) -> Result<PathBuf, RcsbDownloadError> {
+) -> Result<PathBuf, DesktopRcsbDownloadError> {
   let destination = download_path(&request.workspace_root, &request.pdb_id, request.format);
   let runtime = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()
-    .map_err(RcsbDownloadError::Runtime)?;
-  let artifact = runtime.block_on(async {
-    let client = Client::new(ClientConfig::default()).map_err(RcsbDownloadError::Client)?;
+    .map_err(DesktopRcsbDownloadError::Runtime)?;
+  let download_result: Result<(), chitin_databases::providers::rcsb::RcsbDownloadError> = runtime.block_on(async {
+    let client = Client::new(ClientConfig::default()).map_err(|error| {
+      chitin_databases::providers::rcsb::RcsbDownloadError::Provider(
+        chitin_databases::providers::rcsb::RcsbError::Transport(error),
+      )
+    })?;
     client
       .rcsb()
-      .download_structure_with_progress(request.pdb_id, request.format, report_progress)
-      .await
-      .map_err(RcsbDownloadError::Provider)
-  })?;
-
-  if let Some(directory) = destination.parent() {
-    fs::create_dir_all(directory).map_err(|source| RcsbDownloadError::CreateDirectory {
-      path: directory.to_path_buf(),
-      source,
-    })?;
-  }
-  fs::write(&destination, artifact.content).map_err(|source| RcsbDownloadError::WriteFile {
-    path: destination.clone(),
-    source,
-  })?;
+      .download_structure_to_path(request.pdb_id, request.format, &destination, report_progress)
+      .await?;
+    Ok(())
+  });
+  download_result.map_err(DesktopRcsbDownloadError::Download)?;
   Ok(destination)
 }

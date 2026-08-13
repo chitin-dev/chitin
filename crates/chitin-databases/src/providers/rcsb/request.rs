@@ -53,6 +53,11 @@ impl StructureFormat {
       Self::Mmcif => "cif",
     }
   }
+
+  /// Returns the canonical filename for an RCSB entry in this format.
+  pub fn filename(self, id: &PdbId) -> String {
+    format!("{}.{}", id.as_str(), self.extension())
+  }
 }
 
 impl RcsbEndpoints {

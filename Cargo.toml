@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/chitin-command",
+  "crates/chitin-cli",
   "crates/chitin-utils",
   "crates/chitin-databases",
   "crates/chitin-desktop",

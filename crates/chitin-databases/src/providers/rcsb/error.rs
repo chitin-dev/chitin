@@ -1,6 +1,7 @@
 //! RCSB provider error types.
 
 use crate::{DecodeError, TransportError};
+use std::path::PathBuf;
 
 /// Validation error for an RCSB PDB identifier.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
@@ -49,4 +50,18 @@ pub enum RcsbError {
   /// Provider response could not be decoded.
   #[error(transparent)]
   Decode(#[from] DecodeError),
+}
+
+/// Failure while downloading an RCSB artifact to a local file.
+#[derive(Debug, thiserror::Error)]
+pub enum RcsbDownloadError {
+  /// The provider request failed.
+  #[error(transparent)]
+  Provider(#[from] RcsbError),
+  /// The destination directory could not be created.
+  #[error("failed to create '{path}': {source}")]
+  CreateDirectory { path: PathBuf, source: std::io::Error },
+  /// The downloaded bytes could not be written.
+  #[error("failed to write '{path}': {source}")]
+  WriteFile { path: PathBuf, source: std::io::Error },
 }

@@ -7,6 +7,6 @@ mod identifier;
 mod request;
 
 pub use client::{RcsbClient, RcsbEntryMetadata};
-pub use error::{PdbIdError, RcsbError};
+pub use error::{PdbIdError, RcsbDownloadError, RcsbError};
 pub use identifier::PdbId;
 pub use request::{RcsbEndpoints, StructureFormat};

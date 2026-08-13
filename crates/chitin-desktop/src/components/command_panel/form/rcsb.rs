@@ -31,7 +31,7 @@ pub(crate) fn download_path(workspace_root: &Path, pdb_id: &PdbId, format: Struc
       StructureFormat::Pdb => "pdb",
       StructureFormat::Mmcif => "mmcif",
     })
-    .join(format!("{}.{}", pdb_id.as_str(), format.extension()))
+    .join(format.filename(pdb_id))
 }
 
 /// Persistent primitive state for the RCSB download form.

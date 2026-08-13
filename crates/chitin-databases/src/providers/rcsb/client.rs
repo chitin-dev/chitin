@@ -1,6 +1,6 @@
 //! RCSB provider client implementation.
 
-use std::{sync::Arc, time::SystemTime};
+use std::{path::Path, sync::Arc, time::SystemTime};
 
 use http::StatusCode;
 
@@ -9,7 +9,7 @@ use crate::{
   TransportError, client::ClientRuntime,
 };
 
-use super::{PdbId, RcsbEndpoints, RcsbError, StructureFormat, dto::RcsbEntryDto};
+use super::{PdbId, RcsbDownloadError, RcsbEndpoints, RcsbError, StructureFormat, dto::RcsbEntryDto};
 
 /// RCSB Protein Data Bank provider client.
 #[derive(Clone)]
@@ -96,6 +96,42 @@ impl RcsbClient {
       content: response.body,
       provenance,
     })
+  }
+
+  /// Downloads an artifact and persists it at the requested destination.
+  ///
+  /// # Parameters
+  ///
+  /// * `id` identifies the RCSB entry.
+  /// * `format` selects PDB or mmCIF content.
+  /// * `destination` is the final local file path.
+  /// * `progress` receives downloaded and optional total byte counts.
+  ///
+  /// # Returns
+  ///
+  /// Returns `()` after the artifact has been written successfully.
+  pub async fn download_structure_to_path(
+    &self,
+    id: PdbId,
+    format: StructureFormat,
+    destination: &Path,
+    progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
+  ) -> Result<(), RcsbDownloadError> {
+    let artifact = self
+      .download_structure_with_progress(id, format, progress)
+      .await
+      .map_err(RcsbDownloadError::Provider)?;
+    if let Some(directory) = destination.parent() {
+      std::fs::create_dir_all(directory).map_err(|source| RcsbDownloadError::CreateDirectory {
+        path: directory.to_path_buf(),
+        source,
+      })?;
+    }
+    std::fs::write(destination, artifact.content).map_err(|source| RcsbDownloadError::WriteFile {
+      path: destination.to_path_buf(),
+      source,
+    })?;
+    Ok(())
   }
 
   /// Fetches a small stable subset of RCSB entry metadata.
