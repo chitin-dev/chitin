@@ -198,6 +198,10 @@ impl ChitinApp {
     let Some(form) = self.command_panel.rcsb_form_if_created() else {
       return;
     };
+    if form.download.read(cx).active {
+      log::debug!("RCSB download submission ignored because a batch is already active");
+      return;
+    }
     let Some(workspace_root) = self.workspace.as_ref().map(|workspace| workspace.root.clone()) else {
       log::warn!("RCSB download ignored because no workspace is open");
       return;
@@ -226,6 +230,8 @@ impl ChitinApp {
     form
       .download
       .update(cx, |state, cx| state.start_item(1, total_items, String::new(), cx));
+    form.pdb_id.update(cx, |state, cx| state.set_disabled(true, cx));
+    form.format.update(cx, |state, cx| state.set_disabled(true, cx));
     form.submit.update(cx, |state, cx| state.set_disabled(true, cx));
 
     let progress = Arc::new(AtomicU64::new(0));
@@ -268,6 +274,8 @@ impl ChitinApp {
       result
     });
     let download_state = form.download.clone();
+    let pdb_id_state = form.pdb_id.clone();
+    let format_state = form.format.clone();
     let submit_state = form.submit.clone();
     cx.spawn(async move |app, cx| {
       let result = download_task.await;
@@ -282,6 +290,8 @@ impl ChitinApp {
             download_state.update(cx, |state, cx| state.fail(error.to_string(), cx));
           }
         }
+        pdb_id_state.update(cx, |state, cx| state.set_disabled(false, cx));
+        format_state.update(cx, |state, cx| state.set_disabled(false, cx));
         submit_state.update(cx, |state, cx| state.set_disabled(false, cx));
       });
     })

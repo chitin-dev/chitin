@@ -176,6 +176,9 @@ impl RcsbFormPanel {
 
   /// Resets form fields and progress before opening the singleton panel.
   pub(crate) fn reset(&self, cx: &mut Context<crate::app::ChitinApp>) {
+    if self.download.read(cx).active {
+      return;
+    }
     self.pdb_id.update(cx, |state, cx| state.set_text("", cx));
     self.format.update(cx, |state, cx| {
       state.select(StructureFormat::Pdb.id(), cx);
