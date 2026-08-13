@@ -13,6 +13,15 @@ The PDB identifier must contain exactly four ASCII letters or digits.
 Identifiers are normalized to uppercase, so `4hhb` and `4HHB` refer to the same
 entry.
 
+Multiple identifiers can be separated by commas:
+
+```bash
+chitin db rcsb download --id 4hhb,1yth,6vxx --format pdb
+```
+
+Downloads are processed sequentially. Each completed file is kept if a later
+identifier fails.
+
 `--format` accepts:
 
 - `pdb` for the legacy PDB text format;
@@ -68,6 +77,19 @@ This writes:
 ```text
 ./structures/4HHB.pdb
 ```
+
+For multiple identifiers, `--output` must be an existing directory or a
+directory-style path that does not already name a file:
+
+```bash
+chitin db rcsb download \
+  --id 4hhb,1yth \
+  --output ./structures
+```
+
+This writes `./structures/4HHB.pdb` and `./structures/1YTH.pdb`. A single
+explicit file path cannot be used for multiple identifiers because it would
+cause the downloads to overwrite one another.
 
 An existing directory is detected from the filesystem. A path that does not
 exist is treated as an explicit file path, even when it has no extension:
