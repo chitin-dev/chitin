@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: github-pages
+  group: docs-pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
