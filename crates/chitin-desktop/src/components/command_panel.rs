@@ -170,10 +170,6 @@ impl ChitinApp {
         }
         TextInputEvent::Submit { .. } => match this.command_panel.submit_current() {
           CommandPanelEvent::Invoke(command) => this.invoke_command_from_panel(command, window, cx),
-          CommandPanelEvent::SubmitForm { .. } => {
-            this.command_panel.close(window, cx);
-            cx.notify();
-          }
           CommandPanelEvent::StateChanged | CommandPanelEvent::Close => {}
         },
         TextInputEvent::Cancel => {
@@ -357,10 +353,6 @@ impl ChitinApp {
         cx.notify();
       }
       CommandPanelEvent::Invoke(command) => self.invoke_command_from_panel(command, window, cx),
-      CommandPanelEvent::SubmitForm { .. } => {
-        self.command_panel.close(window, cx);
-        cx.notify();
-      }
     }
   }
 

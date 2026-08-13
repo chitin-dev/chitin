@@ -5,7 +5,7 @@ use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrateg
 
 use crate::{
   app::ChitinApp,
-  commands::{ChitinCommand, CommandRegistry, DatabaseCommand},
+  commands::{ChitinCommand, CommandRegistry},
   components::command_panel::form::rcsb::RcsbFormPanel,
 };
 
@@ -27,8 +27,6 @@ pub(crate) enum CommandPanelEvent {
   Close,
   /// A command should be invoked from the current search result.
   Invoke(ChitinCommand),
-  /// A command-specific form was submitted.
-  SubmitForm { command: ChitinCommand, value: String },
 }
 
 /// State and focus owner for the desktop command panel.
@@ -95,7 +93,7 @@ impl CommandPanelController {
     &self.mode
   }
 
-  /// Returns the current search text or form input.
+  /// Returns the current search text.
   pub(crate) fn query(&self) -> &str {
     self.quickpick.query()
   }
@@ -294,19 +292,7 @@ impl CommandPanelController {
       return self.handle_search_key(event);
     }
 
-    if self.is_rcsb_form() {
-      return (event.keystroke.key == "escape").then_some(CommandPanelEvent::Close);
-    }
-
-    self.handle_form_key(event)
-  }
-
-  /// Reports whether the active form belongs to the RCSB download workflow.
-  fn is_rcsb_form(&self) -> bool {
-    matches!(
-      self.mode,
-      CommandPanelMode::Form(ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure))
-    )
+    (event.keystroke.key == "escape").then_some(CommandPanelEvent::Close)
   }
 
   /// Handles navigation keys while the search input owns query editing.
@@ -338,35 +324,6 @@ impl CommandPanelController {
     }
   }
 
-  /// Handles form-mode keys until forms use a dedicated primitive input.
-  ///
-  /// # Parameters
-  ///
-  /// * `event` is the GPUI key event received by the workbench root.
-  ///
-  /// # Returns
-  ///
-  /// A panel event for form edits, submission, or cancellation.
-  fn handle_form_key(&mut self, event: &KeyDownEvent) -> Option<CommandPanelEvent> {
-    match event.keystroke.key.as_str() {
-      "escape" => Some(CommandPanelEvent::Close),
-      "enter" => Some(self.submit()),
-      "backspace" => {
-        let mut query = self.quickpick.query().to_owned();
-        query.pop();
-        self.quickpick.set_query(query);
-        Some(CommandPanelEvent::StateChanged)
-      }
-      _ => {
-        let character = printable_character(event)?;
-        let mut query = self.quickpick.query().to_owned();
-        query.push_str(character);
-        self.quickpick.set_query(query);
-        Some(CommandPanelEvent::StateChanged)
-      }
-    }
-  }
-
   /// Resets transient state before an open transition.
   ///
   /// # Parameters
@@ -391,20 +348,14 @@ impl CommandPanelController {
   ///
   /// # Returns
   ///
-  /// An invocation request, form submission, or local state-change event.
+  /// An invocation request or local state-change event.
   fn submit(&self) -> CommandPanelEvent {
-    match &self.mode {
-      CommandPanelMode::Search => self
-        .registry
-        .search(self.quickpick.query())
-        .get(self.quickpick.selected_index())
-        .map(|result| CommandPanelEvent::Invoke(result.descriptor.command.clone()))
-        .unwrap_or(CommandPanelEvent::StateChanged),
-      CommandPanelMode::Form(command) => CommandPanelEvent::SubmitForm {
-        command: command.clone(),
-        value: self.quickpick.query().to_owned(),
-      },
-    }
+    self
+      .registry
+      .search(self.quickpick.query())
+      .get(self.quickpick.selected_index())
+      .map(|result| CommandPanelEvent::Invoke(result.descriptor.command.clone()))
+      .unwrap_or(CommandPanelEvent::StateChanged)
   }
 }
 
@@ -413,27 +364,6 @@ impl Default for CommandPanelController {
   fn default() -> Self {
     Self::new()
   }
-}
-
-/// Extracts printable text input from a key event.
-///
-/// # Parameters
-///
-/// * `event` is the key event received by the command panel.
-///
-/// # Returns
-///
-/// `Some(&str)` for printable text input, otherwise `None`.
-fn printable_character(event: &KeyDownEvent) -> Option<&str> {
-  let modifiers = event.keystroke.modifiers;
-  if modifiers.control || modifiers.platform || modifiers.alt || modifiers.function {
-    return None;
-  }
-  event
-    .keystroke
-    .key_char
-    .as_deref()
-    .or_else(|| (event.keystroke.key.len() == 1).then_some(event.keystroke.key.as_str()))
 }
 
 #[cfg(test)]
