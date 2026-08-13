@@ -194,6 +194,7 @@ impl RcsbFormPanel {
     } else {
       "Download progress".to_string()
     };
+
     div()
       .flex()
       .flex_col()
@@ -246,7 +247,10 @@ impl RcsbFormPanel {
           .theme(theme)
           .animation_id(download.animation_id.clone())
           .finishing_from(download.finishing_from)
-          .label(ProgressLabel::new(format!("Download completed {} KB", download.received_bytes / 1024)))
+          .label(ProgressLabel::new(format!(
+            "Download completed {} KB",
+            download.received_bytes / 1024
+          )))
           .into_any_element()
       } else {
         Progress::new(download.progress)

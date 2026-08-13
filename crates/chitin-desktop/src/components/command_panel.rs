@@ -107,6 +107,7 @@ pub(crate) fn render_command_panel(
       .absolute()
       .inset_0()
       .flex()
+      .items_start()
       .justify_center()
       .child(
         div()
@@ -116,6 +117,7 @@ pub(crate) fn render_command_panel(
           .border_1()
           .border_color(theme.border.primary)
           .bg(theme.background.secondary)
+          .flex_none()
           .child(form.render(theme, cx)),
       )
       .track_focus(&focus_handle);
