@@ -13,18 +13,18 @@ background work, so its orchestration belongs to `chitin-desktop`.
 
 ## Source map
 
-| Module                                             | Responsibility                                                                                                                                             |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `components/command_panel.rs`                      | Renders the overlay, connects GPUI events to application behavior, invokes commands, and runs the RCSB download.                                           |
-| `components/command_panel/controller.rs`           | Owns visibility, mode, focus restoration, persistent input entities, and command-panel transitions while composing `QuickPickState`.                       |
-| `components/command_panel/form/rcsb.rs`            | Owns and renders the RCSB form's primitive states and download-progress presentation.                                                                      |
-| `commands/command_panel.rs`                        | Defines command metadata, invocation behavior, registration, search, and ranking.                                                                          |
-| `commands/mod.rs`                                  | Defines the typed `ChitinCommand` hierarchy and the application command bus.                                                                               |
-| `commands/{application,database,tab,workspace}.rs` | Own the commands and descriptors for each feature area.                                                                                                    |
-| `app.rs`                                           | Owns `CommandPanelController`, installs the global action/key routes, and inserts the overlay into the root layout.                                        |
-| `chitin-ui::composite::quickpick`                  | Provides reusable search-list presentation and `QuickPickState` for query, selection, and virtual-list scrolling. It has no knowledge of desktop commands. |
-| `chitin-ui::primitive`                             | Supplies `TextInput`, `Select`, `Button`, and `Progress` behavior used by the panel and its forms.                                                         |
-| `chitin-databases`                                 | Supplies the RCSB client, request types, identifiers, formats, transport, and download progress callback.                                                  |
+| Module                                   | Responsibility                                                                                                                                             |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `components/command_panel.rs`            | Renders the overlay, connects GPUI events to application behavior, invokes commands, and runs the RCSB download.                                           |
+| `components/command_panel/controller.rs` | Owns visibility, mode, focus restoration, persistent input entities, and command-panel transitions while composing `QuickPickState`.                       |
+| `components/command_panel/form/rcsb.rs`  | Owns and renders the RCSB form's primitive states and download-progress presentation.                                                                      |
+| `components/command_panel.rs`            | Renders the command panel, owns its form lifecycle, and routes selected commands.                                                                          |
+| `chitin-command`                         | Defines the shared typed `ChitinCommand` hierarchy, descriptors, and command metadata.                                                                     |
+| `keybindings/dispatch.rs`                | Adapts shared commands to desktop app behavior; GPUI input bindings remain in the neighboring keybinding modules.                                          |
+| `app.rs`                                 | Owns `CommandPanelController`, installs the global action/key routes, and inserts the overlay into the root layout.                                        |
+| `chitin-ui::composite::quickpick`        | Provides reusable search-list presentation and `QuickPickState` for query, selection, and virtual-list scrolling. It has no knowledge of desktop commands. |
+| `chitin-ui::primitive`                   | Supplies `TextInput`, `Select`, `Button`, and `Progress` behavior used by the panel and its forms.                                                         |
+| `chitin-databases`                       | Supplies the RCSB client, request types, identifiers, formats, transport, and download progress callback.                                                  |
 
 The dependency direction is:
 
