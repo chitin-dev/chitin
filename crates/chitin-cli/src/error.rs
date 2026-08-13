@@ -3,6 +3,9 @@
 /// Error returned by the Chitin CLI command handlers.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CliError {
+  /// A comma-separated identifier list contains an invalid element.
+  #[error("{0}")]
+  InvalidPdbIdList(#[from] chitin_databases::providers::rcsb::PdbIdListError),
   /// The supplied PDB identifier failed provider validation.
   #[error("invalid PDB ID: {0}")]
   InvalidPdbId(#[from] chitin_databases::providers::rcsb::PdbIdError),
@@ -12,6 +15,9 @@ pub(crate) enum CliError {
   /// No platform home directory variable was available.
   #[error("could not determine the home directory; set HOME or USERPROFILE")]
   HomeDirectory,
+  /// Multiple downloads were given one explicit file path.
+  #[error("--output must be a directory when downloading multiple PDB IDs: {0}")]
+  MultipleOutputFile(std::path::PathBuf),
   /// A command was not implemented by this CLI entry point.
   #[error("unsupported CLI command: {0}")]
   UnsupportedCommand(&'static str),

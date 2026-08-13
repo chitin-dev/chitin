@@ -1,6 +1,10 @@
 //! RCSB provider client implementation.
 
-use std::{path::Path, sync::Arc, time::SystemTime};
+use std::{
+  path::{Path, PathBuf},
+  sync::Arc,
+  time::SystemTime,
+};
 
 use http::StatusCode;
 
@@ -33,6 +37,39 @@ pub struct RcsbEntryMetadata {
   pub initial_release_date: Option<String>,
   /// Response provenance.
   pub provenance: Provenance,
+}
+
+/// One structure and destination in a sequential RCSB download batch.
+#[derive(Clone, Debug)]
+pub struct RcsbBatchDownloadRequest {
+  /// RCSB structure identifier.
+  pub id: PdbId,
+  /// Structure file format.
+  pub format: StructureFormat,
+  /// Destination path for the downloaded file.
+  pub destination: PathBuf,
+}
+
+/// Progress notification emitted while a batch is downloaded.
+#[derive(Clone, Debug)]
+pub enum RcsbBatchDownloadEvent {
+  /// A structure has started downloading.
+  Started { index: usize, total: usize, id: PdbId },
+  /// Bytes have been received for the active structure.
+  Progress {
+    index: usize,
+    total: usize,
+    id: PdbId,
+    received: u64,
+    total_bytes: Option<u64>,
+  },
+  /// A structure has been written successfully.
+  Completed {
+    index: usize,
+    total: usize,
+    id: PdbId,
+    path: PathBuf,
+  },
 }
 
 impl RcsbClient {
@@ -131,6 +168,58 @@ impl RcsbClient {
       path: destination.to_path_buf(),
       source,
     })?;
+    Ok(())
+  }
+
+  /// Downloads and persists structures sequentially while reporting batch progress.
+  ///
+  /// # Parameters
+  ///
+  /// * `requests` contains each identifier, format, and destination.
+  /// * `progress` receives start, byte-progress, and completion events.
+  ///
+  /// # Returns
+  ///
+  /// Returns `()` after every structure has been written successfully.
+  pub async fn download_structures_to_paths(
+    &self,
+    requests: &[RcsbBatchDownloadRequest],
+    progress: impl Fn(RcsbBatchDownloadEvent) + Send + Sync + 'static,
+  ) -> Result<(), RcsbDownloadError> {
+    let total = requests.len();
+    let progress = Arc::new(progress);
+    for (position, request) in requests.iter().enumerate() {
+      let index = position + 1;
+      progress(RcsbBatchDownloadEvent::Started {
+        index,
+        total,
+        id: request.id.clone(),
+      });
+      let event_progress = progress.clone();
+      let event_id = request.id.clone();
+      self
+        .download_structure_to_path(
+          request.id.clone(),
+          request.format,
+          &request.destination,
+          move |received, total_bytes| {
+            event_progress(RcsbBatchDownloadEvent::Progress {
+              index,
+              total,
+              id: event_id.clone(),
+              received,
+              total_bytes,
+            });
+          },
+        )
+        .await?;
+      progress(RcsbBatchDownloadEvent::Completed {
+        index,
+        total,
+        id: request.id.clone(),
+        path: request.destination.clone(),
+      });
+    }
     Ok(())
   }
 

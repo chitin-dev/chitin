@@ -1,10 +1,9 @@
 //! Desktop command panel rendering and input handling.
 
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{
-  Arc,
-  atomic::{AtomicBool, AtomicU64, Ordering},
+  Arc, Mutex,
+  atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::Duration;
 
@@ -16,7 +15,10 @@ use controller::{CommandPanelEvent, CommandPanelMode};
 use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
 
 use chitin_command::{ApplicationCommand, ChitinCommand, CommandInvocationKind};
-use chitin_databases::{Client, ClientConfig, providers::rcsb::PdbId};
+use chitin_databases::{
+  Client, ClientConfig,
+  providers::rcsb::{PdbId, RcsbBatchDownloadEvent, RcsbBatchDownloadRequest},
+};
 use chitin_ui::{
   composite::quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
   primitive::input::text::{TextInputEvent, TextInputState},
@@ -31,16 +33,6 @@ use crate::app::ChitinApp;
 
 /// Callback invoked when a rendered command row is selected.
 type CommandPanelSelectHandler = dyn for<'a, 'b> Fn(usize, &'a mut Window, &'b mut App);
-
-/// A validated RCSB structure download that can outlive the form panel.
-struct RcsbDownloadRequest {
-  /// Workspace root that owns the hidden download directory.
-  workspace_root: PathBuf,
-  /// Canonical uppercase RCSB identifier.
-  pdb_id: PdbId,
-  /// Selected output format and destination layout.
-  format: chitin_databases::providers::rcsb::StructureFormat,
-}
 
 /// Failure encountered while downloading or persisting an RCSB structure.
 #[derive(Debug, thiserror::Error)]
@@ -210,25 +202,30 @@ impl ChitinApp {
       log::warn!("RCSB download ignored because no workspace is open");
       return;
     };
-    let raw_pdb_id = form.pdb_id.read(cx).text().trim().to_owned();
-    let Ok(pdb_id) = PdbId::new(&raw_pdb_id) else {
-      log::warn!("RCSB download ignored because '{raw_pdb_id}' is not a valid PDB ID");
+    let raw_pdb_ids = form.pdb_id.read(cx).text().trim().to_owned();
+    let Ok(ids) = PdbId::parse_many(&raw_pdb_ids) else {
+      log::warn!("RCSB download ignored because the PDB ID list is invalid: {raw_pdb_ids}");
       return;
     };
-    let request = RcsbDownloadRequest {
-      workspace_root,
-      pdb_id,
-      format: form.selected_format(cx),
-    };
-    let destination = download_path(&request.workspace_root, &request.pdb_id, request.format);
+    let format = form.selected_format(cx);
+    let requests = ids
+      .into_iter()
+      .map(|pdb_id| RcsbBatchDownloadRequest {
+        destination: download_path(&workspace_root, &pdb_id, format),
+        id: pdb_id,
+        format,
+      })
+      .collect::<Vec<_>>();
+    let total_items = requests.len();
     log::info!(
-      "RCSB download started: pdb_id={}, format={:?}, destination={}",
-      request.pdb_id,
-      request.format,
-      destination.display()
+      "RCSB batch download started: items={}, format={:?}",
+      total_items,
+      format
     );
 
-    form.download.update(cx, RcsbDownloadState::start);
+    form
+      .download
+      .update(cx, |state, cx| state.start_item(1, total_items, String::new(), cx));
     form.submit.update(cx, |state, cx| state.set_disabled(true, cx));
 
     let progress = Arc::new(AtomicU64::new(0));
@@ -239,19 +236,33 @@ impl ChitinApp {
     let background_received_bytes = received_bytes.clone();
     let background_has_total = has_total.clone();
     let background_active = active.clone();
+    let batch_index = Arc::new(AtomicUsize::new(0));
+    let batch_total = Arc::new(AtomicUsize::new(total_items));
+    let current_id = Arc::new(Mutex::new(String::new()));
+    let background_batch_index = batch_index.clone();
+    let background_batch_total = batch_total.clone();
+    let background_current_id = current_id.clone();
     let download_task = cx.background_executor().spawn(async move {
-      let result = download_rcsb_structure(request, move |received, total| {
-        log::debug!("RCSB form progress callback: received={received}, total={total:?}");
-        background_received_bytes.store(received, Ordering::Relaxed);
-        if let Some(total) = total {
-          if let Some(value) = received.saturating_mul(10_000).checked_div(total) {
-            log::debug!("RCSB download progress callback: {} basis points", value);
+      let result = download_rcsb_structures(requests, move |event| match event {
+        RcsbBatchDownloadEvent::Started { index, total, id } => {
+          background_batch_index.store(index, Ordering::Release);
+          background_batch_total.store(total, Ordering::Release);
+          if let Ok(mut current) = background_current_id.lock() {
+            *current = id.to_string();
+          }
+        }
+        RcsbBatchDownloadEvent::Progress {
+          received, total_bytes, ..
+        } => {
+          background_received_bytes.store(received, Ordering::Relaxed);
+          if let Some(total) = total_bytes
+            && let Some(value) = received.saturating_mul(10_000).checked_div(total)
+          {
             background_has_total.store(true, Ordering::Release);
             background_progress.store(value, Ordering::Relaxed);
           }
-        } else {
-          log::debug!("RCSB download progress callback: received={received} bytes, total=unknown");
         }
+        RcsbBatchDownloadEvent::Completed { .. } => {}
       });
       background_active.store(false, Ordering::Release);
       result
@@ -262,8 +273,8 @@ impl ChitinApp {
       let result = download_task.await;
       let _ = app.update(cx, |_, cx| {
         match result {
-          Ok(path) => {
-            log::info!("RCSB download completed: {}", path.display());
+          Ok(()) => {
+            log::info!("RCSB batch download completed");
             download_state.update(cx, RcsbDownloadState::finish);
           }
           Err(error) => {
@@ -277,6 +288,9 @@ impl ChitinApp {
     .detach();
     let progress_state = form.download.clone();
     let progress_active = active;
+    let progress_batch_index = batch_index;
+    let progress_batch_total = batch_total;
+    let progress_current_id = current_id;
     cx.spawn(async move |app, cx| {
       let mut last_logged_percent = None;
       loop {
@@ -295,6 +309,12 @@ impl ChitinApp {
         let _ = app.update(cx, |_, cx| {
           let active = progress_state.read(cx).active;
           if active {
+            let item_index = progress_batch_index.load(Ordering::Acquire);
+            let item_total = progress_batch_total.load(Ordering::Acquire);
+            let item_id = progress_current_id.lock().map(|id| id.clone()).unwrap_or_default();
+            if item_index > 0 && progress_state.read(cx).current_index != item_index {
+              progress_state.update(cx, |state, cx| state.start_item(item_index, item_total, item_id, cx));
+            }
             progress_state.update(cx, |state, cx| state.set_received_bytes(received, cx));
             if has_total.load(Ordering::Acquire) {
               progress_state.update(cx, |state, cx| state.set_progress(percent, cx));
@@ -381,11 +401,10 @@ impl ChitinApp {
 /// # Returns
 ///
 /// The final artifact path after the file has been written successfully.
-fn download_rcsb_structure(
-  request: RcsbDownloadRequest,
-  report_progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
-) -> Result<PathBuf, DesktopRcsbDownloadError> {
-  let destination = download_path(&request.workspace_root, &request.pdb_id, request.format);
+fn download_rcsb_structures(
+  requests: Vec<RcsbBatchDownloadRequest>,
+  report_progress: impl Fn(RcsbBatchDownloadEvent) + Send + Sync + 'static,
+) -> Result<(), DesktopRcsbDownloadError> {
   let runtime = tokio::runtime::Builder::new_current_thread()
     .enable_all()
     .build()
@@ -398,10 +417,10 @@ fn download_rcsb_structure(
     })?;
     client
       .rcsb()
-      .download_structure_to_path(request.pdb_id, request.format, &destination, report_progress)
+      .download_structures_to_paths(&requests, report_progress)
       .await?;
     Ok(())
   });
   download_result.map_err(DesktopRcsbDownloadError::Download)?;
-  Ok(destination)
+  Ok(())
 }

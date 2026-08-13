@@ -50,6 +50,12 @@ pub(crate) struct RcsbFormPanel {
 /// Visible state for the active RCSB download.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct RcsbDownloadState {
+  /// One-based index of the active download in the batch.
+  pub(crate) current_index: usize,
+  /// Number of downloads in the active batch.
+  pub(crate) total_items: usize,
+  /// Identifier of the active download.
+  pub(crate) current_id: Option<String>,
   /// Download completion percentage.
   pub(crate) progress: f32,
   /// Whether a download is currently running.
@@ -72,6 +78,9 @@ pub(crate) struct RcsbDownloadState {
 impl RcsbDownloadState {
   /// Resets the download state before opening the singleton form.
   pub(crate) fn reset(&mut self, cx: &mut Context<Self>) {
+    self.current_index = 0;
+    self.total_items = 0;
+    self.current_id = None;
     self.progress = 0.0;
     self.active = false;
     self.indeterminate = false;
@@ -83,8 +92,11 @@ impl RcsbDownloadState {
     cx.notify();
   }
 
-  /// Marks a new download as active.
-  pub(crate) fn start(&mut self, cx: &mut Context<Self>) {
+  /// Starts the animation for the next item in a download batch.
+  pub(crate) fn start_item(&mut self, index: usize, total: usize, id: String, cx: &mut Context<Self>) {
+    self.current_index = index;
+    self.total_items = total;
+    self.current_id = Some(id);
     self.progress = 0.0;
     self.active = true;
     self.indeterminate = true;
@@ -189,7 +201,19 @@ impl RcsbFormPanel {
       .selected_option()
       .map(|option| SharedString::from(option.label()));
     let download = self.download.read(cx);
-    let progress_label = if download.indeterminate {
+    let progress_label = if download.total_items > 0 {
+      let current = download.current_index.max(1);
+      let id = download.current_id.as_deref().unwrap_or("structure");
+      if download.indeterminate {
+        format!(
+          "Downloading {current}/{} · {id} · {} KB",
+          download.total_items,
+          download.received_bytes / 1024
+        )
+      } else {
+        format!("Downloading {current}/{} · {id}", download.total_items)
+      }
+    } else if download.indeterminate {
       format!("Downloading… {} KB", download.received_bytes / 1024)
     } else {
       "Download progress".to_string()
@@ -248,7 +272,9 @@ impl RcsbFormPanel {
           .animation_id(download.animation_id.clone())
           .finishing_from(download.finishing_from)
           .label(ProgressLabel::new(format!(
-            "Download completed {} KB",
+            "Downloaded {}/{} · {} KB",
+            download.current_index,
+            download.total_items,
             download.received_bytes / 1024
           )))
           .into_any_element()

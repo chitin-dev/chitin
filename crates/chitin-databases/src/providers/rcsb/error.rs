@@ -20,6 +20,19 @@ pub enum PdbIdError {
   },
 }
 
+/// Validation error for one element of a comma-separated PDB ID list.
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+#[error("invalid PDB ID at position {index} ('{value}'): {source}")]
+pub struct PdbIdListError {
+  /// One-based position in the input list.
+  pub index: usize,
+  /// The original list element.
+  pub value: String,
+  /// Validation failure for the element.
+  #[source]
+  pub source: PdbIdError,
+}
+
 /// RCSB provider error.
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum RcsbError {
