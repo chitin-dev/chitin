@@ -125,6 +125,19 @@ impl RcsbDownloadState {
     cx.notify();
   }
 
+  /// Clears the most recent validation or download error.
+  pub(crate) fn clear_error(&mut self, cx: &mut Context<Self>) {
+    if self.error.take().is_some() {
+      cx.notify();
+    }
+  }
+
+  /// Stores a validation error without starting a download.
+  pub(crate) fn set_validation_error(&mut self, error: String, cx: &mut Context<Self>) {
+    self.error = Some(error);
+    cx.notify();
+  }
+
   /// Starts the short completion animation after a successful download.
   pub(crate) fn finish(&mut self, cx: &mut Context<Self>) {
     let starting_progress = self.progress;

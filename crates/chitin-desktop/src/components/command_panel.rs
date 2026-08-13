@@ -163,7 +163,12 @@ impl ChitinApp {
     if self.command_panel.take_rcsb_form_subscription() {
       let pdb_subscription = cx.subscribe_in(&form.pdb_id, window, move |this, _, event, window, cx| match event {
         TextInputEvent::Submit { .. } => this.submit_rcsb_form(window, cx),
-        TextInputEvent::Change { .. } => cx.notify(),
+        TextInputEvent::Change { .. } => {
+          if let Some(form) = this.command_panel.rcsb_form_if_created() {
+            form.download.update(cx, RcsbDownloadState::clear_error);
+          }
+          cx.notify();
+        }
         _ => {}
       });
       pdb_subscription.detach();
@@ -207,9 +212,16 @@ impl ChitinApp {
       return;
     };
     let raw_pdb_ids = form.pdb_id.read(cx).text().trim().to_owned();
-    let Ok(ids) = PdbId::parse_many(&raw_pdb_ids) else {
-      log::warn!("RCSB download ignored because the PDB ID list is invalid: {raw_pdb_ids}");
-      return;
+    let ids = match PdbId::parse_many(&raw_pdb_ids) {
+      Ok(ids) => ids,
+      Err(error) => {
+        let error = error.to_string();
+        log::warn!("RCSB download ignored because the PDB ID list is invalid: {error}");
+        form
+          .download
+          .update(cx, |state, cx| state.set_validation_error(error, cx));
+        return;
+      }
     };
     let format = form.selected_format(cx);
     let requests = ids
