@@ -1,8 +1,11 @@
 use std::io::Read;
 
+pub mod cif;
+
 use super::error::{MmcifParseError, MmcifParseResult, PdbParseError};
 use super::model::{Element, ResidueKind};
 use super::pdb::{AtomRecord, StructureBuilder};
+use cif::{CifCategory, CifDocument, CifParser, CifValue};
 
 /// Reads the atom-site loop of an mmCIF document into the shared structure model.
 #[derive(Debug, Clone, Copy, Default)]
@@ -51,8 +54,11 @@ impl MmcifParser {
   /// ```
   pub fn parse_bytes(&self, bytes: &[u8]) -> Result<MmcifParseResult, MmcifParseError> {
     let input = std::str::from_utf8(bytes).map_err(|_| MmcifParseError::InvalidUtf8)?;
-    let tokens = tokenize(input)?;
-    let table = atom_site_rows(&tokens)?;
+    let document = CifParser::parse(input).map_err(|error| MmcifParseError::InvalidToken {
+      line: error.line,
+      message: error.message,
+    })?;
+    let table = AtomSiteTable::from_document(&document)?;
     let mut builder = StructureBuilder::default();
     let mut current_model = None;
 
@@ -96,181 +102,6 @@ impl MmcifParser {
     reader.read_to_end(&mut bytes)?;
     self.parse_bytes(&bytes)
   }
-}
-
-/// A token together with the source line where it began.
-#[derive(Debug, Clone)]
-struct Token {
-  /// Decoded token text without surrounding quotes.
-  text: String,
-  /// One-based source line.
-  line: usize,
-}
-
-/// Tokenizes quoted values, comments, and semicolon-delimited text fields.
-///
-/// # Parameters
-///
-/// * `input` is a complete UTF-8 mmCIF document.
-///
-/// # Returns
-///
-/// Tokens carrying their source line, or a diagnostic for an unterminated
-/// quoted or semicolon-delimited value.
-fn tokenize(input: &str) -> Result<Vec<Token>, MmcifParseError> {
-  let bytes = input.as_bytes();
-  let mut tokens = Vec::new();
-  let mut position = 0;
-  let mut line = 1;
-
-  while position < bytes.len() {
-    while position < bytes.len() && bytes[position].is_ascii_whitespace() {
-      if bytes[position] == b'\n' {
-        line += 1;
-      }
-      position += 1;
-    }
-    if position >= bytes.len() {
-      break;
-    }
-    if bytes[position] == b'#' {
-      while position < bytes.len() && bytes[position] != b'\n' {
-        position += 1;
-      }
-      continue;
-    }
-
-    let token_line = line;
-    let first = bytes[position];
-    if first == b'\'' || first == b'"' {
-      let quote = first;
-      position += 1;
-      let start = position;
-      while position < bytes.len() && bytes[position] != quote {
-        if bytes[position] == b'\n' {
-          line += 1;
-        }
-        position += 1;
-      }
-      if position >= bytes.len() {
-        return Err(MmcifParseError::InvalidToken {
-          line: token_line,
-          message: "unterminated quoted value".to_owned(),
-        });
-      }
-      tokens.push(Token {
-        text: input[start..position].to_owned(),
-        line: token_line,
-      });
-      position += 1;
-      continue;
-    }
-
-    if first == b';' && (position == 0 || bytes[position - 1] == b'\n') {
-      position += 1;
-      let start = position;
-      while position < bytes.len() {
-        if (position == 0 || bytes[position - 1] == b'\n') && bytes[position] == b';' {
-          let text = input[start..position].trim_end_matches('\n').to_owned();
-          tokens.push(Token { text, line: token_line });
-          while position < bytes.len() && bytes[position] != b'\n' {
-            position += 1;
-          }
-          break;
-        }
-        if bytes[position] == b'\n' {
-          line += 1;
-        }
-        position += 1;
-      }
-      if position >= bytes.len() && tokens.last().is_none_or(|token| token.line != token_line) {
-        return Err(MmcifParseError::InvalidToken {
-          line: token_line,
-          message: "unterminated semicolon text field".to_owned(),
-        });
-      }
-      continue;
-    }
-
-    let start = position;
-    while position < bytes.len() && !bytes[position].is_ascii_whitespace() && bytes[position] != b'#' {
-      position += 1;
-    }
-    tokens.push(Token {
-      text: input[start..position].to_owned(),
-      line: token_line,
-    });
-  }
-
-  Ok(tokens)
-}
-
-/// Extracts rows from the first loop containing `_atom_site.*` columns.
-///
-/// # Parameters
-///
-/// * `tokens` is the output of [`tokenize`].
-///
-/// # Returns
-///
-/// A normalized atom-site table, or an error when the loop is absent or has an
-/// incomplete final row.
-fn atom_site_rows(tokens: &[Token]) -> Result<AtomSiteTable, MmcifParseError> {
-  let mut position = 0;
-  while position < tokens.len() {
-    if tokens[position].text != "loop_" {
-      position += 1;
-      continue;
-    }
-    position += 1;
-    let tag_start = position;
-    while position < tokens.len() && tokens[position].text.starts_with('_') {
-      position += 1;
-    }
-    let tags: Vec<String> = tokens[tag_start..position]
-      .iter()
-      .map(|token| token.text.clone())
-      .collect();
-    if tags.is_empty() {
-      return Err(MmcifParseError::InvalidToken {
-        line: 0,
-        message: "loop has no column tags".to_owned(),
-      });
-    }
-    if !tags.iter().any(|tag| tag.starts_with("_atom_site.")) {
-      while position < tokens.len() && tokens[position].text != "loop_" && !tokens[position].text.starts_with('_') {
-        position += 1;
-      }
-      continue;
-    }
-    let value_start = position;
-    while position < tokens.len() && tokens[position].text != "loop_" && !tokens[position].text.starts_with('_') {
-      position += 1;
-    }
-    let values = &tokens[value_start..position];
-    if values.is_empty() || !values.len().is_multiple_of(tags.len()) {
-      return Err(MmcifParseError::InvalidToken {
-        line: tokens[tag_start..position].first().map_or(0, |tag| tag.line),
-        message: "atom_site loop has incomplete rows".to_owned(),
-      });
-    }
-    return Ok(AtomSiteTable {
-      rows: values
-        .chunks(tags.len())
-        .enumerate()
-        .map(|(index, row)| AtomSiteRow {
-          row_number: index + 1,
-          tags: tags.clone(),
-          values: row.iter().map(|token| token.text.clone()).collect(),
-        })
-        .collect(),
-    });
-  }
-
-  Err(MmcifParseError::InvalidToken {
-    line: 0,
-    message: "missing atom_site loop".to_owned(),
-  })
 }
 
 /// Converts an atom-site row into the common builder record.
@@ -343,8 +174,8 @@ struct AtomSiteRow {
   row_number: usize,
   /// Column tags in loop order.
   tags: Vec<String>,
-  /// Values aligned positionally with `tags`.
-  values: Vec<String>,
+  /// Values aligned positionally with `tags`, preserving CIF missing markers.
+  values: Vec<CifValue>,
 }
 
 /// Columnar atom-site data selected from an mmCIF document.
@@ -362,7 +193,54 @@ impl AtomSiteRow {
       .iter()
       .position(|candidate| candidate == tag)
       .and_then(|index| self.values.get(index))
-      .map(String::as_str)
+      .and_then(CifValue::as_text)
+  }
+}
+
+impl AtomSiteTable {
+  /// Selects the first atom-site loop from a generic CIF document.
+  ///
+  /// # Parameters
+  ///
+  /// * `document` is the parsed CIF document whose categories are searched in
+  ///   source order.
+  ///
+  /// # Returns
+  ///
+  /// A row-oriented atom-site table, or an error when no usable loop exists.
+  fn from_document(document: &CifDocument) -> Result<Self, MmcifParseError> {
+    for block in &document.blocks {
+      for category in &block.categories {
+        let CifCategory::Loop { tags, rows } = category else {
+          continue;
+        };
+        if !tags.iter().any(|tag| tag.starts_with("_atom_site.")) {
+          continue;
+        }
+        if rows.is_empty() {
+          return Err(MmcifParseError::InvalidToken {
+            line: 0,
+            message: "atom_site loop has no rows".to_owned(),
+          });
+        }
+        return Ok(Self {
+          rows: rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| AtomSiteRow {
+              row_number: index + 1,
+              tags: tags.clone(),
+              values: row.clone(),
+            })
+            .collect(),
+        });
+      }
+    }
+
+    Err(MmcifParseError::InvalidToken {
+      line: 0,
+      message: "missing atom_site loop".to_owned(),
+    })
   }
 }
 
@@ -512,10 +390,10 @@ mod tests {
   use super::*;
 
   #[test]
-  fn tokenizes_quotes_and_comments() {
-    let tokens =
-      tokenize("data_x\n# comment\n_tag 'quoted value'\n").unwrap_or_else(|error| panic!("valid tokens: {error}"));
-    assert_eq!(tokens[2].text, "quoted value");
+  fn parses_quotes_and_comments() {
+    let document =
+      CifParser::parse("data_x\n# comment\n_tag 'quoted value'\n").unwrap_or_else(|error| panic!("valid CIF: {error}"));
+    assert_eq!(document.blocks[0].categories.len(), 1);
   }
 
   #[test]
