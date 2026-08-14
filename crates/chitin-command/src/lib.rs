@@ -165,6 +165,21 @@ pub fn default_registry() -> CommandRegistry {
   )
 }
 
+/// Scores a command descriptor against a normalized search query.
+///
+/// Exact command identifiers receive the highest score, followed by title,
+/// identifier-prefix, title-prefix, and category matches. The ordering keeps
+/// command IDs predictable while still allowing users to search by the label
+/// shown in the command panel.
+///
+/// # Parameters
+///
+/// * `descriptor` is the command metadata being matched.
+/// * `query` is a trimmed, lowercase search query.
+///
+/// # Returns
+///
+/// A score when the descriptor matches, or `None` when it should be omitted.
 fn score_descriptor(descriptor: &CommandDescriptor, query: &str) -> Option<i32> {
   if query.is_empty() {
     return Some(1);
@@ -172,6 +187,7 @@ fn score_descriptor(descriptor: &CommandDescriptor, query: &str) -> Option<i32> 
   let id = normalize(descriptor.id);
   let title = normalize(descriptor.title);
   let category = normalize(descriptor.category.label());
+  // Check stronger matches first so a broad prefix cannot hide an exact hit.
   if id == query {
     return Some(1000);
   }
@@ -200,6 +216,15 @@ fn score_descriptor(descriptor: &CommandDescriptor, query: &str) -> Option<i32> 
   None
 }
 
+/// Trims surrounding whitespace and lowercases a command-search value.
+///
+/// # Parameters
+///
+/// * `value` is the raw command identifier, title, category, or user query.
+///
+/// # Returns
+///
+/// A canonical value suitable for case-insensitive matching.
 fn normalize(value: &str) -> String {
   value.trim().to_ascii_lowercase()
 }
