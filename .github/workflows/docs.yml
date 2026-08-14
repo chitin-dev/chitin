@@ -29,6 +29,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Install mdBook
         uses: peaceiris/actions-mdbook@v2
         with:
@@ -41,7 +44,7 @@ jobs:
           key: mdbook-${{ runner.os }}-${{ hashFiles('docs/src/**', 'docs/book.toml') }}
 
       - name: Build documentation
-        run: mdbook build docs
+        run: just docs-build
 
       - name: Upload Pages artifact
         if: github.event_name != 'pull_request'
