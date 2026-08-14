@@ -200,7 +200,7 @@ struct AtomKey {
 
 /// Mutable assembly state used while converting records into dense tables.
 #[derive(Debug, Default)]
-struct StructureBuilder {
+pub(super) struct StructureBuilder {
   /// Structure tables being assembled.
   structure: Structure,
   /// Recoverable warnings collected in source order.
@@ -232,7 +232,7 @@ impl StructureBuilder {
   /// exists, only the current model's coordinate slot is written; if it is
   /// new, every existing coordinate set receives a NaN placeholder to keep
   /// all position vectors aligned with the atom table.
-  fn add_atom(&mut self, record: AtomRecord) -> Result<(), PdbParseError> {
+  pub(super) fn add_atom(&mut self, record: AtomRecord) -> Result<(), PdbParseError> {
     let model_id = self.ensure_model();
     let chain_id = self.ensure_chain(model_id, record.chain_id.clone());
     let residue_id = self.ensure_residue(
@@ -330,7 +330,7 @@ impl StructureBuilder {
   /// # Parameters
   ///
   /// * `source_number` is the source MODEL number.
-  fn start_model(&mut self, source_number: i32) {
+  pub(super) fn start_model(&mut self, source_number: i32) {
     if let Some(model_id) = self.current_model {
       let coordinate_set_id = self.structure.models[model_id.index()].coordinate_set_id;
       let has_atoms = self.structure.coordinates[coordinate_set_id.index()]
@@ -447,7 +447,7 @@ impl StructureBuilder {
   ///
   /// The completed structure and recoverable diagnostics, or an error when a
   /// builder invariant is broken.
-  fn finish(mut self) -> Result<PdbParseResult, PdbParseError> {
+  pub(super) fn finish(mut self) -> Result<PdbParseResult, PdbParseError> {
     if self.structure.models.is_empty() {
       // An END-only file is a valid empty snapshot and needs no implicit model.
     }
@@ -465,35 +465,35 @@ impl StructureBuilder {
 
 /// Normalized fields extracted from one ATOM or HETATM record.
 #[derive(Debug)]
-struct AtomRecord {
+pub(super) struct AtomRecord {
   /// One-based source line for errors raised during insertion.
-  line: usize,
+  pub(super) line: usize,
   /// Source serial number, when present.
-  serial: Option<i32>,
+  pub(super) serial: Option<i32>,
   /// Atom name from columns 13–16.
-  name: AtomName,
+  pub(super) name: AtomName,
   /// Element from columns 77–78.
-  element: Option<Element>,
+  pub(super) element: Option<Element>,
   /// Chain identifier from column 22.
-  chain_id: Option<String>,
+  pub(super) chain_id: Option<String>,
   /// Residue name from columns 18–20.
-  residue_name: String,
+  pub(super) residue_name: String,
   /// Residue sequence number from columns 23–26.
-  sequence_number: i32,
+  pub(super) sequence_number: i32,
   /// Insertion code from column 27.
-  insertion_code: Option<char>,
+  pub(super) insertion_code: Option<char>,
   /// Alternate-location code from column 17.
-  altloc: Option<char>,
+  pub(super) altloc: Option<char>,
   /// Occupancy from columns 55–60.
-  occupancy: Option<f32>,
+  pub(super) occupancy: Option<f32>,
   /// B-factor from columns 61–66.
-  b_factor: Option<f32>,
+  pub(super) b_factor: Option<f32>,
   /// Optional formal charge from columns 79–80.
-  formal_charge: Option<i8>,
+  pub(super) formal_charge: Option<i8>,
   /// Cartesian coordinates from columns 31–54, in ångström units.
-  position: [f32; 3],
+  pub(super) position: [f32; 3],
   /// Whether the source record was ATOM or HETATM.
-  kind: ResidueKind,
+  pub(super) kind: ResidueKind,
 }
 
 /// Parses one ATOM or HETATM record using the PDB fixed-column layout.

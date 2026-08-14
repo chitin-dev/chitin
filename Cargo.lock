@@ -699,7 +699,10 @@ dependencies = [
 name = "chitin-bio"
 version = "0.1.0"
 dependencies = [
+ "chitin-databases",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

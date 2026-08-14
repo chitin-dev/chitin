@@ -54,6 +54,38 @@ pub enum PdbParseError {
   },
 }
 
+/// A fatal error that prevents a valid mmCIF structure snapshot from being built.
+#[derive(Debug, thiserror::Error)]
+pub enum MmcifParseError {
+  /// The input stream could not be read.
+  #[error("failed to read mmCIF input: {0}")]
+  Io(#[from] io::Error),
+  /// The input bytes are not valid UTF-8.
+  #[error("mmCIF input is not valid UTF-8")]
+  InvalidUtf8,
+  /// Tokenization or loop structure is invalid.
+  #[error("mmCIF line {line}: invalid token stream: {message}")]
+  InvalidToken {
+    /// One-based source line where tokenization failed.
+    line: usize,
+    /// Explanation of the tokenization failure.
+    message: String,
+  },
+  /// A required atom-site field is absent or malformed.
+  #[error("mmCIF atom_site row {row}: invalid {field}: {value:?}")]
+  InvalidField {
+    /// One-based atom-site row.
+    row: usize,
+    /// Name of the failing field.
+    field: &'static str,
+    /// Original field text.
+    value: String,
+  },
+  /// The shared structure builder rejected a semantic event.
+  #[error("mmCIF structure error: {0}")]
+  InvalidStructure(String),
+}
+
 /// The result of a successful PDB parse, including recoverable diagnostics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PdbParseResult {
@@ -62,3 +94,6 @@ pub struct PdbParseResult {
   /// Non-fatal issues encountered while reading the input.
   pub diagnostics: Vec<Diagnostic>,
 }
+
+/// The result shape shared by PDB and mmCIF readers.
+pub type MmcifParseResult = PdbParseResult;
