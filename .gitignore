@@ -8,3 +8,5 @@ docs/superpowers
 .worktrees/
 .chitin/
 .cargo/
+.codex/
+.agents/
