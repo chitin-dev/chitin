@@ -19,11 +19,17 @@ use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
 use chitin_command::{ApplicationCommand, ChitinCommand, CommandInvocationKind};
 use chitin_databases::{
   Client, ClientConfig,
-  providers::rcsb::{PdbId, RcsbBatchDownloadEvent, RcsbBatchDownloadRequest},
+  providers::rcsb::{PdbId, RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, RcsbDownloadError, RcsbError},
 };
 use chitin_ui::{
   composite::quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
-  primitive::input::text::{TextInputEvent, TextInputState},
+  primitive::{
+    button::ButtonEvent,
+    input::{
+      select::SelectInputEvent,
+      text::{TextInputEvent, TextInputState},
+    },
+  },
   themes::UIThemes,
 };
 use gpui::{
@@ -44,7 +50,7 @@ enum DesktopRcsbDownloadError {
   Runtime(std::io::Error),
   /// The shared database client or local persistence step failed.
   #[error("RCSB download failed: {0}")]
-  Download(#[from] chitin_databases::providers::rcsb::RcsbDownloadError),
+  Download(#[from] RcsbDownloadError),
 }
 
 /// Renders the command panel overlay.
@@ -176,17 +182,14 @@ impl ChitinApp {
       pdb_subscription.detach();
 
       let select_subscription = cx.subscribe_in(&form.format, window, move |_, _, event, _, cx| {
-        if matches!(
-          event,
-          chitin_ui::primitive::input::select::SelectInputEvent::SelectionChange { .. }
-        ) {
+        if matches!(event, SelectInputEvent::SelectionChange { .. }) {
           cx.notify();
         }
       });
       select_subscription.detach();
 
       let submit_subscription = cx.subscribe_in(&form.submit, window, move |this, _, event, window, cx| {
-        if matches!(event, chitin_ui::primitive::button::ButtonEvent::Click) {
+        if matches!(event, ButtonEvent::Click) {
           this.submit_rcsb_form(window, cx);
         }
       });
@@ -468,12 +471,9 @@ fn download_rcsb_structures(
     .enable_all()
     .build()
     .map_err(DesktopRcsbDownloadError::Runtime)?;
-  let download_result: Result<(), chitin_databases::providers::rcsb::RcsbDownloadError> = runtime.block_on(async {
-    let client = Client::new(ClientConfig::default()).map_err(|error| {
-      chitin_databases::providers::rcsb::RcsbDownloadError::Provider(
-        chitin_databases::providers::rcsb::RcsbError::Transport(error),
-      )
-    })?;
+  let download_result: Result<(), RcsbDownloadError> = runtime.block_on(async {
+    let client =
+      Client::new(ClientConfig::default()).map_err(|error| RcsbDownloadError::Provider(RcsbError::Transport(error)))?;
     client
       .rcsb()
       .download_structures_to_paths(&requests, report_progress)

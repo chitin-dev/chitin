@@ -1,17 +1,19 @@
 //! Errors produced while parsing and executing CLI workflows.
 
+use chitin_databases::providers::rcsb::{PdbIdError, PdbIdListError, RcsbDownloadError};
+
 /// Error returned by the Chitin CLI command handlers.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CliError {
   /// A comma-separated identifier list contains an invalid element.
   #[error("{0}")]
-  InvalidPdbIdList(#[from] chitin_databases::providers::rcsb::PdbIdListError),
+  InvalidPdbIdList(#[from] PdbIdListError),
   /// The supplied PDB identifier failed provider validation.
   #[error("invalid PDB ID: {0}")]
-  InvalidPdbId(#[from] chitin_databases::providers::rcsb::PdbIdError),
+  InvalidPdbId(#[from] PdbIdError),
   /// The RCSB provider or local persistence step failed.
   #[error("RCSB download failed: {0}")]
-  Rcsb(#[from] chitin_databases::providers::rcsb::RcsbDownloadError),
+  Rcsb(#[from] RcsbDownloadError),
   /// No platform home directory variable was available.
   #[error("could not determine the home directory; set HOME or USERPROFILE")]
   HomeDirectory,

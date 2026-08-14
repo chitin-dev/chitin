@@ -8,7 +8,9 @@ use std::{
 
 use chitin_databases::{
   Client, ClientConfig,
-  providers::rcsb::{PdbId, RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, StructureFormat},
+  providers::rcsb::{
+    PdbId, RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, RcsbDownloadError, RcsbError, StructureFormat,
+  },
 };
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -34,11 +36,8 @@ pub(crate) async fn download_rcsb(
   // we use `,` as the splitter of different PDB IDs.
   let ids = PdbId::parse_many(&raw_ids)?;
   let multiple = ids.len() > 1;
-  let client = Client::new(ClientConfig::default()).map_err(|error| {
-    CliError::Rcsb(chitin_databases::providers::rcsb::RcsbDownloadError::Provider(
-      chitin_databases::providers::rcsb::RcsbError::Transport(error),
-    ))
-  })?;
+  let client = Client::new(ClientConfig::default())
+    .map_err(|error| CliError::Rcsb(RcsbDownloadError::Provider(RcsbError::Transport(error))))?;
   let requests = ids
     .into_iter()
     .map(|id| {
