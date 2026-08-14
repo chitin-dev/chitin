@@ -72,7 +72,7 @@ impl MmcifParser {
       builder.add_atom(atom).map_err(map_builder_error)?;
     }
 
-    builder.finish().map_err(map_builder_error)
+    builder.finish(false).map_err(map_builder_error)
   }
 
   /// Reads all bytes from a reader and parses the mmCIF atom-site loop.

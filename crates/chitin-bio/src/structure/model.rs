@@ -241,6 +241,29 @@ impl Structure {
   /// assert!(structure.validate_invariants().is_ok());
   /// ```
   pub fn validate_invariants(&self) -> Result<(), String> {
+    for (model_index, model) in self.models.iter().enumerate() {
+      if model.coordinate_set_id.index() >= self.coordinates.len() {
+        return Err(format!("model {model_index} references missing coordinates"));
+      }
+      if model
+        .chain_ids
+        .iter()
+        .any(|chain_id| chain_id.index() >= self.chains.len())
+      {
+        return Err(format!("model {model_index} references a missing chain"));
+      }
+    }
+
+    for (chain_index, chain) in self.chains.iter().enumerate() {
+      if chain
+        .residue_ids
+        .iter()
+        .any(|residue_id| residue_id.index() >= self.residues.len())
+      {
+        return Err(format!("chain {chain_index} references a missing residue"));
+      }
+    }
+
     for (residue_index, residue) in self.residues.iter().enumerate() {
       if residue.chain_id.index() >= self.chains.len() {
         return Err(format!("residue {residue_index} references missing chain"));
@@ -257,6 +280,17 @@ impl Structure {
     for bond in &self.bonds {
       if bond.a.index() >= self.atoms.len() || bond.b.index() >= self.atoms.len() {
         return Err("bond references an atom outside the atom table".to_owned());
+      }
+    }
+
+    for (range_index, range) in self.secondary_ranges.iter().enumerate() {
+      if range.start.index() >= self.residues.len() || range.end.index() >= self.residues.len() {
+        return Err(format!(
+          "secondary-structure range {range_index} references a missing residue"
+        ));
+      }
+      if self.residues[range.start.index()].chain_id != self.residues[range.end.index()].chain_id {
+        return Err(format!("secondary-structure range {range_index} crosses chains"));
       }
     }
 

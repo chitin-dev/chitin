@@ -3,8 +3,9 @@ use std::io::Read;
 
 use super::error::{Diagnostic, DiagnosticSeverity, PdbParseError, PdbParseResult};
 use super::model::{
-  Atom, AtomId, AtomName, Chain, ChainId, CoordinateSet, CoordinateSetId, Element, Model, ModelId, Residue, ResidueId,
-  ResidueKind, SecondaryStructure, Structure,
+  AnnotationSource, Atom, AtomId, AtomName, Bond, BondOrder, BondSource, Chain, ChainId, CoordinateSet,
+  CoordinateSetId, Element, Model, ModelId, Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure,
+  Structure,
 };
 
 /// Reads fixed-column PDB records into an indexed structure snapshot.
@@ -67,7 +68,7 @@ impl PdbParser {
       self.parse_line(line, line_number, &mut builder)?;
     }
 
-    builder.finish()
+    builder.finish(self.strict)
   }
 
   /// Reads all bytes from a reader and parses them as a PDB stream.
@@ -123,10 +124,10 @@ impl PdbParser {
       "MODEL" => builder.start_model(parse_required_i32(line, 10, 14, "model", line_number)?),
       "ATOM" | "HETATM" => builder.add_atom(parse_atom(line, line_number, record == "HETATM")?)?,
       "TER" => builder.finish_chain(),
-      // These records have dedicated fields in the model, but are intentionally
-      // deferred until the minimal atom snapshot is stable.
-      "ANISOU" | "CONECT" | "HELIX" | "SHEET" | "REMARK" | "TITLE" | "COMPND" | "SOURCE" | "KEYWDS" | "AUTHOR"
-      | "JRNL" | "CRYST1" => {}
+      "CONECT" => builder.add_conect(parse_conect(line, line_number)?),
+      "HELIX" => builder.add_secondary_range(parse_helix(line, line_number)?),
+      "SHEET" => builder.add_secondary_range(parse_sheet(line, line_number)?),
+      "ANISOU" | "REMARK" | "TITLE" | "COMPND" | "SOURCE" | "KEYWDS" | "AUTHOR" | "JRNL" | "CRYST1" => {}
       _ => self.record_warning(
         builder,
         line_number,
@@ -183,7 +184,8 @@ struct ResidueKey {
   /// Residue name is included because malformed files can reuse a sequence
   /// number for different residue records.
   name: String,
-  /// ATOM and HETATM records are kept as distinct residue kinds.
+  /// ATOM and HETATM records are kept as distinct residue kinds. HETATM represents
+  /// for "heterogen atom"
   kind: ResidueKind,
 }
 
@@ -196,6 +198,36 @@ struct AtomKey {
   name: String,
   /// Alternate location distinguishes conformers with the same atom name.
   altloc: Option<char>,
+}
+
+/// A source CONECT relation waiting for serial numbers to resolve to AtomId.
+#[derive(Debug)]
+struct PendingBond {
+  /// One-based source line for diagnostics.
+  line: usize,
+  /// Source atom serial number.
+  source: i32,
+  /// Target atom serial number.
+  target: i32,
+}
+
+/// A HELIX or SHEET range waiting for residue identifiers to resolve.
+#[derive(Debug)]
+struct PendingSecondaryRange {
+  /// One-based source line for diagnostics.
+  line: usize,
+  /// Author chain identifier, or None for a blank chain.
+  chain_id: Option<String>,
+  /// First residue sequence number.
+  start_sequence_number: i32,
+  /// First residue insertion code.
+  start_insertion_code: Option<char>,
+  /// Last residue sequence number.
+  end_sequence_number: i32,
+  /// Last residue insertion code.
+  end_insertion_code: Option<char>,
+  /// HELIX or SHEET classification.
+  kind: SecondaryStructure,
 }
 
 /// Mutable assembly state used while converting records into dense tables.
@@ -213,6 +245,12 @@ pub(super) struct StructureBuilder {
   residue_ids: HashMap<ResidueKey, ResidueId>,
   /// Maps source atom/conformer identity to the shared atom table.
   atom_ids: HashMap<AtomKey, AtomId>,
+  /// Maps PDB serial numbers to normalized atom identifiers.
+  serial_ids: HashMap<i32, AtomId>,
+  /// CONECT records are resolved after all atoms have been read.
+  pending_bonds: Vec<PendingBond>,
+  /// Secondary-structure records are resolved after all residues have been read.
+  pending_secondary_ranges: Vec<PendingSecondaryRange>,
 }
 
 impl StructureBuilder {
@@ -261,6 +299,9 @@ impl StructureBuilder {
     } else {
       let atom_id = AtomId::from_index(self.structure.atoms.len());
       self.atom_ids.insert(atom_key, atom_id);
+      if let Some(serial) = record.serial {
+        self.serial_ids.entry(serial).or_insert(atom_id);
+      }
       self.structure.atoms.push(Atom {
         serial: record.serial,
         name: record.name,
@@ -280,6 +321,19 @@ impl StructureBuilder {
 
     self.structure.coordinates[coordinate_set_id.index()].positions[atom_id.index()] = record.position;
     Ok(())
+  }
+
+  /// Queues a CONECT relation for resolution after atom parsing completes.
+  fn add_conect(&mut self, relation: (usize, i32, Vec<i32>)) {
+    let (line, source, targets) = relation;
+    self
+      .pending_bonds
+      .extend(targets.into_iter().map(|target| PendingBond { line, source, target }));
+  }
+
+  /// Queues a secondary-structure range for resolution after residue parsing.
+  fn add_secondary_range(&mut self, range: PendingSecondaryRange) {
+    self.pending_secondary_ranges.push(range);
   }
 
   /// Ensures that a model and its coordinate vector exist before an atom is added.
@@ -441,17 +495,19 @@ impl StructureBuilder {
     self.structure.metadata.identifier = non_empty(identifier);
   }
 
-  /// Finalizes the snapshot and checks all index/coordinate invariants.
+  /// Finalizes deferred bonds and annotations, then checks structure invariants.
   ///
   /// # Returns
   ///
   /// The completed structure and recoverable diagnostics, or an error when a
   /// builder invariant is broken.
-  pub(super) fn finish(mut self) -> Result<PdbParseResult, PdbParseError> {
+  pub(super) fn finish(mut self, strict: bool) -> Result<PdbParseResult, PdbParseError> {
     if self.structure.models.is_empty() {
       // An END-only file is a valid empty snapshot and needs no implicit model.
     }
     self.finish_model();
+    self.resolve_bonds(strict)?;
+    self.resolve_secondary_ranges(strict)?;
     self
       .structure
       .validate_invariants()
@@ -460,6 +516,178 @@ impl StructureBuilder {
       structure: self.structure,
       diagnostics: self.diagnostics,
     })
+  }
+
+  /// Resolves source serial numbers into atom IDs and deduplicates edges.
+  ///
+  /// # Parameters
+  ///
+  /// * `strict` controls whether references to unknown atom serials are fatal.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` after all resolvable edges are stored, or a strict-mode parse
+  /// error for an unresolved reference.
+  fn resolve_bonds(&mut self, strict: bool) -> Result<(), PdbParseError> {
+    let pending_bonds = std::mem::take(&mut self.pending_bonds);
+    for pending in pending_bonds {
+      let Some(&source) = self.serial_ids.get(&pending.source) else {
+        self.deferred_warning(
+          strict,
+          pending.line,
+          "PDB_CONECT_UNKNOWN_ATOM",
+          format!("CONECT source serial {} was not found", pending.source),
+        )?;
+        continue;
+      };
+      let Some(&target) = self.serial_ids.get(&pending.target) else {
+        self.deferred_warning(
+          strict,
+          pending.line,
+          "PDB_CONECT_UNKNOWN_ATOM",
+          format!("CONECT target serial {} was not found", pending.target),
+        )?;
+        continue;
+      };
+      if source == target {
+        continue;
+      }
+      let (a, b) = if source.index() < target.index() {
+        (source, target)
+      } else {
+        (target, source)
+      };
+      if !self.structure.bonds.iter().any(|bond| bond.a == a && bond.b == b) {
+        self.structure.bonds.push(Bond {
+          a,
+          b,
+          order: BondOrder::Unknown,
+          source: BondSource::Conect,
+        });
+      }
+    }
+    Ok(())
+  }
+
+  /// Resolves HELIX/SHEET endpoints and annotates residues in each range.
+  ///
+  /// # Parameters
+  ///
+  /// * `strict` controls whether an endpoint that is absent from the atom
+  ///   records is fatal.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` after valid ranges are stored and residue annotations applied.
+  fn resolve_secondary_ranges(&mut self, strict: bool) -> Result<(), PdbParseError> {
+    let pending_ranges = std::mem::take(&mut self.pending_secondary_ranges);
+    for pending in pending_ranges {
+      let Some(start) = self.find_residue(
+        pending.chain_id.as_deref(),
+        pending.start_sequence_number,
+        pending.start_insertion_code,
+      ) else {
+        self.deferred_warning(
+          strict,
+          pending.line,
+          "PDB_SECONDARY_UNKNOWN_RESIDUE",
+          "secondary-structure start residue was not found".to_owned(),
+        )?;
+        continue;
+      };
+      let Some(end) = self.find_residue(
+        pending.chain_id.as_deref(),
+        pending.end_sequence_number,
+        pending.end_insertion_code,
+      ) else {
+        self.deferred_warning(
+          strict,
+          pending.line,
+          "PDB_SECONDARY_UNKNOWN_RESIDUE",
+          "secondary-structure end residue was not found".to_owned(),
+        )?;
+        continue;
+      };
+      if self.structure.residues[start.index()].chain_id != self.structure.residues[end.index()].chain_id {
+        self.deferred_warning(
+          strict,
+          pending.line,
+          "PDB_SECONDARY_CROSS_CHAIN",
+          "secondary-structure range crosses chains".to_owned(),
+        )?;
+        continue;
+      }
+      let chain_id = self.structure.residues[start.index()].chain_id;
+      let residue_ids = self.structure.chains[chain_id.index()].residue_ids.clone();
+      let start_position = residue_ids.iter().position(|id| *id == start);
+      let end_position = residue_ids.iter().position(|id| *id == end);
+      let (Some(start_position), Some(end_position)) = (start_position, end_position) else {
+        continue;
+      };
+      let (first, last) = if start_position <= end_position {
+        (start_position, end_position)
+      } else {
+        (end_position, start_position)
+      };
+      for residue_id in &residue_ids[first..=last] {
+        self.structure.residues[residue_id.index()].secondary_structure = pending.kind;
+      }
+      self.structure.secondary_ranges.push(SecondaryRange {
+        chain_id,
+        start,
+        end,
+        kind: pending.kind,
+        source: AnnotationSource::File,
+      });
+    }
+    Ok(())
+  }
+
+  /// Finds a residue by author chain, sequence number, and insertion code.
+  fn find_residue(
+    &self,
+    chain_id: Option<&str>,
+    sequence_number: i32,
+    insertion_code: Option<char>,
+  ) -> Option<ResidueId> {
+    self
+      .chains_for_id(chain_id)
+      .into_iter()
+      .flat_map(|chain| chain.residue_ids.iter().copied())
+      .find(|residue_id| {
+        let residue = &self.structure.residues[residue_id.index()];
+        residue.sequence_number == sequence_number && residue.insertion_code == insertion_code
+      })
+  }
+
+  /// Returns chains matching an author identifier.
+  fn chains_for_id(&self, chain_id: Option<&str>) -> Vec<&Chain> {
+    self
+      .structure
+      .chains
+      .iter()
+      .filter(|chain| chain.auth_id.as_deref() == chain_id)
+      .collect()
+  }
+
+  /// Records a deferred warning or converts it into a strict parse failure.
+  fn deferred_warning(
+    &mut self,
+    strict: bool,
+    line: usize,
+    code: &'static str,
+    message: String,
+  ) -> Result<(), PdbParseError> {
+    if strict {
+      return Err(PdbParseError::InvalidStructure { line, message });
+    }
+    self.diagnostics.push(Diagnostic {
+      code,
+      line,
+      severity: DiagnosticSeverity::Warning,
+      message,
+    });
+    Ok(())
   }
 }
 
@@ -538,6 +766,77 @@ fn parse_atom(line: &str, line_number: usize, hetero: bool) -> Result<AtomRecord
     } else {
       ResidueKind::Polymer
     },
+  })
+}
+
+/// Parses a CONECT record into a source serial and its target serials.
+///
+/// # Parameters
+///
+/// * `line` is one decoded fixed-column CONECT record.
+/// * `line_number` identifies the source line in parse errors.
+///
+/// # Returns
+///
+/// The source line, source serial, and all populated target serials.
+fn parse_conect(line: &str, line_number: usize) -> Result<(usize, i32, Vec<i32>), PdbParseError> {
+  let source = parse_required_i32(line, 6, 11, "CONECT source serial", line_number)?;
+  let targets = [(11, 16), (16, 21), (21, 26), (26, 31)]
+    .into_iter()
+    .filter_map(|(start, end)| {
+      let value = field(line, start, end).trim();
+      (!value.is_empty()).then(|| value.parse::<i32>())
+    })
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|_| PdbParseError::InvalidField {
+      line: line_number,
+      field: "CONECT target serial",
+      value: field(line, 11, 31).to_owned(),
+    })?;
+  Ok((line_number, source, targets))
+}
+
+/// Parses a HELIX record into a deferred residue range.
+///
+/// # Parameters
+///
+/// * `line` is one decoded fixed-column HELIX record.
+/// * `line_number` identifies the source line in parse errors.
+///
+/// # Returns
+///
+/// A residue range resolved after all atom records have been indexed.
+fn parse_helix(line: &str, line_number: usize) -> Result<PendingSecondaryRange, PdbParseError> {
+  Ok(PendingSecondaryRange {
+    line: line_number,
+    chain_id: non_empty(field(line, 19, 20)),
+    start_sequence_number: parse_required_i32(line, 21, 25, "HELIX start sequence", line_number)?,
+    start_insertion_code: single_char(field(line, 25, 26)),
+    end_sequence_number: parse_required_i32(line, 33, 37, "HELIX end sequence", line_number)?,
+    end_insertion_code: single_char(field(line, 37, 38)),
+    kind: SecondaryStructure::Helix,
+  })
+}
+
+/// Parses a SHEET record into a deferred residue range.
+///
+/// # Parameters
+///
+/// * `line` is one decoded fixed-column SHEET record.
+/// * `line_number` identifies the source line in parse errors.
+///
+/// # Returns
+///
+/// A residue range resolved after all atom records have been indexed.
+fn parse_sheet(line: &str, line_number: usize) -> Result<PendingSecondaryRange, PdbParseError> {
+  Ok(PendingSecondaryRange {
+    line: line_number,
+    chain_id: non_empty(field(line, 21, 22)),
+    start_sequence_number: parse_required_i32(line, 22, 26, "SHEET start sequence", line_number)?,
+    start_insertion_code: single_char(field(line, 26, 27)),
+    end_sequence_number: parse_required_i32(line, 33, 37, "SHEET end sequence", line_number)?,
+    end_insertion_code: single_char(field(line, 37, 38)),
+    kind: SecondaryStructure::Sheet,
   })
 }
 
@@ -723,6 +1022,16 @@ mod tests {
 
   const ATOM_1: &str = "ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00 10.00           N  ";
   const ATOM_2: &str = "ATOM      2  CA  GLY A   1       1.000   2.000   3.000  1.00 11.00           C  ";
+  const ATOM_3: &str = "ATOM      3  N   GLY A   2       2.000   3.000   4.000  1.00 12.00           N  ";
+
+  fn fixed_record(record: &str, fields: &[(usize, &str)]) -> String {
+    let mut line = vec![b' '; 80];
+    line[..record.len()].copy_from_slice(record.as_bytes());
+    for &(start, value) in fields {
+      line[start..start + value.len()].copy_from_slice(value.as_bytes());
+    }
+    String::from_utf8(line).unwrap_or_else(|error| panic!("test record should be ASCII: {error}"))
+  }
 
   #[test]
   fn parses_atom_fields_and_indexes_coordinates() {
@@ -757,5 +1066,35 @@ mod tests {
   fn strict_mode_rejects_unknown_records() {
     let error = PdbParser::new().strict(true).parse_bytes(b"FOOBAR\n");
     assert!(matches!(error, Err(PdbParseError::InvalidStructure { .. })));
+  }
+
+  #[test]
+  fn parses_conect_bonds_and_deduplicates_reverse_edges() {
+    let input = format!("{ATOM_1}\n{ATOM_2}\nCONECT    1    2\nCONECT    2    1\n");
+    let parsed = PdbParser::new()
+      .parse_bytes(input.as_bytes())
+      .unwrap_or_else(|error| panic!("CONECT fixture should parse: {error}"));
+    assert_eq!(parsed.structure.bonds.len(), 1);
+    assert_eq!(parsed.structure.bonds[0].a.index(), 0);
+    assert_eq!(parsed.structure.bonds[0].b.index(), 1);
+  }
+
+  #[test]
+  fn parses_helix_and_sheet_ranges_and_marks_residues() {
+    let helix = fixed_record("HELIX", &[(19, "A"), (21, "1"), (33, "1"), (38, "1")]);
+    let sheet = fixed_record("SHEET", &[(21, "A"), (22, "2"), (32, "A"), (33, "2")]);
+    let input = format!("{ATOM_1}\n{ATOM_2}\n{ATOM_3}\n{helix}\n{sheet}\n");
+    let parsed = PdbParser::new()
+      .parse_bytes(input.as_bytes())
+      .unwrap_or_else(|error| panic!("secondary-structure fixture should parse: {error}"));
+    assert_eq!(parsed.structure.secondary_ranges.len(), 2);
+    assert_eq!(
+      parsed.structure.residues[0].secondary_structure,
+      SecondaryStructure::Helix
+    );
+    assert_eq!(
+      parsed.structure.residues[1].secondary_structure,
+      SecondaryStructure::Sheet
+    );
   }
 }

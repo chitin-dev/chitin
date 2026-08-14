@@ -108,7 +108,7 @@ async fn downloads_configured_structures_and_parses_them() {
     let parsed = parse_download(request.format, &bytes)
       .unwrap_or_else(|error| panic!("{} {} should parse: {error}", request.id, request.format.label()));
     println!(
-      "RCSB {} {}: {} bytes, {} models, {} chains, {} residues, {} atoms, {} diagnostics",
+      "RCSB {} {}: {} bytes, {} models, {} chains, {} residues, {} atoms, {} bonds, {} secondary ranges, {} diagnostics",
       request.id,
       request.format.label(),
       bytes.len(),
@@ -116,6 +116,8 @@ async fn downloads_configured_structures_and_parses_them() {
       parsed.structure.chains.len(),
       parsed.structure.residues.len(),
       parsed.structure.atoms.len(),
+      parsed.structure.bonds.len(),
+      parsed.structure.secondary_ranges.len(),
       parsed.diagnostics.len(),
     );
     assert!(
