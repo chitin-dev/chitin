@@ -696,6 +696,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin-bio"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "chitin-command"
 version = "0.1.0"
 
