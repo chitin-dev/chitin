@@ -5,8 +5,8 @@
 //! validate the real desktop shell without `#[path]`-based source inclusion.
 
 pub mod app;
-pub mod commands;
 pub(crate) mod components;
+pub mod keybindings;
 
 /// GPUI adapter for the experimental WGPU document panel.
 pub mod wgpu_panel {

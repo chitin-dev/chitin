@@ -247,15 +247,6 @@ impl SelectInputState {
   }
 
   /// Updates selector availability, closing the popup and emitting semantic events when it changes.
-  ///
-  /// # Parameters
-  ///
-  /// * `disabled` supplies the next availability state.
-  /// * `cx` closes an open popup, emits state events, and refreshes observers.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after applying a changed availability state.
   pub fn set_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
     if self.disabled == disabled {
       return;
@@ -397,15 +388,6 @@ impl SelectInputState {
   }
 
   /// Updates popup visibility and emits an event only when it changed.
-  ///
-  /// # Parameters
-  ///
-  /// * `open` selects the next popup visibility state.
-  /// * `cx` emits an open-state event and refreshes observers.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after applying a changed visibility state.
   fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
     if self.open == open {
       return;
@@ -426,15 +408,6 @@ impl SelectInputState {
   }
 
   /// Updates the selected identifier and emits an event only when it changed.
-  ///
-  /// # Parameters
-  ///
-  /// * `selected_id` supplies the next optional selection identifier.
-  /// * `cx` emits a selection event and refreshes observers.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after applying a changed selection.
   fn set_selected_id(&mut self, selected_id: Option<SharedString>, cx: &mut Context<Self>) {
     if self.selected_id == selected_id {
       return;

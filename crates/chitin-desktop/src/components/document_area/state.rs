@@ -189,14 +189,6 @@ impl DocumentPanelContent {
   }
 
   /// Returns the tab title for this document-panel content.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A string slice suitable for the document panel tab strip.
   pub(crate) fn title(&self) -> &str {
     match self {
       Self::ProjectDocument(document) => document.title.as_str(),
@@ -205,14 +197,6 @@ impl DocumentPanelContent {
   }
 
   /// Returns the project document payload when this tab holds one.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `Some(&OpenedProjectDocument)` for project-file tabs; otherwise `None`.
   #[cfg(test)]
   fn project_document(&self) -> Option<&OpenedProjectDocument> {
     match self {
@@ -261,15 +245,6 @@ impl DocumentPanelContent {
 
 impl DocumentPanelState {
   /// Creates empty document panel state with one root panel.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`DocumentPanelState`] with one empty leaf panel that can render the
-  /// main workbench empty state before any project file is opened.
   pub(crate) fn empty() -> Self {
     Self {
       tree: PanelTree::single_leaf(PanelLeaf::new(DEFAULT_DOCUMENT_PANEL_ID)),
@@ -418,17 +393,6 @@ impl DocumentPanelState {
   }
 
   /// Focuses the previous tab in the focused document panel.
-  ///
-  /// Navigation is circular across every tab in the panel container's visual
-  /// tree order.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when another tab was activated; otherwise `false`.
   pub(crate) fn focus_previous_tab(&mut self) -> bool {
     let Some((panel_id, tab_id)) = self.relative_container_tab(-1) else {
       return false;
@@ -438,17 +402,6 @@ impl DocumentPanelState {
   }
 
   /// Focuses the next tab in the focused document panel.
-  ///
-  /// Navigation is circular across every tab in the panel container's visual
-  /// tree order.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when another tab was activated; otherwise `false`.
   pub(crate) fn focus_next_tab(&mut self) -> bool {
     let Some((panel_id, tab_id)) = self.relative_container_tab(1) else {
       return false;
@@ -458,17 +411,6 @@ impl DocumentPanelState {
   }
 
   /// Closes the active tab in the focused document panel.
-  ///
-  /// The underlying panel tree repairs active-tab selection by preferring the
-  /// right neighbor, then the left neighbor when no right neighbor exists.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when an active tab existed and was closed; otherwise `false`.
   pub(crate) fn close_focused_tab(&mut self) -> bool {
     let panel_id = self.focused_panel_id;
     let Some(tab_id) = self.tree.leaf(panel_id).and_then(|leaf| leaf.active_tab) else {
@@ -479,19 +421,6 @@ impl DocumentPanelState {
   }
 
   /// Returns the first active document in panel-tree order.
-  ///
-  /// This helper is intentionally read-only and primarily supports places that
-  /// still need a simple "current document" view while the richer panel model
-  /// is being introduced.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `Some(&OpenedProjectDocument)` when any panel has an active tab;
-  /// otherwise `None`.
   #[cfg(test)]
   pub(crate) fn active_document(&self) -> Option<&OpenedProjectDocument> {
     self
@@ -635,18 +564,6 @@ impl DocumentPanelState {
   }
 
   /// Clears the current insertion target while preserving the active drag.
-  ///
-  /// The workbench root invokes this at the start of each native drag-move
-  /// event. A tab strip later in event propagation replaces it with a valid
-  /// target when the pointer is inside that strip.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the temporary drag session.
-  ///
-  /// # Returns
-  ///
-  /// `true` when an existing target was cleared; otherwise `false`.
   pub(crate) fn clear_tab_drag_target(&mut self) -> bool {
     let Some(tab_drag) = self.tab_drag.as_mut() else {
       return false;
@@ -688,14 +605,6 @@ impl DocumentPanelState {
   }
 
   /// Cancels the current tab drag without mutating the panel tree.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self` to clear temporary interaction state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a drag session existed and was removed; otherwise `false`.
   pub(crate) fn cancel_tab_drag(&mut self) -> bool {
     self.tab_drag.take().is_some()
   }
@@ -758,40 +667,16 @@ impl DocumentPanelState {
   }
 
   /// Stops the active document panel split resize gesture.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self` to clear resize state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a resize drag was active and removed; otherwise `false`.
   pub(crate) fn stop_resize(&mut self) -> bool {
     self.resize_drag.take().is_some()
   }
 
   /// Returns the active document panel resize axis.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `Some(PanelSplitAxis)` when a resize drag is active; otherwise `None`.
   pub(crate) fn resize_axis(&self) -> Option<PanelSplitAxis> {
     self.resize_drag.as_ref().map(|resize_drag| resize_drag.anchor().axis)
   }
 
   /// Allocates the next document panel identifier.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// A fresh [`PanelId`] for a document panel leaf.
   fn allocate_panel_id(&mut self) -> PanelId {
     let panel_id = self.next_panel_id;
     self.next_panel_id = PanelId::new(panel_id.value() + 1);
@@ -799,14 +684,6 @@ impl DocumentPanelState {
   }
 
   /// Allocates the next document tab identifier.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// A fresh [`PanelTabId`] for a document tab.
   fn allocate_tab_id(&mut self) -> PanelTabId {
     let tab_id = self.next_tab_id;
     self.next_tab_id = PanelTabId::new(tab_id.value() + 1);

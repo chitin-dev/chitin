@@ -14,7 +14,7 @@ use std::{borrow::Cow, fs, path::PathBuf};
 
 use chitin_desktop::{
   app::{ChitinApp, WgpuDocumentViewFactory},
-  commands::default_key_bindings,
+  keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
 use cube::ExampleCubeScene;
@@ -70,14 +70,6 @@ impl AssetSource for DesktopAssets {
 }
 
 /// Starts the desktop WGPU integration example.
-///
-/// # Parameters
-///
-/// This function reads an optional project path from `std::env::args_os`.
-///
-/// # Returns
-///
-/// This function returns `()` after handing control to GPUI's event loop.
 fn main() {
   env_logger::init();
   let project_path = std::env::args_os().nth(1).map(PathBuf::from);

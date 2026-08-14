@@ -260,14 +260,6 @@ struct ButtonMetrics {
 
 impl ButtonSize {
   /// Returns visual metrics for one predefined button size.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the selected button size.
-  ///
-  /// # Returns
-  ///
-  /// Height and font size values for the rendered button.
   fn metrics(self) -> ButtonMetrics {
     match self {
       Self::Small => ButtonMetrics {

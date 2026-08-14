@@ -19,7 +19,6 @@ use gpui::{
 };
 
 use crate::{
-  commands::{application::ToggleCommandPanel, workspace::ToggleWorkspace},
   components::{
     activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
@@ -27,6 +26,7 @@ use crate::{
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::{WindowBarControls, render_window_bar},
   },
+  keybindings::{ToggleCommandPanel, ToggleWorkspace},
 };
 
 pub use crate::components::document_area::state::WgpuDocumentViewFactory;
@@ -319,18 +319,6 @@ impl ChitinApp {
   }
 
   /// Applies the workspace-sidebar toggle state transition.
-  ///
-  /// This helper contains only synchronous state mutation so it can be tested
-  /// without constructing a GPUI window. Use [`ChitinApp::toggle_workspace`]
-  /// from UI actions so the app is notified after the transition.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after mutating activity/sidebar visibility.
   fn toggle_workspace_state(&mut self) {
     if self.active_activity == ActiveActivity::Workspace {
       self.project_sidebar_visible = !self.project_sidebar_visible;
@@ -423,6 +411,7 @@ impl Render for ChitinApp {
     let window_bar_controls = self.window_bar_controls(window, cx);
     let activity_bar_controls = self.activity_bar_controls(window, cx);
     let command_panel_search_input = self.command_panel_search_input(window, cx);
+    self.command_panel_rcsb_form(window, cx);
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);

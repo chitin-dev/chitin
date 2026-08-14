@@ -72,15 +72,6 @@ pub struct SidebarResizeState {
 
 impl SidebarResizeState {
   /// Creates sidebar resize state with default width bounds.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`SidebarResizeState`] using the default width, minimum width, and
-  /// maximum width.
   pub fn new() -> Self {
     Self {
       width: DEFAULT_SIDEBAR_WIDTH,
@@ -136,27 +127,11 @@ impl SidebarResizeState {
   }
 
   /// Returns the current sidebar width.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The current clamped sidebar width.
   pub fn width(&self) -> Pixels {
     self.width
   }
 
   /// Returns whether the sidebar is currently being resized.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a resize drag is active; otherwise `false`.
   pub fn is_resizing(&self) -> bool {
     self.resize_drag.is_some()
   }
@@ -196,14 +171,6 @@ impl SidebarResizeState {
   }
 
   /// Stops the current sidebar resize drag.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self` to clear active drag metadata.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a drag was active and removed; otherwise `false`.
   pub fn stop_resize(&mut self) -> bool {
     self.resize_drag.take().is_some()
   }
@@ -243,14 +210,6 @@ impl SidebarResizeState {
 
 impl Default for SidebarResizeState {
   /// Creates the default sidebar resize state.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`SidebarResizeState::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -335,14 +294,6 @@ pub struct SidebarHeader {
 
 impl SidebarHeader {
   /// Creates an empty sidebar header.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`SidebarHeader`] with no children and the built-in dark theme.
   pub fn new() -> Self {
     Self {
       base: div(),
@@ -397,14 +348,6 @@ impl SidebarHeader {
 
 impl Default for SidebarHeader {
   /// Creates the default empty sidebar header.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`SidebarHeader::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -414,14 +357,6 @@ impl IntoElement for SidebarHeader {
   type Element = Div;
 
   /// Converts this header into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self` and its children.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` for the header, or a hidden `Div` when hidden.
   fn into_element(self) -> Self::Element {
     if self.hidden {
       return div().hidden();
@@ -487,14 +422,6 @@ pub struct SidebarBody {
 
 impl SidebarBody {
   /// Creates an empty sidebar body.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`SidebarBody`] with no children, no id, and scrolling disabled.
   pub fn new() -> Self {
     Self {
       id: None,
@@ -581,14 +508,6 @@ impl SidebarBody {
 
 impl Default for SidebarBody {
   /// Creates the default empty sidebar body.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`SidebarBody::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -598,15 +517,6 @@ impl IntoElement for SidebarBody {
   type Element = AnyElement;
 
   /// Converts this body into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self` and its children.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI element for the body, using a stateful scroll container when
-  /// scrolling is enabled.
   fn into_element(self) -> Self::Element {
     if self.hidden {
       return div().hidden().into_any_element();
@@ -668,14 +578,6 @@ pub struct SidebarFooter {
 
 impl SidebarFooter {
   /// Creates an empty sidebar footer.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`SidebarFooter`] with no children and the built-in dark theme.
   pub fn new() -> Self {
     Self {
       base: div(),
@@ -730,14 +632,6 @@ impl SidebarFooter {
 
 impl Default for SidebarFooter {
   /// Creates the default empty sidebar footer.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`SidebarFooter::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -747,14 +641,6 @@ impl IntoElement for SidebarFooter {
   type Element = Div;
 
   /// Converts this footer into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self` and its children.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` for the footer, or a hidden `Div` when hidden.
   fn into_element(self) -> Self::Element {
     if self.hidden {
       return div().hidden();
@@ -794,14 +680,6 @@ pub struct SidebarSection {
 
 impl SidebarSection {
   /// Creates an empty sidebar section.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`SidebarSection`] with no children and fill disabled.
   pub fn new() -> Self {
     Self {
       fill: false,
@@ -872,14 +750,6 @@ impl SidebarSection {
 
 impl Default for SidebarSection {
   /// Creates the default empty sidebar section.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`SidebarSection::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -889,14 +759,6 @@ impl IntoElement for SidebarSection {
   type Element = Div;
 
   /// Converts this section into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self` and its children.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` for the section, or a hidden `Div` when hidden.
   fn into_element(self) -> Self::Element {
     if self.hidden {
       return div().hidden();
@@ -954,14 +816,6 @@ impl IntoElement for SidebarTitle {
   type Element = Div;
 
   /// Converts this title into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self`.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` containing the truncated title label.
   fn into_element(self) -> Self::Element {
     div()
       .min_w_0()
@@ -986,14 +840,6 @@ pub struct SidebarAction {
 
 impl SidebarAction {
   /// Creates an empty sidebar action.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`SidebarAction`] with no children and the built-in dark theme.
   pub fn new() -> Self {
     Self {
       base: div(),
@@ -1048,14 +894,6 @@ impl SidebarAction {
 
 impl Default for SidebarAction {
   /// Creates the default empty sidebar action.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`SidebarAction::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -1065,14 +903,6 @@ impl IntoElement for SidebarAction {
   type Element = Div;
 
   /// Converts this action into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self` and its children.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` for the action, or a hidden `Div` when hidden.
   fn into_element(self) -> Self::Element {
     if self.hidden {
       return div().hidden();
@@ -1113,14 +943,6 @@ pub struct Sidebar {
 
 impl Sidebar {
   /// Creates an empty sidebar shell.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`Sidebar`] with default width, no children, and no resize handle.
   pub fn new() -> Self {
     Self {
       base: div(),
@@ -1205,14 +1027,6 @@ impl Sidebar {
 
 impl Default for Sidebar {
   /// Creates the default empty sidebar shell.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`Sidebar::new`].
   fn default() -> Self {
     Self::new()
   }
@@ -1222,15 +1036,6 @@ impl IntoElement for Sidebar {
   type Element = Div;
 
   /// Converts this sidebar into a GPUI element.
-  ///
-  /// # Parameters
-  ///
-  /// This method consumes `self` and its children.
-  ///
-  /// # Returns
-  ///
-  /// A GPUI `Div` for the sidebar shell, optionally wrapped with a resize
-  /// handle container.
   fn into_element(self) -> Self::Element {
     if self.hidden {
       return div().hidden();

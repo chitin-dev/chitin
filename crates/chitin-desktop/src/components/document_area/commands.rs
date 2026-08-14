@@ -84,40 +84,16 @@ impl ChitinApp {
   }
 
   /// Focuses the previous tab in the focused document panel.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the active tab changed; otherwise `false`.
   pub(crate) fn focus_previous_document_panel_tab(&mut self) -> bool {
     self.document_panels.focus_previous_tab()
   }
 
   /// Focuses the next tab in the focused document panel.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the active tab changed; otherwise `false`.
   pub(crate) fn focus_next_document_panel_tab(&mut self) -> bool {
     self.document_panels.focus_next_tab()
   }
 
   /// Closes the active tab in the focused document panel.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self`.
-  ///
-  /// # Returns
-  ///
-  /// `true` when an active tab was closed; otherwise `false`.
   pub(crate) fn close_focused_document_panel_tab(&mut self) -> bool {
     self.document_panels.close_focused_tab()
   }
@@ -149,14 +125,6 @@ impl ChitinApp {
   }
 
   /// Clears stale document tab insertion feedback before target hit testing.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the app's document panel state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a previous insertion target was removed; otherwise `false`.
   pub(crate) fn clear_document_panel_tab_drag_target(&mut self) -> bool {
     self.document_panels.clear_tab_drag_target()
   }
@@ -176,15 +144,6 @@ impl ChitinApp {
   }
 
   /// Cancels any uncommitted document tab drag.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the app's document panel state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when temporary drag state existed and was cleared; otherwise
-  /// `false`.
   pub(crate) fn cancel_document_panel_tab_drag(&mut self) -> bool {
     self.document_panels.cancel_tab_drag()
   }
@@ -236,29 +195,11 @@ impl ChitinApp {
   }
 
   /// Stops the active document panel split resize.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows `self` to clear document panel resize state.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a document panel resize drag was active and removed;
-  /// otherwise `false`.
   pub(crate) fn stop_document_panel_resize(&mut self) -> bool {
     self.document_panels.stop_resize()
   }
 
   /// Returns the active document panel resize axis.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// `Some(PanelSplitAxis)` when a document panel resize drag is active;
-  /// otherwise `None`.
   pub(crate) fn document_panel_resize_axis(&self) -> Option<PanelSplitAxis> {
     self.document_panels.resize_axis()
   }

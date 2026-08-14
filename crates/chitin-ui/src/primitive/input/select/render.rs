@@ -392,14 +392,6 @@ impl SelectContent {
   }
 
   /// Flattens grouped content into the display order required by selection state.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the content tree.
-  ///
-  /// # Returns
-  ///
-  /// Selectable options in visual order, excluding labels and separators.
   fn options(&self) -> Vec<SelectOption> {
     self
       .children

@@ -1,12 +1,10 @@
 //! Desktop-owned command-panel state and focus management.
 
-use chitin_ui::primitive::input::text::TextInputState;
+use chitin_command::{ChitinCommand, CommandRegistry};
+use chitin_ui::{composite::quickpick::QuickPickState, primitive::input::text::TextInputState};
 use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
 
-use crate::{
-  app::ChitinApp,
-  commands::{ChitinCommand, CommandDescriptor, CommandRegistry},
-};
+use crate::{app::ChitinApp, components::command_panel::form::rcsb::RcsbFormPanel};
 
 /// Current interaction mode of the command panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -26,8 +24,6 @@ pub(crate) enum CommandPanelEvent {
   Close,
   /// A command should be invoked from the current search result.
   Invoke(ChitinCommand),
-  /// A command-specific form was submitted.
-  SubmitForm { command: ChitinCommand, value: String },
 }
 
 /// State and focus owner for the desktop command panel.
@@ -36,12 +32,8 @@ pub(crate) struct CommandPanelController {
   registry: CommandRegistry,
   /// Whether the quick-pick overlay is currently visible.
   is_open: bool,
-  /// Current search text or form value.
-  query: String,
-  /// Selected search result index.
-  selected_index: usize,
-  /// Scroll handle for the virtualized command result list.
-  result_scroll: UniformListScrollHandle,
+  /// Search and selection state for the command result quick-pick.
+  quickpick: QuickPickState,
   /// Primitive text-input state for quick-pick search.
   search_input: Option<Entity<TextInputState>>,
   /// Whether desktop routing has subscribed to search input events.
@@ -50,29 +42,28 @@ pub(crate) struct CommandPanelController {
   mode: CommandPanelMode,
   /// Focus target active before the overlay opened.
   previous_focus: Option<FocusHandle>,
+  /// Singleton RCSB form state used by the database command.
+  rcsb_form: Option<RcsbFormPanel>,
+  /// Whether the next RCSB form render should claim focus.
+  rcsb_focus_pending: bool,
+  /// Whether RCSB form event subscriptions have been installed.
+  rcsb_form_subscribed: bool,
 }
 
 impl CommandPanelController {
   /// Creates a closed command panel with the default command registry.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A controller ready to open and render the desktop command panel.
   pub(crate) fn new() -> Self {
     Self {
-      registry: CommandRegistry::new(),
+      registry: chitin_command::default_registry(),
       is_open: false,
-      query: String::new(),
-      selected_index: 0,
-      result_scroll: UniformListScrollHandle::new(),
+      quickpick: QuickPickState::new(),
       search_input: None,
       search_input_subscribed: false,
       mode: CommandPanelMode::Search,
       previous_focus: None,
+      rcsb_form: None,
+      rcsb_focus_pending: false,
+      rcsb_form_subscribed: false,
     }
   }
 
@@ -91,19 +82,19 @@ impl CommandPanelController {
     &self.mode
   }
 
-  /// Returns the current search text or form input.
+  /// Returns the current search text.
   pub(crate) fn query(&self) -> &str {
-    &self.query
+    self.quickpick.query()
   }
 
   /// Returns the selected command result index.
   pub(crate) fn selected_index(&self) -> usize {
-    self.selected_index
+    self.quickpick.selected_index()
   }
 
   /// Returns the scroll handle for command result virtualization.
   pub(crate) fn result_scroll_handle(&self) -> UniformListScrollHandle {
-    self.result_scroll.clone()
+    self.quickpick.scroll_handle()
   }
 
   /// Returns persistent primitive state for the quick-pick search input.
@@ -126,23 +117,12 @@ impl CommandPanelController {
 
   /// Updates the query after a primitive text-input change event.
   pub(crate) fn set_query(&mut self, query: impl Into<String>) {
-    self.query = query.into();
-    self.selected_index = 0;
-    self.reveal_selected(ScrollStrategy::Top);
+    self.quickpick.set_query(query);
   }
 
   /// Resolves the current search selection or form value into a panel event.
   pub(crate) fn submit_current(&self) -> CommandPanelEvent {
     self.submit()
-  }
-
-  /// Returns the descriptor for the command whose form is open.
-  /// The form command descriptor when the current mode identifies one.
-  pub(crate) fn form_descriptor(&self) -> Option<&CommandDescriptor> {
-    let CommandPanelMode::Form(command) = &self.mode else {
-      return None;
-    };
-    self.registry.descriptor_for(command)
   }
 
   /// Opens the command panel and focuses its overlay.
@@ -190,19 +170,10 @@ impl CommandPanelController {
   }
 
   /// Toggles panel visibility when no GPUI window is available.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// `true` when panel visibility changed. Window-aware callers should prefer [`Self::toggle`].
   pub(crate) fn toggle_without_focus(&mut self) -> bool {
     if self.is_open {
       self.is_open = false;
-      self.query.clear();
-      self.selected_index = 0;
+      self.quickpick.reset();
       self.mode = CommandPanelMode::Search;
       self.previous_focus = None;
     } else {
@@ -227,13 +198,12 @@ impl CommandPanelController {
     }
 
     self.is_open = false;
-    self.query.clear();
+    self.quickpick.reset();
     if let Some(search_input) = self.search_input.as_ref() {
       search_input.update(cx, |state, cx| {
         state.set_text("", cx);
       });
     }
-    self.selected_index = 0;
     self.mode = CommandPanelMode::Search;
     if let Some(previous_focus) = self.previous_focus.take() {
       window.focus(&previous_focus, cx);
@@ -256,9 +226,32 @@ impl CommandPanelController {
     }
 
     self.mode = CommandPanelMode::Form(command);
-    self.query.clear();
-    self.selected_index = 0;
-    self.reveal_selected(ScrollStrategy::Top);
+    self.rcsb_focus_pending = true;
+    self.quickpick.reset();
+    true
+  }
+
+  /// Returns or creates the singleton RCSB form state.
+  pub(crate) fn rcsb_form(&mut self, cx: &mut Context<ChitinApp>) -> RcsbFormPanel {
+    self.rcsb_form.get_or_insert_with(|| RcsbFormPanel::new(cx)).clone()
+  }
+
+  /// Returns the already-created RCSB form state.
+  pub(crate) fn rcsb_form_if_created(&self) -> Option<RcsbFormPanel> {
+    self.rcsb_form.clone()
+  }
+
+  /// Marks the RCSB form focus request as handled.
+  pub(crate) fn take_rcsb_focus_request(&mut self) -> bool {
+    std::mem::take(&mut self.rcsb_focus_pending)
+  }
+
+  /// Marks the RCSB form event subscriptions as installed.
+  pub(crate) fn take_rcsb_form_subscription(&mut self) -> bool {
+    if self.rcsb_form_subscribed {
+      return false;
+    }
+    self.rcsb_form_subscribed = true;
     true
   }
 
@@ -280,7 +273,7 @@ impl CommandPanelController {
       return self.handle_search_key(event);
     }
 
-    self.handle_form_key(event)
+    (event.keystroke.key == "escape").then_some(CommandPanelEvent::Close)
   }
 
   /// Handles navigation keys while the search input owns query editing.
@@ -296,13 +289,14 @@ impl CommandPanelController {
     match event.keystroke.key.as_str() {
       "escape" => Some(CommandPanelEvent::Close),
       "up" => {
-        self.select_previous();
-        self.reveal_selected(ScrollStrategy::Top);
+        self.quickpick.select_previous();
+        self.quickpick.reveal_selected(ScrollStrategy::Top);
         Some(CommandPanelEvent::StateChanged)
       }
       "down" => {
-        self.select_next();
-        self.reveal_selected(ScrollStrategy::Bottom);
+        let result_count = self.registry.search(self.quickpick.query()).len();
+        self.quickpick.select_next(result_count);
+        self.quickpick.reveal_selected(ScrollStrategy::Bottom);
         Some(CommandPanelEvent::StateChanged)
       }
       // TextInputState owns Search-mode typing, deletion, cursor movement,
@@ -311,124 +305,22 @@ impl CommandPanelController {
     }
   }
 
-  /// Handles form-mode keys until forms use a dedicated primitive input.
-  ///
-  /// # Parameters
-  ///
-  /// * `event` is the GPUI key event received by the workbench root.
-  ///
-  /// # Returns
-  ///
-  /// A panel event for form edits, submission, or cancellation.
-  fn handle_form_key(&mut self, event: &KeyDownEvent) -> Option<CommandPanelEvent> {
-    match event.keystroke.key.as_str() {
-      "escape" => Some(CommandPanelEvent::Close),
-      "enter" => Some(self.submit()),
-      "backspace" => {
-        self.query.pop();
-        self.selected_index = 0;
-        self.reveal_selected(ScrollStrategy::Top);
-        Some(CommandPanelEvent::StateChanged)
-      }
-      _ => {
-        let character = printable_character(event)?;
-        self.query.push_str(character);
-        self.selected_index = 0;
-        self.reveal_selected(ScrollStrategy::Top);
-        Some(CommandPanelEvent::StateChanged)
-      }
-    }
-  }
-
   /// Resets transient state before an open transition.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after preparing search mode.
   fn reset_for_open(&mut self) {
     self.is_open = true;
-    self.query.clear();
-    self.selected_index = 0;
+    self.quickpick.reset();
     self.mode = CommandPanelMode::Search;
-    self.reveal_selected(ScrollStrategy::Top);
-  }
-
-  /// Moves selection to the previous visible search result.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after clamping the selected index.
-  fn select_previous(&mut self) {
-    if !matches!(self.mode, CommandPanelMode::Search) {
-      return;
-    }
-
-    self.selected_index = self.selected_index.saturating_sub(1);
-  }
-
-  /// Moves selection to the next visible search result.
-  ///
-  /// # Parameters
-  ///
-  /// This method mutably borrows the controller.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after clamping the selected index.
-  fn select_next(&mut self) {
-    if !matches!(self.mode, CommandPanelMode::Search) {
-      return;
-    }
-
-    let result_count = self.registry.search(&self.query).len();
-    if result_count > 0 {
-      self.selected_index = (self.selected_index + 1).min(result_count - 1);
-    }
-  }
-
-  /// Scrolls the virtual result list so the selected row remains visible.
-  ///
-  /// # Parameters
-  ///
-  /// * `strategy` controls which viewport edge GPUI should use when scrolling is needed.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after recording a deferred GPUI scroll request.
-  fn reveal_selected(&self, strategy: ScrollStrategy) {
-    self.result_scroll.scroll_to_item(self.selected_index, strategy);
+    self.quickpick.reveal_selected(ScrollStrategy::Top);
   }
 
   /// Resolves the current input line into a command-panel operation.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the controller state and command registry.
-  ///
-  /// # Returns
-  ///
-  /// An invocation request, form submission, or local state-change event.
   fn submit(&self) -> CommandPanelEvent {
-    match &self.mode {
-      CommandPanelMode::Search => self
-        .registry
-        .search(&self.query)
-        .get(self.selected_index)
-        .map(|result| CommandPanelEvent::Invoke(result.descriptor.command.clone()))
-        .unwrap_or(CommandPanelEvent::StateChanged),
-      CommandPanelMode::Form(command) => CommandPanelEvent::SubmitForm {
-        command: command.clone(),
-        value: self.query.clone(),
-      },
-    }
+    self
+      .registry
+      .search(self.quickpick.query())
+      .get(self.quickpick.selected_index())
+      .map(|result| CommandPanelEvent::Invoke(result.descriptor.command.clone()))
+      .unwrap_or(CommandPanelEvent::StateChanged)
   }
 }
 
@@ -437,27 +329,6 @@ impl Default for CommandPanelController {
   fn default() -> Self {
     Self::new()
   }
-}
-
-/// Extracts printable text input from a key event.
-///
-/// # Parameters
-///
-/// * `event` is the key event received by the command panel.
-///
-/// # Returns
-///
-/// `Some(&str)` for printable text input, otherwise `None`.
-fn printable_character(event: &KeyDownEvent) -> Option<&str> {
-  let modifiers = event.keystroke.modifiers;
-  if modifiers.control || modifiers.platform || modifiers.alt || modifiers.function {
-    return None;
-  }
-  event
-    .keystroke
-    .key_char
-    .as_deref()
-    .or_else(|| (event.keystroke.key.len() == 1).then_some(event.keystroke.key.as_str()))
 }
 
 #[cfg(test)]
@@ -479,21 +350,21 @@ mod tests {
   #[test]
   fn reset_for_open_should_clear_query_and_selection() {
     let mut controller = CommandPanelController::new();
-    controller.query = "tab".to_string();
-    controller.selected_index = 2;
+    controller.set_query("tab");
+    controller.quickpick.select_next(3);
 
     controller.reset_for_open();
 
     assert!(controller.is_open);
-    assert!(controller.query.is_empty());
-    assert_eq!(controller.selected_index, 0);
+    assert!(controller.query().is_empty());
+    assert_eq!(controller.selected_index(), 0);
     assert_eq!(controller.mode, CommandPanelMode::Search);
   }
 
   #[test]
   fn open_form_should_store_only_command_identity() {
     let mut controller = CommandPanelController::new();
-    let command = ChitinCommand::from(crate::commands::DatabaseCommand::DownloadRcsbStructure);
+    let command = ChitinCommand::from(chitin_command::DatabaseCommand::DownloadRcsbStructure);
 
     assert!(controller.open_form(command.clone()));
     assert_eq!(controller.mode, CommandPanelMode::Form(command));
@@ -502,7 +373,7 @@ mod tests {
   #[test]
   fn set_query_should_reset_result_selection() {
     let mut controller = CommandPanelController::new();
-    controller.selected_index = 3;
+    controller.quickpick.select_next(4);
 
     controller.set_query("workspace");
 

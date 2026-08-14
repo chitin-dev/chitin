@@ -4,14 +4,6 @@ use super::*;
 use gpui::{Bounds, px};
 
 /// Creates a root panel containing four stable test tabs.
-///
-/// # Parameters
-///
-/// This function takes no parameters.
-///
-/// # Returns
-///
-/// A [`PanelTree`] containing tabs A through D in one root leaf.
 fn four_tab_tree() -> PanelTree<&'static str> {
   PanelTree::single_leaf(
     PanelLeaf::new(PanelId::new(1))

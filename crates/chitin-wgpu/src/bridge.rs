@@ -26,14 +26,6 @@ impl RenderTargetSize {
   }
 
   /// Returns the width divided by height.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A non-panicking aspect ratio with a non-zero height guard.
   pub fn aspect(&self) -> f32 {
     self.width as f32 / self.height.max(1) as f32
   }
@@ -103,14 +95,6 @@ impl DepthTarget {
   }
 
   /// Returns the current depth texture view.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A WGPU texture view suitable for a depth attachment.
   pub fn view(&self) -> &wgpu::TextureView {
     &self.view
   }

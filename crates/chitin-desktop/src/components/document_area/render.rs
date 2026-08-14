@@ -2,6 +2,7 @@
 
 use std::{rc::Rc, time::Instant};
 
+use chitin_command::PanelTabCommand;
 use chitin_ui::{
   composite::panel::{
     PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
@@ -17,10 +18,7 @@ use gpui::{
 
 use crate::{
   app::ChitinApp,
-  commands::{
-    PanelTabCommand,
-    tab::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT},
-  },
+  keybindings::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT},
 };
 
 use super::state::{DocumentPanelContent, DocumentPanelState, OpenedProjectDocument};

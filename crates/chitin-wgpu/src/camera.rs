@@ -95,40 +95,16 @@ impl ViewerCamera {
   }
 
   /// Restores the default viewport orientation.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after replacing the current camera state.
   pub fn reset(&mut self) {
     *self = Self::default();
   }
 
   /// Returns the current camera view matrix.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A right-handed view matrix looking at the current target.
   fn view_matrix(&self) -> glam::Mat4 {
     glam::camera::rh::view::look_at_mat4(self.eye(), self.target, glam::Vec3::Y)
   }
 
   /// Returns the current eye position in scene space.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A scene-space camera position derived from orbit angles and distance.
   fn eye(&self) -> glam::Vec3 {
     let (sin_yaw, cos_yaw) = self.yaw.sin_cos();
     let (sin_pitch, cos_pitch) = self.pitch.sin_cos();
@@ -136,27 +112,11 @@ impl ViewerCamera {
   }
 
   /// Returns the camera-right direction used for panning.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A normalized scene-space right vector.
   fn view_right(&self) -> glam::Vec3 {
     glam::Vec3::Y.cross((self.target - self.eye()).normalize()).normalize()
   }
 
   /// Returns the camera-up direction used for panning.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A normalized scene-space up vector.
   fn view_up(&self) -> glam::Vec3 {
     (self.target - self.eye())
       .normalize()

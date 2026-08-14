@@ -67,14 +67,6 @@ pub struct PanelContainerConfig {
 
 impl PanelContainerConfig {
   /// Creates an empty panel container configuration.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// A [`PanelContainerConfig`] with optional behaviors disabled.
   pub fn new() -> Self {
     Self::default()
   }

@@ -40,27 +40,11 @@ impl<TAnchor, TValue> ResizeGesture<TAnchor, TValue> {
   }
 
   /// Returns the resized target anchor.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// A shared reference to the component-specific anchor.
   pub fn anchor(&self) -> &TAnchor {
     &self.anchor
   }
 
   /// Returns the cursor position where the drag started.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The start cursor position on the resize axis.
   pub fn start_position(&self) -> Pixels {
     self.start_position
   }
@@ -68,14 +52,6 @@ impl<TAnchor, TValue> ResizeGesture<TAnchor, TValue> {
 
 impl<TAnchor, TValue: Copy> ResizeGesture<TAnchor, TValue> {
   /// Returns the target value when the drag started.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`.
-  ///
-  /// # Returns
-  ///
-  /// The copied start value.
   pub fn start_value(&self) -> TValue {
     self.start_value
   }

@@ -1,15 +1,19 @@
 //! RCSB provider client implementation.
 
-use std::{sync::Arc, time::SystemTime};
+use std::{
+  path::{Path, PathBuf},
+  sync::Arc,
+  time::SystemTime,
+};
 
 use http::StatusCode;
 
 use crate::{
-  ArtifactFormat, DecodeError, DownloadedArtifact, HttpResponse, Provenance, ProviderId, TransportError,
-  client::ClientRuntime,
+  ArtifactFormat, DecodeError, DownloadProgressCallback, DownloadedArtifact, HttpResponse, Provenance, ProviderId,
+  TransportError, client::ClientRuntime,
 };
 
-use super::{PdbId, RcsbEndpoints, RcsbError, StructureFormat, dto::RcsbEntryDto};
+use super::{PdbId, RcsbDownloadError, RcsbEndpoints, RcsbError, StructureFormat, dto::RcsbEntryDto};
 
 /// RCSB Protein Data Bank provider client.
 #[derive(Clone)]
@@ -33,6 +37,39 @@ pub struct RcsbEntryMetadata {
   pub initial_release_date: Option<String>,
   /// Response provenance.
   pub provenance: Provenance,
+}
+
+/// One structure and destination in a sequential RCSB download batch.
+#[derive(Clone, Debug)]
+pub struct RcsbBatchDownloadRequest {
+  /// RCSB structure identifier.
+  pub id: PdbId,
+  /// Structure file format.
+  pub format: StructureFormat,
+  /// Destination path for the downloaded file.
+  pub destination: PathBuf,
+}
+
+/// Progress notification emitted while a batch is downloaded.
+#[derive(Clone, Debug)]
+pub enum RcsbBatchDownloadEvent {
+  /// A structure has started downloading.
+  Started { index: usize, total: usize, id: PdbId },
+  /// Bytes have been received for the active structure.
+  Progress {
+    index: usize,
+    total: usize,
+    id: PdbId,
+    received: u64,
+    total_bytes: Option<u64>,
+  },
+  /// A structure has been written successfully.
+  Completed {
+    index: usize,
+    total: usize,
+    id: PdbId,
+    path: PathBuf,
+  },
 }
 
 impl RcsbClient {
@@ -68,10 +105,38 @@ impl RcsbClient {
   /// Returns [`RcsbError`] for transport failures, missing entries, rate
   /// limits, or other malformed provider responses.
   pub async fn download_structure(&self, id: PdbId, format: StructureFormat) -> Result<DownloadedArtifact, RcsbError> {
+    self.download_structure_with_progress(id, format, |_, _| {}).await
+  }
+
+  /// Downloads a structure and reports received response bytes.
+  ///
+  /// # Parameters
+  ///
+  /// * `id` identifies the RCSB PDB entry.
+  /// * `format` selects PDB or mmCIF raw content.
+  /// * `progress` receives cumulative received bytes and the optional total
+  ///   response size.
+  ///
+  /// # Returns
+  ///
+  /// A raw downloaded artifact with response provenance. The content is not
+  /// parsed.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`RcsbError`] for transport failures, missing entries, rate
+  /// limits, or malformed provider responses.
+  pub async fn download_structure_with_progress(
+    &self,
+    id: PdbId,
+    format: StructureFormat,
+    progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
+  ) -> Result<DownloadedArtifact, RcsbError> {
     let requested_at = SystemTime::now();
     let request = self.endpoints.structure_download_request(&id, format)?;
     let resolved_url = request.url.clone();
-    let response = self.runtime.execute(request).await?;
+    let progress: DownloadProgressCallback = Arc::new(progress);
+    let response = self.runtime.execute_with_progress(request, Some(progress)).await?;
     let response = map_status(response, &id)?;
     let provenance = Provenance::from_headers(
       ProviderId::Rcsb,
@@ -85,6 +150,94 @@ impl RcsbClient {
       content: response.body,
       provenance,
     })
+  }
+
+  /// Downloads an artifact and persists it at the requested destination.
+  ///
+  /// # Parameters
+  ///
+  /// * `id` identifies the RCSB entry.
+  /// * `format` selects PDB or mmCIF content.
+  /// * `destination` is the final local file path.
+  /// * `progress` receives downloaded and optional total byte counts.
+  ///
+  /// # Returns
+  ///
+  /// Returns `()` after the artifact has been written successfully.
+  pub async fn download_structure_to_path(
+    &self,
+    id: PdbId,
+    format: StructureFormat,
+    destination: &Path,
+    progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
+  ) -> Result<(), RcsbDownloadError> {
+    let artifact = self
+      .download_structure_with_progress(id, format, progress)
+      .await
+      .map_err(RcsbDownloadError::Provider)?;
+    if let Some(directory) = destination.parent() {
+      std::fs::create_dir_all(directory).map_err(|source| RcsbDownloadError::CreateDirectory {
+        path: directory.to_path_buf(),
+        source,
+      })?;
+    }
+    std::fs::write(destination, artifact.content).map_err(|source| RcsbDownloadError::WriteFile {
+      path: destination.to_path_buf(),
+      source,
+    })?;
+    Ok(())
+  }
+
+  /// Downloads and persists structures sequentially while reporting batch progress.
+  ///
+  /// # Parameters
+  ///
+  /// * `requests` contains each identifier, format, and destination.
+  /// * `progress` receives start, byte-progress, and completion events.
+  ///
+  /// # Returns
+  ///
+  /// Returns `()` after every structure has been written successfully.
+  pub async fn download_structures_to_paths(
+    &self,
+    requests: &[RcsbBatchDownloadRequest],
+    progress: impl Fn(RcsbBatchDownloadEvent) + Send + Sync + 'static,
+  ) -> Result<(), RcsbDownloadError> {
+    let total = requests.len();
+    let progress = Arc::new(progress);
+    for (position, request) in requests.iter().enumerate() {
+      let index = position + 1;
+      progress(RcsbBatchDownloadEvent::Started {
+        index,
+        total,
+        id: request.id.clone(),
+      });
+      let event_progress = progress.clone();
+      let event_id = request.id.clone();
+      self
+        .download_structure_to_path(
+          request.id.clone(),
+          request.format,
+          &request.destination,
+          move |received, total_bytes| {
+            event_progress(RcsbBatchDownloadEvent::Progress {
+              index,
+              total,
+              id: event_id.clone(),
+              received,
+              total_bytes,
+            });
+          },
+        )
+        .await?;
+      progress(RcsbBatchDownloadEvent::Completed {
+        index,
+        total,
+        id: request.id.clone(),
+        path: request.destination.clone(),
+      });
+    }
+    Ok(())
   }
 
   /// Fetches a small stable subset of RCSB entry metadata.

@@ -69,14 +69,6 @@ pub struct NumberInputStyle {
 
 impl NumberInputStyle {
   /// Creates a style with no overrides.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no Rust parameters.
-  ///
-  /// # Returns
-  ///
-  /// A visual style that preserves the selected [`NumberInputVariant`] defaults.
   pub fn new() -> Self {
     Self::default()
   }
@@ -739,14 +731,6 @@ impl NumberInputColors {
 
 impl NumberInputSize {
   /// Maps one numeric-input size to the matching text-input size.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the selected numeric-input size.
-  ///
-  /// # Returns
-  ///
-  /// The matching text-input size variant.
   fn text_input_size(self) -> TextInputSize {
     match self {
       Self::Small => TextInputSize::Small,
@@ -756,14 +740,6 @@ impl NumberInputSize {
   }
 
   /// Returns the font size shared by numeric text, placeholders, and affixes.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the selected numeric-input size.
-  ///
-  /// # Returns
-  ///
-  /// The font size used by the embedded text input.
   fn font_size(self) -> Pixels {
     self.text_input_size().font_size()
   }
@@ -771,14 +747,6 @@ impl NumberInputSize {
 
 impl NumberInputVariant {
   /// Maps one numeric-input appearance variant to its embedded text-input variant.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads the selected numeric-input appearance variant.
-  ///
-  /// # Returns
-  ///
-  /// The matching text-input appearance variant.
   fn text_input_variant(self) -> TextInputVariant {
     match self {
       Self::Primary => TextInputVariant::Primary,

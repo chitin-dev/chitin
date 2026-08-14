@@ -3,7 +3,7 @@
 
 use std::{borrow::Cow, collections::BTreeSet, path::PathBuf};
 
-use chitin_desktop::{app::ChitinApp, commands::default_key_bindings};
+use chitin_desktop::{app::ChitinApp, keybindings::default_key_bindings};
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
@@ -63,20 +63,6 @@ impl AssetSource for DesktopAssets {
 }
 
 /// Starts the Chitin desktop application.
-///
-/// The binary reads an optional project path from the first CLI argument,
-/// registers default command keybindings, opens the GPUI window, and assigns
-/// initial focus to the project sidebar so tree navigation works immediately.
-///
-/// # Parameters
-///
-/// This function takes no Rust parameters. It reads process arguments through
-/// * `std::env::args_os`.
-///
-/// # Returns
-///
-/// This function returns `()`. On window creation failure it logs the error to
-/// stderr and quits the GPUI application.
 fn main() {
   env_logger::init();
   let project_path = std::env::args_os().nth(1).map(PathBuf::from);

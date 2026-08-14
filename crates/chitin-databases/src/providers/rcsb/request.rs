@@ -30,12 +30,33 @@ pub struct RcsbEndpoints {
 }
 
 impl StructureFormat {
+  /// Returns the stable identifier used by clients and UI selectors.
+  pub fn id(self) -> &'static str {
+    match self {
+      Self::Pdb => "pdb",
+      Self::Mmcif => "mmcif",
+    }
+  }
+
+  /// Returns the user-facing structure format label.
+  pub fn label(self) -> &'static str {
+    match self {
+      Self::Pdb => "PDB",
+      Self::Mmcif => "mmCIF",
+    }
+  }
+
   /// Returns the RCSB download extension.
   pub fn extension(self) -> &'static str {
     match self {
       Self::Pdb => "pdb",
       Self::Mmcif => "cif",
     }
+  }
+
+  /// Returns the canonical filename for an RCSB entry in this format.
+  pub fn filename(self, id: &PdbId) -> String {
+    format!("{}.{}", id.as_str(), self.extension())
   }
 }
 

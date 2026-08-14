@@ -28,4 +28,4 @@ pub use provenance::{Provenance, ProviderId};
 pub use request::{HttpMethod, HttpRequest};
 pub use response::{ArtifactFormat, DownloadedArtifact, HttpResponse};
 pub use retry::RetryPolicy;
-pub use transport::HttpTransport;
+pub use transport::{DownloadProgressCallback, HttpTransport};

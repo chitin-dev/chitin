@@ -30,14 +30,6 @@ pub struct HttpRequest {
 
 impl HttpRequest {
   /// Creates an idempotent GET request.
-  ///
-  /// # Parameters
-  ///
-  /// * `url` is the fully qualified endpoint URL.
-  ///
-  /// # Returns
-  ///
-  /// A request with no body and empty headers.
   pub fn get(url: Url) -> Self {
     Self {
       method: HttpMethod::Get,

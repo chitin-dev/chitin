@@ -143,29 +143,11 @@ pub struct ProjectWorkspace {
 
 impl ProjectTreeEntry {
   /// Returns `true` if this entry represents a directory.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, the project tree entry being inspected.
-  ///
-  /// # Returns
-  ///
-  /// `true` when [`ProjectTreeEntry::kind`] is
-  /// [`ProjectTreeEntryKind::Directory`]; otherwise `false`.
   pub fn is_dir(&self) -> bool {
     self.kind == ProjectTreeEntryKind::Directory
   }
 
   /// Returns `true` if this entry represents a file.
-  ///
-  /// # Parameters
-  ///
-  /// This method reads `self`, the project tree entry being inspected.
-  ///
-  /// # Returns
-  ///
-  /// `true` when [`ProjectTreeEntry::kind`] is [`ProjectTreeEntryKind::File`];
-  /// otherwise `false`.
   pub fn is_file(&self) -> bool {
     self.kind == ProjectTreeEntryKind::File
   }
@@ -204,26 +186,6 @@ fn display_name(path: &Path) -> String {
 }
 
 /// Determines whether a path points to a directory hidden from the tree UI.
-///
-/// # Parameters
-///
-/// * `path` is the filesystem path to test against the hidden-directory list.
-///
-/// # Returns
-///
-/// `true` when the path's final component is in [`NOT_DISPLAYED_DIRS`];
-/// otherwise `false`.
-///
-/// # Note
-///
-/// This function is for UI filtering only and does not affect filesystem
-/// operations. Users can still access hidden directories through other means
-/// (e.g., terminal, file explorer "show hidden files").
-///
-/// The list is intentionally minimal—only directories that are:
-/// - Internal implementation details of version control systems
-/// - Dangerous to modify manually
-/// - Not useful for everyday development tasks
 fn is_not_displayed_directory(path: &Path) -> bool {
   path
     .file_name()
@@ -520,14 +482,6 @@ mod tests {
     }
 
     /// Returns the root path of this temporary project.
-    ///
-    /// # Parameters
-    ///
-    /// This method reads `self`.
-    ///
-    /// # Returns
-    ///
-    /// A borrowed [`Path`] pointing at the project root.
     fn path(&self) -> &Path {
       &self.root
     }
@@ -569,15 +523,6 @@ mod tests {
 
   impl Drop for TestProject {
     /// Removes the temporary project directory after the test.
-    ///
-    /// # Parameters
-    ///
-    /// This method mutably borrows `self` during drop.
-    ///
-    /// # Returns
-    ///
-    /// This function returns `()`. Cleanup errors are ignored because test
-    /// failures should report the assertion that failed first.
     fn drop(&mut self) {
       let _ = fs::remove_dir_all(&self.root);
     }

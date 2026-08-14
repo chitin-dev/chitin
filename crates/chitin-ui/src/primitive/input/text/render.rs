@@ -310,15 +310,6 @@ impl RenderOnce for TextInput {
 }
 
 /// Returns whether a key event is a platform clipboard shortcut for `key`.
-///
-/// # Parameters
-///
-/// * `event` supplies the normalized GPUI key event.
-/// * `key` supplies the lower-case clipboard key to match.
-///
-/// # Returns
-///
-/// `true` when Ctrl or the platform modifier is pressed with `key`.
 fn is_clipboard_shortcut(event: &KeyDownEvent, key: &str) -> bool {
   let modifiers = event.keystroke.modifiers;
   event.keystroke.key == key && (modifiers.control || modifiers.platform)

@@ -325,14 +325,6 @@ impl ActivityBar {
 
 impl Default for ActivityBar {
   /// Creates the default empty activity bar.
-  ///
-  /// # Parameters
-  ///
-  /// This function takes no parameters.
-  ///
-  /// # Returns
-  ///
-  /// The same value as [`ActivityBar::new`].
   fn default() -> Self {
     Self::new()
   }
