@@ -1,10 +1,14 @@
-<div align="center" name="markdown">
+# chitin
 
-![chitin](https://socialify.git.ci/chitin-dev/chitin/image?description=1&font=Source+Code+Pro&language=1&logo=https%3A%2F%2Fraw.githubusercontent.com%2Fchitin-dev%2Fchitin%2F4f22ec7b692e59f8aa275f799c6b7a47c7e712ec%2Fassets%2Flogo.svg&name=1&owner=1&pattern=Charlie+Brown&theme=Dark)
+<p align="center" name="markdown">
+  <img src="assets/logo.svg" alt="chitin-dev" width="100" />
+</p>
 
-</div>
+<p align="center">
+  <a href="https://chitin-ide.dev">chitin-ide.dev</a> · <a href="#install">install</a> · <a href="https://chitin-ide.dev/docs/quick-start/">quick start</a> · <a href="https://chitin-ide.dev/docs/">docs</a>
+</p>
 
-![Rule](https://cdn.jsdelivr.net/gh/andreasbm/readme/assets/lines/rainbow.png)
+---
 
 ## ✨ Features
 
