@@ -29,6 +29,21 @@ pub trait HttpTransport: Send + Sync {
   async fn execute(&self, request: HttpRequest) -> Result<HttpResponse, TransportError>;
 
   /// Executes a request and reports response-body progress when supported.
+  ///
+  /// # Parameters
+  ///
+  /// * `request` is the transport-neutral request to execute.
+  /// * `progress` receives the number of bytes received and the optional
+  ///   response length.
+  ///
+  /// # Returns
+  ///
+  /// A buffered transport-neutral response after the request completes.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`TransportError`] when request execution or response buffering
+  /// fails.
   async fn execute_with_progress(
     &self,
     request: HttpRequest,
@@ -97,6 +112,22 @@ impl HttpTransport for ReqwestTransport {
 }
 
 impl ReqwestTransport {
+  /// Executes one request, optionally streaming response-body progress.
+  ///
+  /// # Parameters
+  ///
+  /// * `request` contains the method, URL, headers, and optional body.
+  /// * `progress` receives cumulative byte counts while the response body is
+  ///   read.
+  ///
+  /// # Returns
+  ///
+  /// A buffered response containing the status, headers, and body.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`TransportError`] for request failures, response-size-limit
+  /// violations, or failures while reading the response body.
   async fn execute_request(
     &self,
     request: HttpRequest,

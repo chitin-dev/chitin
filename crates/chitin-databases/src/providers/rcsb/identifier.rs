@@ -39,6 +39,20 @@ impl PdbId {
   }
 
   /// Parses a comma-separated list of PDB identifiers.
+  ///
+  /// # Parameters
+  ///
+  /// * `value` contains comma-separated identifiers. Whitespace around each
+  ///   item is ignored.
+  ///
+  /// # Returns
+  ///
+  /// Canonical uppercase identifiers in their original input order.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`PdbIdListError`] for the first invalid item, including its
+  /// one-based position and original substring.
   pub fn parse_many(value: &str) -> Result<Vec<Self>, PdbIdListError> {
     value
       .split(',')

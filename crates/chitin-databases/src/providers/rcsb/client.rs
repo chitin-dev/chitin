@@ -109,6 +109,23 @@ impl RcsbClient {
   }
 
   /// Downloads a structure and reports received response bytes.
+  ///
+  /// # Parameters
+  ///
+  /// * `id` identifies the RCSB PDB entry.
+  /// * `format` selects PDB or mmCIF raw content.
+  /// * `progress` receives cumulative received bytes and the optional total
+  ///   response size.
+  ///
+  /// # Returns
+  ///
+  /// A raw downloaded artifact with response provenance. The content is not
+  /// parsed.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`RcsbError`] for transport failures, missing entries, rate
+  /// limits, or malformed provider responses.
   pub async fn download_structure_with_progress(
     &self,
     id: PdbId,

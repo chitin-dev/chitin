@@ -94,6 +94,22 @@ impl ClientRuntime {
   }
 
   /// Executes a request while forwarding response-body progress.
+  ///
+  /// # Parameters
+  ///
+  /// * `request` is the transport-neutral request to execute.
+  /// * `progress` receives cumulative response-body bytes and the optional
+  ///   response length.
+  ///
+  /// # Returns
+  ///
+  /// A buffered response after concurrency limits, retries, and response-size
+  /// checks have been applied.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`TransportError`] when the request is cancelled, transport
+  /// execution fails, retries are exhausted, or the response is too large.
   pub(crate) async fn execute_with_progress(
     &self,
     request: HttpRequest,

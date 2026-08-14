@@ -82,6 +82,18 @@ impl FormatArg {
 }
 
 /// Dispatches a parsed CLI workflow.
+///
+/// # Parameters
+///
+/// * `command` is the validated top-level CLI command.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after the selected workflow completes.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when command execution or output generation fails.
 pub(crate) async fn dispatch(command: CliCommand) -> Result<(), CliError> {
   match command {
     CliCommand::Completions { shell } => {
@@ -93,12 +105,38 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<(), CliError> {
   }
 }
 
+/// Dispatches a database command to its provider-specific workflow.
+///
+/// # Parameters
+///
+/// * `command` is the parsed database subcommand.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after the database workflow completes.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the selected workflow fails.
 async fn dispatch_database_command(command: DatabaseSubcommand) -> Result<(), CliError> {
   match command {
     DatabaseSubcommand::Rcsb(command) => dispatch_rcsb_command(command.command).await,
   }
 }
 
+/// Dispatches an RCSB subcommand to the shared command bus.
+///
+/// # Parameters
+///
+/// * `command` is the parsed RCSB subcommand and its download options.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after the RCSB workflow completes.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the RCSB download or output resolution fails.
 async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> {
   match command {
     RcsbSubcommand::Download { id, format, output } => {
@@ -109,6 +147,22 @@ async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> 
 }
 
 /// Routes the CLI request through the shared typed command bus.
+///
+/// # Parameters
+///
+/// * `command` identifies the typed command to dispatch.
+/// * `raw_id` contains one or more comma-separated PDB identifiers.
+/// * `format` selects the structure file format.
+/// * `output` optionally overrides the generated output path.
+///
+/// # Returns
+///
+/// Returns `Ok(())` after the command completes successfully.
+///
+/// # Errors
+///
+/// Returns [`CliError`] when the command is unsupported or the RCSB download
+/// fails.
 async fn dispatch_command(
   command: ChitinCommand,
   raw_id: String,
