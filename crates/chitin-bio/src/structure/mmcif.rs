@@ -74,6 +74,7 @@ impl MmcifParser {
 
     parse_struct_conn(&document, &mut builder)?;
     parse_struct_conf(&document, &mut builder)?;
+    parse_struct_sheet_range(&document, &mut builder)?;
 
     builder.finish(false).map_err(map_builder_error)
   }
@@ -239,7 +240,7 @@ fn parse_struct_conf(document: &CifDocument, builder: &mut StructureBuilder) -> 
       continue;
     }
     let (chain_id, start_sequence_number, end_chain_id, end_sequence_number) =
-      annotation_endpoints(tags, values, row_index + 1)?;
+      annotation_endpoints(tags, values, row_index + 1, "struct_conf")?;
     if chain_id != end_chain_id {
       return Err(MmcifParseError::InvalidField {
         row: row_index + 1,
@@ -256,10 +257,47 @@ fn parse_struct_conf(document: &CifDocument, builder: &mut StructureBuilder) -> 
       line: row_index + 1,
       chain_id: Some(chain_id),
       start_sequence_number,
-      start_insertion_code: annotation_insertion_code(tags, values, "beg"),
+      start_insertion_code: annotation_insertion_code(tags, values, "struct_conf", "beg"),
       end_sequence_number,
-      end_insertion_code: annotation_insertion_code(tags, values, "end"),
+      end_insertion_code: annotation_insertion_code(tags, values, "struct_conf", "end"),
       kind,
+    });
+  }
+  Ok(())
+}
+
+/// Parses `_struct_sheet_range` rows into sheet secondary-structure ranges.
+///
+/// # Parameters
+///
+/// * `document` is the generic CIF document containing sheet ranges.
+/// * `builder` receives deferred residue ranges.
+///
+/// # Returns
+///
+/// `Ok(())` when the category is absent or every range has valid endpoints.
+fn parse_struct_sheet_range(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+  let Some((tags, rows)) = category_loop(document, "struct_sheet_range") else {
+    return Ok(());
+  };
+  for (row_index, values) in rows.iter().enumerate() {
+    let (chain_id, start_sequence_number, end_chain_id, end_sequence_number) =
+      annotation_endpoints(tags, values, row_index + 1, "struct_sheet_range")?;
+    if chain_id != end_chain_id {
+      return Err(MmcifParseError::InvalidField {
+        row: row_index + 1,
+        field: "_struct_sheet_range chain",
+        value: format!("{chain_id:?} and {end_chain_id:?}"),
+      });
+    }
+    builder.add_secondary_range(PendingSecondaryRange {
+      line: row_index + 1,
+      chain_id: Some(chain_id),
+      start_sequence_number,
+      start_insertion_code: annotation_insertion_code(tags, values, "struct_sheet_range", "beg"),
+      end_sequence_number,
+      end_insertion_code: annotation_insertion_code(tags, values, "struct_sheet_range", "end"),
+      kind: SecondaryStructure::Sheet,
     });
   }
   Ok(())
@@ -270,18 +308,19 @@ fn annotation_endpoints(
   tags: &[String],
   values: &[CifValue],
   row: usize,
+  category: &str,
 ) -> Result<(String, i32, String, i32), MmcifParseError> {
   let auth = (
-    loop_value(tags, values, "_struct_conf.beg_auth_asym_id"),
-    loop_value(tags, values, "_struct_conf.beg_auth_seq_id"),
-    loop_value(tags, values, "_struct_conf.end_auth_asym_id"),
-    loop_value(tags, values, "_struct_conf.end_auth_seq_id"),
+    loop_value(tags, values, &format!("_{category}.beg_auth_asym_id")),
+    loop_value(tags, values, &format!("_{category}.beg_auth_seq_id")),
+    loop_value(tags, values, &format!("_{category}.end_auth_asym_id")),
+    loop_value(tags, values, &format!("_{category}.end_auth_seq_id")),
   );
   let label = (
-    loop_value(tags, values, "_struct_conf.beg_label_asym_id"),
-    loop_value(tags, values, "_struct_conf.beg_label_seq_id"),
-    loop_value(tags, values, "_struct_conf.end_label_asym_id"),
-    loop_value(tags, values, "_struct_conf.end_label_seq_id"),
+    loop_value(tags, values, &format!("_{category}.beg_label_asym_id")),
+    loop_value(tags, values, &format!("_{category}.beg_label_seq_id")),
+    loop_value(tags, values, &format!("_{category}.end_label_asym_id")),
+    loop_value(tags, values, &format!("_{category}.end_label_seq_id")),
   );
   let (beg_chain, beg_seq, end_chain, end_seq) = match auth {
     (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
@@ -290,7 +329,7 @@ fn annotation_endpoints(
       _ => {
         return Err(MmcifParseError::InvalidField {
           row,
-          field: "_struct_conf endpoints",
+          field: "secondary-structure endpoints",
           value: "missing auth and label endpoints".to_owned(),
         });
       }
@@ -315,8 +354,8 @@ fn annotation_endpoints(
 }
 
 /// Reads a mmCIF insertion code from a structural range endpoint.
-fn annotation_insertion_code(tags: &[String], values: &[CifValue], endpoint: &str) -> Option<char> {
-  let tag = format!("_struct_conf.pdbx_{endpoint}_PDB_ins_code");
+fn annotation_insertion_code(tags: &[String], values: &[CifValue], category: &str, endpoint: &str) -> Option<char> {
+  let tag = format!("_{category}.pdbx_{endpoint}_PDB_ins_code");
   loop_value(tags, values, &tag)
     .filter(|value| !is_missing(value))
     .and_then(|value| value.chars().next())
@@ -712,19 +751,30 @@ _struct_conf.beg_label_seq_id
 _struct_conf.end_label_asym_id
 _struct_conf.end_label_seq_id
 HELX_RH_3T_P . . . . A 1 A 2
+loop_
+_struct_sheet_range.sheet_id
+_struct_sheet_range.id
+_struct_sheet_range.beg_label_asym_id
+_struct_sheet_range.beg_label_seq_id
+_struct_sheet_range.pdbx_beg_PDB_ins_code
+_struct_sheet_range.end_label_asym_id
+_struct_sheet_range.end_label_seq_id
+_struct_sheet_range.pdbx_end_PDB_ins_code
+sheet1 1 A 2 . A 2 .
 "#;
     let parsed = MmcifParser::new()
       .parse_bytes(input)
       .unwrap_or_else(|error| panic!("struct_conn fixture should parse: {error}"));
     assert_eq!(parsed.structure.bonds.len(), 1);
-    assert_eq!(parsed.structure.secondary_ranges.len(), 1);
+    assert_eq!(parsed.structure.secondary_ranges.len(), 2);
     assert_eq!(
       parsed.structure.residues[0].secondary_structure,
       SecondaryStructure::Helix310
     );
     assert_eq!(
       parsed.structure.residues[1].secondary_structure,
-      SecondaryStructure::Helix310
+      SecondaryStructure::Sheet
     );
+    assert_eq!(parsed.structure.secondary_ranges[1].kind, SecondaryStructure::Sheet);
   }
 }
