@@ -3,8 +3,8 @@ use std::io::Read;
 pub mod cif;
 
 use super::error::{MmcifParseError, MmcifParseResult, PdbParseError};
-use super::model::{Element, ResidueKind};
-use super::pdb::{AtomRecord, StructureBuilder};
+use super::model::{Element, ResidueKind, SecondaryStructure};
+use super::pdb::{AtomLookupKey, AtomRecord, PendingSecondaryRange, StructureBuilder};
 use cif::{CifCategory, CifDocument, CifParser, CifValue};
 
 /// Reads the atom-site loop of an mmCIF document into the shared structure model.
@@ -72,6 +72,9 @@ impl MmcifParser {
       builder.add_atom(atom).map_err(map_builder_error)?;
     }
 
+    parse_struct_conn(&document, &mut builder)?;
+    parse_struct_conf(&document, &mut builder)?;
+
     builder.finish(false).map_err(map_builder_error)
   }
 
@@ -104,6 +107,221 @@ impl MmcifParser {
   }
 }
 
+/// Finds a loop belonging to one mmCIF category.
+fn category_loop<'a>(document: &'a CifDocument, category: &str) -> Option<(&'a [String], &'a [Vec<CifValue>])> {
+  let prefix = format!("_{category}.");
+  document
+    .blocks
+    .iter()
+    .flat_map(|block| &block.categories)
+    .find_map(|category_value| {
+      let CifCategory::Loop { tags, rows } = category_value else {
+        return None;
+      };
+      tags
+        .iter()
+        .any(|tag| tag.starts_with(&prefix))
+        .then_some((tags.as_slice(), rows.as_slice()))
+    })
+}
+
+/// Returns a decoded cell from a generic CIF loop row.
+fn loop_value<'a>(tags: &[String], values: &'a [CifValue], tag: &str) -> Option<&'a str> {
+  tags
+    .iter()
+    .position(|candidate| candidate == tag)
+    .and_then(|index| values.get(index))
+    .and_then(CifValue::as_text)
+}
+
+/// Parses all `_struct_conn` rows into deferred atom-pair relations.
+///
+/// # Parameters
+///
+/// * `document` is the generic CIF document containing the connection loop.
+/// * `builder` receives relations resolved after atom aliases are indexed.
+///
+/// # Returns
+///
+/// `Ok(())` when the category is absent or every row has two usable endpoints.
+/// Malformed endpoint rows return a field error.
+fn parse_struct_conn(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+  let Some((tags, rows)) = category_loop(document, "struct_conn") else {
+    return Ok(());
+  };
+  for (row_index, values) in rows.iter().enumerate() {
+    let first = struct_conn_endpoint(tags, values, "ptnr1", row_index + 1)?;
+    let second = struct_conn_endpoint(tags, values, "ptnr2", row_index + 1)?;
+    builder.add_named_bond(row_index + 1, first, second);
+  }
+  Ok(())
+}
+
+/// Resolves an endpoint by falling back per identifier field from auth to label.
+fn struct_conn_endpoint(
+  tags: &[String],
+  values: &[CifValue],
+  prefix: &str,
+  row: usize,
+) -> Result<AtomLookupKey, MmcifParseError> {
+  // RCSB files commonly mix namespaces: for example, auth chain/sequence
+  // together with a label atom name.  The mmCIF dictionary permits each
+  // field to be absent independently, so choosing one namespace as a whole
+  // would reject otherwise valid connections.
+  let field = |suffix: &str| {
+    loop_value(tags, values, &format!("_struct_conn.{prefix}_auth_{suffix}"))
+      .filter(|value| !is_missing(value))
+      .or_else(|| {
+        loop_value(tags, values, &format!("_struct_conn.{prefix}_label_{suffix}")).filter(|value| !is_missing(value))
+      })
+  };
+  let Some(chain_id) = field("asym_id") else {
+    return Err(MmcifParseError::InvalidField {
+      row,
+      field: "_struct_conn endpoint chain",
+      value: format!("{prefix} endpoint has no auth or label chain identifier"),
+    });
+  };
+  let Some(sequence) = field("seq_id") else {
+    return Err(MmcifParseError::InvalidField {
+      row,
+      field: "_struct_conn endpoint sequence",
+      value: format!("{prefix} endpoint has no auth or label sequence identifier"),
+    });
+  };
+  let Some(atom_name) = field("atom_id") else {
+    return Err(MmcifParseError::InvalidField {
+      row,
+      field: "_struct_conn endpoint atom",
+      value: format!("{prefix} endpoint has no auth or label atom identifier"),
+    });
+  };
+  let sequence_number = sequence.parse().map_err(|_| MmcifParseError::InvalidField {
+    row,
+    field: "_struct_conn residue sequence",
+    value: sequence.to_owned(),
+  })?;
+  let insertion_code = loop_value(tags, values, &format!("_struct_conn.pdbx_{prefix}_PDB_ins_code"))
+    .filter(|value| !is_missing(value))
+    .and_then(|value| value.chars().next());
+  let altloc = loop_value(tags, values, &format!("_struct_conn.pdbx_{prefix}_label_alt_id"))
+    .filter(|value| !is_missing(value))
+    .and_then(|value| value.chars().next());
+  Ok(AtomLookupKey {
+    chain_id: Some(chain_id.to_owned()),
+    sequence_number,
+    atom_name: atom_name.to_owned(),
+    insertion_code,
+    altloc,
+  })
+}
+
+/// Parses helix ranges from `_struct_conf`, preserving common helix types.
+///
+/// # Parameters
+///
+/// * `document` is the generic CIF document containing structural annotations.
+/// * `builder` receives deferred residue ranges.
+///
+/// # Returns
+///
+/// `Ok(())` when all helix rows are valid or the category is absent.
+fn parse_struct_conf(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+  let Some((tags, rows)) = category_loop(document, "struct_conf") else {
+    return Ok(());
+  };
+  for (row_index, values) in rows.iter().enumerate() {
+    let Some(conf_type) = loop_value(tags, values, "_struct_conf.conf_type_id") else {
+      continue;
+    };
+    let conf_type_upper = conf_type.to_ascii_uppercase();
+    if !conf_type_upper.starts_with("HELX_") {
+      continue;
+    }
+    let (chain_id, start_sequence_number, end_chain_id, end_sequence_number) =
+      annotation_endpoints(tags, values, row_index + 1)?;
+    if chain_id != end_chain_id {
+      return Err(MmcifParseError::InvalidField {
+        row: row_index + 1,
+        field: "_struct_conf chain",
+        value: format!("{chain_id:?} and {end_chain_id:?}"),
+      });
+    }
+    let kind = match conf_type_upper.as_str() {
+      "HELX_RH_3T_P" => SecondaryStructure::Helix310,
+      "HELX_RH_PI_P" => SecondaryStructure::PiHelix,
+      _ => SecondaryStructure::Helix,
+    };
+    builder.add_secondary_range(PendingSecondaryRange {
+      line: row_index + 1,
+      chain_id: Some(chain_id),
+      start_sequence_number,
+      start_insertion_code: annotation_insertion_code(tags, values, "beg"),
+      end_sequence_number,
+      end_insertion_code: annotation_insertion_code(tags, values, "end"),
+      kind,
+    });
+  }
+  Ok(())
+}
+
+/// Selects auth or label chain/sequence endpoints for a structural range.
+fn annotation_endpoints(
+  tags: &[String],
+  values: &[CifValue],
+  row: usize,
+) -> Result<(String, i32, String, i32), MmcifParseError> {
+  let auth = (
+    loop_value(tags, values, "_struct_conf.beg_auth_asym_id"),
+    loop_value(tags, values, "_struct_conf.beg_auth_seq_id"),
+    loop_value(tags, values, "_struct_conf.end_auth_asym_id"),
+    loop_value(tags, values, "_struct_conf.end_auth_seq_id"),
+  );
+  let label = (
+    loop_value(tags, values, "_struct_conf.beg_label_asym_id"),
+    loop_value(tags, values, "_struct_conf.beg_label_seq_id"),
+    loop_value(tags, values, "_struct_conf.end_label_asym_id"),
+    loop_value(tags, values, "_struct_conf.end_label_seq_id"),
+  );
+  let (beg_chain, beg_seq, end_chain, end_seq) = match auth {
+    (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+    _ => match label {
+      (Some(a), Some(b), Some(c), Some(d)) => (a, b, c, d),
+      _ => {
+        return Err(MmcifParseError::InvalidField {
+          row,
+          field: "_struct_conf endpoints",
+          value: "missing auth and label endpoints".to_owned(),
+        });
+      }
+    },
+  };
+  let start_sequence_number = beg_seq.parse().map_err(|_| MmcifParseError::InvalidField {
+    row,
+    field: "_struct_conf start sequence",
+    value: beg_seq.to_owned(),
+  })?;
+  let end_sequence_number = end_seq.parse().map_err(|_| MmcifParseError::InvalidField {
+    row,
+    field: "_struct_conf end sequence",
+    value: end_seq.to_owned(),
+  })?;
+  Ok((
+    beg_chain.to_owned(),
+    start_sequence_number,
+    end_chain.to_owned(),
+    end_sequence_number,
+  ))
+}
+
+/// Reads a mmCIF insertion code from a structural range endpoint.
+fn annotation_insertion_code(tags: &[String], values: &[CifValue], endpoint: &str) -> Option<char> {
+  let tag = format!("_struct_conf.pdbx_{endpoint}_PDB_ins_code");
+  loop_value(tags, values, &tag)
+    .filter(|value| !is_missing(value))
+    .and_then(|value| value.chars().next())
+}
+
 /// Converts an atom-site row into the common builder record.
 ///
 /// # Parameters
@@ -119,6 +337,9 @@ fn atom_record(row: &AtomSiteRow) -> Result<AtomRecord, MmcifParseError> {
   let name = required_text(row, &["_atom_site.auth_atom_id", "_atom_site.label_atom_id"])?;
   let residue_name = required_text(row, &["_atom_site.auth_comp_id", "_atom_site.label_comp_id"])?;
   let chain_id = optional_text(row, &["_atom_site.auth_asym_id", "_atom_site.label_asym_id"]);
+  let label_chain_id = optional_text(row, &["_atom_site.label_asym_id"]);
+  let label_sequence_number = optional_i32(row, "_atom_site.label_seq_id", "label residue sequence")?;
+  let label_atom_name = optional_text(row, &["_atom_site.label_atom_id"]);
   let sequence_number = required_i32(
     row,
     &["_atom_site.auth_seq_id", "_atom_site.label_seq_id"],
@@ -149,6 +370,9 @@ fn atom_record(row: &AtomSiteRow) -> Result<AtomRecord, MmcifParseError> {
     } else {
       ResidueKind::Polymer
     },
+    label_chain_id: label_chain_id.map(str::to_owned),
+    label_sequence_number,
+    label_atom_name: label_atom_name.map(str::to_owned),
   })
 }
 
@@ -439,5 +663,68 @@ ATOM 1 CA ALA B 4 1.0 2.0 3.0
       .unwrap_or_else(|error| panic!("fixture should parse: {error}"));
     assert_eq!(parsed.structure.chains[0].auth_id.as_deref(), Some("B"));
     assert_eq!(parsed.structure.residues[0].sequence_number, 4);
+  }
+
+  #[test]
+  fn parses_struct_conn_with_auth_and_label_identifiers() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 CA ALA A 10 CA ALA A 1 1.0 2.0 3.0 C
+ATOM 2 O GLY A 11 O GLY A 2 4.0 5.0 6.0 O
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_auth_asym_id
+_struct_conn.ptnr1_auth_seq_id
+_struct_conn.ptnr1_auth_atom_id
+_struct_conn.ptnr1_label_asym_id
+_struct_conn.ptnr1_label_seq_id
+_struct_conn.ptnr1_label_atom_id
+_struct_conn.ptnr2_auth_asym_id
+_struct_conn.ptnr2_auth_seq_id
+_struct_conn.ptnr2_auth_atom_id
+_struct_conn.ptnr2_label_asym_id
+_struct_conn.ptnr2_label_seq_id
+_struct_conn.ptnr2_label_atom_id
+covale A 10 CA A 1 CA A 11 O A 2 O
+covale A 10 ? A 1 CA A 11 ? A 2 O
+loop_
+_struct_conf.conf_type_id
+_struct_conf.beg_auth_asym_id
+_struct_conf.beg_auth_seq_id
+_struct_conf.end_auth_asym_id
+_struct_conf.end_auth_seq_id
+_struct_conf.beg_label_asym_id
+_struct_conf.beg_label_seq_id
+_struct_conf.end_label_asym_id
+_struct_conf.end_label_seq_id
+HELX_RH_3T_P . . . . A 1 A 2
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("struct_conn fixture should parse: {error}"));
+    assert_eq!(parsed.structure.bonds.len(), 1);
+    assert_eq!(parsed.structure.secondary_ranges.len(), 1);
+    assert_eq!(
+      parsed.structure.residues[0].secondary_structure,
+      SecondaryStructure::Helix310
+    );
+    assert_eq!(
+      parsed.structure.residues[1].secondary_structure,
+      SecondaryStructure::Helix310
+    );
   }
 }

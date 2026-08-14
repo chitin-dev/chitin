@@ -200,6 +200,21 @@ struct AtomKey {
   altloc: Option<char>,
 }
 
+/// Identifier tuple used by mmCIF connectivity records.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(super) struct AtomLookupKey {
+  /// Chain identifier in label or author namespace.
+  pub(super) chain_id: Option<String>,
+  /// Residue sequence number in the selected namespace.
+  pub(super) sequence_number: i32,
+  /// Atom name in the selected namespace.
+  pub(super) atom_name: String,
+  /// Residue insertion code, when present.
+  pub(super) insertion_code: Option<char>,
+  /// Alternate location, when present.
+  pub(super) altloc: Option<char>,
+}
+
 /// A source CONECT relation waiting for serial numbers to resolve to AtomId.
 #[derive(Debug)]
 struct PendingBond {
@@ -211,23 +226,34 @@ struct PendingBond {
   target: i32,
 }
 
-/// A HELIX or SHEET range waiting for residue identifiers to resolve.
+/// An mmCIF atom-pair relation waiting for atom aliases to resolve.
 #[derive(Debug)]
-struct PendingSecondaryRange {
+struct PendingNamedBond {
   /// One-based source line for diagnostics.
   line: usize,
+  /// First endpoint lookup key.
+  first: AtomLookupKey,
+  /// Second endpoint lookup key.
+  second: AtomLookupKey,
+}
+
+/// A HELIX or SHEET range waiting for residue identifiers to resolve.
+#[derive(Debug)]
+pub(super) struct PendingSecondaryRange {
+  /// One-based source line for diagnostics.
+  pub(super) line: usize,
   /// Author chain identifier, or None for a blank chain.
-  chain_id: Option<String>,
+  pub(super) chain_id: Option<String>,
   /// First residue sequence number.
-  start_sequence_number: i32,
+  pub(super) start_sequence_number: i32,
   /// First residue insertion code.
-  start_insertion_code: Option<char>,
+  pub(super) start_insertion_code: Option<char>,
   /// Last residue sequence number.
-  end_sequence_number: i32,
+  pub(super) end_sequence_number: i32,
   /// Last residue insertion code.
-  end_insertion_code: Option<char>,
+  pub(super) end_insertion_code: Option<char>,
   /// HELIX or SHEET classification.
-  kind: SecondaryStructure,
+  pub(super) kind: SecondaryStructure,
 }
 
 /// Mutable assembly state used while converting records into dense tables.
@@ -247,8 +273,12 @@ pub(super) struct StructureBuilder {
   atom_ids: HashMap<AtomKey, AtomId>,
   /// Maps PDB serial numbers to normalized atom identifiers.
   serial_ids: HashMap<i32, AtomId>,
+  /// Maps label/auth atom aliases to normalized atom identifiers.
+  lookup_ids: HashMap<AtomLookupKey, AtomId>,
   /// CONECT records are resolved after all atoms have been read.
   pending_bonds: Vec<PendingBond>,
+  /// mmCIF struct_conn records are resolved after all atoms have been read.
+  pending_named_bonds: Vec<PendingNamedBond>,
   /// Secondary-structure records are resolved after all residues have been read.
   pending_secondary_ranges: Vec<PendingSecondaryRange>,
 }
@@ -285,6 +315,16 @@ impl StructureBuilder {
       name: record.name.clone(),
       altloc: record.altloc,
     };
+    let lookup_chain_id = record.chain_id.clone();
+    let lookup_sequence_number = record.sequence_number;
+    let lookup_atom_name = record.name.clone();
+    let lookup_insertion_code = record.insertion_code;
+    let lookup_altloc = record.altloc;
+    let label_lookup = record
+      .label_chain_id
+      .clone()
+      .zip(record.label_sequence_number)
+      .zip(record.label_atom_name.clone());
     let coordinate_set_id = self.structure.models[model_id.index()].coordinate_set_id;
 
     let atom_id = if let Some(&atom_id) = self.atom_ids.get(&atom_key) {
@@ -319,6 +359,29 @@ impl StructureBuilder {
       atom_id
     };
 
+    self.lookup_ids.insert(
+      AtomLookupKey {
+        chain_id: lookup_chain_id,
+        sequence_number: lookup_sequence_number,
+        atom_name: lookup_atom_name,
+        insertion_code: lookup_insertion_code,
+        altloc: lookup_altloc,
+      },
+      atom_id,
+    );
+    if let Some(((chain_id, sequence_number), atom_name)) = label_lookup {
+      self.lookup_ids.insert(
+        AtomLookupKey {
+          chain_id: Some(chain_id),
+          sequence_number,
+          atom_name,
+          insertion_code: lookup_insertion_code,
+          altloc: lookup_altloc,
+        },
+        atom_id,
+      );
+    }
+
     self.structure.coordinates[coordinate_set_id.index()].positions[atom_id.index()] = record.position;
     Ok(())
   }
@@ -331,8 +394,13 @@ impl StructureBuilder {
       .extend(targets.into_iter().map(|target| PendingBond { line, source, target }));
   }
 
+  /// Queues an mmCIF atom-pair relation for alias-aware resolution.
+  pub(super) fn add_named_bond(&mut self, line: usize, first: AtomLookupKey, second: AtomLookupKey) {
+    self.pending_named_bonds.push(PendingNamedBond { line, first, second });
+  }
+
   /// Queues a secondary-structure range for resolution after residue parsing.
-  fn add_secondary_range(&mut self, range: PendingSecondaryRange) {
+  pub(super) fn add_secondary_range(&mut self, range: PendingSecondaryRange) {
     self.pending_secondary_ranges.push(range);
   }
 
@@ -507,6 +575,7 @@ impl StructureBuilder {
     }
     self.finish_model();
     self.resolve_bonds(strict)?;
+    self.resolve_named_bonds(strict)?;
     self.resolve_secondary_ranges(strict)?;
     self
       .structure
@@ -563,6 +632,58 @@ impl StructureBuilder {
           b,
           order: BondOrder::Unknown,
           source: BondSource::Conect,
+        });
+      }
+    }
+    Ok(())
+  }
+
+  /// Resolves label/auth atom aliases for mmCIF struct_conn relations.
+  ///
+  /// # Parameters
+  ///
+  /// * `strict` controls whether an endpoint absent from the atom table is
+  ///   fatal.
+  ///
+  /// # Returns
+  ///
+  /// `Ok(())` after all resolvable relations are stored, or a strict-mode
+  /// parse error for an unresolved endpoint.
+  fn resolve_named_bonds(&mut self, strict: bool) -> Result<(), PdbParseError> {
+    let pending_bonds = std::mem::take(&mut self.pending_named_bonds);
+    for pending in pending_bonds {
+      let Some(&first) = self.lookup_ids.get(&pending.first) else {
+        self.deferred_warning(
+          strict,
+          pending.line,
+          "MMCIF_STRUCT_CONN_UNKNOWN_ATOM",
+          "first struct_conn atom was not found".to_owned(),
+        )?;
+        continue;
+      };
+      let Some(&second) = self.lookup_ids.get(&pending.second) else {
+        self.deferred_warning(
+          strict,
+          pending.line,
+          "MMCIF_STRUCT_CONN_UNKNOWN_ATOM",
+          "second struct_conn atom was not found".to_owned(),
+        )?;
+        continue;
+      };
+      if first == second {
+        continue;
+      }
+      let (a, b) = if first.index() < second.index() {
+        (first, second)
+      } else {
+        (second, first)
+      };
+      if !self.structure.bonds.iter().any(|bond| bond.a == a && bond.b == b) {
+        self.structure.bonds.push(Bond {
+          a,
+          b,
+          order: BondOrder::Unknown,
+          source: BondSource::StructConn,
         });
       }
     }
@@ -650,14 +771,22 @@ impl StructureBuilder {
     sequence_number: i32,
     insertion_code: Option<char>,
   ) -> Option<ResidueId> {
-    self
+    let residue = self
       .chains_for_id(chain_id)
       .into_iter()
       .flat_map(|chain| chain.residue_ids.iter().copied())
       .find(|residue_id| {
         let residue = &self.structure.residues[residue_id.index()];
         residue.sequence_number == sequence_number && residue.insertion_code == insertion_code
+      });
+    residue.or_else(|| {
+      self.lookup_ids.iter().find_map(|(key, atom_id)| {
+        (key.chain_id.as_deref() == chain_id
+          && key.sequence_number == sequence_number
+          && key.insertion_code == insertion_code)
+          .then(|| self.structure.atoms[atom_id.index()].residue_id)
       })
+    })
   }
 
   /// Returns chains matching an author identifier.
@@ -722,6 +851,12 @@ pub(super) struct AtomRecord {
   pub(super) position: [f32; 3],
   /// Whether the source record was ATOM or HETATM.
   pub(super) kind: ResidueKind,
+  /// Optional label-namespace chain identifier from mmCIF.
+  pub(super) label_chain_id: Option<String>,
+  /// Optional label-namespace residue sequence from mmCIF.
+  pub(super) label_sequence_number: Option<i32>,
+  /// Optional label-namespace atom name from mmCIF.
+  pub(super) label_atom_name: Option<String>,
 }
 
 /// Parses one ATOM or HETATM record using the PDB fixed-column layout.
@@ -766,6 +901,9 @@ fn parse_atom(line: &str, line_number: usize, hetero: bool) -> Result<AtomRecord
     } else {
       ResidueKind::Polymer
     },
+    label_chain_id: None,
+    label_sequence_number: None,
+    label_atom_name: None,
   })
 }
 
@@ -780,6 +918,7 @@ fn parse_atom(line: &str, line_number: usize, hetero: bool) -> Result<AtomRecord
 ///
 /// The source line, source serial, and all populated target serials.
 fn parse_conect(line: &str, line_number: usize) -> Result<(usize, i32, Vec<i32>), PdbParseError> {
+  // this function name is not a typo, it parses the CONECT record in pdb
   let source = parse_required_i32(line, 6, 11, "CONECT source serial", line_number)?;
   let targets = [(11, 16), (16, 21), (21, 26), (26, 31)]
     .into_iter()

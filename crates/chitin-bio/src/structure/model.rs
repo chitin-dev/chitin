@@ -132,6 +132,8 @@ pub enum BondOrder {
 pub enum BondSource {
   /// Explicit PDB CONECT record.
   Conect,
+  /// Explicit mmCIF _struct_conn relation.
+  StructConn,
   /// Inferred from polymer topology.
   PolymerInference,
   /// Inferred from a distance heuristic.
@@ -145,6 +147,10 @@ pub enum SecondaryStructure {
   Unknown,
   /// Alpha or other helix annotation.
   Helix,
+  /// Three-ten helix annotation.
+  Helix310,
+  /// Pi helix annotation.
+  PiHelix,
   /// Beta-sheet annotation.
   Sheet,
   /// Explicit coil annotation.
