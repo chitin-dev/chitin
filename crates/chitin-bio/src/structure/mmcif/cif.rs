@@ -115,7 +115,7 @@ impl CifParser {
           .map(|token| token.text.clone())
           .collect::<Vec<_>>();
         let value_start = cursor;
-        while cursor < tokens.len() && !is_control_token(&tokens[cursor].text) {
+        while cursor < tokens.len() && !is_control_token(&tokens[cursor]) {
           cursor += 1;
         }
         let values = &tokens[value_start..cursor];
@@ -162,6 +162,7 @@ struct Token {
   text: String,
   value: CifValue,
   line: usize,
+  quoted: bool,
 }
 
 /// A syntax error with the source line where it was detected.
@@ -246,6 +247,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, CifParseError> {
         text: text.clone(),
         value: CifValue::Text(text),
         line: token_line,
+        quoted: true,
       });
       position += 1;
       continue;
@@ -262,6 +264,7 @@ fn tokenize(input: &str) -> Result<Vec<Token>, CifParseError> {
             text: text.clone(),
             value: CifValue::Text(text),
             line: token_line,
+            quoted: true,
           });
           closed = true;
           while position < bytes.len() && bytes[position] != b'\n' {
@@ -294,14 +297,15 @@ fn tokenize(input: &str) -> Result<Vec<Token>, CifParseError> {
       text,
       value,
       line: token_line,
+      quoted: false,
     });
   }
   Ok(tokens)
 }
 
 /// Reports whether a token begins a new CIF construct rather than a loop cell.
-fn is_control_token(value: &str) -> bool {
-  value == "loop_" || value.starts_with("data_") || value.starts_with('_')
+fn is_control_token(token: &Token) -> bool {
+  !token.quoted && (token.text == "loop_" || token.text.starts_with("data_") || token.text.starts_with('_'))
 }
 
 #[cfg(test)]
@@ -345,5 +349,25 @@ _atom_site.label_atom_id
         ..
       }
     ));
+  }
+
+  #[test]
+  fn keeps_quoted_tag_like_loop_values() {
+    let document = CifParser::parse(
+      r#"data_demo
+loop_
+_audit.ordinal
+_audit.item
+1 '_atom_site.Cartn_x'
+2 '_entity.pdbx_description'
+"#,
+    )
+    .unwrap_or_else(|error| panic!("quoted loop values should parse: {error}"));
+
+    let CifCategory::Loop { rows, .. } = &document.blocks[0].categories[0] else {
+      panic!("expected loop category");
+    };
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0][1].as_text(), Some("_atom_site.Cartn_x"));
   }
 }

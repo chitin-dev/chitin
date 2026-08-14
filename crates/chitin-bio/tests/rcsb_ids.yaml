@@ -1,0 +1,11 @@
+# Add four-character PDB identifiers here to expand the ignored online batch.
+pdb_ids:
+  - 4HHB
+  - 1CRN
+  - 22QU
+  - 36HT
+  - 9TLE
+  - 9T9C
+  - 9ZRB
+  - 36GY
+  - 27OA
