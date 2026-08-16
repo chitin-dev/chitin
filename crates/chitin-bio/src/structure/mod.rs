@@ -10,7 +10,7 @@ pub use mmcif::MmcifParser;
 pub use mmcif::cif;
 pub use model::{
   AnnotationSource, Atom, AtomId, AtomName, Bond, BondOrder, BondSource, Chain, ChainId, CoordinateSet,
-  CoordinateSetId, Element, Model, ModelId, Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure,
-  Structure, StructureMetadata,
+  CoordinateSetId, Element, MissingPolymerResidue, Model, ModelId, PolymerEntity, PolymerSequenceResidue, PolymerType,
+  Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure, Structure, StructureMetadata,
 };
 pub use pdb::PdbParser;

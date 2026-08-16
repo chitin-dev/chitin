@@ -83,8 +83,64 @@ pub struct Residue {
 pub struct Chain {
   /// Author chain identifier. A blank chain is represented by `None`.
   pub auth_id: Option<String>,
+  /// Label/asym chain identifier from mmCIF, when available.
+  pub label_id: Option<String>,
+  /// Polymer entity identifier associated with this chain, when available.
+  pub entity_id: Option<String>,
   /// Residues in source order.
   pub residue_ids: Vec<ResidueId>,
+}
+
+/// The polymer family declared by an mmCIF entity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PolymerType {
+  /// A peptide or protein polymer.
+  Polypeptide,
+  /// A DNA polymer.
+  Polydeoxyribonucleotide,
+  /// An RNA polymer.
+  Polyribonucleotide,
+  /// A polymer type not covered by the common families.
+  Other(String),
+}
+
+/// One position in an entity's declared polymer sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolymerSequenceResidue {
+  /// One-based label sequence position from `_entity_poly_seq.num`.
+  pub number: i32,
+  /// Chemical component identifier from `_entity_poly_seq.mon_id`.
+  pub monomer: String,
+  /// Whether the source marks this position as a hetero polymer component.
+  pub hetero: bool,
+}
+
+/// A declared polymer position without coordinates in one model and chain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingPolymerResidue {
+  /// Coordinate model in which the position is absent.
+  pub model_id: ModelId,
+  /// Chain containing the declared position.
+  pub chain_id: ChainId,
+  /// One-based label sequence position.
+  pub sequence_number: i32,
+  /// Chemical component identifier declared for the position.
+  pub monomer: String,
+  /// Whether the source marks this position as a hetero polymer component.
+  pub hetero: bool,
+}
+
+/// A complete polymer entity and the chains that instantiate it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolymerEntity {
+  /// Entity identifier from `_entity_poly.entity_id`.
+  pub id: String,
+  /// Polymer family from `_entity_poly.type`.
+  pub polymer_type: PolymerType,
+  /// Complete declared sequence, including positions without coordinates.
+  pub sequence: Vec<PolymerSequenceResidue>,
+  /// Chains mapped to this entity through `_struct_asym`.
+  pub chain_ids: Vec<ChainId>,
 }
 
 /// A coordinate-bearing PDB model.
@@ -207,6 +263,10 @@ pub struct Structure {
   pub coordinates: Vec<CoordinateSet>,
   /// File-level metadata.
   pub metadata: StructureMetadata,
+  /// Declared polymer entities and their complete sequences.
+  pub polymer_entities: Vec<PolymerEntity>,
+  /// Declared polymer positions missing from individual model/chain coordinate sets.
+  pub missing_polymer_residues: Vec<MissingPolymerResidue>,
   /// Secondary-structure intervals.
   pub secondary_ranges: Vec<SecondaryRange>,
 }
@@ -242,6 +302,8 @@ impl Structure {
   ///   bonds: Vec::new(),
   ///   coordinates: Vec::new(),
   ///   metadata: Default::default(),
+  ///   polymer_entities: Vec::new(),
+  ///   missing_polymer_residues: Vec::new(),
   ///   secondary_ranges: Vec::new(),
   /// };
   /// assert!(structure.validate_invariants().is_ok());
@@ -267,6 +329,23 @@ impl Structure {
         .any(|residue_id| residue_id.index() >= self.residues.len())
       {
         return Err(format!("chain {chain_index} references a missing residue"));
+      }
+    }
+
+    for (entity_index, entity) in self.polymer_entities.iter().enumerate() {
+      if entity
+        .chain_ids
+        .iter()
+        .any(|chain_id| chain_id.index() >= self.chains.len())
+      {
+        return Err(format!("polymer entity {entity_index} references a missing chain"));
+      }
+      for window in entity.sequence.windows(2) {
+        if window[0].number >= window[1].number {
+          return Err(format!(
+            "polymer entity {entity_index} sequence is not strictly ordered"
+          ));
+        }
       }
     }
 

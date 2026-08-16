@@ -44,7 +44,18 @@ pub enum CifCategory {
 pub struct CifDataBlock {
   /// Name after the data_ prefix.
   pub name: String,
-  /// Categories in source order.
+  /// Categories declared directly in the data block, in source order.
+  pub categories: Vec<CifCategory>,
+  /// Dictionary save frames in source order.
+  pub save_frames: Vec<CifSaveFrame>,
+}
+
+/// One named CIF save frame nested inside a data block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CifSaveFrame {
+  /// Name after the `save_` prefix.
+  pub name: String,
+  /// Categories declared inside the frame, in source order.
   pub categories: Vec<CifCategory>,
 }
 
@@ -84,13 +95,16 @@ impl CifParser {
     let tokens = tokenize(input)?;
     let mut blocks = Vec::new();
     let mut cursor = 0;
+    let mut current_save_frame = None;
 
     while cursor < tokens.len() {
       if let Some(name) = tokens[cursor].text.strip_prefix("data_") {
         blocks.push(CifDataBlock {
           name: name.to_owned(),
           categories: Vec::new(),
+          save_frames: Vec::new(),
         });
+        current_save_frame = None;
         cursor += 1;
         continue;
       }
@@ -101,10 +115,25 @@ impl CifParser {
         ));
       };
 
+      if tokens[cursor].text == "save_" {
+        current_save_frame = None;
+        cursor += 1;
+        continue;
+      }
+      if let Some(name) = tokens[cursor].text.strip_prefix("save_") {
+        block.save_frames.push(CifSaveFrame {
+          name: name.to_owned(),
+          categories: Vec::new(),
+        });
+        current_save_frame = Some(block.save_frames.len() - 1);
+        cursor += 1;
+        continue;
+      }
+
       if tokens[cursor].text == "loop_" {
         cursor += 1;
         let tag_start = cursor;
-        while cursor < tokens.len() && tokens[cursor].text.starts_with('_') {
+        while cursor < tokens.len() && !tokens[cursor].quoted && tokens[cursor].text.starts_with('_') {
           cursor += 1;
         }
         if tag_start == cursor {
@@ -122,14 +151,18 @@ impl CifParser {
         if values.is_empty() || !values.len().is_multiple_of(tags.len()) {
           return Err(CifParseError::new(
             tokens[tag_start].line,
-            "loop values do not form complete rows",
+            format!(
+              "loop has {} values for {} columns, so values do not form complete rows",
+              values.len(),
+              tags.len()
+            ),
           ));
         }
         let rows = values
           .chunks(tags.len())
           .map(|row| row.iter().map(|token| token.value.clone()).collect())
           .collect();
-        block.categories.push(CifCategory::Loop { tags, rows });
+        categories_mut(block, current_save_frame).push(CifCategory::Loop { tags, rows });
         continue;
       }
 
@@ -139,7 +172,7 @@ impl CifParser {
         let Some(value) = tokens.get(cursor) else {
           return Err(CifParseError::new(tokens[cursor - 1].line, "tag has no value"));
         };
-        block.categories.push(CifCategory::Item {
+        categories_mut(block, current_save_frame).push(CifCategory::Item {
           tag,
           value: value.value.clone(),
         });
@@ -154,6 +187,15 @@ impl CifParser {
       return Err(CifParseError::new(0, "document has no data_ block"));
     }
     Ok(CifDocument { blocks })
+  }
+}
+
+/// Selects the current save frame or the surrounding data block as destination.
+fn categories_mut(block: &mut CifDataBlock, save_frame: Option<usize>) -> &mut Vec<CifCategory> {
+  if let Some(index) = save_frame {
+    &mut block.save_frames[index].categories
+  } else {
+    &mut block.categories
   }
 }
 
@@ -305,7 +347,11 @@ fn tokenize(input: &str) -> Result<Vec<Token>, CifParseError> {
 
 /// Reports whether a token begins a new CIF construct rather than a loop cell.
 fn is_control_token(token: &Token) -> bool {
-  !token.quoted && (token.text == "loop_" || token.text.starts_with("data_") || token.text.starts_with('_'))
+  !token.quoted
+    && (token.text == "loop_"
+      || token.text.starts_with("data_")
+      || token.text.starts_with("save_")
+      || token.text.starts_with('_'))
 }
 
 #[cfg(test)]
@@ -356,10 +402,10 @@ _atom_site.label_atom_id
     let document = CifParser::parse(
       r#"data_demo
 loop_
-_audit.ordinal
 _audit.item
-1 '_atom_site.Cartn_x'
-2 '_entity.pdbx_description'
+_audit.ordinal
+'_atom_site.Cartn_x' 1
+'_entity.pdbx_description' 2
 "#,
     )
     .unwrap_or_else(|error| panic!("quoted loop values should parse: {error}"));
@@ -368,6 +414,16 @@ _audit.item
       panic!("expected loop category");
     };
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0][1].as_text(), Some("_atom_site.Cartn_x"));
+    assert_eq!(rows[0][0].as_text(), Some("_atom_site.Cartn_x"));
+  }
+
+  #[test]
+  fn preserves_dictionary_save_frames() {
+    let document =
+      CifParser::parse("data_dictionary\nsave__entry.id\n_item.name '_entry.id'\n_item_type.code code\nsave_\n")
+        .unwrap_or_else(|error| panic!("dictionary fixture should parse: {error}"));
+
+    assert_eq!(document.blocks[0].save_frames[0].name, "_entry.id");
+    assert_eq!(document.blocks[0].save_frames[0].categories.len(), 2);
   }
 }

@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
 use super::error::{Diagnostic, DiagnosticSeverity, PdbParseError, PdbParseResult};
 use super::model::{
   AnnotationSource, Atom, AtomId, AtomName, Bond, BondOrder, BondSource, Chain, ChainId, CoordinateSet,
-  CoordinateSetId, Element, Model, ModelId, Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure,
-  Structure,
+  CoordinateSetId, Element, MissingPolymerResidue, Model, ModelId, PolymerEntity, PolymerSequenceResidue, PolymerType,
+  Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure, Structure,
 };
 
 /// Reads fixed-column PDB records into an indexed structure snapshot.
@@ -170,6 +170,8 @@ impl PdbParser {
 struct ChainKey {
   /// Author chain identifier; `None` represents a blank chain identifier.
   auth_id: Option<String>,
+  /// Label/asym chain identifier when the source provides one.
+  label_id: Option<String>,
 }
 
 /// Lookup key for a residue in the normalized structure topology.
@@ -275,6 +277,10 @@ pub(super) struct StructureBuilder {
   serial_ids: HashMap<i32, AtomId>,
   /// Maps label/auth atom aliases to normalized atom identifiers.
   lookup_ids: HashMap<AtomLookupKey, AtomId>,
+  /// Maps mmCIF label chain identifiers to polymer entities.
+  label_chain_entities: HashMap<String, String>,
+  /// Model/chain/entity positions observed in atom-site coordinates.
+  observed_polymer_positions: HashSet<(ModelId, String, String, i32)>,
   /// CONECT records are resolved after all atoms have been read.
   pending_bonds: Vec<PendingBond>,
   /// mmCIF struct_conn records are resolved after all atoms have been read.
@@ -302,7 +308,18 @@ impl StructureBuilder {
   /// all position vectors aligned with the atom table.
   pub(super) fn add_atom(&mut self, record: AtomRecord) -> Result<(), PdbParseError> {
     let model_id = self.ensure_model();
-    let chain_id = self.ensure_chain(model_id, record.chain_id.clone());
+    let entity_id = record.label_entity_id.clone().or_else(|| {
+      record
+        .label_chain_id
+        .as_ref()
+        .and_then(|label_id| self.label_chain_entities.get(label_id).cloned())
+    });
+    let chain_id = self.ensure_chain(
+      model_id,
+      record.chain_id.clone(),
+      record.label_chain_id.clone(),
+      entity_id.clone(),
+    );
     let residue_id = self.ensure_residue(
       chain_id,
       record.residue_name.clone(),
@@ -383,6 +400,87 @@ impl StructureBuilder {
     }
 
     self.structure.coordinates[coordinate_set_id.index()].positions[atom_id.index()] = record.position;
+    if let (Some(entity_id), Some(label_id), Some(label_sequence_number)) =
+      (entity_id, record.label_chain_id, record.label_sequence_number)
+    {
+      self
+        .observed_polymer_positions
+        .insert((model_id, label_id, entity_id, label_sequence_number));
+    }
+    Ok(())
+  }
+
+  /// Associates a label chain with its polymer entity.
+  pub(super) fn add_label_chain_entity(&mut self, label_id: String, entity_id: String) {
+    self.label_chain_entities.insert(label_id, entity_id);
+  }
+
+  /// Associates a normalized chain with a polymer entity exactly once.
+  fn attach_chain_entity(&mut self, chain_id: ChainId, entity_id: Option<&str>) {
+    let Some(entity_id) = entity_id else {
+      return;
+    };
+    self.structure.chains[chain_id.index()].entity_id = Some(entity_id.to_owned());
+    if let Some(entity) = self
+      .structure
+      .polymer_entities
+      .iter_mut()
+      .find(|entity| entity.id == entity_id)
+      && !entity.chain_ids.contains(&chain_id)
+    {
+      entity.chain_ids.push(chain_id);
+    }
+  }
+
+  /// Adds or updates an entity declared by `_entity_poly`.
+  pub(super) fn add_polymer_entity(&mut self, entity: PolymerEntity) -> Result<(), PdbParseError> {
+    if self
+      .structure
+      .polymer_entities
+      .iter()
+      .any(|existing| existing.id == entity.id)
+    {
+      return Err(PdbParseError::InvalidStructure {
+        line: 0,
+        message: format!("duplicate polymer entity {}", entity.id),
+      });
+    }
+    self.structure.polymer_entities.push(entity);
+    Ok(())
+  }
+
+  /// Adds one declared sequence position to a polymer entity.
+  pub(super) fn add_polymer_sequence(
+    &mut self,
+    entity_id: String,
+    sequence: PolymerSequenceResidue,
+  ) -> Result<(), PdbParseError> {
+    let Some(entity) = self
+      .structure
+      .polymer_entities
+      .iter_mut()
+      .find(|entity| entity.id == entity_id)
+    else {
+      let entity_index = self.structure.polymer_entities.len();
+      self.structure.polymer_entities.push(PolymerEntity {
+        id: entity_id,
+        polymer_type: PolymerType::Other("unknown".to_owned()),
+        sequence: Vec::new(),
+        chain_ids: Vec::new(),
+      });
+      self.structure.polymer_entities[entity_index].sequence.push(sequence);
+      return Ok(());
+    };
+    if entity.sequence.iter().any(|entry| entry.number == sequence.number) {
+      return Err(PdbParseError::InvalidStructure {
+        line: 0,
+        message: format!(
+          "duplicate sequence position {} for entity {}",
+          sequence.number, entity.id
+        ),
+      });
+    }
+    entity.sequence.push(sequence);
     Ok(())
   }
 
@@ -490,23 +588,35 @@ impl StructureBuilder {
   ///
   /// A shared chain ID. Reusing it across models preserves topology while each
   /// model records its own membership.
-  fn ensure_chain(&mut self, model_id: ModelId, auth_id: Option<String>) -> ChainId {
+  fn ensure_chain(
+    &mut self,
+    model_id: ModelId,
+    auth_id: Option<String>,
+    label_id: Option<String>,
+    entity_id: Option<String>,
+  ) -> ChainId {
     let key = ChainKey {
       auth_id: auth_id.clone(),
+      label_id: label_id.clone(),
     };
     if let Some(&chain_id) = self.chain_ids.get(&key) {
       if !self.structure.models[model_id.index()].chain_ids.contains(&chain_id) {
         self.structure.models[model_id.index()].chain_ids.push(chain_id);
       }
+      self.attach_chain_entity(chain_id, entity_id.as_deref());
       return chain_id;
     }
     let chain_id = ChainId::from_index(self.structure.chains.len());
     self.chain_ids.insert(key, chain_id);
+    let chain_entity_id = entity_id.clone();
     self.structure.chains.push(Chain {
       auth_id,
+      label_id,
+      entity_id,
       residue_ids: Vec::new(),
     });
     self.structure.models[model_id.index()].chain_ids.push(chain_id);
+    self.attach_chain_entity(chain_id, chain_entity_id.as_deref());
     chain_id
   }
 
@@ -577,6 +687,7 @@ impl StructureBuilder {
     self.resolve_bonds(strict)?;
     self.resolve_named_bonds(strict)?;
     self.resolve_secondary_ranges(strict)?;
+    self.resolve_polymer_sequences();
     self
       .structure
       .validate_invariants()
@@ -585,6 +696,42 @@ impl StructureBuilder {
       structure: self.structure,
       diagnostics: self.diagnostics,
     })
+  }
+
+  /// Sorts declared sequences and records positions absent from each model.
+  fn resolve_polymer_sequences(&mut self) {
+    for entity in &mut self.structure.polymer_entities {
+      entity.sequence.sort_by_key(|residue| residue.number);
+    }
+
+    let models = self.structure.models.clone();
+    let entities = self.structure.polymer_entities.clone();
+    for entity in entities {
+      for chain_id in entity.chain_ids {
+        let Some(label_id) = self.structure.chains[chain_id.index()].label_id.as_deref() else {
+          continue;
+        };
+        for model in &models {
+          for residue in &entity.sequence {
+            let observed = self.observed_polymer_positions.contains(&(
+              model.id,
+              label_id.to_owned(),
+              entity.id.clone(),
+              residue.number,
+            ));
+            if !observed {
+              self.structure.missing_polymer_residues.push(MissingPolymerResidue {
+                model_id: model.id,
+                chain_id,
+                sequence_number: residue.number,
+                monomer: residue.monomer.clone(),
+                hetero: residue.hetero,
+              });
+            }
+          }
+        }
+      }
+    }
   }
 
   /// Resolves source serial numbers into atom IDs and deduplicates edges.
@@ -857,6 +1004,8 @@ pub(super) struct AtomRecord {
   pub(super) label_sequence_number: Option<i32>,
   /// Optional label-namespace atom name from mmCIF.
   pub(super) label_atom_name: Option<String>,
+  /// Optional mmCIF polymer entity identifier.
+  pub(super) label_entity_id: Option<String>,
 }
 
 /// Parses one ATOM or HETATM record using the PDB fixed-column layout.
@@ -904,6 +1053,7 @@ fn parse_atom(line: &str, line_number: usize, hetero: bool) -> Result<AtomRecord
     label_chain_id: None,
     label_sequence_number: None,
     label_atom_name: None,
+    label_entity_id: None,
   })
 }
 

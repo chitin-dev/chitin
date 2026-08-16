@@ -32,8 +32,16 @@ bio-test:
 bio-online:
   cargo test -p chitin-bio --test rcsb_online downloads_configured_structures_and_parses_them -- --ignored --nocapture
 
+# Requires the ignored local PDBx dictionary beside the generated schema.
+generate-mmcif-schema:
+  cargo run -p chitin-mmcif-schema --locked
+  rustfmt --edition 2024 crates/chitin-bio/src/structure/mmcif/schema.rs
+
 desktop path=".":
   cargo run -p chitin-desktop -- "{{path}}"
+
+wgpu-example path=".":
+  cargo run --example chitin-wgpu-desktop -- "{{path}}"
 
 showcase:
   cargo run -p chitin-ui --example primitive-showcase

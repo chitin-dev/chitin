@@ -699,12 +699,22 @@ dependencies = [
 name = "chitin-bio"
 version = "0.1.0"
 dependencies = [
+ "chitin-bio-macros",
  "chitin-databases",
  "serde",
  "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "chitin-bio-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -746,6 +756,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "wgpu",
+]
+
+[[package]]
+name = "chitin-mmcif-schema"
+version = "0.1.0"
+dependencies = [
+ "chitin-bio",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
