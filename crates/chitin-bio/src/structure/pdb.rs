@@ -3,9 +3,10 @@ use std::io::Read;
 
 use super::error::{Diagnostic, DiagnosticSeverity, PdbParseError, StructureParseResult};
 use super::model::{
-  AnnotationSource, Atom, AtomId, Bond, BondOrder, BondSource, Chain, ChainId, CoordinateSet, CoordinateSetId, Element,
-  MissingPolymerResidue, Model, ModelId, PolymerEntity, PolymerSequenceResidue, PolymerType, Residue, ResidueId,
-  ResidueKind, SecondaryRange, SecondaryStructure, Structure, Symmetry, UnitCell,
+  AnnotationSource, AssemblyGeneration, Atom, AtomId, BiologicalAssembly, Bond, BondOrder, BondSource, Chain, ChainId,
+  CoordinateSet, CoordinateSetId, Element, MissingPolymerResidue, Model, ModelId, PolymerEntity,
+  PolymerSequenceResidue, PolymerType, Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure, Structure,
+  StructureOperation, Symmetry, UnitCell,
 };
 
 /// Reads fixed-column PDB records into an indexed structure snapshot.
@@ -423,6 +424,67 @@ impl StructureBuilder {
   /// Stores the declared crystallographic space-group metadata.
   pub(super) fn set_symmetry(&mut self, symmetry: Symmetry) {
     self.structure.metadata.symmetry = Some(symmetry);
+  }
+
+  /// Adds one assembly operation while rejecting duplicate source identifiers.
+  pub(super) fn add_structure_operation(&mut self, operation: StructureOperation) -> Result<(), PdbParseError> {
+    if self
+      .structure
+      .metadata
+      .assembly
+      .operations
+      .iter()
+      .any(|existing| existing.id == operation.id)
+    {
+      return Err(PdbParseError::InvalidStructure {
+        line: 0,
+        message: format!("duplicate assembly operation {}", operation.id),
+      });
+    }
+    self.structure.metadata.assembly.operations.push(operation);
+    Ok(())
+  }
+
+  /// Adds an assembly definition while rejecting duplicate source identifiers.
+  pub(super) fn add_biological_assembly(&mut self, assembly: BiologicalAssembly) -> Result<(), PdbParseError> {
+    if self
+      .structure
+      .metadata
+      .assembly
+      .assemblies
+      .iter()
+      .any(|existing| existing.id == assembly.id)
+    {
+      return Err(PdbParseError::InvalidStructure {
+        line: 0,
+        message: format!("duplicate biological assembly {}", assembly.id),
+      });
+    }
+    self.structure.metadata.assembly.assemblies.push(assembly);
+    Ok(())
+  }
+
+  /// Appends one generation rule to its declared biological assembly.
+  pub(super) fn add_assembly_generation(
+    &mut self,
+    assembly_id: &str,
+    generation: AssemblyGeneration,
+  ) -> Result<(), PdbParseError> {
+    let Some(assembly) = self
+      .structure
+      .metadata
+      .assembly
+      .assemblies
+      .iter_mut()
+      .find(|assembly| assembly.id == assembly_id)
+    else {
+      return Err(PdbParseError::InvalidStructure {
+        line: 0,
+        message: format!("assembly generation references unknown assembly {assembly_id}"),
+      });
+    };
+    assembly.generations.push(generation);
+    Ok(())
   }
 
   /// Associates a normalized chain with a polymer entity exactly once.

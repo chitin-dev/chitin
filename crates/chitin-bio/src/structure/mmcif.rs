@@ -71,6 +71,7 @@ impl MmcifParser {
     // Entity declarations must precede atom projection so label-chain and
     // complete-sequence metadata are available while topology is constructed.
     categories::metadata::parse(&document, &mut builder)?;
+    categories::assembly::parse(&document, &mut builder)?;
     categories::entity::parse(&document, &mut builder)?;
     categories::atom_site::parse(&document, &mut builder)?;
     categories::connectivity::parse(&document, &mut builder)?;
@@ -204,6 +205,60 @@ ATOM 1 CA ALA A 1 1.0 2.0 3.0 C
         .as_ref()
         .and_then(|symmetry| symmetry.international_tables_number),
       Some(19)
+    );
+  }
+
+  #[test]
+  fn preserves_assembly_operations_without_expanding_coordinates() {
+    let input = br#"data_demo
+loop_
+_pdbx_struct_oper_list.id
+_pdbx_struct_oper_list.matrix[1][1]
+_pdbx_struct_oper_list.matrix[1][2]
+_pdbx_struct_oper_list.matrix[1][3]
+_pdbx_struct_oper_list.matrix[2][1]
+_pdbx_struct_oper_list.matrix[2][2]
+_pdbx_struct_oper_list.matrix[2][3]
+_pdbx_struct_oper_list.matrix[3][1]
+_pdbx_struct_oper_list.matrix[3][2]
+_pdbx_struct_oper_list.matrix[3][3]
+_pdbx_struct_oper_list.vector[1]
+_pdbx_struct_oper_list.vector[2]
+_pdbx_struct_oper_list.vector[3]
+1 1 0 0 0 1 0 0 0 1 2 3 4
+loop_
+_pdbx_struct_assembly.id
+_pdbx_struct_assembly.details
+1 'biological unit'
+loop_
+_pdbx_struct_assembly_gen.assembly_id
+_pdbx_struct_assembly_gen.asym_id_list
+_pdbx_struct_assembly_gen.auth_asym_id_list
+_pdbx_struct_assembly_gen.oper_expression
+1 A A 1
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 CA ALA A 1 1.0 2.0 3.0 C
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("assembly fixture should parse: {error}"));
+    assert_eq!(parsed.structure.metadata.assembly.operations.len(), 1);
+    assert_eq!(parsed.structure.metadata.assembly.assemblies.len(), 1);
+    assert_eq!(parsed.structure.metadata.assembly.assemblies[0].generations.len(), 1);
+    assert_eq!(parsed.structure.atom_count(), 1);
+    assert_eq!(
+      parsed.structure.metadata.assembly.operations[0].translation,
+      [2.0, 3.0, 4.0]
     );
   }
 

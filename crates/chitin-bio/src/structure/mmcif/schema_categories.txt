@@ -8,3 +8,6 @@ struct_conn
 struct_sheet_range
 cell
 symmetry
+pdbx_struct_oper_list
+pdbx_struct_assembly
+pdbx_struct_assembly_gen

@@ -245,6 +245,8 @@ pub struct StructureMetadata {
   pub unit_cell: Option<UnitCell>,
   /// Crystallographic space-group metadata, when supplied by the source format.
   pub symmetry: Option<Symmetry>,
+  /// Biological assembly operations and generation rules.
+  pub assembly: AssemblyMetadata,
 }
 
 /// Parameters describing a crystallographic unit cell.
@@ -263,6 +265,50 @@ pub struct Symmetry {
   pub space_group_name: Option<String>,
   /// International Tables number, when provided.
   pub international_tables_number: Option<i32>,
+}
+
+/// A rigid operation that can be applied when expanding a biological assembly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructureOperation {
+  /// Dictionary operation identifier.
+  pub id: String,
+  /// Rotation matrix in Cartesian coordinates.
+  pub rotation: [[f32; 3]; 3],
+  /// Translation vector in ångströms.
+  pub translation: [f32; 3],
+}
+
+/// One row describing which chains an operator expression targets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssemblyGeneration {
+  /// Label asym identifiers selected by this generation rule.
+  pub asym_ids: Vec<String>,
+  /// Author asym identifiers, when supplied by the source.
+  pub auth_asym_ids: Vec<String>,
+  /// Entity-instance identifiers, used by files that do not provide asym IDs.
+  pub entity_instance_ids: Vec<String>,
+  /// Raw operator expression, preserved for a later expansion pass.
+  pub operator_expression: String,
+}
+
+/// A biological assembly definition without materialized duplicate coordinates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BiologicalAssembly {
+  /// Assembly identifier.
+  pub id: String,
+  /// Optional source description.
+  pub details: Option<String>,
+  /// Rules used to select chains and operations for this assembly.
+  pub generations: Vec<AssemblyGeneration>,
+}
+
+/// Assembly operations and biological assembly generation rules.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AssemblyMetadata {
+  /// Operations indexed by their source identifiers.
+  pub operations: Vec<StructureOperation>,
+  /// Biological assemblies declared by the source file.
+  pub assemblies: Vec<BiologicalAssembly>,
 }
 
 /// Indexed, renderer-independent molecular structure data.

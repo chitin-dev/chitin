@@ -347,6 +347,75 @@ pub(crate) struct EntityPolySeq {
   pub(crate) num: Integer,
 }
 
+/// Typed schema for the `_pdbx_struct_assembly` category.
+#[mmcif_category(name = "pdbx_struct_assembly")]
+pub(crate) struct PdbxStructAssembly {
+  #[mmcif(tag = "_pdbx_struct_assembly.details")]
+  pub(crate) details: Text,
+  #[mmcif(tag = "_pdbx_struct_assembly.id")]
+  pub(crate) id: Text,
+  #[mmcif(tag = "_pdbx_struct_assembly.method_details")]
+  pub(crate) method_details: Text,
+  #[mmcif(tag = "_pdbx_struct_assembly.oligomeric_count")]
+  pub(crate) oligomeric_count: Integer,
+  #[mmcif(tag = "_pdbx_struct_assembly.oligomeric_details")]
+  pub(crate) oligomeric_details: Text,
+}
+
+/// Typed schema for the `_pdbx_struct_assembly_gen` category.
+#[mmcif_category(name = "pdbx_struct_assembly_gen")]
+pub(crate) struct PdbxStructAssemblyGen {
+  #[mmcif(tag = "_pdbx_struct_assembly_gen.assembly_id")]
+  pub(crate) assembly_id: Text,
+  #[mmcif(tag = "_pdbx_struct_assembly_gen.asym_id_list")]
+  pub(crate) asym_id_list: Text,
+  #[mmcif(tag = "_pdbx_struct_assembly_gen.auth_asym_id_list")]
+  pub(crate) auth_asym_id_list: Text,
+  #[mmcif(tag = "_pdbx_struct_assembly_gen.entity_inst_id")]
+  pub(crate) entity_inst_id: Text,
+  #[mmcif(tag = "_pdbx_struct_assembly_gen.oper_expression")]
+  pub(crate) oper_expression: Text,
+}
+
+/// Typed schema for the `_pdbx_struct_oper_list` category.
+#[mmcif_category(name = "pdbx_struct_oper_list")]
+pub(crate) struct PdbxStructOperList {
+  #[mmcif(tag = "_pdbx_struct_oper_list.full_matrix")]
+  pub(crate) full_matrix: Text,
+  #[mmcif(tag = "_pdbx_struct_oper_list.id")]
+  pub(crate) id: Text,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[1][1]")]
+  pub(crate) matrix_1_1: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[1][2]")]
+  pub(crate) matrix_1_2: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[1][3]")]
+  pub(crate) matrix_1_3: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[2][1]")]
+  pub(crate) matrix_2_1: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[2][2]")]
+  pub(crate) matrix_2_2: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[2][3]")]
+  pub(crate) matrix_2_3: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[3][1]")]
+  pub(crate) matrix_3_1: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[3][2]")]
+  pub(crate) matrix_3_2: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.matrix[3][3]")]
+  pub(crate) matrix_3_3: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.name")]
+  pub(crate) name: Text,
+  #[mmcif(tag = "_pdbx_struct_oper_list.symmetry_operation")]
+  pub(crate) symmetry_operation: Text,
+  #[mmcif(tag = "_pdbx_struct_oper_list.type")]
+  pub(crate) type_: Text,
+  #[mmcif(tag = "_pdbx_struct_oper_list.vector[1]")]
+  pub(crate) vector_1: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.vector[2]")]
+  pub(crate) vector_2: Float,
+  #[mmcif(tag = "_pdbx_struct_oper_list.vector[3]")]
+  pub(crate) vector_3: Float,
+}
+
 /// Typed schema for the `_struct_asym` category.
 #[mmcif_category(name = "struct_asym")]
 pub(crate) struct StructAsym {

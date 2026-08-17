@@ -1,5 +1,6 @@
 //! Typed mmCIF categories and their projection into the structure model.
 
+pub(super) mod assembly;
 pub(super) mod atom_site;
 pub(super) mod connectivity;
 pub(super) mod entity;
