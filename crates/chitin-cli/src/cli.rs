@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use chitin_command::{ChitinCommand, DatabaseCommand};
+use chitin_command::{ChitinCommand, DatabaseCommand, StructureCommand};
 use chitin_databases::providers::rcsb::StructureFormat;
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
@@ -24,8 +24,63 @@ pub(crate) enum CliCommand {
   /// Work with external biological databases.
   #[command(name = "db", visible_alias = "databases")]
   Database(DatabaseCommandArgs),
+  /// Inspect or validate a local PDB/mmCIF structure file.
+  Structure(StructureCommandArgs),
   /// Generate shell completion scripts.
   Completions { shell: Shell },
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct StructureCommandArgs {
+  #[command(subcommand)]
+  command: StructureSubcommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum StructureSubcommand {
+  /// Print a human-readable or JSON structure summary.
+  Inspect(StructureInspectArgs),
+  /// Parse a structure and verify its indexed model invariants.
+  Validate(StructureValidateArgs),
+}
+
+#[derive(Debug, Args)]
+struct StructureInspectArgs {
+  #[command(flatten)]
+  input: StructureInputArgs,
+  /// Output representation.
+  #[arg(long, value_enum, default_value_t = OutputArg::Text)]
+  output: OutputArg,
+  /// Include chains, metadata, assembly, and diagnostics.
+  #[arg(long)]
+  verbose: bool,
+}
+
+#[derive(Debug, Args)]
+struct StructureValidateArgs {
+  #[command(flatten)]
+  input: StructureInputArgs,
+  /// Output representation.
+  #[arg(long, value_enum, default_value_t = OutputArg::Text)]
+  output: OutputArg,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct StructureInputArgs {
+  /// Structure file path, or `-` to read stdin.
+  #[arg(value_name = "FILE")]
+  pub(crate) input: PathBuf,
+  /// Input format; inferred from the extension when omitted.
+  #[arg(long, value_enum)]
+  pub(crate) format: Option<FormatArg>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum OutputArg {
+  /// Human-readable terminal output.
+  Text,
+  /// Stable machine-readable JSON output.
+  Json,
 }
 
 #[derive(Debug, Args)]
@@ -64,7 +119,7 @@ enum RcsbSubcommand {
 
 /// CLI spelling for the two RCSB structure formats.
 #[derive(Clone, Copy, Debug, ValueEnum)]
-enum FormatArg {
+pub(crate) enum FormatArg {
   /// Legacy PDB format.
   Pdb,
   /// PDBx/mmCIF format.
@@ -73,7 +128,7 @@ enum FormatArg {
 
 impl FormatArg {
   /// Converts the CLI value into the shared provider format.
-  fn structure_format(self) -> StructureFormat {
+  pub(crate) fn structure_format(self) -> StructureFormat {
     match self {
       Self::Pdb => StructureFormat::Pdb,
       Self::Mmcif => StructureFormat::Mmcif,
@@ -102,6 +157,31 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<(), CliError> {
       Ok(())
     }
     CliCommand::Database(database) => dispatch_database_command(database.command).await,
+    CliCommand::Structure(structure) => dispatch_structure_command(structure.command).await,
+  }
+}
+
+/// Dispatches a structure command through the shared command bus.
+async fn dispatch_structure_command(command: StructureSubcommand) -> Result<(), CliError> {
+  match command {
+    StructureSubcommand::Inspect(args) => {
+      crate::structure::dispatch(
+        ChitinCommand::from(StructureCommand::Inspect),
+        args.input,
+        Some(args.output),
+        args.verbose,
+      )
+      .await
+    }
+    StructureSubcommand::Validate(args) => {
+      crate::structure::dispatch(
+        ChitinCommand::from(StructureCommand::Validate),
+        args.input,
+        Some(args.output),
+        false,
+      )
+      .await
+    }
   }
 }
 

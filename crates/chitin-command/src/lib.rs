@@ -3,11 +3,13 @@
 mod application;
 mod database;
 mod panel_tab;
+mod structure;
 mod workspace;
 
 pub use application::ApplicationCommand;
 pub use database::DatabaseCommand;
 pub use panel_tab::PanelTabCommand;
+pub use structure::StructureCommand;
 pub use workspace::WorkspaceCommand;
 
 /// Top-level command hierarchy shared by desktop, terminal, and CLI inputs.
@@ -19,6 +21,8 @@ pub enum ChitinCommand {
   Database(DatabaseCommand),
   /// Application-shell commands.
   Application(ApplicationCommand),
+  /// Structure parsing and inspection commands.
+  Structure(StructureCommand),
 }
 
 impl ChitinCommand {
@@ -28,6 +32,7 @@ impl ChitinCommand {
       Self::Workspace(command) => command.id(),
       Self::Database(command) => command.id(),
       Self::Application(command) => command.id(),
+      Self::Structure(command) => command.id(),
     }
   }
 }
@@ -47,6 +52,12 @@ impl From<DatabaseCommand> for ChitinCommand {
 impl From<ApplicationCommand> for ChitinCommand {
   fn from(command: ApplicationCommand) -> Self {
     Self::Application(command)
+  }
+}
+
+impl From<StructureCommand> for ChitinCommand {
+  fn from(command: StructureCommand) -> Self {
+    Self::Structure(command)
   }
 }
 

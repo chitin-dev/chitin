@@ -5,10 +5,12 @@ mod cli;
 mod download;
 mod error;
 mod output;
+mod structure;
 
 use std::process::ExitCode;
 
 use clap::Parser;
+use console::Style;
 
 use crate::{cli::Cli, error::CliError};
 
@@ -24,6 +26,6 @@ async fn main() -> ExitCode {
 
 /// Prints a user-facing error and returns the process failure code.
 fn report_error(error: CliError) -> ExitCode {
-  eprintln!("error: {error}");
+  eprintln!("{} {error}", Style::new().red().bold().apply_to("error:"));
   ExitCode::FAILURE
 }

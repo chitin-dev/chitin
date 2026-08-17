@@ -686,11 +686,14 @@ dependencies = [
 name = "chitin"
 version = "0.1.0"
 dependencies = [
+ "chitin-bio",
  "chitin-command",
  "chitin-databases",
  "clap",
  "clap_complete",
+ "console",
  "indicatif",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
 ]
