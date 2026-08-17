@@ -70,6 +70,7 @@ impl MmcifParser {
 
     // Entity declarations must precede atom projection so label-chain and
     // complete-sequence metadata are available while topology is constructed.
+    categories::metadata::parse(&document, &mut builder)?;
     categories::entity::parse(&document, &mut builder)?;
     categories::atom_site::parse(&document, &mut builder)?;
     categories::connectivity::parse(&document, &mut builder)?;
@@ -162,6 +163,48 @@ ATOM 1 CA ALA B 4 1.0 2.0 3.0
       .unwrap_or_else(|error| panic!("fixture should parse: {error}"));
     assert_eq!(parsed.structure.chains[0].auth_id.as_deref(), Some("B"));
     assert_eq!(parsed.structure.residues[0].sequence_number, 4);
+  }
+
+  #[test]
+  fn projects_scalar_cell_and_symmetry_items() {
+    let input = br#"data_demo
+_cell.length_a 10.0
+_cell.length_b 20.0
+_cell.length_c 30.0
+_cell.angle_alpha 90.0
+_cell.angle_beta 91.0
+_cell.angle_gamma 92.0
+_symmetry.space_group_name_H-M 'P 21 21 21'
+_symmetry.Int_Tables_number 19
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 CA ALA A 1 1.0 2.0 3.0 C
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("scalar metadata fixture should parse: {error}"));
+    assert_eq!(
+      parsed.structure.metadata.unit_cell.as_ref().map(|cell| cell.lengths),
+      Some([10.0, 20.0, 30.0])
+    );
+    assert_eq!(
+      parsed
+        .structure
+        .metadata
+        .symmetry
+        .as_ref()
+        .and_then(|symmetry| symmetry.international_tables_number),
+      Some(19)
+    );
   }
 
   #[test]

@@ -1,0 +1,10 @@
+# Categories compiled into Chitin's typed mmCIF schema.
+atom_site
+entity_poly
+entity_poly_seq
+struct_asym
+struct_conf
+struct_conn
+struct_sheet_range
+cell
+symmetry

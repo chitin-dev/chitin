@@ -238,12 +238,34 @@ pub struct SecondaryRange {
 }
 
 /// Metadata shared by all models in a structure.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StructureMetadata {
   /// Optional PDB HEADER classification.
   pub classification: Option<String>,
   /// Optional four-character source identifier.
   pub identifier: Option<String>,
+  /// Unit-cell parameters, when supplied by the source format.
+  pub unit_cell: Option<UnitCell>,
+  /// Crystallographic space-group metadata, when supplied by the source format.
+  pub symmetry: Option<Symmetry>,
+}
+
+/// Parameters describing a crystallographic unit cell.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnitCell {
+  /// Cell edge lengths a, b, and c in ångströms.
+  pub lengths: [f32; 3],
+  /// Cell angles alpha, beta, and gamma in degrees.
+  pub angles: [f32; 3],
+}
+
+/// Space-group identifiers declared by a structure file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Symmetry {
+  /// Hermann–Mauguin space-group name.
+  pub space_group_name: Option<String>,
+  /// International Tables number, when provided.
+  pub international_tables_number: Option<i32>,
 }
 
 /// Indexed, renderer-independent molecular structure data.

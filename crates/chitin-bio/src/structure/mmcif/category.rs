@@ -14,40 +14,80 @@ use crate::structure::MmcifParseError;
 #[derive(Debug)]
 pub(crate) struct CategoryView<'a> {
   columns: HashMap<&'a str, usize>,
-  rows: &'a [Vec<CifValue>],
+  rows: CategoryRows<'a>,
+}
+
+/// Stores either loop rows or the single logical row formed by scalar items.
+#[derive(Debug)]
+enum CategoryRows<'a> {
+  Loop(&'a [Vec<CifValue>]),
+  Scalars(Vec<(&'a str, &'a CifValue)>),
 }
 
 impl<'a> CategoryView<'a> {
-  /// Finds the first loop belonging to `category` in source order.
+  /// Finds the first loop or scalar category belonging to `category` in source order.
   pub(crate) fn from_document(document: &'a CifDocument, category: &str) -> Option<Self> {
     let prefix = format!("_{category}.");
-    document
-      .blocks
-      .iter()
-      .flat_map(|block| &block.categories)
-      .find_map(|value| {
+    for block in &document.blocks {
+      if let Some((tags, rows)) = block.categories.iter().find_map(|value| {
         let CifCategory::Loop { tags, rows } = value else {
           return None;
         };
-        tags.iter().any(|tag| tag.starts_with(&prefix)).then(|| Self {
+        tags.iter().any(|tag| tag.starts_with(&prefix)).then_some((tags, rows))
+      }) {
+        return Some(Self {
           columns: tags
             .iter()
             .enumerate()
             .map(|(index, tag)| (tag.as_str(), index))
             .collect(),
-          rows,
+          rows: CategoryRows::Loop(rows),
+        });
+      }
+
+      let scalar_items = block
+        .categories
+        .iter()
+        .filter_map(|value| match value {
+          CifCategory::Item { tag, value } if tag.starts_with(&prefix) => Some((tag.as_str(), value)),
+          _ => None,
         })
-      })
+        .collect::<Vec<_>>();
+      if !scalar_items.is_empty() {
+        return Some(Self {
+          columns: HashMap::new(),
+          rows: CategoryRows::Scalars(scalar_items),
+        });
+      }
+    }
+    None
   }
 
   /// Returns rows with stable one-based category row numbers.
   pub(crate) fn rows(&self) -> impl Iterator<Item = CategoryRow<'_>> {
-    self.rows.iter().enumerate().map(|(index, values)| CategoryRow {
-      columns: &self.columns,
-      values,
-      row_number: index + 1,
+    let columns = &self.columns;
+    let mut index = 0;
+    std::iter::from_fn(move || {
+      index += 1;
+      let values = match &self.rows {
+        CategoryRows::Loop(rows) => rows.get(index - 1).map(|row| RowValues::Loop(row.as_slice())),
+        CategoryRows::Scalars(values) if index == 1 => Some(RowValues::Scalars(values)),
+        CategoryRows::Scalars(_) => None,
+      }?;
+      Some(CategoryRow {
+        columns,
+        values,
+        row_number: index,
+      })
     })
   }
+}
+
+/// The value storage behind one generic category row.
+#[derive(Debug, Clone, Copy)]
+enum RowValues<'a> {
+  Loop(&'a [CifValue]),
+  Scalars(&'a [(&'a str, &'a CifValue)]),
 }
 
 /// A typed borrowed category generated from the local mmCIF schema.
@@ -93,7 +133,7 @@ impl<Schema> TypedRow<'_, Schema> {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CategoryRow<'a> {
   columns: &'a HashMap<&'a str, usize>,
-  values: &'a [CifValue],
+  values: RowValues<'a>,
   row_number: usize,
 }
 
@@ -107,12 +147,18 @@ impl<'a> CategoryRow<'a> {
   pub(crate) fn optional_text(self, tags: &[&str]) -> Option<&'a str> {
     tags.iter().find_map(|tag| {
       self
-        .columns
-        .get(tag)
-        .and_then(|index| self.values.get(*index))
+        .value(tag)
         .and_then(CifValue::as_text)
         .filter(|value| !value.trim().is_empty())
     })
+  }
+
+  /// Returns a raw value by tag from either a loop or scalar category row.
+  fn value(self, tag: &str) -> Option<&'a CifValue> {
+    match self.values {
+      RowValues::Loop(values) => self.columns.get(tag).and_then(|index| values.get(*index)),
+      RowValues::Scalars(values) => values.iter().find_map(|(name, value)| (*name == tag).then_some(*value)),
+    }
   }
 
   /// Reads an optional signed integer from equivalent item names.

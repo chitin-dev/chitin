@@ -5,7 +5,7 @@ use super::error::{Diagnostic, DiagnosticSeverity, PdbParseError, PdbParseResult
 use super::model::{
   AnnotationSource, Atom, AtomId, AtomName, Bond, BondOrder, BondSource, Chain, ChainId, CoordinateSet,
   CoordinateSetId, Element, MissingPolymerResidue, Model, ModelId, PolymerEntity, PolymerSequenceResidue, PolymerType,
-  Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure, Structure,
+  Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure, Structure, Symmetry, UnitCell,
 };
 
 /// Reads fixed-column PDB records into an indexed structure snapshot.
@@ -413,6 +413,16 @@ impl StructureBuilder {
   /// Associates a label chain with its polymer entity.
   pub(super) fn add_label_chain_entity(&mut self, label_id: String, entity_id: String) {
     self.label_chain_entities.insert(label_id, entity_id);
+  }
+
+  /// Stores crystallographic metadata parsed before coordinate projection.
+  pub(super) fn set_unit_cell(&mut self, unit_cell: UnitCell) {
+    self.structure.metadata.unit_cell = Some(unit_cell);
+  }
+
+  /// Stores the declared crystallographic space-group metadata.
+  pub(super) fn set_symmetry(&mut self, symmetry: Symmetry) {
+    self.structure.metadata.symmetry = Some(symmetry);
   }
 
   /// Associates a normalized chain with a polymer entity exactly once.

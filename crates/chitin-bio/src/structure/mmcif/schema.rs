@@ -216,6 +216,75 @@ pub(crate) struct AtomSite {
   pub(crate) type_symbol: Text,
 }
 
+/// Typed schema for the `_cell` category.
+#[mmcif_category(name = "cell")]
+pub(crate) struct Cell {
+  #[mmcif(tag = "_cell.Z_PDB")]
+  pub(crate) z_pdb: Integer,
+  #[mmcif(tag = "_cell.angle_alpha")]
+  pub(crate) angle_alpha: Float,
+  #[mmcif(tag = "_cell.angle_alpha_esd")]
+  pub(crate) angle_alpha_esd: Float,
+  #[mmcif(tag = "_cell.angle_beta")]
+  pub(crate) angle_beta: Float,
+  #[mmcif(tag = "_cell.angle_beta_esd")]
+  pub(crate) angle_beta_esd: Float,
+  #[mmcif(tag = "_cell.angle_gamma")]
+  pub(crate) angle_gamma: Float,
+  #[mmcif(tag = "_cell.angle_gamma_esd")]
+  pub(crate) angle_gamma_esd: Float,
+  #[mmcif(tag = "_cell.details")]
+  pub(crate) details: Text,
+  #[mmcif(tag = "_cell.entry_id")]
+  pub(crate) entry_id: Text,
+  #[mmcif(tag = "_cell.formula_units_Z")]
+  pub(crate) formula_units_z: Integer,
+  #[mmcif(tag = "_cell.length_a")]
+  pub(crate) length_a: Float,
+  #[mmcif(tag = "_cell.length_a_esd")]
+  pub(crate) length_a_esd: Float,
+  #[mmcif(tag = "_cell.length_b")]
+  pub(crate) length_b: Float,
+  #[mmcif(tag = "_cell.length_b_esd")]
+  pub(crate) length_b_esd: Float,
+  #[mmcif(tag = "_cell.length_c")]
+  pub(crate) length_c: Float,
+  #[mmcif(tag = "_cell.length_c_esd")]
+  pub(crate) length_c_esd: Float,
+  #[mmcif(tag = "_cell.pdbx_esd_method")]
+  pub(crate) pdbx_esd_method: Text,
+  #[mmcif(tag = "_cell.pdbx_unique_axis")]
+  pub(crate) pdbx_unique_axis: Text,
+  #[mmcif(tag = "_cell.reciprocal_angle_alpha")]
+  pub(crate) reciprocal_angle_alpha: Float,
+  #[mmcif(tag = "_cell.reciprocal_angle_alpha_esd")]
+  pub(crate) reciprocal_angle_alpha_esd: Float,
+  #[mmcif(tag = "_cell.reciprocal_angle_beta")]
+  pub(crate) reciprocal_angle_beta: Float,
+  #[mmcif(tag = "_cell.reciprocal_angle_beta_esd")]
+  pub(crate) reciprocal_angle_beta_esd: Float,
+  #[mmcif(tag = "_cell.reciprocal_angle_gamma")]
+  pub(crate) reciprocal_angle_gamma: Float,
+  #[mmcif(tag = "_cell.reciprocal_angle_gamma_esd")]
+  pub(crate) reciprocal_angle_gamma_esd: Float,
+  #[mmcif(tag = "_cell.reciprocal_length_a")]
+  pub(crate) reciprocal_length_a: Float,
+  #[mmcif(tag = "_cell.reciprocal_length_a_esd")]
+  pub(crate) reciprocal_length_a_esd: Float,
+  #[mmcif(tag = "_cell.reciprocal_length_b")]
+  pub(crate) reciprocal_length_b: Float,
+  #[mmcif(tag = "_cell.reciprocal_length_b_esd")]
+  pub(crate) reciprocal_length_b_esd: Float,
+  #[mmcif(tag = "_cell.reciprocal_length_c")]
+  pub(crate) reciprocal_length_c: Float,
+  #[mmcif(tag = "_cell.reciprocal_length_c_esd")]
+  pub(crate) reciprocal_length_c_esd: Float,
+  #[mmcif(tag = "_cell.volume")]
+  pub(crate) volume: Float,
+  #[mmcif(tag = "_cell.volume_esd")]
+  pub(crate) volume_esd: Float,
+}
+
 /// Typed schema for the `_entity_poly` category.
 #[mmcif_category(name = "entity_poly")]
 pub(crate) struct EntityPoly {
@@ -508,4 +577,21 @@ pub(crate) struct StructSheetRange {
   pub(crate) sheet_id: Text,
   #[mmcif(tag = "_struct_sheet_range.symmetry")]
   pub(crate) symmetry: Text,
+}
+
+/// Typed schema for the `_symmetry` category.
+#[mmcif_category(name = "symmetry")]
+pub(crate) struct Symmetry {
+  #[mmcif(tag = "_symmetry.Int_Tables_number")]
+  pub(crate) int_tables_number: Integer,
+  #[mmcif(tag = "_symmetry.cell_setting")]
+  pub(crate) cell_setting: Text,
+  #[mmcif(tag = "_symmetry.entry_id")]
+  pub(crate) entry_id: Text,
+  #[mmcif(tag = "_symmetry.pdbx_full_space_group_name_H-M")]
+  pub(crate) pdbx_full_space_group_name_h_m: Text,
+  #[mmcif(tag = "_symmetry.space_group_name_H-M")]
+  pub(crate) space_group_name_h_m: Text,
+  #[mmcif(tag = "_symmetry.space_group_name_Hall")]
+  pub(crate) space_group_name_hall: Text,
 }

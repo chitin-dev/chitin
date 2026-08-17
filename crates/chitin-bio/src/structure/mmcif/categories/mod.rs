@@ -3,6 +3,7 @@
 pub(super) mod atom_site;
 pub(super) mod connectivity;
 pub(super) mod entity;
+pub(super) mod metadata;
 pub(super) mod secondary;
 
 use crate::structure::{MmcifParseError, PdbParseError};
