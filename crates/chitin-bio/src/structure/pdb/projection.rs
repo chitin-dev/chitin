@@ -220,25 +220,27 @@ impl PdbProjection {
   /// Dispatches supported REMARK records to PDB-specific projection logic.
   fn project_remark(&mut self, line: &str, line_number: usize) -> Result<(), PdbParseError> {
     match field(line, 7, 10).trim() {
-      "465" => self.project_missing_residue(line, line_number),
+      "465" => self.project_missing_residue(line),
       "350" => self.project_assembly_remark(line, line_number),
       _ => Ok(()),
     }
   }
 
   /// Projects one `REMARK 465` missing-residue data row.
-  fn project_missing_residue(&mut self, line: &str, line_number: usize) -> Result<(), PdbParseError> {
+  ///
+  /// The `REMARK 465` section also contains headings and explanatory text.
+  /// Those lines occupy the same fixed columns but do not contain a numeric
+  /// sequence number, so they are intentionally ignored here.
+  fn project_missing_residue(&mut self, line: &str) -> Result<(), PdbParseError> {
     let residue_name = field(line, 15, 18).trim();
     let chain_id = field(line, 19, 20).trim();
     let sequence = field(line, 21, 26).trim();
     if residue_name.is_empty() || chain_id.is_empty() || sequence.is_empty() {
       return Ok(());
     }
-    let sequence_number = sequence.parse::<i32>().map_err(|_| PdbParseError::InvalidField {
-      line: line_number,
-      field: "REMARK 465 residue sequence",
-      value: sequence.to_owned(),
-    })?;
+    let Ok(sequence_number) = sequence.parse::<i32>() else {
+      return Ok(());
+    };
     self.input.missing_residues.push(ProjectedMissingResidue {
       chain_id: chain_id.to_owned(),
       sequence_number,

@@ -228,6 +228,24 @@ mod tests {
   }
 
   #[test]
+  fn ignores_remark_465_headings_and_projects_data_rows() {
+    let input = concat!(
+      "REMARK 465\n",
+      "REMARK 465 MISSING RESIDUES\n",
+      "REMARK 465 THE FOLLOWING RESIDUES WERE NOT LOCATED IN THE\n",
+      "REMARK 465 EXPERIMENT. (M=MODEL NUMBER; RES=RESIDUE NAME; C=CHAIN\n",
+      "REMARK 465   M RES C SSSEQI\n",
+      "REMARK 465     GLY A    2\n",
+      "ATOM      1  CA  ALA A   1       1.000   2.000   3.000  1.00 20.00           C  \n",
+    );
+    let parsed = PdbParser::new()
+      .parse_bytes(input.as_bytes())
+      .unwrap_or_else(|error| panic!("REMARK 465 fixture should parse: {error}"));
+
+    assert_eq!(parsed.structure.missing_polymer_residues.len(), 1);
+  }
+
+  #[test]
   fn projects_pdb_remark_350_assembly_without_expanding_atoms() {
     let input = concat!(
       "REMARK 350 BIOMOLECULE: 1\n",
