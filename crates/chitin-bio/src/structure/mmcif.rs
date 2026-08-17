@@ -11,7 +11,7 @@ mod category;
 pub mod cif;
 mod schema;
 
-use super::error::{MmcifParseError, MmcifParseResult};
+use super::error::{MmcifParseError, StructureParseResult};
 use super::pdb::StructureBuilder;
 use cif::CifParser;
 
@@ -60,7 +60,7 @@ impl MmcifParser {
   /// assert_eq!(parsed.structure.atom_count(), 1);
   /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
-  pub fn parse_bytes(&self, bytes: &[u8]) -> Result<MmcifParseResult, MmcifParseError> {
+  pub fn parse_bytes(&self, bytes: &[u8]) -> Result<StructureParseResult, MmcifParseError> {
     let input = std::str::from_utf8(bytes).map_err(|_| MmcifParseError::InvalidUtf8)?;
     let document = CifParser::parse(input).map_err(|error| MmcifParseError::InvalidToken {
       line: error.line,
@@ -98,7 +98,7 @@ impl MmcifParser {
   /// let parsed = MmcifParser::new().parse_reader(Cursor::new(b"data_empty\n"));
   /// assert!(parsed.is_err());
   /// ```
-  pub fn parse_reader<R>(&self, mut reader: R) -> Result<MmcifParseResult, MmcifParseError>
+  pub fn parse_reader<R>(&self, mut reader: R) -> Result<StructureParseResult, MmcifParseError>
   where
     R: Read,
   {

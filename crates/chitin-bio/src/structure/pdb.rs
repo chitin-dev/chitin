@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
 
-use super::error::{Diagnostic, DiagnosticSeverity, PdbParseError, PdbParseResult};
+use super::error::{Diagnostic, DiagnosticSeverity, PdbParseError, StructureParseResult};
 use super::model::{
-  AnnotationSource, Atom, AtomId, AtomName, Bond, BondOrder, BondSource, Chain, ChainId, CoordinateSet,
-  CoordinateSetId, Element, MissingPolymerResidue, Model, ModelId, PolymerEntity, PolymerSequenceResidue, PolymerType,
-  Residue, ResidueId, ResidueKind, SecondaryRange, SecondaryStructure, Structure, Symmetry, UnitCell,
+  AnnotationSource, Atom, AtomId, Bond, BondOrder, BondSource, Chain, ChainId, CoordinateSet, CoordinateSetId, Element,
+  MissingPolymerResidue, Model, ModelId, PolymerEntity, PolymerSequenceResidue, PolymerType, Residue, ResidueId,
+  ResidueKind, SecondaryRange, SecondaryStructure, Structure, Symmetry, UnitCell,
 };
 
 /// Reads fixed-column PDB records into an indexed structure snapshot.
@@ -58,7 +58,7 @@ impl PdbParser {
   /// assert_eq!(parsed.structure.atoms[0].name, "N");
   /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
-  pub fn parse_bytes(&self, bytes: &[u8]) -> Result<PdbParseResult, PdbParseError> {
+  pub fn parse_bytes(&self, bytes: &[u8]) -> Result<StructureParseResult, PdbParseError> {
     let mut builder = StructureBuilder::default();
 
     for (line_index, raw_line) in bytes.split(|byte| *byte == b'\n').enumerate() {
@@ -92,7 +92,7 @@ impl PdbParser {
   /// assert!(parsed.structure.models.is_empty());
   /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
-  pub fn parse_reader<R>(&self, mut reader: R) -> Result<PdbParseResult, PdbParseError>
+  pub fn parse_reader<R>(&self, mut reader: R) -> Result<StructureParseResult, PdbParseError>
   where
     R: Read,
   {
@@ -689,7 +689,7 @@ impl StructureBuilder {
   ///
   /// The completed structure and recoverable diagnostics, or an error when a
   /// builder invariant is broken.
-  pub(super) fn finish(mut self, strict: bool) -> Result<PdbParseResult, PdbParseError> {
+  pub(super) fn finish(mut self, strict: bool) -> Result<StructureParseResult, PdbParseError> {
     if self.structure.models.is_empty() {
       // An END-only file is a valid empty snapshot and needs no implicit model.
     }
@@ -702,7 +702,7 @@ impl StructureBuilder {
       .structure
       .validate_invariants()
       .map_err(|message| PdbParseError::InvalidStructure { line: 0, message })?;
-    Ok(PdbParseResult {
+    Ok(StructureParseResult {
       structure: self.structure,
       diagnostics: self.diagnostics,
     })
@@ -985,7 +985,7 @@ pub(super) struct AtomRecord {
   /// Source serial number, when present.
   pub(super) serial: Option<i32>,
   /// Atom name from columns 13–16.
-  pub(super) name: AtomName,
+  pub(super) name: String,
   /// Element from columns 77–78.
   pub(super) element: Option<Element>,
   /// Chain identifier from column 22.

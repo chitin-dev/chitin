@@ -22,9 +22,6 @@ id_type!(ChainId);
 id_type!(ModelId);
 id_type!(CoordinateSetId);
 
-/// The normalized atom name from a PDB atom record.
-pub type AtomName = String;
-
 /// The element inferred from the PDB element column when present.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Element(pub String);
@@ -44,7 +41,7 @@ pub struct Atom {
   /// Source serial number, if the record supplied one.
   pub serial: Option<i32>,
   /// Normalized atom name.
-  pub name: AtomName,
+  pub name: String,
   /// Element from the source element field, when present.
   pub element: Option<Element>,
   /// Parent residue.

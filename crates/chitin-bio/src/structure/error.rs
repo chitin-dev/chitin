@@ -9,7 +9,7 @@ pub enum DiagnosticSeverity {
   Info,
 }
 
-/// A recoverable issue encountered while reading a PDB stream.
+/// A recoverable issue encountered while reading a structure source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
   /// Stable machine-readable diagnostic code.
@@ -82,18 +82,20 @@ pub enum MmcifParseError {
     value: String,
   },
   /// The shared structure builder rejected a semantic event.
-  #[error("mmCIF structure error: {0}")]
-  InvalidStructure(String),
+  #[error("mmCIF structure error at line {line}: {message}")]
+  InvalidStructure {
+    /// Source line associated with the builder event, or zero when synthetic.
+    line: usize,
+    /// Explanation of the violated structure invariant.
+    message: String,
+  },
 }
 
-/// The result of a successful PDB parse, including recoverable diagnostics.
+/// The result of a successful structure parse, including recoverable diagnostics.
 #[derive(Debug, Clone, PartialEq)]
-pub struct PdbParseResult {
+pub struct StructureParseResult {
   /// Immutable structure data assembled from the input.
   pub structure: crate::structure::Structure,
   /// Non-fatal issues encountered while reading the input.
   pub diagnostics: Vec<Diagnostic>,
 }
-
-/// The result shape shared by PDB and mmCIF readers.
-pub type MmcifParseResult = PdbParseResult;

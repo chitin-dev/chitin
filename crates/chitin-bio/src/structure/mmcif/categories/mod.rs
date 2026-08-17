@@ -10,7 +10,13 @@ use crate::structure::{MmcifParseError, PdbParseError};
 
 /// Converts a shared builder failure into the mmCIF error namespace.
 pub(super) fn map_builder_error(error: PdbParseError) -> MmcifParseError {
-  MmcifParseError::InvalidStructure(error.to_string())
+  match error {
+    PdbParseError::InvalidStructure { line, message } => MmcifParseError::InvalidStructure { line, message },
+    other => MmcifParseError::InvalidStructure {
+      line: 0,
+      message: other.to_string(),
+    },
+  }
 }
 
 /// Returns a required generated schema value.

@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use chitin_bio::structure::{MmcifParser, PdbParseResult, PdbParser};
+use chitin_bio::structure::{MmcifParser, PdbParser, StructureParseResult};
 use chitin_databases::providers::rcsb::{RcsbBatchDownloadEvent, RcsbBatchDownloadRequest};
 use chitin_databases::{
   Client, ClientConfig,
@@ -69,7 +69,7 @@ fn fixture_requests(ids: &[PdbId], directory: &Path) -> Vec<RcsbBatchDownloadReq
 /// # Returns
 ///
 /// The common parsed structure result, or a formatted parser error.
-fn parse_download(format: StructureFormat, bytes: &[u8]) -> Result<PdbParseResult, String> {
+fn parse_download(format: StructureFormat, bytes: &[u8]) -> Result<StructureParseResult, String> {
   match format {
     StructureFormat::Pdb => PdbParser::new().parse_bytes(bytes).map_err(|error| error.to_string()),
     StructureFormat::Mmcif => MmcifParser::new().parse_bytes(bytes).map_err(|error| error.to_string()),
