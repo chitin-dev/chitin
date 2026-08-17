@@ -22,6 +22,20 @@ pub struct Diagnostic {
   pub message: String,
 }
 
+/// A format-neutral failure while constructing indexed structure data.
+///
+/// Parsers translate this internal error into their public error namespace so
+/// the shared builder never needs to know whether input originated from PDB,
+/// mmCIF, or a future structure format.
+#[derive(Debug, thiserror::Error)]
+#[error("structure projection at source location {line}: {message}")]
+pub(crate) struct StructureBuildError {
+  /// One-based source line or row, or zero for generated data.
+  pub(crate) line: usize,
+  /// Explanation of the violated construction invariant.
+  pub(crate) message: String,
+}
+
 /// A fatal error that prevents a valid structure snapshot from being built.
 #[derive(Debug, thiserror::Error)]
 pub enum PdbParseError {

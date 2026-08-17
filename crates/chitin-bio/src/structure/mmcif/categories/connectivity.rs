@@ -1,23 +1,23 @@
 //! Explicit atom connectivity projected from `_struct_conn`.
 
-use crate::structure::MmcifParseError;
 use crate::structure::mmcif::cif::CifDocument;
 use crate::structure::mmcif::schema::StructConn;
-use crate::structure::pdb::{AtomLookupKey, StructureBuilder};
+use crate::structure::projection::{AtomLookupKey, StructureInput};
+use crate::structure::{BondSource, MmcifParseError};
 
 use super::optional_text_i32;
 
-/// Projects explicit atom-pair relations into the shared structure builder.
+/// Projects explicit atom-pair relations into format-neutral structure input.
 ///
 /// # Parameters
 ///
 /// * `document` contains the optional `_struct_conn` category.
-/// * `builder` receives endpoint pairs for resolution after atom indexing.
+/// * `input` receives endpoint pairs for resolution after atom indexing.
 ///
 /// # Returns
 ///
 /// `Ok(())` when the category is absent or every endpoint is valid.
-pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = StructConn::from_document(document) else {
     return Ok(());
   };
@@ -46,7 +46,13 @@ pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> R
       row.pdbx_ptnr2_pdb_ins_code().and_then(|value| value.chars().next()),
       row.pdbx_ptnr2_label_alt_id().and_then(|value| value.chars().next()),
     )?;
-    builder.add_named_bond(row.row_number(), first, second);
+    input.add_named_bond(
+      row.row_number(),
+      first,
+      second,
+      BondSource::StructConn,
+      "MMCIF_STRUCT_CONN_UNKNOWN_ATOM",
+    );
   }
   Ok(())
 }

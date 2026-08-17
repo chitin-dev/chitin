@@ -2,26 +2,26 @@
 
 use crate::structure::mmcif::cif::CifDocument;
 use crate::structure::mmcif::schema::{StructConf, StructSheetRange};
-use crate::structure::pdb::{PendingSecondaryRange, StructureBuilder};
+use crate::structure::projection::{ProjectedSecondaryRange, StructureInput};
 use crate::structure::{MmcifParseError, SecondaryStructure};
 
-/// Projects helix and sheet ranges into the shared structure builder.
+/// Projects helix and sheet ranges into format-neutral structure input.
 ///
 /// # Parameters
 ///
 /// * `document` contains generic mmCIF categories.
-/// * `builder` receives deferred ranges resolved after residue construction.
+/// * `input` receives deferred ranges resolved after residue construction.
 ///
 /// # Returns
 ///
 /// `Ok(())` when optional categories are absent or all present ranges are valid.
-pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
-  parse_helices(document, builder)?;
-  parse_sheets(document, builder)
+pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
+  parse_helices(document, input)?;
+  parse_sheets(document, input)
 }
 
 /// Adds supported `_struct_conf` helix variants.
-fn parse_helices(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+fn parse_helices(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = StructConf::from_document(document) else {
     return Ok(());
   };
@@ -50,7 +50,7 @@ fn parse_helices(document: &CifDocument, builder: &mut StructureBuilder) -> Resu
       },
     )?;
     add_range(
-      builder,
+      input,
       row.row_number(),
       endpoints,
       row.pdbx_beg_pdb_ins_code().and_then(|value| value.chars().next()),
@@ -66,7 +66,7 @@ fn parse_helices(document: &CifDocument, builder: &mut StructureBuilder) -> Resu
 }
 
 /// Adds `_struct_sheet_range` annotations.
-fn parse_sheets(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+fn parse_sheets(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = StructSheetRange::from_document(document) else {
     return Ok(());
   };
@@ -88,7 +88,7 @@ fn parse_sheets(document: &CifDocument, builder: &mut StructureBuilder) -> Resul
       },
     )?;
     add_range(
-      builder,
+      input,
       row.row_number(),
       endpoints,
       row.pdbx_beg_pdb_ins_code().and_then(|value| value.chars().next()),
@@ -185,14 +185,14 @@ impl SequenceValue<'_> {
 
 /// Stores one normalized secondary-structure interval.
 fn add_range(
-  builder: &mut StructureBuilder,
+  input: &mut StructureInput,
   row: usize,
   endpoints: RangeEndpoints,
   begin_insertion: Option<char>,
   end_insertion: Option<char>,
   kind: SecondaryStructure,
 ) {
-  builder.add_secondary_range(PendingSecondaryRange {
+  input.add_secondary_range(ProjectedSecondaryRange {
     line: row,
     chain_id: Some(endpoints.begin_chain),
     start_sequence_number: endpoints.begin_sequence,
@@ -200,5 +200,6 @@ fn add_range(
     end_sequence_number: endpoints.end_sequence,
     end_insertion_code: end_insertion,
     kind,
+    unresolved_code: "MMCIF_SECONDARY_UNKNOWN_RESIDUE",
   });
 }

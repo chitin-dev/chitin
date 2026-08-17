@@ -2,13 +2,13 @@
 
 use crate::structure::mmcif::cif::CifDocument;
 use crate::structure::mmcif::schema::{Cell, Symmetry as SymmetryCategory};
-use crate::structure::pdb::StructureBuilder;
+use crate::structure::projection::StructureInput;
 use crate::structure::{MmcifParseError, Symmetry, UnitCell};
 
 use super::required;
 
 /// Projects crystallographic metadata from the generic CIF document into the
-/// shared structure builder.
+/// format-neutral structure input.
 ///
 /// The two categories are optional in an mmCIF structure. When present,
 /// `_cell` is validated as a complete six-parameter unit cell before it is
@@ -19,16 +19,16 @@ use super::required;
 /// # Parameters
 ///
 /// * `document` contains the syntax-level data blocks and category values.
-/// * `builder` receives validated unit-cell and space-group metadata.
+/// * `input` receives validated unit-cell and space-group metadata.
 ///
 /// # Returns
 ///
 /// `Ok(())` when absent metadata is skipped or all present values are valid.
 /// Returns [`MmcifParseError::InvalidField`] for malformed numeric values or
 /// geometrically invalid unit-cell parameters.
-pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
-  parse_unit_cell(document, builder)?;
-  parse_symmetry(document, builder)
+pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
+  parse_unit_cell(document, input)?;
+  parse_symmetry(document, input)
 }
 
 /// Reads and validates the six scalar values that define a unit cell.
@@ -40,14 +40,14 @@ pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> R
 /// # Parameters
 ///
 /// * `document` contains the generic `_cell` category.
-/// * `builder` receives the validated [`UnitCell`].
+/// * `input` receives the validated [`UnitCell`].
 ///
 /// # Returns
 ///
 /// `Ok(())` when no cell is declared or when a complete valid cell is stored.
 /// Returns a field error when a required value is missing, cannot be parsed as
 /// a finite number, or falls outside the valid geometric domain.
-fn parse_unit_cell(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+fn parse_unit_cell(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = Cell::from_document(document) else {
     return Ok(());
   };
@@ -65,7 +65,7 @@ fn parse_unit_cell(document: &CifDocument, builder: &mut StructureBuilder) -> Re
     required(row.row_number(), "_cell.angle_gamma", row.angle_gamma()?)?,
   ];
   validate_cell_parameters(row.row_number(), lengths, angles)?;
-  builder.set_unit_cell(UnitCell { lengths, angles });
+  input.unit_cell = Some(UnitCell { lengths, angles });
   Ok(())
 }
 
@@ -119,19 +119,19 @@ fn validate_cell_parameters(row: usize, lengths: [f32; 3], angles: [f32; 3]) -> 
 ///
 /// The Hermann–Mauguin name and International Tables number are independent
 /// dictionary items, so either one may be present without the other. Missing
-/// values are preserved as `None`; the builder is updated only when at least
+/// values are preserved as `None`; the projection is updated only when at least
 /// one identifier is available.
 ///
 /// # Parameters
 ///
 /// * `document` contains the generic `_symmetry` category.
-/// * `builder` receives the identifiers that were declared by the source.
+/// * `input` receives the identifiers that were declared by the source.
 ///
 /// # Returns
 ///
 /// `Ok(())` when the category is absent or its values are valid. Returns a
 /// field conversion error if the International Tables number is malformed.
-fn parse_symmetry(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+fn parse_symmetry(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = SymmetryCategory::from_document(document) else {
     return Ok(());
   };
@@ -141,7 +141,7 @@ fn parse_symmetry(document: &CifDocument, builder: &mut StructureBuilder) -> Res
   let space_group_name = row.space_group_name_h_m();
   let international_tables_number = row.int_tables_number()?;
   if space_group_name.is_some() || international_tables_number.is_some() {
-    builder.set_symmetry(Symmetry {
+    input.symmetry = Some(Symmetry {
       space_group_name: space_group_name.map(str::to_owned),
       international_tables_number,
     });

@@ -1,9 +1,16 @@
-//! Indexed molecular structure data and PDB parsing.
+//! Molecular structure parsing, semantic projection, and indexed model data.
+//!
+//! Each source format first parses its own syntax and then projects supported
+//! semantics into a shared internal representation. The common builder is the
+//! only layer that assigns dense IDs and creates [`Structure`], keeping file
+//! syntax independent from macromolecular topology generation.
 
+pub(crate) mod builder;
 mod error;
 mod mmcif;
 mod model;
 mod pdb;
+pub(crate) mod projection;
 
 pub use error::{Diagnostic, DiagnosticSeverity, MmcifParseError, PdbParseError, StructureParseResult};
 pub use mmcif::MmcifParser;

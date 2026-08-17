@@ -3,23 +3,23 @@
 use crate::structure::mmcif::category::TypedRow;
 use crate::structure::mmcif::cif::CifDocument;
 use crate::structure::mmcif::schema::AtomSite;
-use crate::structure::pdb::{AtomRecord, StructureBuilder};
+use crate::structure::projection::{ProjectedAtom, StructureInput};
 use crate::structure::{Element, MmcifParseError, ResidueKind};
 
-use super::{map_builder_error, optional_text_i32, required};
+use super::{optional_text_i32, required};
 
 /// Projects the required atom-site loop into shared topology and coordinates.
 ///
 /// # Parameters
 ///
 /// * `document` contains the generic CIF document.
-/// * `builder` receives atom records grouped into coordinate models.
+/// * `input` receives atom records grouped into coordinate models.
 ///
 /// # Returns
 ///
 /// `Ok(())` after every atom-site row is accepted. A missing/empty category or
 /// malformed required field returns [`MmcifParseError`].
-pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = AtomSite::from_document(document) else {
     return Err(MmcifParseError::InvalidToken {
       line: 0,
@@ -38,10 +38,10 @@ pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> R
   for row in rows {
     let model_number = row.pdbx_pdb_model_num()?.unwrap_or(1);
     if current_model != Some(model_number) {
-      builder.start_model(model_number);
+      input.start_model(model_number);
       current_model = Some(model_number);
     }
-    builder.add_atom(atom_record(row)?).map_err(map_builder_error)?;
+    input.add_atom(atom_record(row)?);
   }
   Ok(())
 }
@@ -54,9 +54,9 @@ pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> R
 ///
 /// # Returns
 ///
-/// A shared [`AtomRecord`] using author identifiers when present and label
+/// A shared [`ProjectedAtom`] using author identifiers when present and label
 /// identifiers as fallback aliases.
-fn atom_record(row: TypedRow<'_, AtomSite>) -> Result<AtomRecord, MmcifParseError> {
+fn atom_record(row: TypedRow<'_, AtomSite>) -> Result<ProjectedAtom, MmcifParseError> {
   let row_number = row.row_number();
   let atom_name = required(
     row_number,
@@ -78,7 +78,7 @@ fn atom_record(row: TypedRow<'_, AtomSite>) -> Result<AtomRecord, MmcifParseErro
     required(row_number, "residue sequence", row.label_seq_id()?)?
   };
 
-  Ok(AtomRecord {
+  Ok(ProjectedAtom {
     line: row_number,
     serial: optional_text_i32(row_number, "atom-site id", row.id())?,
     name: atom_name.to_owned(),

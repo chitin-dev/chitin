@@ -2,7 +2,8 @@
 //!
 //! [`cif`] parses syntax without biological assumptions. The private category
 //! layer compiles dictionary item names into typed borrowed rows, while the
-//! category modules project only model-relevant values into `StructureBuilder`.
+//! category modules project only model-relevant values into the format-neutral
+//! [`StructureInput`](super::projection::StructureInput).
 
 use std::io::Read;
 
@@ -11,8 +12,9 @@ mod category;
 pub mod cif;
 mod schema;
 
+use super::builder::build_structure;
 use super::error::{MmcifParseError, StructureParseResult};
-use super::pdb::StructureBuilder;
+use super::projection::StructureInput;
 use cif::CifParser;
 
 /// Reads an mmCIF document into the shared structure model.
@@ -66,18 +68,21 @@ impl MmcifParser {
       line: error.line,
       message: error.message,
     })?;
-    let mut builder = StructureBuilder::default();
+    let mut input = StructureInput::default();
 
     // Entity declarations must precede atom projection so label-chain and
     // complete-sequence metadata are available while topology is constructed.
-    categories::metadata::parse(&document, &mut builder)?;
-    categories::assembly::parse(&document, &mut builder)?;
-    categories::entity::parse(&document, &mut builder)?;
-    categories::atom_site::parse(&document, &mut builder)?;
-    categories::connectivity::parse(&document, &mut builder)?;
-    categories::secondary::parse(&document, &mut builder)?;
+    categories::metadata::parse(&document, &mut input)?;
+    categories::assembly::parse(&document, &mut input)?;
+    categories::entity::parse(&document, &mut input)?;
+    categories::atom_site::parse(&document, &mut input)?;
+    categories::connectivity::parse(&document, &mut input)?;
+    categories::secondary::parse(&document, &mut input)?;
 
-    builder.finish(false).map_err(categories::map_builder_error)
+    build_structure(input, false).map_err(|error| MmcifParseError::InvalidStructure {
+      line: error.line,
+      message: error.message,
+    })
   }
 
   /// Reads all bytes from a reader and parses the mmCIF document.

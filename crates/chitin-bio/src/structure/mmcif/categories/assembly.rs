@@ -2,10 +2,10 @@
 
 use crate::structure::mmcif::cif::CifDocument;
 use crate::structure::mmcif::schema::{PdbxStructAssembly, PdbxStructAssemblyGen, PdbxStructOperList};
-use crate::structure::pdb::StructureBuilder;
+use crate::structure::projection::StructureInput;
 use crate::structure::{AssemblyGeneration, BiologicalAssembly, MmcifParseError, StructureOperation};
 
-use super::{map_builder_error, required};
+use super::required;
 
 /// Projects assembly operations and non-materialized generation rules.
 ///
@@ -17,21 +17,21 @@ use super::{map_builder_error, required};
 /// # Parameters
 ///
 /// * `document` contains the generic `_pdbx_struct_*` categories.
-/// * `builder` receives operations and biological assembly definitions.
+/// * `input` receives operations and biological assembly definitions.
 ///
 /// # Returns
 ///
 /// `Ok(())` when the optional categories are absent or valid. Returns a field
 /// error for incomplete rows and a structure error for duplicate or unknown
 /// assembly references.
-pub(crate) fn parse(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
-  parse_operations(document, builder)?;
-  parse_assemblies(document, builder)?;
-  parse_generations(document, builder)
+pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
+  parse_operations(document, input)?;
+  parse_assemblies(document, input)?;
+  parse_generations(document, input)
 }
 
 /// Reads rigid operations from `_pdbx_struct_oper_list`.
-fn parse_operations(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+fn parse_operations(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = PdbxStructOperList::from_document(document) else {
     return Ok(());
   };
@@ -97,30 +97,28 @@ fn parse_operations(document: &CifDocument, builder: &mut StructureBuilder) -> R
         required(row.row_number(), "_pdbx_struct_oper_list.vector[3]", row.vector_3()?)?,
       ],
     };
-    builder.add_structure_operation(operation).map_err(map_builder_error)?;
+    input.add_structure_operation(operation);
   }
   Ok(())
 }
 
 /// Reads assembly identifiers and descriptions from `_pdbx_struct_assembly`.
-fn parse_assemblies(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+fn parse_assemblies(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = PdbxStructAssembly::from_document(document) else {
     return Ok(());
   };
   for row in category.rows() {
-    builder
-      .add_biological_assembly(BiologicalAssembly {
-        id: required(row.row_number(), "_pdbx_struct_assembly.id", row.id())?.to_owned(),
-        details: row.details().map(str::to_owned),
-        generations: Vec::new(),
-      })
-      .map_err(map_builder_error)?;
+    input.add_biological_assembly(BiologicalAssembly {
+      id: required(row.row_number(), "_pdbx_struct_assembly.id", row.id())?.to_owned(),
+      details: row.details().map(str::to_owned),
+      generations: Vec::new(),
+    });
   }
   Ok(())
 }
 
 /// Reads chain selections and raw operator expressions for each assembly.
-fn parse_generations(document: &CifDocument, builder: &mut StructureBuilder) -> Result<(), MmcifParseError> {
+fn parse_generations(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
   let Some(category) = PdbxStructAssemblyGen::from_document(document) else {
     return Ok(());
   };
@@ -145,17 +143,15 @@ fn parse_generations(document: &CifDocument, builder: &mut StructureBuilder) -> 
         value: String::new(),
       });
     }
-    builder
-      .add_assembly_generation(
-        assembly_id,
-        AssemblyGeneration {
-          asym_ids,
-          auth_asym_ids,
-          entity_instance_ids,
-          operator_expression: operator_expression.to_owned(),
-        },
-      )
-      .map_err(map_builder_error)?;
+    input.add_assembly_generation(
+      assembly_id.to_owned(),
+      AssemblyGeneration {
+        asym_ids,
+        auth_asym_ids,
+        entity_instance_ids,
+        operator_expression: operator_expression.to_owned(),
+      },
+    );
   }
   Ok(())
 }
