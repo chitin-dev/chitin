@@ -32,6 +32,10 @@ bio-test:
 bio-online:
   cargo test -p chitin-bio --test rcsb_online downloads_configured_structures_and_parses_them -- --ignored --nocapture
 
+# Parse flat PDB/mmCIF fixtures without network access.
+bio-local path="crates/chitin-bio/tests/fixtures/rcsb":
+  CHITIN_BIO_FIXTURE_ROOT="{{path}}" cargo test -p chitin-bio --test rcsb_local -- --nocapture
+
 # Requires the ignored local PDBx dictionary beside the generated schema.
 generate-mmcif-schema:
   cargo run -p chitin-mmcif-schema --locked
@@ -40,8 +44,8 @@ generate-mmcif-schema:
 desktop path=".":
   cargo run -p chitin-desktop -- "{{path}}"
 
-wgpu-example path=".":
-  cargo run --example chitin-wgpu-desktop -- "{{path}}"
+wgpu-example path="." *args:
+  cargo run --example chitin-wgpu-desktop -- "{{path}}" {{args}}
 
 showcase:
   cargo run -p chitin-ui --example primitive-showcase

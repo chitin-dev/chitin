@@ -746,6 +746,7 @@ name = "chitin-desktop"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "chitin-bio",
  "chitin-command",
  "chitin-databases",
  "chitin-ui",
@@ -790,6 +791,8 @@ dependencies = [
 name = "chitin-wgpu"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
+ "chitin-bio",
  "glam",
  "wgpu",
 ]

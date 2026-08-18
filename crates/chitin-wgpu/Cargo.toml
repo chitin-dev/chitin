@@ -6,6 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+bytemuck = "1.24"
+chitin-bio = { path = "../chitin-bio" }
 glam = "0.33"
 wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
 

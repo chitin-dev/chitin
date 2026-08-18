@@ -11,6 +11,7 @@ mod mmcif;
 mod model;
 mod pdb;
 pub(crate) mod projection;
+mod scene;
 
 pub use error::{Diagnostic, DiagnosticSeverity, MmcifParseError, PdbParseError, StructureParseResult};
 pub use mmcif::MmcifParser;
@@ -22,3 +23,6 @@ pub use model::{
   SecondaryStructure, Structure, StructureMetadata, StructureOperation, Symmetry, UnitCell,
 };
 pub use pdb::PdbParser;
+pub use scene::{
+  AtomSceneInstance, BondSceneInstance, ElementCategory, SceneBounds, StructureScene, StructureSceneError,
+};
