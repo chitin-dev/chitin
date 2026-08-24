@@ -54,6 +54,16 @@ const MATERIAL_UNIFORM_OFFSET: u64 = 128;
 /// Byte offset of the per-frame absolute depth-cue vector.
 const DEPTH_CUE_UNIFORM_OFFSET: u64 = 176;
 
+/// Geometry-specific pipeline settings shared by atom and bond pipelines.
+struct PipelineConfig {
+  /// Target color format.
+  color_format: wgpu::TextureFormat,
+  /// Mesh and instance vertex layout.
+  instance_layout: wgpu::VertexBufferLayout<'static>,
+  /// Optional back-face culling mode.
+  cull_mode: Option<wgpu::Face>,
+}
+
 /// Shader output used to isolate one stage of molecule shading.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -466,8 +476,11 @@ impl MoleculeRenderer {
       &shader,
       "chitin_molecule_atom_pipeline",
       "atom_vertex",
-      color_format,
-      atom_instance_layout(),
+      PipelineConfig {
+        color_format,
+        instance_layout: atom_instance_layout(),
+        cull_mode: None,
+      },
     );
     let bond_pipeline = create_pipeline(
       &device,
@@ -475,8 +488,11 @@ impl MoleculeRenderer {
       &shader,
       "chitin_molecule_bond_pipeline",
       "bond_vertex",
-      color_format,
-      bond_instance_layout(),
+      PipelineConfig {
+        color_format,
+        instance_layout: bond_instance_layout(),
+        cull_mode: Some(wgpu::Face::Back),
+      },
     );
 
     let (sphere_vertices, sphere_indices) = sphere_mesh(SPHERE_LATITUDES, SPHERE_LONGITUDES);
@@ -824,8 +840,7 @@ fn create_pipeline(
   shader: &wgpu::ShaderModule,
   label: &'static str,
   vertex_entry: &'static str,
-  color_format: wgpu::TextureFormat,
-  instance_layout: wgpu::VertexBufferLayout<'static>,
+  config: PipelineConfig,
 ) -> wgpu::RenderPipeline {
   device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
     label: Some(label),
@@ -833,14 +848,14 @@ fn create_pipeline(
     vertex: wgpu::VertexState {
       module: shader,
       entry_point: Some(vertex_entry),
-      buffers: &[Some(mesh_vertex_layout()), Some(instance_layout)],
+      buffers: &[Some(mesh_vertex_layout()), Some(config.instance_layout)],
       compilation_options: Default::default(),
     },
     fragment: Some(wgpu::FragmentState {
       module: shader,
       entry_point: Some("fragment"),
       targets: &[Some(wgpu::ColorTargetState {
-        format: color_format,
+        format: config.color_format,
         blend: None,
         write_mask: wgpu::ColorWrites::ALL,
       })],
@@ -849,7 +864,11 @@ fn create_pipeline(
     primitive: wgpu::PrimitiveState {
       topology: wgpu::PrimitiveTopology::TriangleList,
       front_face: wgpu::FrontFace::Ccw,
-      cull_mode: Some(wgpu::Face::Back),
+      // The sphere mesh and cylinder mesh have different winding needs. Atom
+      // surfaces render both sides so a winding mismatch cannot expose rear
+      // atoms through a front sphere; depth testing still keeps the nearest
+      // surface opaque. Bonds retain back-face culling.
+      cull_mode: config.cull_mode,
       ..Default::default()
     },
     depth_stencil: Some(wgpu::DepthStencilState {
