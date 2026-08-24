@@ -283,11 +283,11 @@ impl Default for BallAndStickStyle {
       depth_cue_strength: 0.18,
       material: BallAndStickMaterial {
         key_light_direction: [0.577, -0.577, -0.577],
-        key_light_strength: 0.90,
+        key_light_strength: 0.93,
         fill_light_direction: [-0.2, -0.2, -0.959],
         fill_light_strength: 0.26,
         diffuse_reflectivity: 0.58,
-        ambient_strength: 0.42,
+        ambient_strength: 0.46,
         specular_strength: 0.10,
         shininess: 28.0,
       },
