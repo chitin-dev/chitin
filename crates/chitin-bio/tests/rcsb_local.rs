@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chitin_bio::structure::{MmcifParser, PdbParser, Structure, StructureParseResult};
+use chitin_bio::structure::{BondSource, MmcifParser, PdbParser, Structure, StructureParseResult, StructureScene};
 
 /// Structure-file format associated with one local fixture directory.
 #[derive(Clone, Copy)]
@@ -85,6 +85,13 @@ fn assert_structure_is_valid(path: &Path, structure: &Structure) {
 /// Prints the common macromolecular summary for one parsed fixture.
 fn print_structure_summary(format: FixtureFormat, path: &Path, bytes: &[u8], parsed: &StructureParseResult) {
   let structure = &parsed.structure;
+  let scene = StructureScene::from_first_model(structure)
+    .unwrap_or_else(|error| panic!("{} should produce a render scene: {error}", path.display()));
+  let inferred_bond_count = scene
+    .bonds
+    .iter()
+    .filter(|bond| bond.source == BondSource::DistanceInference)
+    .count();
   println!(
     "RCSB {} {}:
    - {} bytes,
@@ -93,6 +100,7 @@ fn print_structure_summary(format: FixtureFormat, path: &Path, bytes: &[u8], par
    - {} residues,
    - {} atoms,
    - {} bonds,
+   - {} render bonds ({} distance-inferred),
    - {} polymer entities,
    - {} missing polymer residues,
    - {} secondary ranges,
@@ -105,6 +113,8 @@ fn print_structure_summary(format: FixtureFormat, path: &Path, bytes: &[u8], par
     structure.residues.len(),
     structure.atoms.len(),
     structure.bonds.len(),
+    scene.bonds.len(),
+    inferred_bond_count,
     structure.polymer_entities.len(),
     structure.missing_polymer_residues.len(),
     structure.secondary_ranges.len(),

@@ -46,8 +46,20 @@ impl ViewerCamera {
   ///
   /// A matrix that transforms scene-space positions into WGPU clip space.
   pub fn view_projection(&self, aspect: f32) -> glam::Mat4 {
-    let projection = glam::camera::rh::proj::directx::perspective(0.70, aspect, 0.1, 100.0);
-    projection * self.view_matrix()
+    self.projection_matrix(aspect) * self.view_matrix()
+  }
+
+  /// Builds the perspective projection matrix for the current viewport.
+  ///
+  /// # Parameters
+  ///
+  /// * `aspect` is the render target width divided by height.
+  ///
+  /// # Returns
+  ///
+  /// A right-handed projection matrix using WGPU's zero-to-one depth range.
+  pub fn projection_matrix(&self, aspect: f32) -> glam::Mat4 {
+    glam::camera::rh::proj::directx::perspective(0.70, aspect, 0.1, 100.0)
   }
 
   /// Applies an orbit rotation from a drag delta.
@@ -100,7 +112,7 @@ impl ViewerCamera {
   }
 
   /// Returns the current camera view matrix.
-  fn view_matrix(&self) -> glam::Mat4 {
+  pub fn view_matrix(&self) -> glam::Mat4 {
     glam::camera::rh::view::look_at_mat4(self.eye(), self.target, glam::Vec3::Y)
   }
 

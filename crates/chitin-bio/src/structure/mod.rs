@@ -25,4 +25,5 @@ pub use model::{
 pub use pdb::PdbParser;
 pub use scene::{
   AtomSceneInstance, BondSceneInstance, ElementCategory, SceneBounds, StructureScene, StructureSceneError,
+  StructureSceneOptions,
 };

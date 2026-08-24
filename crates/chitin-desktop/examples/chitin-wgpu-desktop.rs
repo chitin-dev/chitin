@@ -2,6 +2,7 @@
 //! Chitin desktop shell with an interactive WGPU document-area panel.
 //!
 //! Run with `cargo run --example chitin-wgpu-desktop -- . [structure.pdb]`.
+//! Add `--representation stick|ball-and-stick|sphere` to choose the atom view.
 //!
 //! This example validates the integration path where GPUI owns the app shell,
 //! document tabs, splits, and side panels while WGPU renders an interactive
@@ -18,6 +19,7 @@ use chitin_desktop::{
   keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
+use chitin_wgpu::AtomRepresentation;
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
@@ -25,6 +27,52 @@ use molecule::ExampleMoleculeScene;
 
 /// Small bundled structure used when the example receives no file argument.
 const DEFAULT_STRUCTURE: &[u8] = include_bytes!("../../chitin-bio/tests/fixtures/rcsb/pdb/1CRN.pdb");
+
+/// Parsed command-line arguments for the WGPU molecule example.
+struct ExampleArguments {
+  /// Workspace path passed to the desktop shell.
+  project_path: Option<PathBuf>,
+  /// Optional PDB or mmCIF file to display.
+  structure_path: Option<PathBuf>,
+  /// Atom-level display representation.
+  representation: AtomRepresentation,
+}
+
+/// Parses positional paths and the atom representation option.
+fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
+  let mut positional = Vec::new();
+  let mut representation = AtomRepresentation::default();
+  let mut arguments = std::env::args_os().skip(1);
+
+  while let Some(argument) = arguments.next() {
+    let argument = argument.to_string_lossy();
+    if argument == "--representation" {
+      let Some(value) = arguments.next() else {
+        return Err("--representation requires stick, ball-and-stick, or sphere".to_string());
+      };
+      let value = value.to_string_lossy();
+      representation = AtomRepresentation::from_name(&value)
+        .ok_or_else(|| format!("unknown representation {value:?}; expected stick, ball-and-stick, or sphere"))?;
+    } else if let Some(value) = argument.strip_prefix("--representation=") {
+      representation = AtomRepresentation::from_name(value)
+        .ok_or_else(|| format!("unknown representation {value:?}; expected stick, ball-and-stick, or sphere"))?;
+    } else if argument.starts_with('-') {
+      return Err(format!("unknown option {argument:?}"));
+    } else {
+      positional.push(PathBuf::from(argument.as_ref()));
+    }
+  }
+
+  if positional.len() > 2 {
+    return Err("expected at most PROJECT_PATH and STRUCTURE_PATH".to_string());
+  }
+
+  Ok(ExampleArguments {
+    project_path: positional.first().cloned(),
+    structure_path: positional.get(1).cloned(),
+    representation,
+  })
+}
 
 /// GPUI asset source backed by the repository's `assets/` directory.
 struct DesktopAssets {
@@ -76,9 +124,17 @@ impl AssetSource for DesktopAssets {
 /// Starts the desktop WGPU integration example.
 fn main() {
   env_logger::init();
-  let mut arguments = std::env::args_os().skip(1);
-  let project_path = arguments.next().map(PathBuf::from);
-  let structure_path = arguments.next().map(PathBuf::from);
+  let ExampleArguments {
+    project_path,
+    structure_path,
+    representation,
+  } = match parse_example_arguments() {
+    Ok(arguments) => arguments,
+    Err(error) => {
+      eprintln!("invalid arguments: {error}");
+      return;
+    }
+  };
   let (scene, title) = match load_structure_scene(structure_path.as_deref()) {
     Ok(scene) => scene,
     Err(error) => {
@@ -108,9 +164,10 @@ fn main() {
           window.activate_window();
 
           let factory_scene = Arc::clone(&scene);
+          let factory_representation = representation;
           let wgpu_panel_factory = WgpuDocumentViewFactory::new(move |window, cx| {
             let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
-            let panel_scene = ExampleMoleculeScene::new(Arc::clone(&factory_scene));
+            let panel_scene = ExampleMoleculeScene::new(Arc::clone(&factory_scene), factory_representation);
             cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, panel_scene))
               .into()
           });

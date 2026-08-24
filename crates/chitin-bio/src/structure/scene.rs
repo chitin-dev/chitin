@@ -2,7 +2,9 @@
 
 use thiserror::Error;
 
-use super::{AtomId, BondOrder, Element, ModelId, ResidueId, Structure};
+use crate::chemistry::{BondInferenceConfig, BondInferenceError, infer_bonds};
+
+use super::{AtomId, BondOrder, BondSource, Element, ModelId, ResidueId, Structure};
 
 /// Broad element families used by default molecular visualizations.
 ///
@@ -105,6 +107,26 @@ pub struct BondSceneInstance {
   pub positions: [[f32; 3]; 2],
   /// Chemical bond order retained from the topology model.
   pub order: BondOrder,
+  /// Whether the connection came from source data or geometric inference.
+  pub source: BondSource,
+}
+
+/// Controls derived geometry included while extracting a structure scene.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StructureSceneOptions {
+  /// Whether distance inference fills connections absent from source topology.
+  pub infer_missing_bonds: bool,
+  /// Geometric limits used when `infer_missing_bonds` is enabled.
+  pub bond_inference: BondInferenceConfig,
+}
+
+impl Default for StructureSceneOptions {
+  fn default() -> Self {
+    Self {
+      infer_missing_bonds: true,
+      bond_inference: BondInferenceConfig::default(),
+    }
+  }
 }
 
 /// Renderer-neutral geometry and identity mapping for one structure model.
@@ -150,6 +172,9 @@ pub enum StructureSceneError {
     /// Dense model index being extracted.
     model_index: usize,
   },
+  /// Distance-based bond inference could not analyze the selected model.
+  #[error(transparent)]
+  BondInference(#[from] BondInferenceError),
 }
 
 impl StructureScene {
@@ -162,8 +187,9 @@ impl StructureScene {
   ///
   /// # Returns
   ///
-  /// A renderer-neutral scene containing only finite coordinates, or a
-  /// [`StructureSceneError`] when the model cannot produce visible geometry.
+  /// A renderer-neutral scene containing finite coordinates, source bonds, and
+  /// default distance-inferred bonds, or a [`StructureSceneError`] when the
+  /// model cannot produce visible geometry.
   ///
   /// # Examples
   ///
@@ -176,6 +202,27 @@ impl StructureScene {
   /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
   pub fn from_model(structure: &Structure, model_id: ModelId) -> Result<Self, StructureSceneError> {
+    Self::from_model_with_options(structure, model_id, StructureSceneOptions::default())
+  }
+
+  /// Extracts one model with caller-selected derived-geometry behavior.
+  ///
+  /// # Parameters
+  ///
+  /// * `structure` is the validated indexed topology and coordinate model.
+  /// * `model_id` selects the coordinate set to project into the scene.
+  /// * `options` controls whether and how missing bonds are inferred.
+  ///
+  /// # Returns
+  ///
+  /// A renderer-neutral scene containing finite atom coordinates and the
+  /// requested bond sources, or a [`StructureSceneError`] when extraction or
+  /// inference cannot analyze the selected model.
+  pub fn from_model_with_options(
+    structure: &Structure,
+    model_id: ModelId,
+    options: StructureSceneOptions,
+  ) -> Result<Self, StructureSceneError> {
     let model = structure
       .models
       .get(model_id.index())
@@ -224,7 +271,7 @@ impl StructureScene {
 
     // Bonds remain a topology relation until both endpoint positions exist in
     // this model. This naturally excludes alternate models represented by NaN.
-    let bonds = structure
+    let mut bonds: Vec<_> = structure
       .bonds
       .iter()
       .filter_map(|bond| {
@@ -237,9 +284,25 @@ impl StructureScene {
           atom_ids: [bond.a, bond.b],
           positions: [a, b],
           order: bond.order,
+          source: bond.source,
         })
       })
       .collect();
+
+    if options.infer_missing_bonds {
+      let inferred = infer_bonds(structure, model_id, options.bond_inference)?;
+      bonds.reserve(inferred.len());
+      bonds.extend(inferred.into_iter().filter_map(|bond| {
+        let a = coordinates.positions.get(bond.atom_ids[0].index()).copied()?;
+        let b = coordinates.positions.get(bond.atom_ids[1].index()).copied()?;
+        Some(BondSceneInstance {
+          atom_ids: bond.atom_ids,
+          positions: [a, b],
+          order: bond.order,
+          source: BondSource::DistanceInference,
+        })
+      }));
+    }
 
     Ok(Self {
       model_id,
@@ -320,5 +383,17 @@ mod tests {
 
     assert_eq!(scene.atoms.len(), 1);
     assert!(scene.bonds.is_empty());
+  }
+
+  #[test]
+  fn scene_infers_bonds_missing_from_source_topology() {
+    let pdb = b"ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00 10.00           N  \nATOM      2  CA  GLY A   1       1.450   0.000   0.000  1.00 10.00           C  \nEND\n";
+    let parsed = PdbParser::new()
+      .parse_bytes(pdb)
+      .unwrap_or_else(|error| panic!("test PDB should parse: {error}"));
+    let scene = StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("test structure should produce a scene: {error}"));
+
+    assert_eq!(scene.bonds[0].source, BondSource::DistanceInference);
   }
 }

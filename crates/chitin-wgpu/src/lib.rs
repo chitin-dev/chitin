@@ -10,4 +10,7 @@ pub mod molecule;
 
 pub use bridge::{ClearRenderer, DepthTarget, RenderTargetSize};
 pub use camera::{DragMode, ViewerCamera, ViewportDrag};
-pub use molecule::MoleculeRenderer;
+pub use molecule::{
+  AtomRepresentation, BallAndStickElementStyle, BallAndStickMaterial, BallAndStickPalette, BallAndStickStyle,
+  MoleculeDebugMode, MoleculeRenderer,
+};
