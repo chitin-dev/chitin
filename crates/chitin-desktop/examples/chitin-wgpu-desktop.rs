@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 //! Chitin desktop shell with an interactive WGPU document-area panel.
 //!
-//! Run with `cargo run --example chitin-wgpu-desktop -- . [structure.pdb]`.
+//! Run with `cargo run --example chitin-wgpu-desktop -- . structure.pdb`.
 //! Add `--representation stick|ball-and-stick|sphere` to choose the atom view.
 //!
 //! This example validates the integration path where GPUI owns the app shell,
@@ -11,7 +11,12 @@
 #[path = "./chitin-wgpu/molecule.rs"]
 mod molecule;
 
-use std::{borrow::Cow, fs, path::PathBuf, sync::Arc};
+use std::{
+  borrow::Cow,
+  fs,
+  path::{Path, PathBuf},
+  sync::Arc,
+};
 
 use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
 use chitin_desktop::{
@@ -25,15 +30,12 @@ use gpui::{
 };
 use molecule::ExampleMoleculeScene;
 
-/// Small bundled structure used when the example receives no file argument.
-const DEFAULT_STRUCTURE: &[u8] = include_bytes!("../../chitin-bio/tests/fixtures/rcsb/pdb/1CRN.pdb");
-
 /// Parsed command-line arguments for the WGPU molecule example.
 struct ExampleArguments {
   /// Workspace path passed to the desktop shell.
   project_path: Option<PathBuf>,
-  /// Optional PDB or mmCIF file to display.
-  structure_path: Option<PathBuf>,
+  /// PDB or mmCIF file to display.
+  structure_path: PathBuf,
   /// Atom-level display representation.
   representation: AtomRepresentation,
 }
@@ -64,12 +66,17 @@ fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
   }
 
   if positional.len() > 2 {
-    return Err("expected at most PROJECT_PATH and STRUCTURE_PATH".to_string());
+    return Err("expected PROJECT_PATH and STRUCTURE_PATH".to_string());
   }
+
+  let structure_path = positional
+    .get(1)
+    .cloned()
+    .ok_or_else(|| "missing STRUCTURE_PATH; pass a .pdb, .ent, .cif, or .mmcif file".to_string())?;
 
   Ok(ExampleArguments {
     project_path: positional.first().cloned(),
-    structure_path: positional.get(1).cloned(),
+    structure_path,
     representation,
   })
 }
@@ -135,7 +142,7 @@ fn main() {
       return;
     }
   };
-  let (scene, title) = match load_structure_scene(structure_path.as_deref()) {
+  let (scene, title) = match load_structure_scene(&structure_path) {
     Ok(scene) => scene,
     Err(error) => {
       eprintln!("failed to load molecular structure example: {error}");
@@ -199,47 +206,38 @@ fn main() {
 ///
 /// # Parameters
 ///
-/// * `path` optionally selects a local `.pdb`, `.cif`, or `.mmcif` file. When
-///   absent, the bundled 1CRN fixture is parsed.
+/// * `path` selects a local `.pdb`, `.cif`, or `.mmcif` file.
 ///
 /// # Returns
 ///
 /// The extracted first-model scene and document title, or a readable parsing
 /// error for unsupported and malformed input.
-fn load_structure_scene(path: Option<&std::path::Path>) -> std::result::Result<(StructureScene, String), String> {
-  let (structure, title) = if let Some(path) = path {
-    let bytes = fs::read(path).map_err(|error| format!("cannot read '{}': {error}", path.display()))?;
-    let extension = path
-      .extension()
-      .and_then(|extension| extension.to_str())
-      .map(str::to_ascii_lowercase);
-    let structure = match extension.as_deref() {
-      Some("pdb") | Some("ent") => PdbParser::new()
-        .parse_bytes(&bytes)
-        .map(|parsed| parsed.structure)
-        .map_err(|error| error.to_string())?,
-      Some("cif") | Some("mmcif") => MmcifParser::new()
-        .parse_bytes(&bytes)
-        .map(|parsed| parsed.structure)
-        .map_err(|error| error.to_string())?,
-      _ => {
-        return Err(format!(
-          "'{}' must use a .pdb, .ent, .cif, or .mmcif extension",
-          path.display()
-        ));
-      }
-    };
-    let title = path
-      .file_name()
-      .map(|name| name.to_string_lossy().into_owned())
-      .unwrap_or_else(|| path.display().to_string());
-    (structure, title)
-  } else {
-    let parsed = PdbParser::new()
-      .parse_bytes(DEFAULT_STRUCTURE)
-      .map_err(|error| error.to_string())?;
-    (parsed.structure, "1CRN molecular structure".to_owned())
+fn load_structure_scene(path: &Path) -> std::result::Result<(StructureScene, String), String> {
+  let bytes = fs::read(path).map_err(|error| format!("cannot read '{}': {error}", path.display()))?;
+  let extension = path
+    .extension()
+    .and_then(|extension| extension.to_str())
+    .map(str::to_ascii_lowercase);
+  let structure = match extension.as_deref() {
+    Some("pdb") | Some("ent") => PdbParser::new()
+      .parse_bytes(&bytes)
+      .map(|parsed| parsed.structure)
+      .map_err(|error| error.to_string())?,
+    Some("cif") | Some("mmcif") => MmcifParser::new()
+      .parse_bytes(&bytes)
+      .map(|parsed| parsed.structure)
+      .map_err(|error| error.to_string())?,
+    _ => {
+      return Err(format!(
+        "'{}' must use a .pdb, .ent, .cif, or .mmcif extension",
+        path.display()
+      ));
+    }
   };
+  let title = path
+    .file_name()
+    .map(|name| name.to_string_lossy().into_owned())
+    .unwrap_or_else(|| path.display().to_string());
 
   StructureScene::from_first_model(&structure)
     .map(|scene| (scene, title))
