@@ -1,7 +1,7 @@
 //! Framework-neutral orbit camera controls for WGPU viewports.
 
 /// Minimum camera distance from the scene center.
-const MIN_CAMERA_DISTANCE: f32 = 0.9;
+const MIN_CAMERA_DISTANCE: f32 = 0.45;
 /// Maximum camera distance from the scene center.
 const MAX_CAMERA_DISTANCE: f32 = 12.0;
 /// Rotation scale in radians per logical pixel.
@@ -9,7 +9,7 @@ const ROTATE_RADIANS_PER_PIXEL: f32 = 0.008;
 /// Pan scale relative to the current camera distance.
 const PAN_UNITS_PER_PIXEL_AT_UNIT_DISTANCE: f32 = 0.0018;
 /// Wheel zoom scale in exponent units per logical pixel.
-const ZOOM_EXPONENT_PER_PIXEL: f32 = 0.0025;
+const ZOOM_EXPONENT_PER_PIXEL: f32 = 0.005;
 
 /// Camera controls for a generic orbit/pan/zoom 3D viewport.
 #[derive(Clone, Copy)]

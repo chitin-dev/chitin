@@ -1,6 +1,7 @@
 struct Uniforms {
   mvp: mat4x4<f32>,
   model_view: mat4x4<f32>,
+  projection: mat4x4<f32>,
   key_light: vec4<f32>,
   fill_light: vec4<f32>,
   material: vec4<f32>,
@@ -23,95 +24,116 @@ struct AtomInstance {
 struct BondInstance {
   @location(2) start_radius: vec4<f32>,
   @location(3) end_padding: vec4<f32>,
-  @location(4) color: vec4<f32>,
+  @location(4) start_color: vec4<f32>,
+  @location(5) end_color: vec4<f32>,
 }
 
 struct VertexOutput {
   @builtin(position) clip_position: vec4<f32>,
-  @location(0) normal: vec3<f32>,
-  @location(1) color: vec3<f32>,
-  @location(2) view_position: vec3<f32>,
+  @location(0) ray_anchor: vec3<f32>,
+  @location(1) surface_start_radius: vec4<f32>,
+  @location(2) surface_end: vec3<f32>,
+  @location(3) start_color: vec3<f32>,
+  @location(4) end_color: vec3<f32>,
 }
 
-fn camera_normal(scene_normal: vec3<f32>) -> vec3<f32> {
-  let normal_matrix = mat3x3<f32>(
-    uniforms.model_view[0].xyz,
-    uniforms.model_view[1].xyz,
-    uniforms.model_view[2].xyz,
+struct FragmentOutput {
+  @location(0) color: vec4<f32>,
+  @builtin(frag_depth) depth: f32,
+}
+
+fn view_radius(source_radius: f32) -> f32 {
+  return length((uniforms.model_view * vec4<f32>(source_radius, 0.0, 0.0, 0.0)).xyz);
+}
+
+fn projected_radius(radius: f32, view_depth: f32) -> vec2<f32> {
+  let tangent_depth = sqrt(max(view_depth * view_depth - radius * radius, 0.000001));
+  return vec2<f32>(uniforms.projection[0][0], uniforms.projection[1][1])
+    * radius / tangent_depth;
+}
+
+fn view_ray_anchor(ndc: vec2<f32>, view_depth: f32) -> vec3<f32> {
+  return vec3<f32>(
+    ndc.x * view_depth / uniforms.projection[0][0],
+    ndc.y * view_depth / uniforms.projection[1][1],
+    -view_depth,
   );
-  return normalize(normal_matrix * scene_normal);
-}
-
-// Keeps camera-relative directional lighting readable on back-facing molecular
-// surfaces without turning it into an unlit flat-color representation.
-fn wrapped_diffuse(normal: vec3<f32>, light_direction: vec3<f32>, strength: f32) -> f32 {
-  let wrap = 0.35;
-  let facing = max(-dot(normal, light_direction), 0.0);
-  return ((facing + wrap) / (1.0 + wrap)) * strength;
 }
 
 @vertex
 fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
   var out: VertexOutput;
-  let world_position = instance.position_radius.xyz + vertex.position * instance.position_radius.w;
-  let view_position = uniforms.model_view * vec4<f32>(world_position, 1.0);
-  out.clip_position = uniforms.mvp * vec4<f32>(world_position, 1.0);
-  out.normal = camera_normal(vertex.normal);
-  out.color = instance.color.rgb;
-  out.view_position = view_position.xyz;
+  let center = (uniforms.model_view * vec4<f32>(instance.position_radius.xyz, 1.0)).xyz;
+  let radius = view_radius(instance.position_radius.w);
+  let center_clip = uniforms.projection * vec4<f32>(center, 1.0);
+  let center_ndc = center_clip.xy / center_clip.w;
+  let view_depth = max(-center.z, radius + 0.0001);
+  let ndc = center_ndc + vertex.position.xy * projected_radius(radius, view_depth) * 1.03;
+
+  out.clip_position = vec4<f32>(ndc * center_clip.w, center_clip.z, center_clip.w);
+  out.ray_anchor = view_ray_anchor(ndc, view_depth);
+  out.surface_start_radius = vec4<f32>(center, radius);
+  out.surface_end = center;
+  out.start_color = instance.color.rgb;
+  out.end_color = instance.color.rgb;
   return out;
 }
 
 @vertex
 fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput {
   var out: VertexOutput;
-  let start = instance.start_radius.xyz;
-  let end = instance.end_padding.xyz;
-  let direction = end - start;
-  let bond_length = max(length(direction), 0.0001);
-  let up = direction / bond_length;
-
-  // Select a helper that is not parallel to the bond direction, then build an
-  // orthonormal frame around the local cylinder's Y axis.
-  var helper = vec3<f32>(0.0, 1.0, 0.0);
-  if abs(up.y) > 0.95 {
-    helper = vec3<f32>(1.0, 0.0, 0.0);
+  let start = (uniforms.model_view * vec4<f32>(instance.start_radius.xyz, 1.0)).xyz;
+  let end = (uniforms.model_view * vec4<f32>(instance.end_padding.xyz, 1.0)).xyz;
+  let radius = view_radius(instance.start_radius.w);
+  let start_clip = uniforms.projection * vec4<f32>(start, 1.0);
+  let end_clip = uniforms.projection * vec4<f32>(end, 1.0);
+  let start_ndc = start_clip.xy / start_clip.w;
+  let end_ndc = end_clip.xy / end_clip.w;
+  let start_extent = projected_radius(radius, max(-start.z, radius + 0.0001));
+  let end_extent = projected_radius(radius, max(-end.z, radius + 0.0001));
+  let unit_position = vertex.position.x * 0.5 + 0.5;
+  let projected_axis = end_ndc - start_ndc;
+  var projected_normal = vec2<f32>(1.0, 0.0);
+  if dot(projected_axis, projected_axis) > 0.00000001 {
+    projected_normal = normalize(vec2<f32>(-projected_axis.y, projected_axis.x));
   }
-  let right = normalize(cross(helper, up));
-  let forward = cross(up, right);
+  let radial_extent = mix(start_extent, end_extent, unit_position);
+  let normal_extent = length(projected_normal * radial_extent) * 1.02;
+  let ndc = mix(start_ndc, end_ndc, unit_position)
+    + projected_normal * vertex.position.y * normal_extent;
   let center = (start + end) * 0.5;
-  let radial = right * vertex.position.x + forward * vertex.position.z;
-  let world_position = center
-    + radial * instance.start_radius.w
-    + up * vertex.position.y * bond_length;
-  let scene_normal = normalize(right * vertex.normal.x + forward * vertex.normal.z);
-  let view_position = uniforms.model_view * vec4<f32>(world_position, 1.0);
+  let center_clip = uniforms.projection * vec4<f32>(center, 1.0);
+  let view_depth = max(-center.z, radius + 0.0001);
 
-  out.clip_position = uniforms.mvp * vec4<f32>(world_position, 1.0);
-  out.normal = camera_normal(scene_normal);
-  out.color = instance.color.rgb;
-  out.view_position = view_position.xyz;
+  out.clip_position = vec4<f32>(ndc * center_clip.w, center_clip.z, center_clip.w);
+  out.ray_anchor = view_ray_anchor(ndc, view_depth);
+  out.surface_start_radius = vec4<f32>(start, radius);
+  out.surface_end = end;
+  out.start_color = instance.start_color.rgb;
+  out.end_color = instance.end_color.rgb;
   return out;
 }
 
-@fragment
-fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-  let normal = normalize(in.normal);
+fn wrapped_diffuse(normal: vec3<f32>, light_direction: vec3<f32>, strength: f32) -> f32 {
+  let wrap = 0.15;
+  let facing = max(-dot(normal, light_direction), 0.0);
+  return ((facing + wrap) / (1.0 + wrap)) * strength;
+}
+
+fn shade_surface(normal: vec3<f32>, view_position: vec3<f32>, element_color: vec3<f32>) -> vec4<f32> {
   let key_direction = normalize(uniforms.key_light.xyz);
   let fill_direction = normalize(uniforms.fill_light.xyz);
-  // Light directions describe the direction rays travel, matching ChimeraX's
-  // camera-space convention, so the surface-to-light vector is their negation.
   let key_diffuse = wrapped_diffuse(normal, key_direction, uniforms.key_light.w);
   let fill_diffuse = wrapped_diffuse(normal, fill_direction, uniforms.fill_light.w);
-
-  let view_direction = normalize(-in.view_position);
+  let view_direction = normalize(-view_position);
   let reflected_key = normalize(reflect(key_direction, normal));
   let specular = pow(max(dot(reflected_key, view_direction), 0.0), uniforms.material.z)
     * uniforms.material.y;
   let diffuse = uniforms.material.x
     + (key_diffuse + fill_diffuse) * uniforms.material.w;
-  let lit_color = in.color * diffuse + vec3<f32>(specular);
-  let linear_depth = -in.view_position.z;
+  let silhouette = 0.90 + 0.10 * sqrt(abs(dot(normal, view_direction)));
+  let lit_color = (element_color * diffuse + vec3<f32>(specular)) * silhouette;
+  let linear_depth = -view_position.z;
   let cue = smoothstep(uniforms.depth_cue.x, uniforms.depth_cue.y, linear_depth)
     * uniforms.depth_cue.z;
   let debug_mode = u32(uniforms.depth_cue.w + 0.5);
@@ -131,8 +153,75 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(vec3<f32>(cue), 1.0);
   }
   if debug_mode == 6u {
-    return vec4<f32>(in.color, 1.0);
+    return vec4<f32>(element_color, 1.0);
   }
-  let color = mix(lit_color, uniforms.background.rgb, cue);
-  return vec4<f32>(color, 1.0);
+  return vec4<f32>(mix(lit_color, uniforms.background.rgb, cue), 1.0);
+}
+
+fn fragment_depth(view_position: vec3<f32>) -> f32 {
+  let clip_position = uniforms.projection * vec4<f32>(view_position, 1.0);
+  return clip_position.z / clip_position.w;
+}
+
+@fragment
+fn atom_fragment(in: VertexOutput) -> FragmentOutput {
+  let ray_direction = normalize(in.ray_anchor);
+  let center = in.surface_start_radius.xyz;
+  let radius = in.surface_start_radius.w;
+  let center_along_ray = dot(ray_direction, center);
+  let discriminant = center_along_ray * center_along_ray - dot(center, center) + radius * radius;
+  if discriminant < 0.0 {
+    discard;
+  }
+  let distance = center_along_ray - sqrt(discriminant);
+  if distance <= 0.0 {
+    discard;
+  }
+  let view_position = ray_direction * distance;
+  let normal = normalize(view_position - center);
+  var out: FragmentOutput;
+  out.color = shade_surface(normal, view_position, in.start_color);
+  out.depth = fragment_depth(view_position);
+  return out;
+}
+
+@fragment
+fn bond_fragment(in: VertexOutput) -> FragmentOutput {
+  let ray_direction = normalize(in.ray_anchor);
+  let start = in.surface_start_radius.xyz;
+  let end = in.surface_end;
+  let radius = in.surface_start_radius.w;
+  let axis = end - start;
+  let origin_to_start = -start;
+  let axis_length_squared = dot(axis, axis);
+  let axis_ray = dot(axis, ray_direction);
+  let axis_origin = dot(axis, origin_to_start);
+  let ray_origin = dot(ray_direction, origin_to_start);
+  let origin_squared = dot(origin_to_start, origin_to_start);
+  let quadratic_a = axis_length_squared - axis_ray * axis_ray;
+  let quadratic_b = axis_length_squared * ray_origin - axis_origin * axis_ray;
+  let quadratic_c = axis_length_squared * origin_squared
+    - axis_origin * axis_origin
+    - radius * radius * axis_length_squared;
+  let discriminant = quadratic_b * quadratic_b - quadratic_a * quadratic_c;
+  if discriminant < 0.0 || quadratic_a < 0.000001 {
+    discard;
+  }
+  let distance = (-quadratic_b - sqrt(discriminant)) / quadratic_a;
+  let axis_position = axis_origin + distance * axis_ray;
+  if distance <= 0.0 || axis_position < 0.0 || axis_position > axis_length_squared {
+    discard;
+  }
+  let view_position = ray_direction * distance;
+  let axis_surface = start + axis * (axis_position / axis_length_squared);
+  let normal = normalize(view_position - axis_surface);
+  let element_color = select(
+    in.start_color,
+    in.end_color,
+    axis_position >= axis_length_squared * 0.5,
+  );
+  var out: FragmentOutput;
+  out.color = shade_surface(normal, view_position, element_color);
+  out.depth = fragment_depth(view_position);
+  return out;
 }

@@ -1,6 +1,6 @@
 //! Instanced atom and bond rendering for molecular structure scenes.
 
-use std::{f32::consts::PI, sync::Arc};
+use std::sync::Arc;
 
 use chitin_bio::structure::{ElementCategory, StructureScene};
 use wgpu::util::DeviceExt;
@@ -9,12 +9,6 @@ use crate::{DepthTarget, RenderTargetSize};
 
 /// WGSL shader shared by the atom and bond pipelines.
 const SHADER: &str = include_str!("molecule.wgsl");
-/// Number of longitudinal segments in the low-poly atom sphere.
-const SPHERE_LONGITUDES: u16 = 12;
-/// Number of latitudinal segments in the low-poly atom sphere.
-const SPHERE_LATITUDES: u16 = 8;
-/// Number of radial segments in the bond cylinder.
-const BOND_SEGMENTS: u16 = 10;
 /// Default ChimeraX-inspired stick cylinder radius in source ångström units.
 const DEFAULT_STICK_RADIUS: f32 = 0.20;
 /// Fraction of the normalized scene radius reserved for the fitted structure.
@@ -48,11 +42,11 @@ const METAL_VDW_RADIUS: f32 = 1.70;
 /// Fallback van der Waals radius for unclassified elements, in ångströms.
 const OTHER_VDW_RADIUS: f32 = 1.50;
 /// Byte size of the molecule uniform block shared by both pipelines.
-const UNIFORM_BUFFER_SIZE: u64 = 208;
+const UNIFORM_BUFFER_SIZE: u64 = 272;
 /// Byte offset at which the lighting and material vectors begin.
-const MATERIAL_UNIFORM_OFFSET: u64 = 128;
+const MATERIAL_UNIFORM_OFFSET: u64 = 192;
 /// Byte offset of the per-frame absolute depth-cue vector.
-const DEPTH_CUE_UNIFORM_OFFSET: u64 = 176;
+const DEPTH_CUE_UNIFORM_OFFSET: u64 = 240;
 
 /// Geometry-specific pipeline settings shared by atom and bond pipelines.
 struct PipelineConfig {
@@ -60,8 +54,8 @@ struct PipelineConfig {
   color_format: wgpu::TextureFormat,
   /// Mesh and instance vertex layout.
   instance_layout: wgpu::VertexBufferLayout<'static>,
-  /// Optional back-face culling mode.
-  cull_mode: Option<wgpu::Face>,
+  /// Analytic fragment entry point for this surface type.
+  fragment_entry: &'static str,
 }
 
 /// Shader output used to isolate one stage of molecule shading.
@@ -284,18 +278,18 @@ impl Default for BallAndStickStyle {
       bond_radius: DEFAULT_STICK_RADIUS,
       ball_radius_scale: DEFAULT_BALL_RADIUS_SCALE,
       background_color: [0.003, 0.003, 0.005],
-      depth_cue_start: 0.5,
+      depth_cue_start: 0.25,
       depth_cue_end: 1.0,
       depth_cue_strength: 0.18,
       material: BallAndStickMaterial {
         key_light_direction: [0.577, -0.577, -0.577],
-        key_light_strength: 0.85,
+        key_light_strength: 0.90,
         fill_light_direction: [-0.2, -0.2, -0.959],
-        fill_light_strength: 0.35,
-        diffuse_reflectivity: 0.45,
-        ambient_strength: 0.55,
-        specular_strength: 0.05,
-        shininess: 24.0,
+        fill_light_strength: 0.26,
+        diffuse_reflectivity: 0.58,
+        ambient_strength: 0.42,
+        specular_strength: 0.10,
+        shininess: 28.0,
       },
     }
   }
@@ -303,30 +297,23 @@ impl Default for BallAndStickStyle {
 
 /// Instanced renderer for atoms and source or inferred scene bonds.
 ///
-/// One shared sphere and cylinder mesh are uploaded per renderer. Molecular
-/// coordinates, radii, and colors are stored in instance buffers so GPU memory
-/// grows linearly with atom and bond counts rather than tessellated mesh size.
+/// One shared billboard quad is uploaded per renderer. Fragment shaders solve
+/// analytic sphere and cylinder intersections and write their exact depth.
 pub struct MoleculeRenderer {
   /// Pipeline for instanced atom spheres.
   atom_pipeline: wgpu::RenderPipeline,
   /// Pipeline for instanced bond cylinders.
   bond_pipeline: wgpu::RenderPipeline,
-  /// Shared low-poly sphere vertices.
-  sphere_vertex_buffer: wgpu::Buffer,
-  /// Shared low-poly sphere triangle indices.
-  sphere_index_buffer: wgpu::Buffer,
-  /// Number of indices in `sphere_index_buffer`.
-  sphere_index_count: u32,
+  /// Shared billboard vertices used by both analytic surface pipelines.
+  quad_vertex_buffer: wgpu::Buffer,
+  /// Shared billboard triangle indices.
+  quad_index_buffer: wgpu::Buffer,
+  /// Number of indices in `quad_index_buffer`.
+  quad_index_count: u32,
   /// Per-atom position, radius, and color data.
   atom_instance_buffer: wgpu::Buffer,
   /// Number of atom instances to draw.
   atom_count: u32,
-  /// Shared open-ended cylinder vertices used for bonds.
-  bond_vertex_buffer: wgpu::Buffer,
-  /// Shared cylinder triangle indices.
-  bond_index_buffer: wgpu::Buffer,
-  /// Number of indices in `bond_index_buffer`.
-  bond_index_count: u32,
   /// Per-bond endpoint, radius, and color data.
   bond_instance_buffer: wgpu::Buffer,
   /// Number of bond instances to draw.
@@ -479,7 +466,7 @@ impl MoleculeRenderer {
       PipelineConfig {
         color_format,
         instance_layout: atom_instance_layout(),
-        cull_mode: None,
+        fragment_entry: "atom_fragment",
       },
     );
     let bond_pipeline = create_pipeline(
@@ -491,25 +478,24 @@ impl MoleculeRenderer {
       PipelineConfig {
         color_format,
         instance_layout: bond_instance_layout(),
-        cull_mode: Some(wgpu::Face::Back),
+        fragment_entry: "bond_fragment",
       },
     );
 
-    let (sphere_vertices, sphere_indices) = sphere_mesh(SPHERE_LATITUDES, SPHERE_LONGITUDES);
-    let (bond_vertices, bond_indices) = cylinder_mesh(BOND_SEGMENTS);
+    let (quad_vertices, quad_indices) = billboard_quad_mesh();
     let atom_instances = atom_instances(scene, style, representation);
     let bond_instances = bond_instances(scene, style, representation);
     let bond_count = bond_instances.len() as u32;
-    let sphere_vertex_buffer = create_buffer(
+    let quad_vertex_buffer = create_buffer(
       &device,
-      "chitin_molecule_sphere_vertices",
-      &sphere_vertices,
+      "chitin_molecule_billboard_vertices",
+      &quad_vertices,
       wgpu::BufferUsages::VERTEX,
     );
-    let sphere_index_buffer = create_buffer(
+    let quad_index_buffer = create_buffer(
       &device,
-      "chitin_molecule_sphere_indices",
-      &sphere_indices,
+      "chitin_molecule_billboard_indices",
+      &quad_indices,
       wgpu::BufferUsages::INDEX,
     );
     let atom_instance_buffer = create_buffer(
@@ -518,23 +504,10 @@ impl MoleculeRenderer {
       &atom_instances,
       wgpu::BufferUsages::VERTEX,
     );
-    let bond_vertex_buffer = create_buffer(
-      &device,
-      "chitin_molecule_bond_vertices",
-      &bond_vertices,
-      wgpu::BufferUsages::VERTEX,
-    );
-    let bond_index_buffer = create_buffer(
-      &device,
-      "chitin_molecule_bond_indices",
-      &bond_indices,
-      wgpu::BufferUsages::INDEX,
-    );
-
     // WGPU buffers cannot have a zero-byte binding range. Keep a single dummy
     // row when the scene has no bonds, while drawing zero rows.
     let bond_buffer_data = if bond_instances.is_empty() {
-      vec![[0.0; 12]]
+      vec![[0.0; 16]]
     } else {
       bond_instances
     };
@@ -580,14 +553,11 @@ impl MoleculeRenderer {
     Self {
       atom_pipeline,
       bond_pipeline,
-      sphere_vertex_buffer,
-      sphere_index_buffer,
-      sphere_index_count: sphere_indices.len() as u32,
+      quad_vertex_buffer,
+      quad_index_buffer,
+      quad_index_count: quad_indices.len() as u32,
       atom_instance_buffer,
       atom_count: scene.atoms.len() as u32,
-      bond_vertex_buffer,
-      bond_index_buffer,
-      bond_index_count: bond_indices.len() as u32,
       bond_instance_buffer,
       bond_count,
       uniform_buffer,
@@ -659,6 +629,10 @@ impl MoleculeRenderer {
     self
       .queue
       .write_buffer(&self.uniform_buffer, 64, bytemuck::bytes_of(&model_view));
+    let projection_uniform = projection.to_cols_array_2d();
+    self
+      .queue
+      .write_buffer(&self.uniform_buffer, 128, bytemuck::bytes_of(&projection_uniform));
     self.queue.write_buffer(
       &self.uniform_buffer,
       DEPTH_CUE_UNIFORM_OFFSET,
@@ -693,24 +667,21 @@ impl MoleculeRenderer {
         multiview_mask: None,
       });
 
-      // Match molecular viewers such as ChimeraX: draw atom junctions first,
-      // then let the depth-tested bond surfaces cover their internal sphere
-      // area. The spheres still close open cylinder endpoints where visible.
-      pass.set_pipeline(&self.atom_pipeline);
-      pass.set_bind_group(0, &self.bind_group, &[]);
-      pass.set_vertex_buffer(0, self.sphere_vertex_buffer.slice(..));
-      pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
-      pass.set_index_buffer(self.sphere_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-      pass.draw_indexed(0..self.sphere_index_count, 0, 0..self.atom_count);
-
       if self.bond_count > 0 {
         pass.set_pipeline(&self.bond_pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
-        pass.set_vertex_buffer(0, self.bond_vertex_buffer.slice(..));
+        pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
         pass.set_vertex_buffer(1, self.bond_instance_buffer.slice(..));
-        pass.set_index_buffer(self.bond_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        pass.draw_indexed(0..self.bond_index_count, 0, 0..self.bond_count);
+        pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.bond_count);
       }
+
+      pass.set_pipeline(&self.atom_pipeline);
+      pass.set_bind_group(0, &self.bind_group, &[]);
+      pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
+      pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
+      pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+      pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
     }
 
     self.queue.submit(std::iter::once(encoder.finish()))
@@ -853,7 +824,7 @@ fn create_pipeline(
     },
     fragment: Some(wgpu::FragmentState {
       module: shader,
-      entry_point: Some("fragment"),
+      entry_point: Some(config.fragment_entry),
       targets: &[Some(wgpu::ColorTargetState {
         format: config.color_format,
         blend: None,
@@ -864,11 +835,7 @@ fn create_pipeline(
     primitive: wgpu::PrimitiveState {
       topology: wgpu::PrimitiveTopology::TriangleList,
       front_face: wgpu::FrontFace::Ccw,
-      // The sphere mesh and cylinder mesh have different winding needs. Atom
-      // surfaces render both sides so a winding mismatch cannot expose rear
-      // atoms through a front sphere; depth testing still keeps the nearest
-      // surface opaque. Bonds retain back-face culling.
-      cull_mode: config.cull_mode,
+      cull_mode: None,
       ..Default::default()
     },
     depth_stencil: Some(wgpu::DepthStencilState {
@@ -927,7 +894,7 @@ fn atom_instance_layout() -> wgpu::VertexBufferLayout<'static> {
 /// Returns the bond endpoints/radius and color instance layout.
 fn bond_instance_layout() -> wgpu::VertexBufferLayout<'static> {
   wgpu::VertexBufferLayout {
-    array_stride: 48,
+    array_stride: 64,
     step_mode: wgpu::VertexStepMode::Instance,
     attributes: &[
       wgpu::VertexAttribute {
@@ -943,6 +910,11 @@ fn bond_instance_layout() -> wgpu::VertexBufferLayout<'static> {
       wgpu::VertexAttribute {
         offset: 32,
         shader_location: 4,
+        format: wgpu::VertexFormat::Float32x4,
+      },
+      wgpu::VertexAttribute {
+        offset: 48,
+        shader_location: 5,
         format: wgpu::VertexFormat::Float32x4,
       },
     ],
@@ -963,63 +935,17 @@ fn create_buffer<T: bytemuck::NoUninit>(
   })
 }
 
-/// Builds a low-poly unit sphere with shared seam vertices.
-fn sphere_mesh(latitudes: u16, longitudes: u16) -> (Vec<[f32; 6]>, Vec<u16>) {
-  let mut vertices = Vec::with_capacity(((latitudes + 1) * (longitudes + 1)) as usize);
-  for latitude in 0..=latitudes {
-    let theta = PI * f32::from(latitude) / f32::from(latitudes);
-    let (sin_theta, cos_theta) = theta.sin_cos();
-    for longitude in 0..=longitudes {
-      let phi = 2.0 * PI * f32::from(longitude) / f32::from(longitudes);
-      let (sin_phi, cos_phi) = phi.sin_cos();
-      let position = [sin_theta * cos_phi, cos_theta, sin_theta * sin_phi];
-      vertices.push([
-        position[0],
-        position[1],
-        position[2],
-        position[0],
-        position[1],
-        position[2],
-      ]);
-    }
-  }
-
-  let mut indices = Vec::with_capacity((latitudes * longitudes * 6) as usize);
-  let row = longitudes + 1;
-  for latitude in 0..latitudes {
-    for longitude in 0..longitudes {
-      let top_left = latitude * row + longitude;
-      let bottom_left = top_left + row;
-      indices.extend_from_slice(&[
-        top_left,
-        bottom_left,
-        top_left + 1,
-        top_left + 1,
-        bottom_left,
-        bottom_left + 1,
-      ]);
-    }
-  }
-  (vertices, indices)
-}
-
-/// Builds an open-ended unit cylinder aligned with the local Y axis.
-fn cylinder_mesh(segments: u16) -> (Vec<[f32; 6]>, Vec<u16>) {
-  let mut vertices = Vec::with_capacity(((segments + 1) * 2) as usize);
-  for segment in 0..=segments {
-    let angle = 2.0 * PI * f32::from(segment) / f32::from(segments);
-    let (sin_angle, cos_angle) = angle.sin_cos();
-    for y in [-0.5, 0.5] {
-      vertices.push([cos_angle, y, sin_angle, cos_angle, 0.0, sin_angle]);
-    }
-  }
-
-  let mut indices = Vec::with_capacity((segments * 6) as usize);
-  for segment in 0..segments {
-    let lower = segment * 2;
-    indices.extend_from_slice(&[lower, lower + 1, lower + 2, lower + 2, lower + 1, lower + 3]);
-  }
-  (vertices, indices)
+/// Builds the two triangles used as an analytic-surface billboard.
+fn billboard_quad_mesh() -> ([[f32; 6]; 4], [u16; 6]) {
+  (
+    [
+      [-1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+      [1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+      [-1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+      [1.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+    ],
+    [0, 1, 2, 2, 1, 3],
+  )
 }
 
 /// Converts scene atoms into tightly packed GPU instance rows.
@@ -1062,7 +988,7 @@ fn atom_instances(
     .collect()
 }
 
-/// Converts bonds into same-element or element-colored half-bond instances.
+/// Converts bonds into continuous cylinders with endpoint element colors.
 ///
 /// # Parameters
 ///
@@ -1071,13 +997,13 @@ fn atom_instances(
 ///
 /// # Returns
 ///
-/// One packed cylinder for a homonuclear bond or two midpoint-sharing packed
-/// cylinders for a heteronuclear bond.
+/// One packed cylinder per bond. The shader selects the endpoint color on each
+/// side of the midpoint without splitting the geometry.
 fn bond_instances(
   scene: &StructureScene,
   style: &BallAndStickStyle,
   representation: AtomRepresentation,
-) -> Vec<[f32; 12]> {
+) -> Vec<[f32; 16]> {
   if representation == AtomRepresentation::Sphere {
     return Vec::new();
   }
@@ -1092,7 +1018,7 @@ fn bond_instances(
     elements[atom.atom_id.index()] = atom.element;
   }
 
-  let mut instances = Vec::with_capacity(scene.bonds.len() * 2);
+  let mut instances = Vec::with_capacity(scene.bonds.len());
   for bond in &scene.bonds {
     let [start, end] = bond.positions;
     let start_element = elements
@@ -1104,22 +1030,8 @@ fn bond_instances(
       .copied()
       .unwrap_or(ElementCategory::Other);
     let start_color = style.palette.for_element(start_element).color;
-
-    if start_element == end_element {
-      instances.push(bond_instance(start, end, style.bond_radius, start_color));
-      continue;
-    }
-
-    // A sharp midpoint transition preserves element identity while atom
-    // spheres cover the open cylinder ends at both nuclei.
-    let midpoint = [
-      (start[0] + end[0]) * 0.5,
-      (start[1] + end[1]) * 0.5,
-      (start[2] + end[2]) * 0.5,
-    ];
     let end_color = style.palette.for_element(end_element).color;
-    instances.push(bond_instance(start, midpoint, style.bond_radius, start_color));
-    instances.push(bond_instance(midpoint, end, style.bond_radius, end_color));
+    instances.push(bond_instance(start, end, style.bond_radius, start_color, end_color));
   }
   instances
 }
@@ -1130,14 +1042,29 @@ fn bond_instances(
 ///
 /// * `start` and `end` are Cartesian cylinder endpoints in ångströms.
 /// * `radius` is the cylinder radius in ångströms.
-/// * `color` is the linear RGB surface color.
+/// * `start_color` and `end_color` are the endpoint linear RGB colors.
 ///
 /// # Returns
 ///
 /// A tightly packed GPU instance row matching `BondInstance` in WGSL.
-fn bond_instance(start: [f32; 3], end: [f32; 3], radius: f32, color: [f32; 3]) -> [f32; 12] {
+fn bond_instance(start: [f32; 3], end: [f32; 3], radius: f32, start_color: [f32; 3], end_color: [f32; 3]) -> [f32; 16] {
   [
-    start[0], start[1], start[2], radius, end[0], end[1], end[2], 0.0, color[0], color[1], color[2], 1.0,
+    start[0],
+    start[1],
+    start[2],
+    radius,
+    end[0],
+    end[1],
+    end[2],
+    0.0,
+    start_color[0],
+    start_color[1],
+    start_color[2],
+    1.0,
+    end_color[0],
+    end_color[1],
+    end_color[2],
+    1.0,
   ]
 }
 
@@ -1232,28 +1159,18 @@ mod tests {
   }
 
   #[test]
-  fn generated_mesh_indices_stay_inside_vertex_tables() {
-    let (sphere_vertices, sphere_indices) = sphere_mesh(SPHERE_LATITUDES, SPHERE_LONGITUDES);
-    let (cylinder_vertices, cylinder_indices) = cylinder_mesh(BOND_SEGMENTS);
+  fn billboard_indices_should_stay_inside_vertex_table() {
+    let (vertices, indices) = billboard_quad_mesh();
 
-    assert!(
-      sphere_indices
-        .iter()
-        .all(|index| usize::from(*index) < sphere_vertices.len())
-    );
-    assert!(
-      cylinder_indices
-        .iter()
-        .all(|index| usize::from(*index) < cylinder_vertices.len())
-    );
+    assert!(indices.iter().all(|index| usize::from(*index) < vertices.len()));
   }
 
   #[test]
-  fn heteronuclear_bond_should_create_two_half_instances() {
+  fn heteronuclear_bond_should_remain_one_continuous_instance() {
     let scene = bonded_scene("O");
     let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
 
-    assert_eq!(instances.len(), 2);
+    assert_eq!(instances.len(), 1);
   }
 
   #[test]
@@ -1265,23 +1182,13 @@ mod tests {
   }
 
   #[test]
-  fn heteronuclear_half_bonds_should_meet_at_the_midpoint() {
-    let scene = bonded_scene("O");
-    let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
-    let first_end = [instances[0][4], instances[0][5], instances[0][6]];
-    let second_start = [instances[1][0], instances[1][1], instances[1][2]];
-
-    assert_eq!(first_end, second_start);
-  }
-
-  #[test]
-  fn heteronuclear_half_bonds_should_use_endpoint_element_colors() {
+  fn heteronuclear_bond_should_pack_both_endpoint_colors() {
     let scene = bonded_scene("O");
     let style = BallAndStickStyle::default();
     let instances = bond_instances(&scene, &style, AtomRepresentation::Stick);
     let colors = (
       [instances[0][8], instances[0][9], instances[0][10]],
-      [instances[1][8], instances[1][9], instances[1][10]],
+      [instances[0][12], instances[0][13], instances[0][14]],
     );
 
     assert_eq!(colors, (style.palette.carbon.color, style.palette.oxygen.color));
@@ -1294,7 +1201,7 @@ mod tests {
   }
 
   #[test]
-  fn bonded_atom_instances_should_cover_cylinder_endpoints() {
+  fn stick_atom_junctions_should_match_cylinder_radius() {
     let scene = bonded_scene("O");
     let style = BallAndStickStyle::default();
 
