@@ -22,7 +22,7 @@ const DIAGNOSTIC_POSITION_LIMIT: usize = 256;
 /// Sphere mode uses the full element radius below. Ball-and-stick deliberately
 /// scales those physical radii down so the bonds remain the dominant visual
 /// structure while the atom centers are still visible.
-const DEFAULT_BALL_RADIUS_SCALE: f32 = 0.35;
+const DEFAULT_BALL_RADIUS_SCALE: f32 = 0.25;
 /// Approximate van der Waals radius for hydrogen, in ångströms.
 const HYDROGEN_VDW_RADIUS: f32 = 1.20;
 /// Approximate van der Waals radius for carbon, in ångströms.
