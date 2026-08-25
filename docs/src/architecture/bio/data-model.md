@@ -1,8 +1,7 @@
 # Structure data model
 
 The structure model is a validated snapshot of molecular identity, topology,
-coordinates, and crystallographic metadata. It is independent of GPUI and
-wgpu.
+coordinates, and crystallographic metadata. It is independent of GPUI and wgpu.
 
 ## Main concepts
 
@@ -25,15 +24,15 @@ and a provenance such as source connectivity or geometric inference.
 
 ## Identity versus state
 
-Topology is shared across models whenever the source permits it. For atom (a)
-and coordinate state (k), the position is:
+Topology is shared across models whenever the source permits it. For atom $a$
+and coordinate state $k$, the position is:
 
 $$
-\mathbf{x}_{k,a} = (x_{k,a}, y_{k,a}, z_{k,a}) \in \mathbb{R}^{3}.
+  \mathbf{x}_{k,a} = (x_{k,a}, y_{k,a}, z_{k,a}) \in \mathbb{R}^{3}
 $$
 
-Changing (k) changes (\mathbf{x}_{k,a}), not the atom's identifier,
-element, residue membership, chain membership, or source bonds.
+Changing $k$ changes $\mathbf{x}_{k,a}$, not the atom's identifier, element,
+residue membership, chain membership, or source bonds.
 
 ## References and invariants
 
@@ -41,11 +40,11 @@ References between tables use stable typed identities. A successful parse must
 ensure that every reference points to an existing record:
 
 $$
-\begin{aligned}
-\mathrm{residue}(a) &\in [0, N_{\mathrm{residue}}),\\
-\mathrm{chain}(r) &\in [0, N_{\mathrm{chain}}),\\
-\mathrm{endpoint}(b) &\in [0, N_{\mathrm{atom}}).
-\end{aligned}
+  \begin{aligned}
+    \mathrm{residue}(a) &\in [0, N_{\mathrm{residue}})\\
+    \mathrm{chain}(r) &\in [0, N_{\mathrm{chain}})\\
+    \mathrm{endpoint}(b) &\in [0, N_{\mathrm{atom}})
+  \end{aligned}
 $$
 
 Each active coordinate state has one position for every atom it addresses.
@@ -53,13 +52,11 @@ Invalid references are parse failures, not deferred renderer errors.
 
 ## Crystallographic metadata
 
-Unit-cell edge lengths (a,b,c) are measured in ångströms. Angles
-(\alpha,\beta,\gamma) are measured in degrees and satisfy:
+Unit-cell edge lengths $(a,b,c)$ are measured in ångströms. Angles
+$(\alpha,\beta,\gamma)$ are measured in degrees and satisfy:
 
 $$
-a,b,c > 0,
-\qquad
-0^\circ < \alpha,\beta,\gamma < 180^\circ.
+  a,b,c > 0, \space 0^\circ < \alpha,\beta,\gamma < 180^\circ
 $$
 
 These values describe the source crystal. Reading them does not automatically

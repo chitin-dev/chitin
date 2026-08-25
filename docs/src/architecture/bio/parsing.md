@@ -35,37 +35,16 @@ The following distinctions are preserved when relevant:
 
 ## Coordinates and unit cells
 
-Cartesian coordinates are stored in ångströms. Fractional coordinates are
-described by a unit-cell basis and are not implicitly expanded during parsing.
-For fractional coordinates (\mathbf{f}), conversion is:
+Cartesian coordinates are stored in ångströms. Fractional coordinates and
+unit-cell geometry are preserved as metadata; parsing does not implicitly expand
+symmetry mates or convert fractional coordinates. The coordinate-system
+contract and unit-cell equations are defined once in
+[the structure model contract](./structure.md#units-and-coordinate-systems).
 
-$$
-\mathbf{x} = A\mathbf{f}.
-$$
-
-For a conventional triclinic cell:
-
-$$
-A =
-\begin{bmatrix}
-a & b\cos\gamma & c\cos\beta \\
-0 & b\sin\gamma &
-c\dfrac{\cos\alpha-\cos\beta\cos\gamma}{\sin\gamma} \\
-0 & 0 & c\sqrt{1-u^2-v^2}
-\end{bmatrix},
-$$
-
-where
-
-$$
-u=\cos\beta,
-\qquad
-v=\frac{\cos\alpha-\cos\beta\cos\gamma}{\sin\gamma}.
-$$
-
-Angles equal to (0^\circ) or (180^\circ) are rejected because they make the
-cell degenerate. A conversion pass must also reject a numerically singular
-basis rather than emitting NaN or infinite coordinates.
+Cell values are still validated at parse time. Zero or straight angles are
+rejected immediately because they describe a degenerate cell; a later coordinate
+conversion must also reject a numerically singular basis rather than emitting
+NaN or infinite coordinates.
 
 ## Validation philosophy
 

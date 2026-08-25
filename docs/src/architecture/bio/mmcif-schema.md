@@ -40,10 +40,10 @@ item may inherit its parent's type:
 
 $$
 T(c)=
-\begin{cases}
-T_{\mathrm{declared}}(c), & \text{if }c\text{ declares a type},\\
-T(p(c)), & \text{if }c\text{ links to parent }p(c).
-\end{cases}
+  \begin{cases}
+    T_{\mathrm{declared}}(c), & \text{if }c\text{ declares a type},\\
+    T(p(c)), & \text{if }c\text{ links to parent }p(c).
+  \end{cases}
 $$
 
 An unresolved type or cyclic link is a dictionary error, not a reason to guess

@@ -16,8 +16,8 @@ Topology contains atom identity, membership, and bonds. Coordinate state (k)
 contains positions and other values that may vary between models:
 
 $$
-\mathrm{state}_k =
-\{\mathbf{x}_{k,a}\mid a\text{ is active in state }k\}.
+  \mathrm{state}_k =
+  \{\mathbf{x}_{k,a}\mid a\text{ is active in state }k\}.
 $$
 
 Changing coordinate state must not change atom identifiers or silently rewrite
@@ -29,7 +29,7 @@ Cartesian coordinates use ångströms and a right-handed frame. Fractional
 coordinates use the unit-cell basis:
 
 $$
-\mathbf{x}=A\mathbf{f}.
+  \mathbf{x}=A\mathbf{f}.
 $$
 
 For edge lengths (a,b,c) and angles (\alpha,\beta,\gamma), a conventional
@@ -72,9 +72,9 @@ volume is too close to zero for reliable conversion.
 
 ## Identifiers and provenance
 
-Author and label identifiers are separate namespaces. Alternate locations,
-model numbers, source serials, and optional experimental values are preserved
-when present.
+Author and label identifiers are separate namespaces. Alternate locations, model
+numbers, source serials, and optional experimental values are preserved when
+present.
 
 Every bond records whether it came from source connectivity or geometric
 inference. Derived geometry must remain traceable to the atom identities that

@@ -45,7 +45,7 @@ The distance cue is a presentation aid, not a replacement for depth testing. If
 (z) is the linear view-space depth, a smooth cue can be expressed as:
 
 $$
-c(z)=s\,\operatorname{smoothstep}(z_0,z_1,z),
+  c(z)=s\,\operatorname{smoothstep}(z_0,z_1,z),
 $$
 
 where (s) is the cue strength and (z_0,z_1) delimit the transition range.
@@ -53,7 +53,6 @@ where (s) is the cue strength and (z_0,z_1) delimit the transition range.
 ## Style versus data
 
 Element colors, radii, lighting, background, and representation are visual
-style. Coordinates, topology, metadata, and bond provenance are scientific
-data. Changing style must not alter the structure snapshot; changing the
-coordinate state should invalidate only the derived visual data that depends on
-positions.
+style. Coordinates, topology, metadata, and bond provenance are scientific data.
+Changing style must not alter the structure snapshot; changing the coordinate
+state should invalidate only the derived visual data that depends on positions.

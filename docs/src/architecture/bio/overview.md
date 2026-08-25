@@ -1,7 +1,7 @@
 # Biological structure layer
 
-`chitin-bio` is the format-independent domain layer for molecular structures.
-It turns PDB and PDBx/mmCIF input into one validated structure model that can be
+`chitin-bio` is the format-independent domain layer for molecular structures. It
+turns PDB and PDBx/mmCIF input into one validated structure model that can be
 used by command-line tools, renderers, and future analysis packages.
 
 The layer preserves source information, normalizes records into stable atoms,
@@ -30,8 +30,8 @@ changes positions and related per-state values, but does not silently create a
 second atom table:
 
 $$
-\mathrm{structure} = \mathrm{topology} +
-\{\mathrm{coordinate\ state}_k\}_{k=1}^{K}.
+  \mathrm{structure} = \mathrm{topology} +
+  \{\mathrm{coordinate\ state}_k\}_{k=1}^{K}
 $$
 
 The renderer may derive GPU data from one selected state, but the source model
@@ -48,5 +48,6 @@ affects interpretation.
 Heuristics such as distance-based bond inference are derived data. They are
 never presented as if they were explicitly recorded by the source file.
 
-See [the structure model](./data-model.md), [the parsing pipeline](./parsing.md),
-and [bond inference](./bond-inference.md) for the main domain rules.
+See [the structure model](./data-model.md),
+[the parsing pipeline](./parsing.md), and [bond inference](./bond-inference.md)
+for the main domain rules.
