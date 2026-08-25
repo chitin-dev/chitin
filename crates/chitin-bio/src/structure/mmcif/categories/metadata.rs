@@ -104,7 +104,7 @@ fn validate_cell_parameters(row: usize, lengths: [f32; 3], angles: [f32; 3]) -> 
     ("_cell.angle_beta", angles[1]),
     ("_cell.angle_gamma", angles[2]),
   ] {
-    if !(0.0..180.0).contains(&value) {
+    if value <= 0.0 || value >= 180.0 {
       return Err(MmcifParseError::InvalidField {
         row,
         field,
@@ -147,4 +147,27 @@ fn parse_symmetry(document: &CifDocument, input: &mut StructureInput) -> Result<
     });
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::validate_cell_parameters;
+  use crate::structure::MmcifParseError;
+
+  #[test]
+  fn zero_cell_angle_should_be_rejected() {
+    let error = match validate_cell_parameters(3, [10.0, 10.0, 10.0], [0.0, 90.0, 90.0]) {
+      Ok(()) => panic!("a zero cell angle must be rejected"),
+      Err(error) => error,
+    };
+
+    assert!(matches!(
+      error,
+      MmcifParseError::InvalidField {
+        row: 3,
+        field: "_cell.angle_alpha",
+        ..
+      }
+    ));
+  }
 }
