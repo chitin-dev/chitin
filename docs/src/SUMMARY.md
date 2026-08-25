@@ -8,8 +8,6 @@
 
 # Architecture
 
-- [Command Panel](./architecture/command-panel.md)
-
 ## Biological structures
 
 - [Overview](./architecture/bio/overview.md)
