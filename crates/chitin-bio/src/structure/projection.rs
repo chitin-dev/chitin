@@ -64,6 +64,29 @@ impl StructureInput {
     self.current_model = Some(self.models.len() - 1);
   }
 
+  /// Selects an existing source model or creates it when first encountered.
+  ///
+  /// mmCIF atom-site rows are not required to be contiguous by model number,
+  /// so returning to a previously seen number must append to that model rather
+  /// than creating a duplicate coordinate model.
+  pub(crate) fn start_or_reuse_model(&mut self, source_number: i32) {
+    let model_index = match self
+      .models
+      .iter()
+      .position(|model| model.source_number == source_number)
+    {
+      Some(index) => index,
+      None => {
+        self.models.push(ProjectedModel {
+          source_number,
+          atoms: Vec::new(),
+        });
+        self.models.len() - 1
+      }
+    };
+    self.current_model = Some(model_index);
+  }
+
   /// Ends the current coordinate model.
   pub(crate) fn finish_model(&mut self) {
     self.current_model = None;

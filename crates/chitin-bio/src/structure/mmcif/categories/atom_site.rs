@@ -38,7 +38,7 @@ pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Resul
   for row in rows {
     let model_number = row.pdbx_pdb_model_num()?.unwrap_or(1);
     if current_model != Some(model_number) {
-      input.start_model(model_number);
+      input.start_or_reuse_model(model_number);
       current_model = Some(model_number);
     }
     input.add_atom(atom_record(row)?);

@@ -150,6 +150,42 @@ ATOM 1 CA ALA A 1 1.0 2.0 3.0 C
   }
 
   #[test]
+  fn groups_interleaved_atom_site_rows_by_model_number() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+_atom_site.pdbx_PDB_model_num
+ATOM 1 CA ALA A 1 1.0 2.0 3.0 C 1
+ATOM 1 CA ALA A 1 4.0 5.0 6.0 C 2
+ATOM 2 C ALA A 1 7.0 8.0 9.0 C 1
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("interleaved model fixture should parse: {error}"));
+
+    assert_eq!(parsed.structure.models.len(), 2);
+    assert_eq!(parsed.structure.models[0].source_number, 1);
+    assert_eq!(parsed.structure.models[1].source_number, 2);
+    assert_eq!(
+      parsed.structure.coordinates[parsed.structure.models[0].coordinate_set_id.index()].positions,
+      vec![[1.0, 2.0, 3.0], [7.0, 8.0, 9.0]]
+    );
+    assert_eq!(
+      parsed.structure.coordinates[parsed.structure.models[1].coordinate_set_id.index()].positions[0],
+      [4.0, 5.0, 6.0]
+    );
+  }
+
+  #[test]
   fn uses_label_identifiers_when_author_identifiers_are_missing() {
     let input = br#"data_demo
 loop_
