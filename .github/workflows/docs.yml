@@ -37,6 +37,12 @@ jobs:
         with:
           mdbook-version: latest
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install mdbook-katex
+        run: cargo install mdbook-katex --locked
+
       - name: Cache mdBook output
         uses: actions/cache@v4
         with:
