@@ -275,7 +275,9 @@ fn tokenize(input: &str) -> Result<Vec<Token>, CifParseError> {
       let quote = first;
       position += 1;
       let start = position;
-      while position < bytes.len() && bytes[position] != quote {
+      while position < bytes.len()
+        && !(bytes[position] == quote && (position + 1 == bytes.len() || bytes[position + 1].is_ascii_whitespace()))
+      {
         if bytes[position] == b'\n' {
           line += 1;
         }
@@ -415,6 +417,30 @@ _audit.ordinal
     };
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0][0].as_text(), Some("_atom_site.Cartn_x"));
+  }
+
+  #[test]
+  fn preserves_embedded_quote_in_quoted_scalar_value() {
+    let document = CifParser::parse("data_demo\n_chem_comp.name 'O'Brien'\n")
+      .unwrap_or_else(|error| panic!("embedded quote fixture should parse: {error}"));
+
+    let CifCategory::Item { value, .. } = &document.blocks[0].categories[0] else {
+      panic!("expected scalar item");
+    };
+    assert_eq!(value.as_text(), Some("O'Brien"));
+  }
+
+  #[test]
+  fn preserves_embedded_quote_in_quoted_loop_value() {
+    let document = CifParser::parse("data_demo\nloop_\n_a\n_b\n'O'Brien' 1\n'Alpha' 2\n")
+      .unwrap_or_else(|error| panic!("embedded quote loop fixture should parse: {error}"));
+
+    let CifCategory::Loop { rows, .. } = &document.blocks[0].categories[0] else {
+      panic!("expected loop category");
+    };
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0][0].as_text(), Some("O'Brien"));
+    assert_eq!(rows[0][1].as_text(), Some("1"));
   }
 
   #[test]
