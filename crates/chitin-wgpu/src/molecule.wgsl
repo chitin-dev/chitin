@@ -1,3 +1,6 @@
+// The CPU writes this block as three matrices followed by lighting, material,
+// depth-cue, and background parameters. Keep the field order synchronized with
+// `material_uniform` and the byte offsets used by the Rust renderer.
 struct Uniforms {
   mvp: mat4x4<f32>,
   model_view: mat4x4<f32>,
@@ -11,16 +14,21 @@ struct Uniforms {
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
+// The shared mesh is a unit quad. Its position.xy values become billboard
+// coordinates; analytic sphere/cylinder intersections provide the real shape.
 struct MeshVertex {
   @location(0) position: vec3<f32>,
   @location(1) normal: vec3<f32>,
 }
 
+// Atom instance data: xyz is the source-space center, w is the source radius.
 struct AtomInstance {
   @location(2) position_radius: vec4<f32>,
   @location(3) color: vec4<f32>,
 }
 
+// Bond instance data: start_radius.xyz/end_padding.xyz are endpoints and
+// start_radius.w is the cylinder radius. The color vectors hold endpoint colors.
 struct BondInstance {
   @location(2) start_radius: vec4<f32>,
   @location(3) end_padding: vec4<f32>,
@@ -28,6 +36,8 @@ struct BondInstance {
   @location(5) end_color: vec4<f32>,
 }
 
+// The vertex stage expands a quad around each primitive. The fragment stage
+// uses these values to reconstruct a camera-space ray and solve the surface.
 struct VertexOutput {
   @builtin(position) clip_position: vec4<f32>,
   @location(0) ray_anchor: vec3<f32>,
@@ -37,22 +47,27 @@ struct VertexOutput {
   @location(4) end_color: vec3<f32>,
 }
 
+// Analytic surfaces write their own depth after finding the exact intersection.
 struct FragmentOutput {
   @location(0) color: vec4<f32>,
   @builtin(frag_depth) depth: f32,
 }
 
 fn view_radius(source_radius: f32) -> f32 {
+  // Only the linear part of model_view affects a radius; translation is zero.
   return length((uniforms.model_view * vec4<f32>(source_radius, 0.0, 0.0, 0.0)).xyz);
 }
 
 fn projected_radius(radius: f32, view_depth: f32) -> vec2<f32> {
+  // Project the tangent of the surface instead of its center. The lower bound
+  // avoids a divide-by-zero when the camera is close to or inside a primitive.
   let tangent_depth = sqrt(max(view_depth * view_depth - radius * radius, 0.000001));
   return vec2<f32>(uniforms.projection[0][0], uniforms.projection[1][1])
     * radius / tangent_depth;
 }
 
 fn view_ray_anchor(ndc: vec2<f32>, view_depth: f32) -> vec3<f32> {
+  // Reconstruct a point on the camera ray at the supplied positive depth.
   return vec3<f32>(
     ndc.x * view_depth / uniforms.projection[0][0],
     ndc.y * view_depth / uniforms.projection[1][1],
@@ -67,6 +82,8 @@ fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
   let radius = view_radius(instance.position_radius.w);
   let center_clip = uniforms.projection * vec4<f32>(center, 1.0);
   let center_ndc = center_clip.xy / center_clip.w;
+  // Expand the unit quad in NDC so every possible sphere intersection reaches
+  // the fragment stage, including the silhouette.
   let view_depth = max(-center.z, radius + 0.0001);
   let ndc = center_ndc + vertex.position.xy * projected_radius(radius, view_depth) * 1.03;
 
@@ -89,6 +106,7 @@ fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput {
   let end_clip = uniforms.projection * vec4<f32>(end, 1.0);
   let start_ndc = start_clip.xy / start_clip.w;
   let end_ndc = end_clip.xy / end_clip.w;
+  // Project both endpoint radii and interpolate their extents along the bond.
   let start_extent = projected_radius(radius, max(-start.z, radius + 0.0001));
   let end_extent = projected_radius(radius, max(-end.z, radius + 0.0001));
   let unit_position = vertex.position.x * 0.5 + 0.5;
@@ -115,6 +133,8 @@ fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput {
 }
 
 fn wrapped_diffuse(normal: vec3<f32>, light_direction: vec3<f32>, strength: f32) -> f32 {
+  // A small wrap term keeps surfaces readable when a normal is turned away
+  // from a light, which is useful for dense molecular scenes.
   let wrap = 0.15;
   let facing = max(-dot(normal, light_direction), 0.0);
   return ((facing + wrap) / (1.0 + wrap)) * strength;
@@ -136,6 +156,8 @@ fn shade_surface(normal: vec3<f32>, view_position: vec3<f32>, element_color: vec
   let linear_depth = -view_position.z;
   let cue = smoothstep(uniforms.depth_cue.x, uniforms.depth_cue.y, linear_depth)
     * uniforms.depth_cue.z;
+  // Debug modes expose individual lighting/depth terms without changing the
+  // geometry or depth written by the analytic surface.
   let debug_mode = u32(uniforms.depth_cue.w + 0.5);
   if debug_mode == 1u {
     return vec4<f32>(normal * 0.5 + vec3<f32>(0.5), 1.0);
@@ -159,6 +181,8 @@ fn shade_surface(normal: vec3<f32>, view_position: vec3<f32>, element_color: vec
 }
 
 fn fragment_depth(view_position: vec3<f32>) -> f32 {
+  // Convert the analytically reconstructed surface point into the same depth
+  // range as the regular WGPU projection.
   let clip_position = uniforms.projection * vec4<f32>(view_position, 1.0);
   return clip_position.z / clip_position.w;
 }
@@ -169,11 +193,14 @@ fn atom_fragment(in: VertexOutput) -> FragmentOutput {
   let center = in.surface_start_radius.xyz;
   let radius = in.surface_start_radius.w;
   let center_along_ray = dot(ray_direction, center);
+  // Solve the camera-ray/sphere quadratic in camera space.
   let discriminant = center_along_ray * center_along_ray - dot(center, center) + radius * radius;
   if discriminant < 0.0 {
     discard;
   }
   let distance = center_along_ray - sqrt(discriminant);
+  // Only the nearest intersection in front of the camera is currently used.
+  // A camera inside a sphere has no positive near intersection and is dropped.
   if distance <= 0.0 {
     discard;
   }
@@ -203,6 +230,8 @@ fn bond_fragment(in: VertexOutput) -> FragmentOutput {
   let quadratic_c = axis_length_squared * origin_squared
     - axis_origin * axis_origin
     - radius * radius * axis_length_squared;
+  // Solve the ray/infinite-cylinder quadratic, then restrict the hit to the
+  // finite segment between the two bond endpoints.
   let discriminant = quadratic_b * quadratic_b - quadratic_a * quadratic_c;
   if discriminant < 0.0 || quadratic_a < 0.000001 {
     discard;
