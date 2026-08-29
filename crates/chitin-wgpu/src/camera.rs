@@ -89,7 +89,7 @@ impl ViewerCamera {
     let right = self.view_right();
     let up = self.view_up();
     let scale = self.distance * PAN_UNITS_PER_PIXEL_AT_UNIT_DISTANCE;
-    self.target += (-right * delta_x + up * delta_y) * scale;
+    self.target += (right * delta_x - up * delta_y) * scale;
   }
 
   /// Applies wheel or drag zoom using an exponential scale.
