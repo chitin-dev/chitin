@@ -623,7 +623,10 @@ impl StructureBuilder {
     self
       .structure
       .validate_invariants()
-      .map_err(|message| StructureBuildError { line: 0, message })?;
+      .map_err(|error| StructureBuildError {
+        line: 0,
+        message: error.to_string(),
+      })?;
     Ok(StructureParseResult {
       structure: self.structure,
       diagnostics: self.diagnostics,

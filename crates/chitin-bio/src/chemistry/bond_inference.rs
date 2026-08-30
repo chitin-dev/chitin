@@ -115,7 +115,7 @@ pub enum BondInferenceError {
 ///
 /// let pdb = b"ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00 10.00           N  \nATOM      2  CA  GLY A   1       1.450   0.000   0.000  1.00 10.00           C  \nEND\n";
 /// let parsed = PdbParser::new().parse_bytes(pdb)?;
-/// let model_id = parsed.structure.models[0].id;
+/// let model_id = parsed.structure.models()[0].id;
 /// let bonds = infer_bonds(&parsed.structure, model_id, BondInferenceConfig::default())?;
 /// assert_eq!(bonds.len(), 1);
 /// # Ok::<(), Box<dyn std::error::Error>>(())

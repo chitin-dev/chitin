@@ -61,7 +61,7 @@ impl PdbParser {
   ///
   /// let pdb = b"ATOM      1  N   GLY A   1       0.000   0.000   0.000  1.00 10.00           N  \n";
   /// let parsed = PdbParser::new().parse_bytes(pdb)?;
-  /// assert_eq!(parsed.structure.atoms[0].name, "N");
+  /// assert_eq!(parsed.structure.atoms()[0].name, "N");
   /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
   pub fn parse_bytes(&self, bytes: &[u8]) -> Result<StructureParseResult, PdbParseError> {
@@ -99,7 +99,7 @@ impl PdbParser {
   ///
   /// let input = Cursor::new(b"END\n");
   /// let parsed = PdbParser::new().parse_reader(input)?;
-  /// assert!(parsed.structure.models.is_empty());
+  /// assert!(parsed.structure.models().is_empty());
   /// # Ok::<(), Box<dyn std::error::Error>>(())
   /// ```
   pub fn parse_reader<R>(&self, mut reader: R) -> Result<StructureParseResult, PdbParseError>

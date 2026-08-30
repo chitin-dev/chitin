@@ -20,7 +20,7 @@ pub use model::{
   AnnotationSource, AssemblyGeneration, AssemblyMetadata, Atom, AtomId, BiologicalAssembly, Bond, BondOrder,
   BondSource, Chain, ChainId, CoordinateSet, CoordinateSetId, Element, MissingPolymerResidue, Model, ModelId,
   PolymerEntity, PolymerSequenceResidue, PolymerType, Residue, ResidueId, ResidueKind, SecondaryRange,
-  SecondaryStructure, Structure, StructureMetadata, StructureOperation, Symmetry, UnitCell,
+  SecondaryStructure, Structure, StructureInvariantError, StructureMetadata, StructureOperation, Symmetry, UnitCell,
 };
 pub use pdb::PdbParser;
 pub use scene::{

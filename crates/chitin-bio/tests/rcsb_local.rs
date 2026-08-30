@@ -72,11 +72,11 @@ fn parse_fixture(format: FixtureFormat, bytes: &[u8]) -> Result<StructureParseRe
 /// Checks the invariants common to every parsed structure source.
 fn assert_structure_is_valid(path: &Path, structure: &Structure) {
   assert!(
-    !structure.models.is_empty(),
+    !structure.models().is_empty(),
     "{} should contain a model",
     path.display()
   );
-  assert!(!structure.atoms.is_empty(), "{} should contain atoms", path.display());
+  assert!(!structure.atoms().is_empty(), "{} should contain atoms", path.display());
   structure
     .validate_invariants()
     .unwrap_or_else(|error| panic!("{} violates structure invariants: {error}", path.display()));
@@ -108,16 +108,16 @@ fn print_structure_summary(format: FixtureFormat, path: &Path, bytes: &[u8], par
     path.file_stem().and_then(|value| value.to_str()).unwrap_or("?"),
     format.label(),
     bytes.len(),
-    structure.models.len(),
-    structure.chains.len(),
-    structure.residues.len(),
-    structure.atoms.len(),
-    structure.bonds.len(),
+    structure.models().len(),
+    structure.chains().len(),
+    structure.residues().len(),
+    structure.atoms().len(),
+    structure.bonds().len(),
     scene.bonds.len(),
     inferred_bond_count,
-    structure.polymer_entities.len(),
-    structure.missing_polymer_residues.len(),
-    structure.secondary_ranges.len(),
+    structure.polymer_entities().len(),
+    structure.missing_polymer_residues().len(),
+    structure.secondary_ranges().len(),
     parsed.diagnostics.len(),
   );
 }
