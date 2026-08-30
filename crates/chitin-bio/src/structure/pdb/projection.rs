@@ -4,7 +4,7 @@
 //! are resolved here. The shared structure builder therefore receives only
 //! normalized semantic data and has no dependency on fixed-column syntax.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::fields::{field, non_empty, parse_required_f32, parse_required_i32};
 use super::records::{PdbAtomRecord, PdbDocument, PdbProjectionRecordKind, PdbRecord, PdbSecondaryRange};
@@ -398,6 +398,7 @@ impl PdbProjection {
       });
     }
 
+    let mut projected_entities = HashSet::new();
     for (chain_id, monomers) in std::mem::take(&mut self.sequences) {
       let entity_id = if let Some(entity_id) = chain_entities.get(&chain_id).cloned() {
         entity_id
@@ -422,16 +423,18 @@ impl PdbProjection {
         .find(|entity| entity.id == entity_id)
       {
         entity.polymer_type = polymer_type;
-        entity.sequence.extend(
-          monomers
-            .into_iter()
-            .enumerate()
-            .map(|(index, monomer)| PolymerSequenceResidue {
-              number: index as i32 + 1,
-              monomer,
-              hetero: false,
-            }),
-        );
+        if projected_entities.insert(entity_id) {
+          entity.sequence.extend(
+            monomers
+              .into_iter()
+              .enumerate()
+              .map(|(index, monomer)| PolymerSequenceResidue {
+                number: index as i32 + 1,
+                monomer,
+                hetero: false,
+              }),
+          );
+        }
       }
     }
     self.input.label_chain_entities.extend(chain_entities);

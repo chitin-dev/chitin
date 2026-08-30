@@ -228,6 +228,25 @@ mod tests {
   }
 
   #[test]
+  fn shares_seqres_sequence_across_chains_of_one_entity() {
+    let input = concat!(
+      "COMPND    1 MOL_ID: 1;\n",
+      "COMPND    2 CHAIN: A, B;\n",
+      "SEQRES   1 A    3  GLY ALA SER\n",
+      "SEQRES   1 B    3  GLY ALA SER\n",
+      "ATOM      1  CA  GLY A   1       1.000   2.000   3.000  1.00 20.00           C  \n",
+      "ATOM      2  CA  GLY B   1       4.000   5.000   6.000  1.00 20.00           C  \n",
+    );
+    let parsed = PdbParser::new()
+      .parse_bytes(input.as_bytes())
+      .unwrap_or_else(|error| panic!("homodimer fixture should parse: {error}"));
+    let entity = &parsed.structure.polymer_entities[0];
+    assert_eq!(entity.sequence.len(), 3);
+    assert_eq!(entity.chain_ids.len(), 2);
+    assert!(parsed.structure.validate_invariants().is_ok());
+  }
+
+  #[test]
   fn ignores_remark_465_headings_and_projects_data_rows() {
     let input = concat!(
       "REMARK 465\n",
