@@ -8,6 +8,14 @@ use std::path::PathBuf;
 
 use chitin_bio::structure::cif::{CifCategory, CifDocument, CifParser, CifSaveFrame};
 
+// The default dictionary is intentionally kept out of Git. Before running the
+// generator without explicit paths, download the official wwPDB ASCII
+// dictionary into this location from the repository root:
+//
+// curl -L https://mmcif.wwpdb.org/dictionaries/ascii/mmcif_pdbx_v50.dic \
+//   -o crates/chitin-bio/src/structure/mmcif/mmcif_pdbx_v50.dic
+//
+// The generated schema can then be refreshed with `just generate-mmcif-schema`.
 const DEFAULT_DICTIONARY: &str = "crates/chitin-bio/src/structure/mmcif/mmcif_pdbx_v50.dic";
 const DEFAULT_SELECTION: &str = "crates/chitin-bio/src/structure/mmcif/schema_categories.txt";
 const DEFAULT_OUTPUT: &str = "crates/chitin-bio/src/structure/mmcif/schema.rs";
