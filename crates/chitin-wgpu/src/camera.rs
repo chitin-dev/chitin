@@ -1,7 +1,7 @@
 //! Framework-neutral orbit camera controls for WGPU viewports.
 
 /// Minimum camera distance from the scene center.
-const MIN_CAMERA_DISTANCE: f32 = 0.9;
+const MIN_CAMERA_DISTANCE: f32 = 0.45;
 /// Maximum camera distance from the scene center.
 const MAX_CAMERA_DISTANCE: f32 = 12.0;
 /// Rotation scale in radians per logical pixel.
@@ -9,7 +9,7 @@ const ROTATE_RADIANS_PER_PIXEL: f32 = 0.008;
 /// Pan scale relative to the current camera distance.
 const PAN_UNITS_PER_PIXEL_AT_UNIT_DISTANCE: f32 = 0.0018;
 /// Wheel zoom scale in exponent units per logical pixel.
-const ZOOM_EXPONENT_PER_PIXEL: f32 = 0.0025;
+const ZOOM_EXPONENT_PER_PIXEL: f32 = 0.005;
 
 /// Camera controls for a generic orbit/pan/zoom 3D viewport.
 #[derive(Clone, Copy)]
@@ -46,8 +46,20 @@ impl ViewerCamera {
   ///
   /// A matrix that transforms scene-space positions into WGPU clip space.
   pub fn view_projection(&self, aspect: f32) -> glam::Mat4 {
-    let projection = glam::camera::rh::proj::directx::perspective(0.70, aspect, 0.1, 100.0);
-    projection * self.view_matrix()
+    self.projection_matrix(aspect) * self.view_matrix()
+  }
+
+  /// Builds the perspective projection matrix for the current viewport.
+  ///
+  /// # Parameters
+  ///
+  /// * `aspect` is the render target width divided by height.
+  ///
+  /// # Returns
+  ///
+  /// A right-handed projection matrix using WGPU's zero-to-one depth range.
+  pub fn projection_matrix(&self, aspect: f32) -> glam::Mat4 {
+    glam::camera::rh::proj::directx::perspective(0.70, aspect, 0.1, 100.0)
   }
 
   /// Applies an orbit rotation from a drag delta.
@@ -77,7 +89,7 @@ impl ViewerCamera {
     let right = self.view_right();
     let up = self.view_up();
     let scale = self.distance * PAN_UNITS_PER_PIXEL_AT_UNIT_DISTANCE;
-    self.target += (-right * delta_x + up * delta_y) * scale;
+    self.target += (right * delta_x - up * delta_y) * scale;
   }
 
   /// Applies wheel or drag zoom using an exponential scale.
@@ -100,7 +112,7 @@ impl ViewerCamera {
   }
 
   /// Returns the current camera view matrix.
-  fn view_matrix(&self) -> glam::Mat4 {
+  pub fn view_matrix(&self) -> glam::Mat4 {
     glam::camera::rh::view::look_at_mat4(self.eye(), self.target, glam::Vec3::Y)
   }
 

@@ -2,11 +2,14 @@
 members = [
   "crates/chitin-command",
   "crates/chitin-cli",
+  "crates/chitin-bio",
+  "crates/chitin-bio-macros",
   "crates/chitin-utils",
   "crates/chitin-databases",
   "crates/chitin-desktop",
   "crates/chitin-ui",
   "crates/chitin-wgpu",
+  "tools/chitin-mmcif-schema",
 ]
 resolver = "2"
 

@@ -1,6 +1,8 @@
 //! Desktop execution adapters for shared commands.
 
-use chitin_command::{ApplicationCommand, ChitinCommand, DatabaseCommand, PanelTabCommand, WorkspaceCommand};
+use chitin_command::{
+  ApplicationCommand, ChitinCommand, DatabaseCommand, PanelTabCommand, StructureCommand, WorkspaceCommand,
+};
 use gpui::Context;
 
 use crate::{app::ChitinApp, components::workspace_tree::WorkspaceTreeNavigation};
@@ -41,7 +43,13 @@ impl ChitinApp {
       ChitinCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
       ChitinCommand::Database(command) => self.dispatch_database_command(command, cx),
       ChitinCommand::Application(command) => self.dispatch_application_command(command, cx),
+      ChitinCommand::Structure(command) => self.dispatch_structure_command(command),
     }
+  }
+
+  /// Reports structure commands that are currently CLI-only.
+  pub(crate) fn dispatch_structure_command(&mut self, command: StructureCommand) {
+    log::debug!("Structure command {} is not a desktop action yet", command.id());
   }
 
   /// Executes an application command.

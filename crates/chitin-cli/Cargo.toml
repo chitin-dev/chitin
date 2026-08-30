@@ -25,10 +25,13 @@ path = "src/main.rs"
 
 [dependencies]
 chitin-command = { version = "0.1.0", path = "../chitin-command" }
+chitin-bio = { version = "0.1.0", path = "../chitin-bio" }
 chitin-databases = { version = "0.1.0", path = "../chitin-databases" }
 clap = { version = "4.6", features = ["derive"] }
 clap_complete = "4.6"
+console = "0.16"
 indicatif = "0.18"
+serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
 

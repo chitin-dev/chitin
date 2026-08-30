@@ -40,6 +40,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -63,10 +66,10 @@ jobs:
           cache-on-failure: true
 
       - name: Build desktop release
-        run: cargo build -p chitin-desktop --release --locked
+        run: just build-desktop-release
 
       - name: Build CLI release
-        run: cargo build -p chitin --release --locked
+        run: just build-cli-release
 
       - name: Package Linux executable
         if: runner.os == 'Linux'

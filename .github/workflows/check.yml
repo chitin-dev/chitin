@@ -6,6 +6,9 @@ on:
       - main
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -17,6 +20,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install just
+        uses: taiki-e/install-action@just
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -46,11 +52,5 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Check workspace
-        run: cargo check --workspace --locked
-
-      - name: Run clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Run Rust CI checks
+        run: just ci

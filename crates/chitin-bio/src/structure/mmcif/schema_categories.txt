@@ -1,0 +1,13 @@
+# Categories compiled into Chitin's typed mmCIF schema.
+atom_site
+entity_poly
+entity_poly_seq
+struct_asym
+struct_conf
+struct_conn
+struct_sheet_range
+cell
+symmetry
+pdbx_struct_oper_list
+pdbx_struct_assembly
+pdbx_struct_assembly_gen
