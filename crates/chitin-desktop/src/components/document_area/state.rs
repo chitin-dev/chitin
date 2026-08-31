@@ -14,7 +14,7 @@ use chitin_ui::{
   primitive::resize::ResizeGesture,
 };
 use chitin_wgpu::AtomRepresentation;
-use gpui::{AnyView, App, Pixels, Window};
+use gpui::{AnyView, App, Bounds, Pixels, Window};
 
 /// Callback that applies an atom representation to one WGPU document view.
 type AtomRepresentationChangeHandler = dyn Fn(AtomRepresentation, &mut App);
@@ -112,6 +112,8 @@ pub(crate) struct DocumentPanelState {
   pub(super) tab_scroll: PanelTabScrollState,
   /// Panel whose document options popover is currently visible.
   pub(super) options_menu_panel_id: Option<PanelId>,
+  /// Last prepainted bounds of the options trigger in window coordinates.
+  pub(super) options_menu_anchor: Option<Bounds<Pixels>>,
 }
 
 impl OpenedProjectDocument {
@@ -425,6 +427,7 @@ impl DocumentPanelState {
       tab_drag: None,
       tab_scroll: PanelTabScrollState::new(),
       options_menu_panel_id: None,
+      options_menu_anchor: None,
     }
   }
 
@@ -465,6 +468,7 @@ impl DocumentPanelState {
       tab_drag: None,
       tab_scroll: PanelTabScrollState::new(),
       options_menu_panel_id: None,
+      options_menu_anchor: None,
     }
   }
 
@@ -529,6 +533,7 @@ impl DocumentPanelState {
     if self.tree.activate_tab(panel_id, tab_id) {
       self.focused_panel_id = panel_id;
       self.options_menu_panel_id = None;
+      self.options_menu_anchor = None;
       return true;
     }
     false
@@ -554,6 +559,7 @@ impl DocumentPanelState {
       return false;
     }
     self.options_menu_panel_id = None;
+    self.options_menu_anchor = None;
 
     let panel_is_empty = self
       .tree
@@ -647,13 +653,28 @@ impl DocumentPanelState {
     if self.active_atom_representation(panel_id).is_none() {
       return false;
     }
-    self.options_menu_panel_id = (self.options_menu_panel_id != Some(panel_id)).then_some(panel_id);
+    let opening = self.options_menu_panel_id != Some(panel_id);
+    self.options_menu_panel_id = opening.then_some(panel_id);
+    if !opening {
+      self.options_menu_anchor = None;
+    }
+    true
+  }
+
+  /// Stores the latest trigger bounds used to anchor a deferred options popup.
+  pub(crate) fn set_options_menu_anchor(&mut self, bounds: Bounds<Pixels>) -> bool {
+    if self.options_menu_anchor == Some(bounds) {
+      return false;
+    }
+    self.options_menu_anchor = Some(bounds);
     true
   }
 
   /// Dismisses the currently visible document options menu.
   pub(crate) fn dismiss_options_menu(&mut self) -> bool {
-    self.options_menu_panel_id.take().is_some()
+    let was_open = self.options_menu_panel_id.take().is_some();
+    self.options_menu_anchor = None;
+    was_open
   }
 
   /// Splits one document panel and copies its active tab to the new panel.

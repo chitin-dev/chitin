@@ -65,6 +65,7 @@ fn two_tab_document_panel_state() -> DocumentPanelState {
     tab_drag: None,
     tab_scroll: PanelTabScrollState::new(),
     options_menu_panel_id: None,
+    options_menu_anchor: None,
   }
 }
 
@@ -329,6 +330,7 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
     tab_drag: None,
     tab_scroll: PanelTabScrollState::new(),
     options_menu_panel_id: None,
+    options_menu_anchor: None,
   };
 
   let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {

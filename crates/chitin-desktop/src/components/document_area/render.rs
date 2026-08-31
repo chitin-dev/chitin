@@ -9,7 +9,7 @@ use chitin_ui::{
     PanelTabCloseIconRenderer, PanelTabDragConfig, PanelTabDragStartHandler, PanelTabDragTargetHandler,
     PanelTabDropHandler, render_panel_container,
   },
-  primitive::popover::{Popover, PopoverStyle},
+  primitive::popover::{Popover, PopoverPlacement, PopoverStyle},
   themes::UIThemes,
 };
 use chitin_wgpu::AtomRepresentation;
@@ -53,6 +53,8 @@ struct DocumentOptionsMenu {
   theme: UIThemes,
   /// Weak root app entity used by dismissal and selection callbacks.
   app: WeakEntity<ChitinApp>,
+  /// Trigger bounds used to align the popup with the ellipsis button.
+  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
 }
 
 /// Renders the main workbench document area.
@@ -161,6 +163,7 @@ fn render_opened_document_panels(
   let focused_panel_id = document_panels.focused_panel_id;
   let atom_representation = document_panels.active_atom_representation(focused_panel_id);
   let options_menu_open = document_panels.options_menu_panel_id == Some(focused_panel_id);
+  let options_menu_anchor = document_panels.options_menu_anchor;
   let render_tab_strip_actions = Rc::new(move |panel_id| {
     render_panel_tab_strip_actions(
       panel_id,
@@ -168,6 +171,7 @@ fn render_opened_document_panels(
       actions_app.clone(),
       atom_representation,
       options_menu_open,
+      options_menu_anchor,
     )
     .into_any_element()
   });
@@ -262,6 +266,7 @@ fn render_panel_tab_strip_actions(
   app: WeakEntity<ChitinApp>,
   atom_representation: Option<AtomRepresentation>,
   options_menu_open: bool,
+  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
 ) -> gpui::Div {
   let mut actions = div()
     .flex()
@@ -278,6 +283,7 @@ fn render_panel_tab_strip_actions(
       options_menu_open,
       theme,
       app.clone(),
+      options_menu_anchor,
     ));
   }
   actions
@@ -304,6 +310,7 @@ fn render_document_options_button(
   open: bool,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
+  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
 ) -> gpui::Div {
   let trigger_app = app.clone();
   let trigger = div()
@@ -329,9 +336,29 @@ fn render_document_options_button(
         .text_color(theme.text.secondary),
     );
 
-  div().relative().size(px(30.0)).child(trigger).when(open, |anchor| {
-    anchor.child(render_document_options_menu(panel_id, atom_representation, theme, app))
-  })
+  let anchor_app = app.clone();
+  div()
+    .relative()
+    .size(px(30.0))
+    .on_children_prepainted(move |children_bounds, _, cx| {
+      if let Some(bounds) = children_bounds.first().copied() {
+        let _ = anchor_app.update(cx, |app, cx| {
+          if app.document_panels.set_options_menu_anchor(bounds) {
+            cx.notify();
+          }
+        });
+      }
+    })
+    .child(trigger)
+    .when(open, |anchor| {
+      anchor.child(render_document_options_menu(
+        panel_id,
+        atom_representation,
+        theme,
+        app,
+        options_menu_anchor,
+      ))
+    })
 }
 
 /// Renders the popup menu for one molecular document panel.
@@ -340,18 +367,26 @@ fn render_document_options_menu(
   atom_representation: AtomRepresentation,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
+  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
 ) -> DocumentOptionsMenu {
   DocumentOptionsMenu {
     panel_id,
     atom_representation,
     theme,
     app,
+    options_menu_anchor,
   }
 }
 
 impl RenderOnce for DocumentOptionsMenu {
   fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
-    let popover = build_document_options_popover(self.panel_id, self.atom_representation, self.theme, self.app);
+    let popover = build_document_options_popover(
+      self.panel_id,
+      self.atom_representation,
+      self.theme,
+      self.app,
+      self.options_menu_anchor,
+    );
     let viewport_size = window.viewport_size();
     div()
       .child(popover.deferred_backdrop(viewport_size))
@@ -365,6 +400,7 @@ fn build_document_options_popover(
   atom_representation: AtomRepresentation,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
+  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
 ) -> Popover {
   let mut representation_section = div().flex().flex_col().p_1().child(
     div()
@@ -391,9 +427,8 @@ fn build_document_options_popover(
   }
 
   let dismiss_app = app;
-  Popover::new(("document-options-menu", panel_id.value()), representation_section)
+  let mut popover = Popover::new(("document-options-menu", panel_id.value()), representation_section)
     .anchor_size(size(px(30.0), px(30.0)))
-    .offset(point(DOCUMENT_OPTIONS_MENU_WIDTH * -1.0 + px(30.0), px(30.0)))
     .style(
       PopoverStyle::new()
         .width(DOCUMENT_OPTIONS_MENU_WIDTH)
@@ -407,7 +442,18 @@ fn build_document_options_popover(
           cx.notify();
         }
       });
-    })
+    });
+  if let Some(bounds) = options_menu_anchor {
+    popover = popover
+      .anchor_position(point(
+        bounds.origin.x + bounds.size.width,
+        bounds.origin.y + bounds.size.height,
+      ))
+      .offset(point(px(-220.0), px(0.0)));
+  } else {
+    popover = popover.placement(PopoverPlacement::Below);
+  }
+  popover
 }
 
 /// Renders one selectable atom representation menu item.
