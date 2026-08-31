@@ -1,7 +1,7 @@
 //! Offline regression tests for optional, locally downloaded RCSB fixtures.
 //!
 //! The fixture directories are intentionally flat so adding a structure only
-//! requires copying one `.pdb` file and/or one `.cif` file. The directories are
+//! requires copying a matching `.pdb` and `.cif` file pair. The directories are
 //! not committed because structure files can be large; tests skip themselves
 //! when the local fixture root is absent. These tests never access the network;
 //! [`rcsb_online.rs`] owns that separate responsibility.
