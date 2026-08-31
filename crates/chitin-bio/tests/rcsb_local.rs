@@ -1,8 +1,10 @@
-//! Offline regression tests for downloaded RCSB structure fixtures.
+//! Offline regression tests for optional, locally downloaded RCSB fixtures.
 //!
 //! The fixture directories are intentionally flat so adding a structure only
-//! requires copying one `.pdb` file and/or one `.cif` file. These tests never
-//! access the network; [`rcsb_online.rs`] owns that separate responsibility.
+//! requires copying one `.pdb` file and/or one `.cif` file. The directories are
+//! not committed because structure files can be large; tests skip themselves
+//! when the local fixture root is absent. These tests never access the network;
+//! [`rcsb_online.rs`] owns that separate responsibility.
 
 use std::path::{Path, PathBuf};
 
@@ -59,6 +61,23 @@ fn fixture_paths(directory: &Path, extension: &str) -> Vec<PathBuf> {
     .collect::<Vec<_>>();
   paths.sort();
   paths
+}
+
+/// Returns whether both optional local fixture directories are available.
+fn fixture_root_is_available(root: &Path) -> bool {
+  root.join("pdb").is_dir() && root.join("mmcif").is_dir()
+}
+
+/// Reports that local fixture tests were skipped because no fixture checkout exists.
+fn skip_without_fixture_root(root: &Path) -> bool {
+  if fixture_root_is_available(root) {
+    return false;
+  }
+  eprintln!(
+    "skipping local RCSB fixture test; expected PDB and mmCIF directories under {}",
+    root.display()
+  );
+  true
 }
 
 /// Parses a fixture with the reader corresponding to its file format.
@@ -125,6 +144,9 @@ fn print_structure_summary(format: FixtureFormat, path: &Path, bytes: &[u8], par
 #[test]
 fn local_rcsb_fixtures_should_parse() {
   let root = fixture_root();
+  if skip_without_fixture_root(&root) {
+    return;
+  }
   let fixtures = [
     (
       FixtureFormat::Pdb,
@@ -155,6 +177,9 @@ fn local_rcsb_fixtures_should_parse() {
 #[test]
 fn local_pdb_and_mmcif_fixtures_should_have_matching_ids() {
   let root = fixture_root();
+  if skip_without_fixture_root(&root) {
+    return;
+  }
   let pdb_ids = fixture_paths(&root.join("pdb"), FixtureFormat::Pdb.extension())
     .into_iter()
     .filter_map(|path| {
