@@ -22,6 +22,8 @@ use gpui::{
   AppContext, Context, Div, Entity, IntoElement, ParentElement, SharedString, Styled, div, prelude::FluentBuilder,
 };
 
+use crate::tasks::{TaskSnapshot, TaskState};
+
 /// Builds the final workspace download path for an RCSB structure.
 pub(crate) fn download_path(workspace_root: &Path, pdb_id: &PdbId, format: StructureFormat) -> PathBuf {
   workspace_root
@@ -60,6 +62,8 @@ pub(crate) struct RcsbDownloadState {
   pub(crate) progress: f32,
   /// Whether a download is currently running.
   pub(crate) active: bool,
+  /// Whether the most recent background download was cancelled.
+  pub(crate) cancelled: bool,
   /// Whether the response did not provide a total size.
   pub(crate) indeterminate: bool,
   /// Whether the completed track is animating its final fill.
@@ -68,6 +72,7 @@ pub(crate) struct RcsbDownloadState {
   pub(crate) finishing_from: f32,
   /// Identity shared by the indeterminate and finishing animation phases.
   pub(crate) animation_id: String,
+  /// Monotonic counter used to restart progress animations for each stage.
   animation_generation: u64,
   /// Bytes received for an indeterminate download.
   pub(crate) received_bytes: u64,
@@ -83,6 +88,7 @@ impl RcsbDownloadState {
     self.current_id = None;
     self.progress = 0.0;
     self.active = false;
+    self.cancelled = false;
     self.indeterminate = false;
     self.finishing = false;
     self.finishing_from = 0.0;
@@ -92,13 +98,47 @@ impl RcsbDownloadState {
     cx.notify();
   }
 
-  /// Starts the animation for the next item in a download batch.
-  pub(crate) fn start_item(&mut self, index: usize, total: usize, id: String, cx: &mut Context<Self>) {
-    self.current_index = index;
+  /// Applies one task-center snapshot to the download presentation state.
+  pub(crate) fn apply_task_snapshot(&mut self, snapshot: &TaskSnapshot, fallback_total: usize, cx: &mut Context<Self>) {
+    match snapshot.state {
+      TaskState::Queued => self.start_queue(fallback_total),
+      TaskState::Running => self.apply_running_snapshot(snapshot, fallback_total),
+      TaskState::Completed => {
+        self.apply_running_snapshot(snapshot, fallback_total);
+        self.finish(cx);
+        return;
+      }
+      TaskState::Failed => {
+        self.apply_running_snapshot(snapshot, fallback_total);
+        self.fail(
+          snapshot
+            .error
+            .clone()
+            .unwrap_or_else(|| "Background download failed".to_string()),
+          cx,
+        );
+        return;
+      }
+      TaskState::Cancelled => {
+        self.apply_running_snapshot(snapshot, fallback_total);
+        self.cancel(cx);
+        return;
+      }
+    }
+    cx.notify();
+  }
+
+  /// Initializes the visible state for a newly queued batch.
+  fn start_queue(&mut self, total: usize) {
+    if self.active {
+      return;
+    }
+    self.current_index = 1;
     self.total_items = total;
-    self.current_id = Some(id);
+    self.current_id = None;
     self.progress = 0.0;
     self.active = true;
+    self.cancelled = false;
     self.indeterminate = true;
     self.finishing = false;
     self.finishing_from = 0.0;
@@ -106,23 +146,42 @@ impl RcsbDownloadState {
     self.animation_id = format!("rcsb-progress-{}", self.animation_generation);
     self.received_bytes = 0;
     self.error = None;
-    cx.notify();
   }
 
-  /// Applies a received-byte progress update.
-  pub(crate) fn set_progress(&mut self, progress: f32, cx: &mut Context<Self>) {
-    self.progress = progress.clamp(0.0, 100.0);
-    self.indeterminate = false;
+  /// Projects task-center progress into the form's per-file presentation state.
+  fn apply_running_snapshot(&mut self, snapshot: &TaskSnapshot, fallback_total: usize) {
+    self.start_queue(fallback_total);
+    let Some(progress) = snapshot.progress.as_ref() else {
+      return;
+    };
+    if self.current_index != progress.stage_index {
+      self.animation_generation = self.animation_generation.wrapping_add(1);
+      self.animation_id = format!("rcsb-progress-{}", self.animation_generation);
+      self.progress = 0.0;
+    }
+    self.current_index = progress.stage_index;
+    self.total_items = if progress.stage_count > 0 {
+      progress.stage_count
+    } else {
+      fallback_total
+    };
+    self.current_id = progress.stage_label.clone();
+    self.received_bytes = progress.completed;
+    self.active = true;
+    self.cancelled = false;
     self.finishing = false;
     self.finishing_from = 0.0;
-    cx.notify();
-  }
-
-  /// Applies progress for a response whose total size is not known.
-  pub(crate) fn set_received_bytes(&mut self, received_bytes: u64, cx: &mut Context<Self>) {
-    self.received_bytes = received_bytes;
-    self.indeterminate = true;
-    cx.notify();
+    if let Some(total) = progress.total.filter(|total| *total > 0) {
+      self.progress = progress
+        .completed
+        .saturating_mul(10_000)
+        .checked_div(total)
+        .unwrap_or_default() as f32
+        / 100.0;
+      self.indeterminate = false;
+    } else {
+      self.indeterminate = true;
+    }
   }
 
   /// Clears the most recent validation or download error.
@@ -143,6 +202,7 @@ impl RcsbDownloadState {
     let starting_progress = self.progress;
     self.progress = 100.0;
     self.active = false;
+    self.cancelled = false;
     self.indeterminate = false;
     self.finishing = true;
     // An indeterminate track is 30% wide, so preserve that visible amount
@@ -154,6 +214,7 @@ impl RcsbDownloadState {
   /// Marks the download as failed while keeping the form open.
   pub(crate) fn fail(&mut self, error: String, cx: &mut Context<Self>) {
     self.active = false;
+    self.cancelled = false;
     self.progress = 0.0;
     self.indeterminate = false;
     self.finishing = false;
@@ -161,6 +222,43 @@ impl RcsbDownloadState {
     self.received_bytes = 0;
     self.error = Some(error);
     cx.notify();
+  }
+
+  /// Clears active progress after cooperative task cancellation.
+  fn cancel(&mut self, cx: &mut Context<Self>) {
+    self.active = false;
+    self.cancelled = true;
+    self.progress = 0.0;
+    self.indeterminate = false;
+    self.finishing = false;
+    self.finishing_from = 0.0;
+    self.received_bytes = 0;
+    self.error = None;
+    cx.notify();
+  }
+}
+
+/// Builds a progress label that reflects cancellation before stale batch metadata.
+fn download_progress_label(download: &RcsbDownloadState) -> String {
+  if download.cancelled {
+    return "Download cancelled".to_string();
+  }
+  if download.total_items > 0 {
+    let current = download.current_index.max(1);
+    let id = download.current_id.as_deref().unwrap_or("structure");
+    if download.indeterminate {
+      format!(
+        "Downloading {current}/{} · {id} · {} KB",
+        download.total_items,
+        download.received_bytes / 1024
+      )
+    } else {
+      format!("Downloading {current}/{} · {id}", download.total_items)
+    }
+  } else if download.indeterminate {
+    format!("Downloading… {} KB", download.received_bytes / 1024)
+  } else {
+    "Download progress".to_string()
   }
 }
 
@@ -217,23 +315,7 @@ impl RcsbFormPanel {
       .selected_option()
       .map(|option| SharedString::from(option.label()));
     let download = self.download.read(cx);
-    let progress_label = if download.total_items > 0 {
-      let current = download.current_index.max(1);
-      let id = download.current_id.as_deref().unwrap_or("structure");
-      if download.indeterminate {
-        format!(
-          "Downloading {current}/{} · {id} · {} KB",
-          download.total_items,
-          download.received_bytes / 1024
-        )
-      } else {
-        format!("Downloading {current}/{} · {id}", download.total_items)
-      }
-    } else if download.indeterminate {
-      format!("Downloading… {} KB", download.received_bytes / 1024)
-    } else {
-      "Download progress".to_string()
-    };
+    let progress_label = download_progress_label(download);
 
     div()
       .flex()
@@ -320,7 +402,7 @@ mod tests {
 
   use chitin_databases::providers::rcsb::PdbId;
 
-  use super::{StructureFormat, download_path};
+  use super::{RcsbDownloadState, StructureFormat, download_path, download_progress_label};
 
   #[test]
   fn pdb_download_path_should_use_pdb_directory_and_extension() -> Result<(), Box<dyn std::error::Error>> {
@@ -340,5 +422,18 @@ mod tests {
 
     assert_eq!(path, Path::new("/workspace/.chitin/download/mmcif/1YTH.cif"));
     Ok(())
+  }
+
+  #[test]
+  fn cancelled_download_should_render_cancelled_label() {
+    let state = RcsbDownloadState {
+      cancelled: true,
+      current_index: 2,
+      total_items: 5,
+      current_id: Some("1CRN".to_string()),
+      ..RcsbDownloadState::default()
+    };
+
+    assert_eq!(download_progress_label(&state), "Download cancelled");
   }
 }

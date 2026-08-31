@@ -4,7 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use chitin_databases::{
-  ArtifactFormat, Client, ClientConfig, DownloadedArtifact, ProviderId, RetryPolicy, TransportError,
+  ArtifactFormat, CancellationToken, Client, ClientConfig, DownloadedArtifact, ProviderId, RetryPolicy, TransportError,
   providers::rcsb::{PdbId, PdbIdError, RcsbEndpoints, RcsbError, StructureFormat},
   test_support::{MockTransport, response, response_with_headers},
 };
@@ -281,4 +281,79 @@ async fn download_structure_should_send_expected_url_to_transport() {
     probe.first_request_url(),
     Some("https://files.rcsb.org/download/4HHB.cif".to_string())
   );
+}
+
+#[tokio::test]
+async fn download_structure_to_path_should_return_persisted_metadata_and_checksum() {
+  let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("temporary directory should be created: {error}"));
+  let destination = directory.path().join("4HHB.pdb");
+  let transport = MockTransport::new(vec![Ok(response(StatusCode::OK, b"streamed"))]);
+  let client = test_client(transport);
+
+  let artifact = client
+    .rcsb()
+    .download_structure_to_path(pdb_id("4hhb"), StructureFormat::Pdb, &destination, |_, _| {})
+    .await
+    .unwrap_or_else(|error| panic!("artifact should be persisted: {error}"));
+
+  assert_eq!(artifact.path, destination);
+  assert_eq!(artifact.bytes, 8);
+  assert_eq!(
+    artifact.checksum,
+    "97a78c00831554f7cc9745e8f6732edcfb571cf548a8d12b48a6e3fc31e5e3e6"
+  );
+  assert_eq!(std::fs::read(&artifact.path).unwrap_or_default(), b"streamed");
+}
+
+#[tokio::test]
+async fn download_structure_to_path_should_replace_existing_destination() {
+  let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("temporary directory should be created: {error}"));
+  let destination = directory.path().join("4HHB.pdb");
+  tokio::fs::write(&destination, b"old content")
+    .await
+    .unwrap_or_else(|error| panic!("existing destination should be created: {error}"));
+  let transport = MockTransport::new(vec![Ok(response(StatusCode::OK, b"new content"))]);
+  let client = test_client(transport);
+
+  client
+    .rcsb()
+    .download_structure_to_path(pdb_id("4hhb"), StructureFormat::Pdb, &destination, |_, _| {})
+    .await
+    .unwrap_or_else(|error| panic!("existing destination should be replaced: {error}"));
+
+  assert_eq!(
+    tokio::fs::read(&destination)
+      .await
+      .unwrap_or_else(|error| panic!("replaced destination should be readable: {error}")),
+    b"new content"
+  );
+}
+
+#[tokio::test]
+async fn cancelled_download_should_not_leave_a_partial_destination() {
+  let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("temporary directory should be created: {error}"));
+  let destination = directory.path().join("cancelled.pdb");
+  let transport = MockTransport::new(vec![Ok(response(StatusCode::OK, b"streamed"))]);
+  let client = test_client(transport);
+  let cancellation = CancellationToken::new();
+  cancellation.cancel();
+
+  let result = client
+    .rcsb()
+    .download_structure_to_path_with_cancellation(
+      pdb_id("4hhb"),
+      StructureFormat::Pdb,
+      &destination,
+      |_, _| {},
+      cancellation,
+    )
+    .await;
+
+  assert!(matches!(
+    result,
+    Err(chitin_databases::providers::rcsb::RcsbDownloadError::Provider(
+      chitin_databases::providers::rcsb::RcsbError::Transport(TransportError::Cancelled)
+    ))
+  ));
+  assert!(!destination.exists());
 }

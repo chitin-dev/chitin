@@ -2,6 +2,7 @@
 
 use bytes::Bytes;
 use http::{HeaderMap, StatusCode};
+use std::path::PathBuf;
 
 use crate::Provenance;
 
@@ -36,4 +37,19 @@ pub struct DownloadedArtifact {
   pub content: Bytes,
   /// Provider and transport provenance.
   pub provenance: Provenance,
+}
+
+/// A downloaded artifact that has been durably persisted on disk.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PersistedArtifact {
+  /// Artifact format.
+  pub format: ArtifactFormat,
+  /// Final destination path after the atomic rename.
+  pub path: PathBuf,
+  /// Provider and transport provenance.
+  pub provenance: Provenance,
+  /// Number of bytes written to disk.
+  pub bytes: u64,
+  /// Lowercase hexadecimal SHA-256 digest of the persisted content.
+  pub checksum: String,
 }

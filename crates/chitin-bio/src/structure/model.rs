@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 macro_rules! id_type {
   ($name:ident) => {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -180,6 +182,51 @@ pub enum BondOrder {
   Unknown,
 }
 
+/// A cross-table invariant violation in an indexed [`Structure`].
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum StructureInvariantError {
+  /// A model references a coordinate set outside the coordinate table.
+  #[error("model {model_index} references missing coordinates")]
+  ModelCoordinates { model_index: usize },
+  /// A model references a chain outside the chain table.
+  #[error("model {model_index} references a missing chain")]
+  ModelChain { model_index: usize },
+  /// A chain references a residue outside the residue table.
+  #[error("chain {chain_index} references a missing residue")]
+  ChainResidue { chain_index: usize },
+  /// A polymer entity references a chain outside the chain table.
+  #[error("polymer entity {entity_index} references a missing chain")]
+  PolymerEntityChain { entity_index: usize },
+  /// A polymer entity sequence is not strictly ordered by position.
+  #[error("polymer entity {entity_index} sequence is not strictly ordered")]
+  PolymerSequenceOrder { entity_index: usize },
+  /// A residue references a chain outside the chain table.
+  #[error("residue {residue_index} references missing chain")]
+  ResidueChain { residue_index: usize },
+  /// A residue references an atom outside the atom table.
+  #[error("residue {residue_index} references a missing atom")]
+  ResidueAtom { residue_index: usize },
+  /// A bond references an atom outside the atom table.
+  #[error("bond references an atom outside the atom table")]
+  BondAtom,
+  /// A secondary-structure range references a residue outside the residue table.
+  #[error("secondary-structure range {range_index} references a missing residue")]
+  SecondaryRangeResidue { range_index: usize },
+  /// A secondary-structure range crosses two different chains.
+  #[error("secondary-structure range {range_index} crosses chains")]
+  SecondaryRangeChain { range_index: usize },
+  /// A coordinate set has a position count different from the atom table.
+  #[error("coordinate set {coordinate_index} has {positions} positions for {atoms} atoms")]
+  CoordinateLength {
+    /// Coordinate-set table index.
+    coordinate_index: usize,
+    /// Number of positions in the coordinate set.
+    positions: usize,
+    /// Number of atoms in the topology table.
+    atoms: usize,
+  },
+}
+
 /// Origin of a bond relationship.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BondSource {
@@ -315,31 +362,81 @@ pub struct AssemblyMetadata {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Structure {
   /// Models in source order.
-  pub models: Vec<Model>,
+  pub(crate) models: Vec<Model>,
   /// Chains indexed by ChainId.
-  pub chains: Vec<Chain>,
+  pub(crate) chains: Vec<Chain>,
   /// Residues indexed by ResidueId.
-  pub residues: Vec<Residue>,
+  pub(crate) residues: Vec<Residue>,
   /// Atoms indexed by AtomId.
-  pub atoms: Vec<Atom>,
+  pub(crate) atoms: Vec<Atom>,
   /// Explicit or inferred bonds.
-  pub bonds: Vec<Bond>,
+  pub(crate) bonds: Vec<Bond>,
   /// Coordinate sets indexed by CoordinateSetId.
-  pub coordinates: Vec<CoordinateSet>,
+  pub(crate) coordinates: Vec<CoordinateSet>,
   /// File-level metadata.
-  pub metadata: StructureMetadata,
+  pub(crate) metadata: StructureMetadata,
   /// Declared polymer entities and their complete sequences.
-  pub polymer_entities: Vec<PolymerEntity>,
+  pub(crate) polymer_entities: Vec<PolymerEntity>,
   /// Declared polymer positions missing from individual model/chain coordinate sets.
-  pub missing_polymer_residues: Vec<MissingPolymerResidue>,
+  pub(crate) missing_polymer_residues: Vec<MissingPolymerResidue>,
   /// Secondary-structure intervals.
-  pub secondary_ranges: Vec<SecondaryRange>,
+  pub(crate) secondary_ranges: Vec<SecondaryRange>,
 }
 
 impl Structure {
   /// Returns the number of atoms in the structure.
   pub fn atom_count(&self) -> usize {
     self.atoms.len()
+  }
+
+  /// Returns the models in source order.
+  pub fn models(&self) -> &[Model] {
+    &self.models
+  }
+
+  /// Returns the normalized chain table.
+  pub fn chains(&self) -> &[Chain] {
+    &self.chains
+  }
+
+  /// Returns the normalized residue table.
+  pub fn residues(&self) -> &[Residue] {
+    &self.residues
+  }
+
+  /// Returns the normalized atom table.
+  pub fn atoms(&self) -> &[Atom] {
+    &self.atoms
+  }
+
+  /// Returns explicit and inferred bonds.
+  pub fn bonds(&self) -> &[Bond] {
+    &self.bonds
+  }
+
+  /// Returns coordinate sets indexed by [`CoordinateSetId`].
+  pub fn coordinates(&self) -> &[CoordinateSet] {
+    &self.coordinates
+  }
+
+  /// Returns file-level metadata.
+  pub fn metadata(&self) -> &StructureMetadata {
+    &self.metadata
+  }
+
+  /// Returns declared polymer entities.
+  pub fn polymer_entities(&self) -> &[PolymerEntity] {
+    &self.polymer_entities
+  }
+
+  /// Returns declared polymer positions absent from coordinate sets.
+  pub fn missing_polymer_residues(&self) -> &[MissingPolymerResidue] {
+    &self.missing_polymer_residues
+  }
+
+  /// Returns secondary-structure intervals.
+  pub fn secondary_ranges(&self) -> &[SecondaryRange] {
+    &self.secondary_ranges
   }
 
   /// Returns a coordinate set by its typed identifier.
@@ -351,39 +448,28 @@ impl Structure {
   ///
   /// # Returns
   ///
-  /// `Ok(())` when every ID points into its owning table. Otherwise returns a
-  /// description of the first broken invariant.
+  /// `Ok(())` when every ID points into its owning table. Otherwise returns the
+  /// first broken invariant.
   ///
   /// # Examples
   ///
   /// ```
   /// use chitin_bio::structure::Structure;
   ///
-  /// let structure = Structure {
-  ///   models: Vec::new(),
-  ///   chains: Vec::new(),
-  ///   residues: Vec::new(),
-  ///   atoms: Vec::new(),
-  ///   bonds: Vec::new(),
-  ///   coordinates: Vec::new(),
-  ///   metadata: Default::default(),
-  ///   polymer_entities: Vec::new(),
-  ///   missing_polymer_residues: Vec::new(),
-  ///   secondary_ranges: Vec::new(),
-  /// };
+  /// let structure = Structure::default();
   /// assert!(structure.validate_invariants().is_ok());
   /// ```
-  pub fn validate_invariants(&self) -> Result<(), String> {
+  pub fn validate_invariants(&self) -> Result<(), StructureInvariantError> {
     for (model_index, model) in self.models.iter().enumerate() {
       if model.coordinate_set_id.index() >= self.coordinates.len() {
-        return Err(format!("model {model_index} references missing coordinates"));
+        return Err(StructureInvariantError::ModelCoordinates { model_index });
       }
       if model
         .chain_ids
         .iter()
         .any(|chain_id| chain_id.index() >= self.chains.len())
       {
-        return Err(format!("model {model_index} references a missing chain"));
+        return Err(StructureInvariantError::ModelChain { model_index });
       }
     }
 
@@ -393,7 +479,7 @@ impl Structure {
         .iter()
         .any(|residue_id| residue_id.index() >= self.residues.len())
       {
-        return Err(format!("chain {chain_index} references a missing residue"));
+        return Err(StructureInvariantError::ChainResidue { chain_index });
       }
     }
 
@@ -403,57 +489,75 @@ impl Structure {
         .iter()
         .any(|chain_id| chain_id.index() >= self.chains.len())
       {
-        return Err(format!("polymer entity {entity_index} references a missing chain"));
+        return Err(StructureInvariantError::PolymerEntityChain { entity_index });
       }
       for window in entity.sequence.windows(2) {
         if window[0].number >= window[1].number {
-          return Err(format!(
-            "polymer entity {entity_index} sequence is not strictly ordered"
-          ));
+          return Err(StructureInvariantError::PolymerSequenceOrder { entity_index });
         }
       }
     }
 
     for (residue_index, residue) in self.residues.iter().enumerate() {
       if residue.chain_id.index() >= self.chains.len() {
-        return Err(format!("residue {residue_index} references missing chain"));
+        return Err(StructureInvariantError::ResidueChain { residue_index });
       }
       if residue
         .atom_ids
         .iter()
         .any(|atom_id| atom_id.index() >= self.atoms.len())
       {
-        return Err(format!("residue {residue_index} references a missing atom"));
+        return Err(StructureInvariantError::ResidueAtom { residue_index });
       }
     }
 
     for bond in &self.bonds {
       if bond.a.index() >= self.atoms.len() || bond.b.index() >= self.atoms.len() {
-        return Err("bond references an atom outside the atom table".to_owned());
+        return Err(StructureInvariantError::BondAtom);
       }
     }
 
     for (range_index, range) in self.secondary_ranges.iter().enumerate() {
       if range.start.index() >= self.residues.len() || range.end.index() >= self.residues.len() {
-        return Err(format!(
-          "secondary-structure range {range_index} references a missing residue"
-        ));
+        return Err(StructureInvariantError::SecondaryRangeResidue { range_index });
       }
       if self.residues[range.start.index()].chain_id != self.residues[range.end.index()].chain_id {
-        return Err(format!("secondary-structure range {range_index} crosses chains"));
+        return Err(StructureInvariantError::SecondaryRangeChain { range_index });
       }
     }
 
     for (coordinate_index, coordinates) in self.coordinates.iter().enumerate() {
       if coordinates.positions.len() != self.atoms.len() {
-        return Err(format!(
-          "coordinate set {coordinate_index} has {} positions for {} atoms",
-          coordinates.positions.len(),
-          self.atoms.len()
-        ));
+        return Err(StructureInvariantError::CoordinateLength {
+          coordinate_index,
+          positions: coordinates.positions.len(),
+          atoms: self.atoms.len(),
+        });
       }
     }
 
     Ok(())
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::{CoordinateSet, Structure, StructureInvariantError};
+
+  #[test]
+  fn validate_invariants_should_return_typed_coordinate_length_error() {
+    let mut structure = Structure::default();
+    structure.coordinates.push(CoordinateSet {
+      positions: vec![[0.0, 0.0, 0.0]],
+    });
+
+    assert_eq!(
+      structure.validate_invariants(),
+      Err(StructureInvariantError::CoordinateLength {
+        coordinate_index: 0,
+        positions: 1,
+        atoms: 0,
+      })
+    );
   }
 }

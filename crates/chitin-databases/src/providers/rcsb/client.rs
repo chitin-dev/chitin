@@ -1,16 +1,20 @@
 //! RCSB provider client implementation.
 
 use std::{
+  io,
   path::{Path, PathBuf},
   sync::Arc,
+  sync::atomic::{AtomicU64, Ordering},
   time::SystemTime,
 };
 
 use http::StatusCode;
+use sha2::{Digest, Sha256};
+use tokio::io::AsyncReadExt;
 
 use crate::{
-  ArtifactFormat, DecodeError, DownloadProgressCallback, DownloadedArtifact, HttpResponse, Provenance, ProviderId,
-  TransportError, client::ClientRuntime,
+  ArtifactFormat, CancellationToken, DecodeError, DownloadProgressCallback, DownloadedArtifact, HttpResponse,
+  PersistedArtifact, Provenance, ProviderId, TransportError, client::ClientRuntime,
 };
 
 use super::{PdbId, RcsbDownloadError, RcsbEndpoints, RcsbError, StructureFormat, dto::RcsbEntryDto};
@@ -69,8 +73,12 @@ pub enum RcsbBatchDownloadEvent {
     total: usize,
     id: PdbId,
     path: PathBuf,
+    /// Persisted artifact metadata and provenance.
+    artifact: Box<PersistedArtifact>,
   },
 }
+
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl RcsbClient {
   /// Creates an RCSB provider client from shared runtime state.
@@ -133,7 +141,10 @@ impl RcsbClient {
     progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
   ) -> Result<DownloadedArtifact, RcsbError> {
     let requested_at = SystemTime::now();
-    let request = self.endpoints.structure_download_request(&id, format)?;
+    let request = self
+      .endpoints
+      .structure_download_request(&id, format)
+      .map_err(RcsbError::Transport)?;
     let resolved_url = request.url.clone();
     let progress: DownloadProgressCallback = Arc::new(progress);
     let response = self.runtime.execute_with_progress(request, Some(progress)).await?;
@@ -163,29 +174,97 @@ impl RcsbClient {
   ///
   /// # Returns
   ///
-  /// Returns `()` after the artifact has been written successfully.
+  /// Returns persisted artifact metadata after the file has been atomically
+  /// replaced.
   pub async fn download_structure_to_path(
     &self,
     id: PdbId,
     format: StructureFormat,
     destination: &Path,
     progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
-  ) -> Result<(), RcsbDownloadError> {
-    let artifact = self
-      .download_structure_with_progress(id, format, progress)
+  ) -> Result<PersistedArtifact, RcsbDownloadError> {
+    self
+      .download_structure_to_path_with_cancellation(id, format, destination, progress, CancellationToken::new())
       .await
-      .map_err(RcsbDownloadError::Provider)?;
+  }
+
+  /// Downloads and atomically persists an artifact with cooperative cancellation.
+  pub async fn download_structure_to_path_with_cancellation(
+    &self,
+    id: PdbId,
+    format: StructureFormat,
+    destination: &Path,
+    progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static,
+    cancellation: CancellationToken,
+  ) -> Result<PersistedArtifact, RcsbDownloadError> {
     if let Some(directory) = destination.parent() {
-      std::fs::create_dir_all(directory).map_err(|source| RcsbDownloadError::CreateDirectory {
-        path: directory.to_path_buf(),
-        source,
-      })?;
+      tokio::fs::create_dir_all(directory)
+        .await
+        .map_err(|source| RcsbDownloadError::CreateDirectory {
+          path: directory.to_path_buf(),
+          source,
+        })?;
     }
-    std::fs::write(destination, artifact.content).map_err(|source| RcsbDownloadError::WriteFile {
+    let temporary = temporary_path(destination);
+    let requested_at = SystemTime::now();
+    let request = self
+      .endpoints
+      .structure_download_request(&id, format)
+      .map_err(|error| RcsbDownloadError::Provider(RcsbError::Transport(error)))?;
+    let resolved_url = request.url.clone();
+    let progress: DownloadProgressCallback = Arc::new(progress);
+    let response = match self
+      .runtime
+      .execute_to_file(request, &temporary, Some(progress), cancellation.clone())
+      .await
+    {
+      Ok(response) => response,
+      Err(error) => {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(RcsbDownloadError::Provider(RcsbError::Transport(error)));
+      }
+    };
+    let response = match map_status(response, &id) {
+      Ok(response) => response,
+      Err(error) => {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(RcsbDownloadError::Provider(error));
+      }
+    };
+    let (bytes, checksum) = match checksum_file(&temporary, &cancellation).await {
+      Ok(result) => result,
+      Err(error) => {
+        let _ = tokio::fs::remove_file(&temporary).await;
+        return Err(error);
+      }
+    };
+    if cancellation.is_cancelled() {
+      let _ = tokio::fs::remove_file(&temporary).await;
+      return Err(RcsbDownloadError::Provider(RcsbError::Transport(
+        TransportError::Cancelled,
+      )));
+    }
+    let provenance = Provenance::from_headers(
+      ProviderId::Rcsb,
+      id.as_str(),
+      requested_at,
+      resolved_url,
+      &response.headers,
+    );
+    if let Err(source) = replace_destination(&temporary, destination).await {
+      let _ = tokio::fs::remove_file(&temporary).await;
+      return Err(RcsbDownloadError::WriteFile {
+        path: destination.to_path_buf(),
+        source,
+      });
+    }
+    Ok(PersistedArtifact {
+      format: artifact_format(format),
       path: destination.to_path_buf(),
-      source,
-    })?;
-    Ok(())
+      provenance,
+      bytes,
+      checksum,
+    })
   }
 
   /// Downloads and persists structures sequentially while reporting batch progress.
@@ -203,9 +282,26 @@ impl RcsbClient {
     requests: &[RcsbBatchDownloadRequest],
     progress: impl Fn(RcsbBatchDownloadEvent) + Send + Sync + 'static,
   ) -> Result<(), RcsbDownloadError> {
+    self
+      .download_structures_to_paths_with_cancellation(requests, progress, CancellationToken::new())
+      .await
+  }
+
+  /// Downloads and persists a batch with cooperative cancellation.
+  pub async fn download_structures_to_paths_with_cancellation(
+    &self,
+    requests: &[RcsbBatchDownloadRequest],
+    progress: impl Fn(RcsbBatchDownloadEvent) + Send + Sync + 'static,
+    cancellation: CancellationToken,
+  ) -> Result<(), RcsbDownloadError> {
     let total = requests.len();
     let progress = Arc::new(progress);
     for (position, request) in requests.iter().enumerate() {
+      if cancellation.is_cancelled() {
+        return Err(RcsbDownloadError::Provider(RcsbError::Transport(
+          TransportError::Cancelled,
+        )));
+      }
       let index = position + 1;
       progress(RcsbBatchDownloadEvent::Started {
         index,
@@ -214,8 +310,8 @@ impl RcsbClient {
       });
       let event_progress = progress.clone();
       let event_id = request.id.clone();
-      self
-        .download_structure_to_path(
+      let artifact = self
+        .download_structure_to_path_with_cancellation(
           request.id.clone(),
           request.format,
           &request.destination,
@@ -228,6 +324,7 @@ impl RcsbClient {
               total_bytes,
             });
           },
+          cancellation.clone(),
         )
         .await?;
       progress(RcsbBatchDownloadEvent::Completed {
@@ -235,6 +332,7 @@ impl RcsbClient {
         total,
         id: request.id.clone(),
         path: request.destination.clone(),
+        artifact: Box::new(artifact),
       });
     }
     Ok(())
@@ -273,6 +371,72 @@ impl RcsbClient {
     })?;
     metadata_from_dto(dto, provenance)
   }
+}
+
+/// Replaces the final artifact while retaining atomic rename semantics where available.
+async fn replace_destination(temporary: &Path, destination: &Path) -> io::Result<()> {
+  #[cfg(windows)]
+  {
+    match tokio::fs::rename(temporary, destination).await {
+      Ok(()) => Ok(()),
+      Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        tokio::fs::remove_file(destination).await?;
+        tokio::fs::rename(temporary, destination).await
+      }
+      Err(error) => Err(error),
+    }
+  }
+
+  #[cfg(not(windows))]
+  {
+    tokio::fs::rename(temporary, destination).await
+  }
+}
+
+/// Creates a same-directory temporary path so the final rename is atomic.
+fn temporary_path(destination: &Path) -> PathBuf {
+  let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+  let mut path = destination.as_os_str().to_os_string();
+  path.push(format!(".part-{}-{counter}", std::process::id()));
+  PathBuf::from(path)
+}
+
+/// Computes a SHA-256 checksum from the persisted file without buffering it.
+async fn checksum_file(path: &Path, cancellation: &CancellationToken) -> Result<(u64, String), RcsbDownloadError> {
+  let mut file = tokio::fs::File::open(path)
+    .await
+    .map_err(|source| RcsbDownloadError::ReadFile {
+      path: path.to_path_buf(),
+      source,
+    })?;
+  let mut digest = Sha256::new();
+  let mut buffer = vec![0_u8; 64 * 1024];
+  let mut bytes = 0_u64;
+  loop {
+    if cancellation.is_cancelled() {
+      return Err(RcsbDownloadError::Provider(RcsbError::Transport(
+        TransportError::Cancelled,
+      )));
+    }
+    let read = file
+      .read(&mut buffer)
+      .await
+      .map_err(|source| RcsbDownloadError::ReadFile {
+        path: path.to_path_buf(),
+        source,
+      })?;
+    if read == 0 {
+      break;
+    }
+    digest.update(&buffer[..read]);
+    bytes = bytes.saturating_add(read as u64);
+  }
+  let checksum = digest
+    .finalize()
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect::<String>();
+  Ok((bytes, checksum))
 }
 
 /// Converts a structure format into an artifact format.

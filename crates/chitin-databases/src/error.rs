@@ -31,6 +31,14 @@ pub enum TransportError {
   /// Request was cancelled by concurrency control.
   #[error("request was cancelled")]
   Cancelled,
+  /// A streamed response could not be written to its temporary file.
+  #[error("failed to write streamed response to '{path}': {message}")]
+  FileWrite {
+    /// Destination path used by the transport.
+    path: std::path::PathBuf,
+    /// Sanitized filesystem error.
+    message: String,
+  },
   /// Other transport failure.
   #[error("transport error: {message}")]
   Other {

@@ -106,6 +106,7 @@ fn validate_structure(
   let validation = parsed
     .structure
     .validate_invariants()
+    .map_err(|error| error.to_string())
     .and_then(|()| validate_content(&parsed.structure));
   match output {
     OutputArg::Text => {
@@ -158,14 +159,14 @@ fn validate_structure(
 /// otherwise returns the reason the input cannot be considered a valid
 /// molecular structure.
 fn validate_content(structure: &Structure) -> Result<(), String> {
-  if structure.atoms.is_empty() {
+  if structure.atoms().is_empty() {
     return Err("no atom records were found".to_owned());
   }
-  if structure.models.is_empty() {
+  if structure.models().is_empty() {
     return Err("no coordinate models were found".to_owned());
   }
   if !structure
-    .coordinates
+    .coordinates()
     .iter()
     .flat_map(|coordinates| coordinates.positions.iter())
     .any(|position| position.iter().all(|coordinate| coordinate.is_finite()))
@@ -200,13 +201,13 @@ fn print_text_summary(
   if verbose {
     println!();
     println!("{}", heading.apply_to("Details"));
-    println!("{} {:#?}", label.apply_to("Metadata:"), parsed.structure.metadata);
+    println!("{} {:#?}", label.apply_to("Metadata:"), parsed.structure.metadata());
     println!(
       "{} {:?}",
       label.apply_to("Chains:"),
       parsed
         .structure
-        .chains
+        .chains()
         .iter()
         .map(|chain| chain.auth_id.as_deref().or(chain.label_id.as_deref()))
         .collect::<Vec<_>>()
@@ -249,23 +250,23 @@ fn print_json_summary(
 /// Builds a stable JSON representation of the currently parsed metadata.
 fn metadata_value(structure: &Structure) -> Value {
   json!({
-    "classification": structure.metadata.classification,
-    "identifier": structure.metadata.identifier,
-    "unit_cell": structure.metadata.unit_cell.as_ref().map(|cell| json!({
+    "classification": structure.metadata().classification,
+    "identifier": structure.metadata().identifier,
+    "unit_cell": structure.metadata().unit_cell.as_ref().map(|cell| json!({
       "lengths": cell.lengths,
       "angles": cell.angles,
     })),
-    "symmetry": structure.metadata.symmetry.as_ref().map(|symmetry| json!({
+    "symmetry": structure.metadata().symmetry.as_ref().map(|symmetry| json!({
       "space_group_name": symmetry.space_group_name,
       "international_tables_number": symmetry.international_tables_number,
     })),
     "assembly": {
-      "operations": structure.metadata.assembly.operations.iter().map(|operation| json!({
+      "operations": structure.metadata().assembly.operations.iter().map(|operation| json!({
         "id": operation.id,
         "rotation": operation.rotation,
         "translation": operation.translation,
       })).collect::<Vec<_>>(),
-      "assemblies": structure.metadata.assembly.assemblies.iter().map(|assembly| json!({
+      "assemblies": structure.metadata().assembly.assemblies.iter().map(|assembly| json!({
         "id": assembly.id,
         "details": assembly.details,
         "generations": assembly.generations.iter().map(|generation| json!({
@@ -282,16 +283,16 @@ fn metadata_value(structure: &Structure) -> Value {
 /// Returns the stable count fields shared by text and JSON summaries.
 fn summary_counts(structure: &Structure) -> Vec<(&'static str, usize)> {
   vec![
-    ("Models", structure.models.len()),
-    ("Chains", structure.chains.len()),
-    ("Residues", structure.residues.len()),
-    ("Atoms", structure.atoms.len()),
-    ("Bonds", structure.bonds.len()),
-    ("Polymer entities", structure.polymer_entities.len()),
-    ("Missing polymer residues", structure.missing_polymer_residues.len()),
-    ("Secondary ranges", structure.secondary_ranges.len()),
-    ("Assembly operations", structure.metadata.assembly.operations.len()),
-    ("Biological assemblies", structure.metadata.assembly.assemblies.len()),
+    ("Models", structure.models().len()),
+    ("Chains", structure.chains().len()),
+    ("Residues", structure.residues().len()),
+    ("Atoms", structure.atoms().len()),
+    ("Bonds", structure.bonds().len()),
+    ("Polymer entities", structure.polymer_entities().len()),
+    ("Missing polymer residues", structure.missing_polymer_residues().len()),
+    ("Secondary ranges", structure.secondary_ranges().len()),
+    ("Assembly operations", structure.metadata().assembly.operations.len()),
+    ("Biological assemblies", structure.metadata().assembly.assemblies.len()),
   ]
 }
 

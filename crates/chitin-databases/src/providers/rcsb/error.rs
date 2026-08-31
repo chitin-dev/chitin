@@ -77,4 +77,7 @@ pub enum RcsbDownloadError {
   /// The downloaded bytes could not be written.
   #[error("failed to write '{path}': {source}")]
   WriteFile { path: PathBuf, source: std::io::Error },
+  /// The persisted artifact could not be read while calculating its checksum.
+  #[error("failed to read '{path}': {source}")]
+  ReadFile { path: PathBuf, source: std::io::Error },
 }

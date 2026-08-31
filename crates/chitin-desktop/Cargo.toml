@@ -9,12 +9,13 @@ repository.workspace = true
 chitin-command = { path = "../chitin-command" }
 log = "0.4.33"
 env_logger = "0.10"
+futures-util = "0.3"
 chitin-databases = { path = "../chitin-databases" }
 chitin-utils = { path = "../chitin-utils" }
 chitin-ui = { path = "../chitin-ui" }
 chitin-wgpu = { path = "../chitin-wgpu" }
 gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "d01b063d0dce9df2be24a53f59201e010712fc01" }
-tokio = { version = "1.52", features = ["rt"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "sync"] }
 wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
 rust-embed = { version = "8.12.0", features = ["debug-embed", "interpolate-folder-path"] }
 thiserror = "2.0"

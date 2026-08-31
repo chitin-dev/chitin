@@ -7,6 +7,7 @@
 pub mod app;
 pub(crate) mod components;
 pub mod keybindings;
+pub mod tasks;
 
 /// GPUI adapter for the experimental WGPU document panel.
 pub mod wgpu_panel {

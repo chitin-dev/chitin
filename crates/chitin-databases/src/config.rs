@@ -11,16 +11,18 @@ pub struct ClientConfig {
   pub user_agent: String,
   /// Maximum time allowed to establish a connection.
   pub connect_timeout: Duration,
-  /// Maximum time allowed for one request attempt, including response-body
-  /// download time.
+  /// Optional maximum time allowed for one complete request attempt.
   ///
-  /// The default is 10 minutes so large RCSB structure artifacts can finish
-  /// downloading instead of being restarted by the retry policy.
-  pub request_timeout: Duration,
-  /// Maximum buffered response body size in bytes.
+  /// The default is `None`; streamed downloads are bounded by
+  /// [`ClientConfig::read_timeout`] instead.
+  pub request_timeout: Option<Duration>,
+  /// Maximum idle interval between response-body reads.
+  pub read_timeout: Duration,
+  /// Maximum response body size in bytes, for both buffered and streamed
+  /// responses.
   ///
-  /// The default is 512 MiB so large RCSB structure artifacts can be
-  /// downloaded while retaining protection against unbounded responses.
+  /// The default is 512 MiB. Streamed artifacts are checked incrementally and
+  /// are never retained in memory by the production transport.
   pub max_response_bytes: u64,
   /// Maximum number of in-flight provider requests sharing this client.
   pub max_concurrent_requests: usize,
@@ -37,7 +39,8 @@ impl Default for ClientConfig {
         env!("CARGO_PKG_VERSION")
       ),
       connect_timeout: Duration::from_secs(10),
-      request_timeout: Duration::from_secs(10 * 60),
+      request_timeout: None,
+      read_timeout: Duration::from_secs(30),
       max_response_bytes: 512 * 1024 * 1024,
       max_concurrent_requests: 8,
       retry_policy: RetryPolicy::default(),

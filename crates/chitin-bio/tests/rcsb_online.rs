@@ -94,7 +94,9 @@ async fn downloads_configured_structures_and_parses_them() {
       RcsbBatchDownloadEvent::Started { index, total, id } => {
         println!("[{index}/{total}] downloading {id}");
       }
-      RcsbBatchDownloadEvent::Completed { index, total, id, path } => {
+      RcsbBatchDownloadEvent::Completed {
+        index, total, id, path, ..
+      } => {
         println!("[{index}/{total}] downloaded {id} to {}", path.display());
       }
       RcsbBatchDownloadEvent::Progress { .. } => {}
@@ -122,23 +124,23 @@ async fn downloads_configured_structures_and_parses_them() {
       request.id,
       request.format.label(),
       bytes.len(),
-      parsed.structure.models.len(),
-      parsed.structure.chains.len(),
-      parsed.structure.residues.len(),
-      parsed.structure.atoms.len(),
-      parsed.structure.bonds.len(),
-      parsed.structure.polymer_entities.len(),
-      parsed.structure.missing_polymer_residues.len(),
-      parsed.structure.secondary_ranges.len(),
+      parsed.structure.models().len(),
+      parsed.structure.chains().len(),
+      parsed.structure.residues().len(),
+      parsed.structure.atoms().len(),
+      parsed.structure.bonds().len(),
+      parsed.structure.polymer_entities().len(),
+      parsed.structure.missing_polymer_residues().len(),
+      parsed.structure.secondary_ranges().len(),
       parsed.diagnostics.len(),
     );
     assert!(
-      !parsed.structure.atoms.is_empty(),
+      !parsed.structure.atoms().is_empty(),
       "{} should contain atoms",
       path.display()
     );
     assert!(
-      !parsed.structure.models.is_empty(),
+      !parsed.structure.models().is_empty(),
       "{} should contain models",
       path.display()
     );

@@ -27,6 +27,7 @@ use crate::{
     window_bar::{WindowBarControls, render_window_bar},
   },
   keybindings::{ToggleCommandPanel, ToggleWorkspace},
+  tasks::BackgroundTaskCenter,
 };
 
 pub use crate::components::document_area::state::WgpuDocumentViewFactory;
@@ -51,6 +52,8 @@ pub struct ChitinApp {
   pub(crate) project_sidebar_visible: bool,
   /// Searchable command panel state, metadata, and focus ownership.
   pub(crate) command_panel: CommandPanelController,
+  /// Application-wide executor and registry for background work.
+  pub(crate) tasks: BackgroundTaskCenter,
   /// Primitive button state for platform window actions.
   pub(crate) window_bar_controls: Option<WindowBarControls>,
   /// Primitive button state for activity-bar navigation controls.
@@ -124,6 +127,7 @@ impl ChitinApp {
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
+      tasks: BackgroundTaskCenter::new(),
       window_bar_controls: None,
       activity_bar_controls: None,
     }

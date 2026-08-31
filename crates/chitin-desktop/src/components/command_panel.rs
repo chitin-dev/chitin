@@ -1,13 +1,6 @@
 //! Desktop command panel rendering and input handling.
 
-use std::rc::Rc;
-use std::sync::{
-  Arc, Mutex,
-  atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-  mpsc,
-};
-use std::thread;
-use std::time::Duration;
+use std::{collections::BTreeSet, rc::Rc};
 
 mod controller;
 mod form;
@@ -17,10 +10,7 @@ use controller::{CommandPanelEvent, CommandPanelMode};
 use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
 
 use chitin_command::{ApplicationCommand, ChitinCommand, CommandInvocationKind};
-use chitin_databases::{
-  Client, ClientConfig,
-  providers::rcsb::{PdbId, RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, RcsbDownloadError, RcsbError},
-};
+use chitin_databases::providers::rcsb::{PdbId, RcsbBatchDownloadRequest};
 use chitin_ui::{
   composite::quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
   primitive::{
@@ -37,21 +27,10 @@ use gpui::{
   div, px,
 };
 
-use crate::app::ChitinApp;
+use crate::{app::ChitinApp, tasks::rcsb::submit_downloads};
 
 /// Callback invoked when a rendered command row is selected.
 type CommandPanelSelectHandler = dyn for<'a, 'b> Fn(usize, &'a mut Window, &'b mut App);
-
-/// Failure encountered while downloading or persisting an RCSB structure.
-#[derive(Debug, thiserror::Error)]
-enum DesktopRcsbDownloadError {
-  /// Tokio could not create the runtime required by the HTTP transport.
-  #[error("failed to create download runtime: {0}")]
-  Runtime(std::io::Error),
-  /// The shared database client or local persistence step failed.
-  #[error("RCSB download failed: {0}")]
-  Download(#[from] RcsbDownloadError),
-}
 
 /// Renders the command panel overlay.
 ///
@@ -229,8 +208,10 @@ impl ChitinApp {
       }
     };
     let format = form.selected_format(cx);
+    let mut unique_ids = BTreeSet::new();
     let requests = ids
       .into_iter()
+      .filter(|pdb_id| unique_ids.insert(pdb_id.clone()))
       .map(|pdb_id| RcsbBatchDownloadRequest {
         destination: download_path(&workspace_root, &pdb_id, format),
         id: pdb_id,
@@ -238,152 +219,43 @@ impl ChitinApp {
       })
       .collect::<Vec<_>>();
     let total_items = requests.len();
+    let mut task = match submit_downloads(&self.tasks, requests) {
+      Ok(task) => task,
+      Err(error) => {
+        log::error!("failed to submit RCSB download task: {error}");
+        form.download.update(cx, |state, cx| state.fail(error.to_string(), cx));
+        return;
+      }
+    };
     log::info!(
-      "RCSB batch download started: items={}, format={:?}",
-      total_items,
-      format
+      "RCSB batch download task submitted: id={}, items={total_items}",
+      task.id()
     );
 
-    form
-      .download
-      .update(cx, |state, cx| state.start_item(1, total_items, String::new(), cx));
     form.pdb_id.update(cx, |state, cx| state.set_disabled(true, cx));
     form.format.update(cx, |state, cx| state.set_disabled(true, cx));
     form.submit.update(cx, |state, cx| state.set_disabled(true, cx));
-    log::info!(
-      "RCSB download submitted from thread name={:?}, id={:?}, items={total_items}",
-      thread::current().name(),
-      thread::current().id()
-    );
+    let initial = task.latest();
+    form
+      .download
+      .update(cx, |state, cx| state.apply_task_snapshot(&initial, total_items, cx));
 
-    let progress = Arc::new(AtomicU64::new(0));
-    let received_bytes = Arc::new(AtomicU64::new(0));
-    let has_total = Arc::new(AtomicBool::new(false));
-    let active = Arc::new(AtomicBool::new(true));
-    let background_progress = progress.clone();
-    let background_received_bytes = received_bytes.clone();
-    let background_has_total = has_total.clone();
-    let background_active = active.clone();
-    let batch_index = Arc::new(AtomicUsize::new(0));
-    let batch_total = Arc::new(AtomicUsize::new(total_items));
-    let current_id = Arc::new(Mutex::new(String::new()));
-    let background_batch_index = batch_index.clone();
-    let background_batch_total = batch_total.clone();
-    let background_current_id = current_id.clone();
-    let (download_sender, download_receiver) = mpsc::channel();
-    let thread_sender = download_sender.clone();
-    let thread_result = thread::Builder::new()
-      .name("chitin-rcsb-download".to_string())
-      .spawn(move || {
-        log::info!(
-          "RCSB download worker started on thread name={:?}, id={:?}",
-          thread::current().name(),
-          thread::current().id()
-        );
-        let result = download_rcsb_structures(requests, move |event| match event {
-          RcsbBatchDownloadEvent::Started { index, total, id } => {
-            background_batch_index.store(index, Ordering::Release);
-            background_batch_total.store(total, Ordering::Release);
-            if let Ok(mut current) = background_current_id.lock() {
-              *current = id.to_string();
-            }
-          }
-          RcsbBatchDownloadEvent::Progress {
-            received, total_bytes, ..
-          } => {
-            background_received_bytes.store(received, Ordering::Relaxed);
-            if let Some(total) = total_bytes
-              && let Some(value) = received.saturating_mul(10_000).checked_div(total)
-            {
-              background_has_total.store(true, Ordering::Release);
-              background_progress.store(value, Ordering::Relaxed);
-            }
-          }
-          RcsbBatchDownloadEvent::Completed { .. } => {}
-        });
-        background_active.store(false, Ordering::Release);
-        log::info!(
-          "RCSB download worker finished on thread name={:?}, id={:?}, success={}",
-          thread::current().name(),
-          thread::current().id(),
-          result.is_ok()
-        );
-        let _ = thread_sender.send(result);
-      });
     let download_state = form.download.clone();
     let pdb_id_state = form.pdb_id.clone();
     let format_state = form.format.clone();
     let submit_state = form.submit.clone();
-    if let Err(error) = thread_result {
-      log::error!(
-        "failed to spawn RCSB download thread from thread name={:?}, id={:?}: {error}",
-        thread::current().name(),
-        thread::current().id()
-      );
-      active.store(false, Ordering::Release);
-      let _ = download_sender.send(Err(DesktopRcsbDownloadError::Runtime(error)));
-    }
     cx.spawn(async move |app, cx| {
-      loop {
-        cx.background_executor().timer(Duration::from_millis(50)).await;
-        let Ok(result) = download_receiver.try_recv() else {
-          continue;
-        };
+      while let Some(snapshot) = task.changed().await {
+        let terminal = snapshot.state.is_terminal();
         let _ = app.update(cx, |_, cx| {
-          match result {
-            Ok(()) => {
-              log::info!("RCSB batch download completed");
-              download_state.update(cx, RcsbDownloadState::finish);
-            }
-            Err(error) => {
-              log::error!("RCSB download failed: {error}");
-              download_state.update(cx, |state, cx| state.fail(error.to_string(), cx));
-            }
-          }
-          pdb_id_state.update(cx, |state, cx| state.set_disabled(false, cx));
-          format_state.update(cx, |state, cx| state.set_disabled(false, cx));
-          submit_state.update(cx, |state, cx| state.set_disabled(false, cx));
-        });
-        break;
-      }
-    })
-    .detach();
-    let progress_state = form.download.clone();
-    let progress_active = active;
-    let progress_batch_index = batch_index;
-    let progress_batch_total = batch_total;
-    let progress_current_id = current_id;
-    cx.spawn(async move |app, cx| {
-      let mut last_logged_percent = None;
-      loop {
-        cx.background_executor().timer(Duration::from_millis(50)).await;
-        let percent = progress.load(Ordering::Relaxed) as f32 / 100.0;
-        let received = received_bytes.load(Ordering::Relaxed);
-        let rounded_percent = percent.round() as u8;
-        if last_logged_percent != Some(rounded_percent) {
-          log::debug!(
-            "RCSB download UI progress tick: percent={percent:.2}, received={received}, has_total={}, active={}",
-            has_total.load(Ordering::Acquire),
-            progress_active.load(Ordering::Acquire)
-          );
-          last_logged_percent = Some(rounded_percent);
-        }
-        let _ = app.update(cx, |_, cx| {
-          let active = progress_state.read(cx).active;
-          if active {
-            let item_index = progress_batch_index.load(Ordering::Acquire);
-            let item_total = progress_batch_total.load(Ordering::Acquire);
-            let item_id = progress_current_id.lock().map(|id| id.clone()).unwrap_or_default();
-            if item_index > 0 && progress_state.read(cx).current_index != item_index {
-              progress_state.update(cx, |state, cx| state.start_item(item_index, item_total, item_id, cx));
-            }
-            progress_state.update(cx, |state, cx| state.set_received_bytes(received, cx));
-            if has_total.load(Ordering::Acquire) {
-              progress_state.update(cx, |state, cx| state.set_progress(percent, cx));
-            }
+          download_state.update(cx, |state, cx| state.apply_task_snapshot(&snapshot, total_items, cx));
+          if terminal {
+            pdb_id_state.update(cx, |state, cx| state.set_disabled(false, cx));
+            format_state.update(cx, |state, cx| state.set_disabled(false, cx));
+            submit_state.update(cx, |state, cx| state.set_disabled(false, cx));
           }
         });
-        if !progress_active.load(Ordering::Acquire) {
+        if terminal {
           break;
         }
       }
@@ -452,34 +324,4 @@ impl ChitinApp {
       }
     }
   }
-}
-
-/// Downloads one RCSB structure and persists it under the workspace metadata directory.
-///
-/// # Parameters
-///
-/// * `request` contains the validated identifier, selected format, and workspace root.
-///
-/// # Returns
-///
-/// The final artifact path after the file has been written successfully.
-fn download_rcsb_structures(
-  requests: Vec<RcsbBatchDownloadRequest>,
-  report_progress: impl Fn(RcsbBatchDownloadEvent) + Send + Sync + 'static,
-) -> Result<(), DesktopRcsbDownloadError> {
-  let runtime = tokio::runtime::Builder::new_current_thread()
-    .enable_all()
-    .build()
-    .map_err(DesktopRcsbDownloadError::Runtime)?;
-  let download_result: Result<(), RcsbDownloadError> = runtime.block_on(async {
-    let client =
-      Client::new(ClientConfig::default()).map_err(|error| RcsbDownloadError::Provider(RcsbError::Transport(error)))?;
-    client
-      .rcsb()
-      .download_structures_to_paths(&requests, report_progress)
-      .await?;
-    Ok(())
-  });
-  download_result.map_err(DesktopRcsbDownloadError::Download)?;
-  Ok(())
 }
