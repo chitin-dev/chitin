@@ -21,10 +21,13 @@ clippy:
 test:
   cargo test --workspace --locked
 
-# The Rust workflow intentionally mirrors .github/workflows/check.yml.
-ci: fmt-check check clippy
+databases-test:
+  cargo test -p chitin-databases --features test-support --locked
 
-verify: fmt-check check clippy test
+# The Rust workflow intentionally mirrors .github/workflows/check.yml.
+ci: fmt-check check clippy test databases-test
+
+verify: fmt-check check clippy test databases-test
 
 bio-test:
   cargo test -p chitin-bio --locked
