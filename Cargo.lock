@@ -755,6 +755,7 @@ dependencies = [
  "chitin-utils",
  "chitin-wgpu",
  "env_logger",
+ "futures-util",
  "glam",
  "gpui-ce",
  "log",
