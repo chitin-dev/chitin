@@ -306,6 +306,30 @@ async fn download_structure_to_path_should_return_persisted_metadata_and_checksu
 }
 
 #[tokio::test]
+async fn download_structure_to_path_should_replace_existing_destination() {
+  let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("temporary directory should be created: {error}"));
+  let destination = directory.path().join("4HHB.pdb");
+  tokio::fs::write(&destination, b"old content")
+    .await
+    .unwrap_or_else(|error| panic!("existing destination should be created: {error}"));
+  let transport = MockTransport::new(vec![Ok(response(StatusCode::OK, b"new content"))]);
+  let client = test_client(transport);
+
+  client
+    .rcsb()
+    .download_structure_to_path(pdb_id("4hhb"), StructureFormat::Pdb, &destination, |_, _| {})
+    .await
+    .unwrap_or_else(|error| panic!("existing destination should be replaced: {error}"));
+
+  assert_eq!(
+    tokio::fs::read(&destination)
+      .await
+      .unwrap_or_else(|error| panic!("replaced destination should be readable: {error}")),
+    b"new content"
+  );
+}
+
+#[tokio::test]
 async fn cancelled_download_should_not_leave_a_partial_destination() {
   let directory = tempfile::tempdir().unwrap_or_else(|error| panic!("temporary directory should be created: {error}"));
   let destination = directory.path().join("cancelled.pdb");

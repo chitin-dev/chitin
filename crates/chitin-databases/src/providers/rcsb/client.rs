@@ -1,6 +1,7 @@
 //! RCSB provider client implementation.
 
 use std::{
+  io,
   path::{Path, PathBuf},
   sync::Arc,
   sync::atomic::{AtomicU64, Ordering},
@@ -250,7 +251,7 @@ impl RcsbClient {
       resolved_url,
       &response.headers,
     );
-    if let Err(source) = tokio::fs::rename(&temporary, destination).await {
+    if let Err(source) = replace_destination(&temporary, destination).await {
       let _ = tokio::fs::remove_file(&temporary).await;
       return Err(RcsbDownloadError::WriteFile {
         path: destination.to_path_buf(),
@@ -369,6 +370,26 @@ impl RcsbClient {
       message: error.to_string(),
     })?;
     metadata_from_dto(dto, provenance)
+  }
+}
+
+/// Replaces the final artifact while retaining atomic rename semantics where available.
+async fn replace_destination(temporary: &Path, destination: &Path) -> io::Result<()> {
+  #[cfg(windows)]
+  {
+    match tokio::fs::rename(temporary, destination).await {
+      Ok(()) => Ok(()),
+      Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+        tokio::fs::remove_file(destination).await?;
+        tokio::fs::rename(temporary, destination).await
+      }
+      Err(error) => Err(error),
+    }
+  }
+
+  #[cfg(not(windows))]
+  {
+    tokio::fs::rename(temporary, destination).await
   }
 }
 
