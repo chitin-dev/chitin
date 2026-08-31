@@ -94,7 +94,9 @@ async fn downloads_configured_structures_and_parses_them() {
       RcsbBatchDownloadEvent::Started { index, total, id } => {
         println!("[{index}/{total}] downloading {id}");
       }
-      RcsbBatchDownloadEvent::Completed { index, total, id, path } => {
+      RcsbBatchDownloadEvent::Completed {
+        index, total, id, path, ..
+      } => {
         println!("[{index}/{total}] downloaded {id} to {}", path.display());
       }
       RcsbBatchDownloadEvent::Progress { .. } => {}

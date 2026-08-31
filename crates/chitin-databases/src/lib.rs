@@ -26,6 +26,6 @@ pub use config::ClientConfig;
 pub use error::{DataError, DecodeError, RemoteError, TransportError};
 pub use provenance::{Provenance, ProviderId};
 pub use request::{HttpMethod, HttpRequest};
-pub use response::{ArtifactFormat, DownloadedArtifact, HttpResponse};
+pub use response::{ArtifactFormat, DownloadedArtifact, HttpResponse, PersistedArtifact};
 pub use retry::RetryPolicy;
-pub use transport::{DownloadProgressCallback, HttpTransport};
+pub use transport::{CancellationToken, DownloadProgressCallback, HttpTransport};
