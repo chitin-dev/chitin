@@ -20,7 +20,7 @@ use std::{
 
 use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
 use chitin_desktop::{
-  app::{ChitinApp, WgpuDocumentViewFactory},
+  app::{ChitinApp, WgpuDocumentView, WgpuDocumentViewFactory},
   keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
@@ -175,8 +175,15 @@ fn main() {
           let wgpu_panel_factory = WgpuDocumentViewFactory::new(move |window, cx| {
             let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
             let panel_scene = ExampleMoleculeScene::new(Arc::clone(&factory_scene), factory_representation);
-            cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, panel_scene))
-              .into()
+            let panel = cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, panel_scene));
+            let controlled_panel = panel.clone();
+            WgpuDocumentView::with_atom_representation(panel, factory_representation, move |representation, cx| {
+              controlled_panel.update(cx, |panel, cx| {
+                if panel.set_atom_representation(representation) {
+                  cx.notify();
+                }
+              });
+            })
           });
           let wgpu_panel = wgpu_panel_factory.build(window, cx);
 

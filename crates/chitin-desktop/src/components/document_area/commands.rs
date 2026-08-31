@@ -3,9 +3,13 @@
 use chitin_ui::composite::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
+use chitin_wgpu::AtomRepresentation;
 use gpui::{Context, Pixels, Window};
 
-use crate::{app::ChitinApp, components::document_area::state::OpenedProjectDocument};
+use crate::{
+  app::ChitinApp,
+  components::document_area::state::{DocumentPanelContent, OpenedProjectDocument},
+};
 
 impl ChitinApp {
   /// Opens a workspace document in the main document panel area.
@@ -23,6 +27,42 @@ impl ChitinApp {
   /// This function returns `()` and mutates document panel state.
   pub(crate) fn open_project_document(&mut self, document: OpenedProjectDocument) {
     if !self.document_panels.open_document_as_tab(document.clone()) {
+      self.document_panels = super::DocumentPanelState::new(document);
+    }
+  }
+
+  /// Opens a workspace document, creating a structure viewport for supported files.
+  pub(crate) fn open_project_document_with_window(
+    &mut self,
+    document: OpenedProjectDocument,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    let is_structure = document
+      .path
+      .extension()
+      .and_then(|extension| extension.to_str())
+      .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "pdb" | "ent" | "cif" | "mmcif"));
+    let content = if is_structure {
+      self.wgpu_document_view_factory.as_ref().map(|factory| {
+        DocumentPanelContent::wgpu_interactive(
+          Some(document.path.clone()),
+          document.title.clone(),
+          factory.build_for_document(&document.path, window, cx),
+          factory.clone(),
+        )
+      })
+    } else {
+      None
+    };
+    if let Some(content) = content {
+      if !self
+        .document_panels
+        .open_content_as_tab(&document.path, content.clone())
+      {
+        self.document_panels = super::DocumentPanelState::with_content(content);
+      }
+    } else if !self.document_panels.open_document_as_tab(document.clone()) {
       self.document_panels = super::DocumentPanelState::new(document);
     }
   }
@@ -66,6 +106,35 @@ impl ChitinApp {
   /// `true` when the panel and tab exist; otherwise `false`.
   pub(crate) fn activate_document_panel_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
     self.document_panels.activate_tab(panel_id, tab_id)
+  }
+
+  /// Toggles the active molecular document's options menu.
+  pub(crate) fn toggle_document_options_menu(&mut self, panel_id: PanelId) -> bool {
+    self.document_panels.toggle_options_menu(panel_id)
+  }
+
+  /// Dismisses the open molecular document options menu.
+  pub(crate) fn dismiss_document_options_menu(&mut self) -> bool {
+    self.document_panels.dismiss_options_menu()
+  }
+
+  /// Applies an atom representation to the active molecular document.
+  pub(crate) fn select_document_atom_representation(
+    &mut self,
+    panel_id: PanelId,
+    representation: AtomRepresentation,
+    cx: &mut Context<Self>,
+  ) -> bool {
+    let Some(on_change) = self
+      .document_panels
+      .select_atom_representation(panel_id, representation)
+    else {
+      self.document_panels.dismiss_options_menu();
+      return false;
+    };
+    self.document_panels.dismiss_options_menu();
+    on_change(representation, cx);
+    true
   }
 
   /// Closes a tab inside a document panel.

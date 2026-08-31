@@ -204,8 +204,9 @@ pub fn render_project_sidebar(
     .on_action(cx.listener(|this, _: &FocusNextEntry, _, cx| {
       this.dispatch_command(WorkspaceCommand::FocusNext.into(), cx);
     }))
-    .on_action(cx.listener(|this, _: &ActivateFocusedEntry, _, cx| {
-      this.dispatch_command(WorkspaceCommand::ActivateFocused.into(), cx);
+    .on_action(cx.listener(|this, _: &ActivateFocusedEntry, window, cx| {
+      this.activate_focused_project_tree_entry_with_window(window, cx);
+      cx.notify();
     }))
     .on_action(cx.listener(|this, _: &FocusFirstEntry, _, cx| {
       this.dispatch_command(WorkspaceCommand::FocusFirst.into(), cx);

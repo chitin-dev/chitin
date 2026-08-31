@@ -13,9 +13,30 @@ use chitin_ui::{
   },
   primitive::resize::ResizeGesture,
 };
+use chitin_wgpu::AtomRepresentation;
 use gpui::{AnyView, App, Pixels, Window};
 
-pub type FreshWgpuSurfaceCallback = Rc<dyn Fn(&mut Window, &mut App) -> AnyView>;
+/// Callback that applies an atom representation to one WGPU document view.
+type AtomRepresentationChangeHandler = dyn Fn(AtomRepresentation, &mut App);
+
+/// Result produced when a WGPU document factory creates a fresh view.
+pub struct WgpuDocumentView {
+  /// Type-erased GPUI view rendered inside the panel body.
+  view: AnyView,
+  /// Optional molecule-specific representation controller.
+  atom_representation: Option<WgpuAtomRepresentationControl>,
+}
+
+/// Mutable atom-representation state and its view update callback.
+#[derive(Clone)]
+pub(crate) struct WgpuAtomRepresentationControl {
+  /// Representation currently selected for this independent panel view.
+  representation: AtomRepresentation,
+  /// Callback that invalidates the scene renderer after a selection change.
+  on_change: Rc<AtomRepresentationChangeHandler>,
+}
+
+type FreshWgpuSurfaceCallback = Rc<dyn Fn(&Path, &mut Window, &mut App) -> WgpuDocumentView>;
 
 /// Factory used to create independent WGPU document views for split panels.
 #[derive(Clone)]
@@ -50,10 +71,14 @@ pub(crate) enum DocumentPanelContent {
   /// Experimental WGPU viewport hosted as a document-area panel.
   #[allow(dead_code)]
   WgpuInteractive {
+    /// Filesystem path represented by this structure viewport, when available.
+    path: Option<PathBuf>,
     /// Display title shown in the document tab strip.
     title: String,
     /// GPUI entity that owns the WGPU surface and interaction state.
     view: AnyView,
+    /// Molecule representation state when this view supports atom rendering.
+    atom_representation: Option<WgpuAtomRepresentationControl>,
     /// Callback that creates an independent view for split-panel clones.
     clone_view: WgpuDocumentViewFactory,
   },
@@ -85,6 +110,8 @@ pub(crate) struct DocumentPanelState {
   pub(super) tab_drag: Option<PanelTabDragState>,
   /// Presentation-only scroll state for panel tab bars.
   pub(super) tab_scroll: PanelTabScrollState,
+  /// Panel whose document options popover is currently visible.
+  pub(super) options_menu_panel_id: Option<PanelId>,
 }
 
 impl OpenedProjectDocument {
@@ -109,6 +136,75 @@ impl OpenedProjectDocument {
   }
 }
 
+impl WgpuDocumentView {
+  /// Creates a WGPU document view without molecule-specific controls.
+  pub fn new(view: impl Into<AnyView>) -> Self {
+    Self {
+      view: view.into(),
+      atom_representation: None,
+    }
+  }
+
+  /// Creates a molecular WGPU view with an independently mutable representation.
+  pub fn with_atom_representation(
+    view: impl Into<AnyView>,
+    representation: AtomRepresentation,
+    on_change: impl Fn(AtomRepresentation, &mut App) + 'static,
+  ) -> Self {
+    Self {
+      view: view.into(),
+      atom_representation: Some(WgpuAtomRepresentationControl {
+        representation,
+        on_change: Rc::new(on_change),
+      }),
+    }
+  }
+
+  /// Applies a copied representation to a newly created independent view.
+  fn select_atom_representation(&mut self, representation: AtomRepresentation, cx: &mut App) {
+    let Some(control) = self.atom_representation.as_mut() else {
+      return;
+    };
+    if let Some(on_change) = control.select(representation) {
+      on_change(representation, cx);
+    }
+  }
+}
+
+impl From<AnyView> for WgpuDocumentView {
+  fn from(view: AnyView) -> Self {
+    Self::new(view)
+  }
+}
+
+impl fmt::Debug for WgpuAtomRepresentationControl {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter
+      .debug_struct("WgpuAtomRepresentationControl")
+      .field("representation", &self.representation)
+      .finish_non_exhaustive()
+  }
+}
+
+impl PartialEq for WgpuAtomRepresentationControl {
+  fn eq(&self, other: &Self) -> bool {
+    self.representation == other.representation && Rc::ptr_eq(&self.on_change, &other.on_change)
+  }
+}
+
+impl Eq for WgpuAtomRepresentationControl {}
+
+impl WgpuAtomRepresentationControl {
+  /// Selects a new representation and returns the callback that applies it.
+  fn select(&mut self, representation: AtomRepresentation) -> Option<Rc<AtomRepresentationChangeHandler>> {
+    if self.representation == representation {
+      return None;
+    }
+    self.representation = representation;
+    Some(Rc::clone(&self.on_change))
+  }
+}
+
 impl WgpuDocumentViewFactory {
   /// Creates a factory for independent WGPU document views.
   ///
@@ -119,8 +215,23 @@ impl WgpuDocumentViewFactory {
   /// # Returns
   ///
   /// A cloneable factory handle suitable for storing in tab payloads.
-  pub fn new(build: impl Fn(&mut Window, &mut App) -> AnyView + 'static) -> Self {
-    Self { build: Rc::new(build) }
+  pub fn new<View>(build: impl Fn(&mut Window, &mut App) -> View + 'static) -> Self
+  where
+    View: Into<WgpuDocumentView>,
+  {
+    Self {
+      build: Rc::new(move |_, window, cx| build(window, cx).into()),
+    }
+  }
+
+  /// Creates a factory that builds a WGPU view for each opened structure path.
+  pub fn new_for_document<View>(build: impl Fn(&Path, &mut Window, &mut App) -> View + 'static) -> Self
+  where
+    View: Into<WgpuDocumentView>,
+  {
+    Self {
+      build: Rc::new(move |path, window, cx| build(path, window, cx).into()),
+    }
   }
 
   /// Builds a fresh WGPU document view.
@@ -132,9 +243,14 @@ impl WgpuDocumentViewFactory {
   ///
   /// # Returns
   ///
-  /// A new [`AnyView`] with independent surface and entity state.
-  pub fn build(&self, window: &mut Window, cx: &mut App) -> AnyView {
-    (self.build)(window, cx)
+  /// A new [`WgpuDocumentView`] with independent surface and control state.
+  pub fn build(&self, window: &mut Window, cx: &mut App) -> WgpuDocumentView {
+    (self.build)(Path::new(""), window, cx)
+  }
+
+  /// Builds a WGPU view for a specific opened document path.
+  pub fn build_for_document(&self, path: &Path, window: &mut Window, cx: &mut App) -> WgpuDocumentView {
+    (self.build)(path, window, cx)
   }
 }
 
@@ -180,10 +296,17 @@ impl DocumentPanelContent {
   ///
   /// A [`DocumentPanelContent`] value that can be inserted into the panel tree.
   #[allow(dead_code)]
-  pub(crate) fn wgpu_interactive(title: impl Into<String>, view: AnyView, clone_view: WgpuDocumentViewFactory) -> Self {
+  pub(crate) fn wgpu_interactive(
+    path: Option<PathBuf>,
+    title: impl Into<String>,
+    document_view: WgpuDocumentView,
+    clone_view: WgpuDocumentViewFactory,
+  ) -> Self {
     Self::WgpuInteractive {
+      path,
       title: title.into(),
-      view,
+      view: document_view.view,
+      atom_representation: document_view.atom_representation,
       clone_view,
     }
   }
@@ -217,8 +340,38 @@ impl DocumentPanelContent {
   fn matches_project_path(&self, path: &Path) -> bool {
     match self {
       Self::ProjectDocument(document) => document.path == path,
-      Self::WgpuInteractive { .. } => false,
+      Self::WgpuInteractive {
+        path: Some(document_path),
+        ..
+      } => document_path == path,
+      Self::WgpuInteractive { path: None, .. } => false,
     }
+  }
+
+  /// Returns the selected atom representation for molecular content.
+  fn atom_representation(&self) -> Option<AtomRepresentation> {
+    match self {
+      Self::WgpuInteractive {
+        atom_representation: Some(control),
+        ..
+      } => Some(control.representation),
+      Self::ProjectDocument(_) | Self::WgpuInteractive { .. } => None,
+    }
+  }
+
+  /// Updates molecular selection state and returns its scene callback.
+  fn select_atom_representation(
+    &mut self,
+    representation: AtomRepresentation,
+  ) -> Option<Rc<AtomRepresentationChangeHandler>> {
+    let Self::WgpuInteractive {
+      atom_representation: Some(control),
+      ..
+    } = self
+    else {
+      return None;
+    };
+    control.select(representation)
   }
 
   /// Creates an independent payload for a split panel.
@@ -234,11 +387,28 @@ impl DocumentPanelContent {
   pub(crate) fn clone_for_split(&self, window: &mut Window, cx: &mut App) -> Self {
     match self {
       Self::ProjectDocument(document) => Self::ProjectDocument(document.clone()),
-      Self::WgpuInteractive { title, clone_view, .. } => Self::WgpuInteractive {
-        title: title.clone(),
-        view: clone_view.build(window, cx),
-        clone_view: clone_view.clone(),
-      },
+      Self::WgpuInteractive {
+        path,
+        title,
+        atom_representation,
+        clone_view,
+        ..
+      } => {
+        let mut document_view = match path.as_deref() {
+          Some(path) => clone_view.build_for_document(path, window, cx),
+          None => clone_view.build(window, cx),
+        };
+        if let Some(control) = atom_representation {
+          document_view.select_atom_representation(control.representation, cx);
+        }
+        Self::WgpuInteractive {
+          path: path.clone(),
+          title: title.clone(),
+          view: document_view.view,
+          atom_representation: document_view.atom_representation,
+          clone_view: clone_view.clone(),
+        }
+      }
     }
   }
 }
@@ -254,6 +424,7 @@ impl DocumentPanelState {
       resize_drag: None,
       tab_drag: None,
       tab_scroll: PanelTabScrollState::new(),
+      options_menu_panel_id: None,
     }
   }
 
@@ -293,6 +464,7 @@ impl DocumentPanelState {
       resize_drag: None,
       tab_drag: None,
       tab_scroll: PanelTabScrollState::new(),
+      options_menu_panel_id: None,
     }
   }
 
@@ -310,6 +482,12 @@ impl DocumentPanelState {
   ///
   /// `true` when the document was focused or appended; otherwise `false`.
   pub(crate) fn open_document_as_tab(&mut self, document: OpenedProjectDocument) -> bool {
+    let path = document.path.clone();
+    self.open_content_as_tab(path.as_path(), DocumentPanelContent::project(document))
+  }
+
+  /// Opens arbitrary document content in the focused panel.
+  pub(crate) fn open_content_as_tab(&mut self, path: &Path, content: DocumentPanelContent) -> bool {
     let panel_id = self.focused_panel_id;
     let Some(leaf) = self.tree.leaf(panel_id) else {
       return false;
@@ -318,14 +496,13 @@ impl DocumentPanelState {
     if let Some(tab_id) = leaf
       .tabs
       .iter()
-      .find(|tab| tab.payload.matches_project_path(&document.path))
+      .find(|tab| tab.payload.matches_project_path(path))
       .map(|tab| tab.id)
     {
       return self.activate_tab(panel_id, tab_id);
     }
 
     let tab_id = self.allocate_tab_id();
-    let content = DocumentPanelContent::project(document);
     let title = content.title().to_string();
     let tab = PanelTab::new(tab_id, title, content);
     let Some(leaf) = self.tree.leaf_mut(panel_id) else {
@@ -351,6 +528,7 @@ impl DocumentPanelState {
   pub(crate) fn activate_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
     if self.tree.activate_tab(panel_id, tab_id) {
       self.focused_panel_id = panel_id;
+      self.options_menu_panel_id = None;
       return true;
     }
     false
@@ -375,6 +553,7 @@ impl DocumentPanelState {
     if !self.tree.close_tab(panel_id, tab_id) {
       return false;
     }
+    self.options_menu_panel_id = None;
 
     let panel_is_empty = self
       .tree
@@ -440,6 +619,41 @@ impl DocumentPanelState {
   /// `Some(&DocumentPanelContent)` when the panel has an active tab.
   pub(crate) fn active_tab_payload(&self, panel_id: PanelId) -> Option<&DocumentPanelContent> {
     self.tree.leaf(panel_id)?.active_tab().map(|tab| &tab.payload)
+  }
+
+  /// Returns the active molecular representation in one panel.
+  pub(crate) fn active_atom_representation(&self, panel_id: PanelId) -> Option<AtomRepresentation> {
+    self.active_tab_payload(panel_id)?.atom_representation()
+  }
+
+  /// Changes the active molecular representation and returns its view callback.
+  pub(crate) fn select_atom_representation(
+    &mut self,
+    panel_id: PanelId,
+    representation: AtomRepresentation,
+  ) -> Option<Rc<AtomRepresentationChangeHandler>> {
+    let leaf = self.tree.leaf_mut(panel_id)?;
+    let active_tab_id = leaf.active_tab?;
+    let content = leaf
+      .tabs
+      .iter_mut()
+      .find(|tab| tab.id == active_tab_id)
+      .map(|tab| &mut tab.payload)?;
+    content.select_atom_representation(representation)
+  }
+
+  /// Toggles the options menu for a molecular document panel.
+  pub(crate) fn toggle_options_menu(&mut self, panel_id: PanelId) -> bool {
+    if self.active_atom_representation(panel_id).is_none() {
+      return false;
+    }
+    self.options_menu_panel_id = (self.options_menu_panel_id != Some(panel_id)).then_some(panel_id);
+    true
+  }
+
+  /// Dismisses the currently visible document options menu.
+  pub(crate) fn dismiss_options_menu(&mut self) -> bool {
+    self.options_menu_panel_id.take().is_some()
   }
 
   /// Splits one document panel and copies its active tab to the new panel.
@@ -724,5 +938,38 @@ impl DocumentPanelState {
     };
 
     Some(tabs[next_index])
+  }
+}
+
+#[cfg(test)]
+mod representation_tests {
+  use super::*;
+
+  fn stick_control() -> WgpuAtomRepresentationControl {
+    WgpuAtomRepresentationControl {
+      representation: AtomRepresentation::Stick,
+      on_change: Rc::new(|_, _| {}),
+    }
+  }
+
+  #[test]
+  fn selecting_new_representation_should_update_control_and_return_callback() {
+    let mut control = stick_control();
+
+    let callback = control.select(AtomRepresentation::Sphere);
+
+    assert_eq!(
+      (control.representation, callback.is_some()),
+      (AtomRepresentation::Sphere, true)
+    );
+  }
+
+  #[test]
+  fn selecting_current_representation_should_not_return_callback() {
+    let mut control = stick_control();
+
+    let callback = control.select(AtomRepresentation::Stick);
+
+    assert!(callback.is_none());
   }
 }
