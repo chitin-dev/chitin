@@ -685,7 +685,22 @@ impl DocumentPanelState {
   }
 
   /// Stores the latest trigger bounds used to anchor a deferred options popup.
-  pub(crate) fn set_options_menu_anchor(&mut self, bounds: Bounds<Pixels>) -> bool {
+  ///
+  /// Bounds from triggers that do not own the open menu are ignored, so a
+  /// different panel cannot move the visible popup.
+  ///
+  /// # Parameters
+  ///
+  /// * `panel_id` identifies the panel whose trigger produced the bounds.
+  /// * `bounds` is the trigger's latest window-space rectangle.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the stored anchor changed.
+  pub(crate) fn set_options_menu_anchor(&mut self, panel_id: PanelId, bounds: Bounds<Pixels>) -> bool {
+    if self.options_menu_panel_id != Some(panel_id) {
+      return false;
+    }
     if self.options_menu_anchor == Some(bounds) {
       return false;
     }

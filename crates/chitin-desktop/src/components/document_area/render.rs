@@ -121,7 +121,9 @@ impl DocumentOptionsControls {
       let MenuEvent::SelectionChange { selected_id } = event else {
         return;
       };
-      let panel_id = app.document_panels.focused_panel_id;
+      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+        return;
+      };
       let representation = match selected_id.as_ref() {
         "stick" => AtomRepresentation::Stick,
         "ball-and-stick" => AtomRepresentation::BallAndStick,
@@ -242,11 +244,11 @@ fn render_opened_document_panels(
     PanelTabDragConfig::new(on_tab_drag_start, on_tab_drag_target, on_tab_drop).state(document_panels.tab_drag.clone());
 
   let actions_app = app.clone();
-  let focused_panel_id = document_panels.focused_panel_id;
-  let atom_representation = document_panels.active_atom_representation(focused_panel_id);
-  let options_menu_open = document_panels.options_menu_panel_id == Some(focused_panel_id);
-  let options_menu_anchor = document_panels.options_menu_anchor;
+  let panel_state = document_panels.clone();
   let render_tab_strip_actions = Rc::new(move |panel_id| {
+    let atom_representation = panel_state.active_atom_representation(panel_id);
+    let options_menu_open = panel_state.options_menu_panel_id == Some(panel_id);
+    let options_menu_anchor = options_menu_open.then_some(panel_state.options_menu_anchor).flatten();
     render_panel_tab_strip_actions(
       panel_id,
       theme,
@@ -427,14 +429,17 @@ fn render_document_options_button(
     .on_children_prepainted(move |children_bounds, _, cx| {
       if let Some(bounds) = children_bounds.first().copied() {
         let _ = anchor_app.update(cx, |app, cx| {
-          if app.document_panels.set_options_menu_anchor(bounds) {
+          if app.document_panels.set_options_menu_anchor(panel_id, bounds) {
             cx.notify();
           }
         });
       }
     })
     .child(trigger)
-    .when(open, |anchor| {
+    // Wait for the trigger's window-space bounds before rendering the popup.
+    // Rendering the fallback local placement for one frame causes a visible
+    // jump when the deferred overlay is repositioned to its real anchor.
+    .when(open && options_menu_anchor.is_some(), |anchor| {
       anchor.child(render_document_options_menu(
         panel_id,
         atom_representation,
