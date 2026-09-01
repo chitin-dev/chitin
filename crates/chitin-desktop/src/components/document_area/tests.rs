@@ -586,6 +586,19 @@ fn open_document_as_tab_should_focus_existing_tab_in_focused_panel() {
   assert_eq!(leaf.tabs[1].payload.title(), "beta.rs");
 }
 
+/// Verifies that the structure-loading preflight activates an existing path without adding a tab.
+#[test]
+fn activate_path_in_focused_panel_should_reuse_existing_tab() {
+  let mut state = two_tab_document_panel_state();
+
+  assert!(state.activate_path_in_focused_panel(&test_document("beta.rs").path));
+
+  let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+    panic!("default panel should exist");
+  };
+  assert_eq!((leaf.tabs.len(), leaf.active_tab), (2, Some(PanelTabId::new(2))));
+}
+
 /// Verifies that new documents open in the currently focused split panel.
 #[test]
 fn open_document_as_tab_should_target_focused_panel() {

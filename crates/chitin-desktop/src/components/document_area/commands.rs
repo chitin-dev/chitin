@@ -1,14 +1,19 @@
 //! Document panel command adapters for the desktop app.
 
+use std::sync::Arc;
+
 use chitin_ui::composite::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
 use chitin_wgpu::AtomRepresentation;
-use gpui::{Context, Pixels, Window};
+use gpui::{App, AppContext, AsyncApp, Context, Pixels, WeakEntity, Window};
 
 use crate::{
   app::ChitinApp,
-  components::document_area::state::{DocumentPanelContent, OpenedProjectDocument},
+  components::document_area::{
+    state::{DocumentPanelContent, OpenedProjectDocument, WgpuDocumentViewFactory},
+    structure::{build_structure_view_from_scene, load_structure_scene},
+  },
 };
 
 impl ChitinApp {
@@ -43,27 +48,66 @@ impl ChitinApp {
       .extension()
       .and_then(|extension| extension.to_str())
       .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "pdb" | "ent" | "cif" | "mmcif"));
-    let content = if is_structure {
-      self.wgpu_document_view_factory.as_ref().map(|factory| {
-        DocumentPanelContent::wgpu_interactive(
-          Some(document.path.clone()),
-          document.title.clone(),
-          factory.build_for_document(&document.path, window, cx),
-          factory.clone(),
-        )
-      })
-    } else {
-      None
-    };
-    if let Some(content) = content {
-      if !self
-        .document_panels
-        .open_content_as_tab(&document.path, content.clone())
-      {
-        self.document_panels = super::DocumentPanelState::with_content(content);
+    if is_structure {
+      if self.document_panels.activate_path_in_focused_panel(&document.path) {
+        return;
       }
+      self.open_structure_document(document, window, cx);
     } else if !self.document_panels.open_document_as_tab(document.clone()) {
       self.document_panels = super::DocumentPanelState::new(document);
+    }
+  }
+
+  /// Starts background parsing for a structure document and installs completed views on the UI thread.
+  fn open_structure_document(&mut self, document: OpenedProjectDocument, window: &mut Window, cx: &mut Context<Self>) {
+    let path = document.path.clone();
+    if !self.pending_structure_loads.insert(path.clone()) {
+      // The original request will install the completed tab when parsing ends.
+      return;
+    }
+
+    let panel_id = self.document_panels.focused_panel_id;
+    let window_handle = window.window_handle();
+    cx.spawn(async move |app: WeakEntity<ChitinApp>, async_cx: &mut AsyncApp| {
+      let load_path = path.clone();
+      let result = async_cx
+        .background_executor()
+        .spawn(async move { load_structure_scene(&load_path) })
+        .await;
+      let _ = async_cx.update_window(window_handle, |_, window, cx| {
+        let _ = app.update(cx, |this, cx| {
+          this.pending_structure_loads.remove(&path);
+          match result {
+            Ok(scene) => this.install_loaded_structure(panel_id, &document, scene, window, cx),
+            Err(error) => {
+              log::error!("failed to load structure '{}': {error}", path.display());
+            }
+          }
+          cx.notify();
+        });
+      });
+    })
+    .detach();
+  }
+
+  /// Installs a parsed structure as an independent WGPU view in its target panel.
+  fn install_loaded_structure(
+    &mut self,
+    panel_id: PanelId,
+    document: &OpenedProjectDocument,
+    scene: Arc<chitin_bio::structure::StructureScene>,
+    window: &mut Window,
+    cx: &mut App,
+  ) {
+    let content = structure_document_content(document, scene, window, cx);
+    let focused_panel_id = self.document_panels.focused_panel_id;
+    let opened = self
+      .document_panels
+      .open_content_in_panel(panel_id, &document.path, content);
+    if opened {
+      // Parsing completion must not steal focus from a panel the user selected
+      // while the background task was running.
+      self.document_panels.focused_panel_id = focused_panel_id;
     }
   }
 
@@ -272,4 +316,22 @@ impl ChitinApp {
   pub(crate) fn document_panel_resize_axis(&self) -> Option<PanelSplitAxis> {
     self.document_panels.resize_axis()
   }
+}
+
+/// Creates one surface-backed panel payload while sharing parsed scene data with future splits.
+fn structure_document_content(
+  document: &OpenedProjectDocument,
+  scene: Arc<chitin_bio::structure::StructureScene>,
+  window: &mut Window,
+  cx: &mut App,
+) -> DocumentPanelContent {
+  let document_view = build_structure_view_from_scene(Arc::clone(&scene), window, cx);
+  let clone_view =
+    WgpuDocumentViewFactory::new(move |window, cx| build_structure_view_from_scene(Arc::clone(&scene), window, cx));
+  DocumentPanelContent::wgpu_interactive(
+    Some(document.path.clone()),
+    document.title.clone(),
+    document_view,
+    clone_view,
+  )
 }

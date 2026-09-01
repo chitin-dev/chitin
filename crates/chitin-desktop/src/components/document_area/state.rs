@@ -492,7 +492,16 @@ impl DocumentPanelState {
 
   /// Opens arbitrary document content in the focused panel.
   pub(crate) fn open_content_as_tab(&mut self, path: &Path, content: DocumentPanelContent) -> bool {
-    let panel_id = self.focused_panel_id;
+    self.open_content_in_panel(self.focused_panel_id, path, content)
+  }
+
+  /// Opens content in a specific panel without changing the caller's target.
+  pub(crate) fn open_content_in_panel(
+    &mut self,
+    panel_id: PanelId,
+    path: &Path,
+    content: DocumentPanelContent,
+  ) -> bool {
     let Some(leaf) = self.tree.leaf(panel_id) else {
       return false;
     };
@@ -517,6 +526,20 @@ impl DocumentPanelState {
     leaf.activate_tab(tab_id);
     self.focused_panel_id = panel_id;
     true
+  }
+
+  /// Activates an already-open path in the focused panel without creating content.
+  pub(crate) fn activate_path_in_focused_panel(&mut self, path: &Path) -> bool {
+    let panel_id = self.focused_panel_id;
+    let Some(tab_id) = self
+      .tree
+      .leaf(panel_id)
+      .and_then(|leaf| leaf.tabs.iter().find(|tab| tab.payload.matches_project_path(path)))
+      .map(|tab| tab.id)
+    else {
+      return false;
+    };
+    self.activate_tab(panel_id, tab_id)
   }
 
   /// Activates one tab inside one document panel.

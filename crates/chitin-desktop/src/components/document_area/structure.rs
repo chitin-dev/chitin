@@ -83,35 +83,32 @@ impl WgpuPanelScene for StructureMoleculeScene {
   }
 }
 
-/// Creates a WGPU document view for a local PDB or mmCIF file.
-pub fn build_structure_view(path: &Path, window: &mut Window, cx: &mut App) -> WgpuDocumentView {
+/// Creates a WGPU document view from an already parsed, renderer-neutral scene.
+///
+/// This function must run on the GPUI event thread because surface and entity
+/// creation require `Window` and `App`. File reading and parsing should happen
+/// before this function is called.
+pub(crate) fn build_structure_view_from_scene(
+  scene: Arc<StructureScene>,
+  window: &mut Window,
+  cx: &mut App,
+) -> WgpuDocumentView {
   let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
-  match load_structure_scene(path) {
-    Ok(scene) => {
-      let panel = cx.new(|_| {
-        ChitinWgpuDocumentPanel::new_with_scene(
-          surface,
-          StructureMoleculeScene::new(Arc::new(scene), AtomRepresentation::Stick),
-        )
-      });
-      let controlled_panel = panel.clone();
-      WgpuDocumentView::with_atom_representation(panel, AtomRepresentation::Stick, move |representation, cx| {
-        controlled_panel.update(cx, |panel, cx| {
-          if panel.set_atom_representation(representation) {
-            cx.notify();
-          }
-        });
-      })
-    }
-    Err(error) => {
-      log::error!("failed to load structure '{}': {error}", path.display());
-      WgpuDocumentView::new(cx.new(|_| ChitinWgpuDocumentPanel::new(surface)))
-    }
-  }
+  let panel = cx.new(|_| {
+    ChitinWgpuDocumentPanel::new_with_scene(surface, StructureMoleculeScene::new(scene, AtomRepresentation::Stick))
+  });
+  let controlled_panel = panel.clone();
+  WgpuDocumentView::with_atom_representation(panel, AtomRepresentation::Stick, move |representation, cx| {
+    controlled_panel.update(cx, |panel, cx| {
+      if panel.set_atom_representation(representation) {
+        cx.notify();
+      }
+    });
+  })
 }
 
 /// Loads a local PDB or mmCIF file and extracts its first renderable model.
-fn load_structure_scene(path: &Path) -> Result<StructureScene, String> {
+pub(crate) fn load_structure_scene(path: &Path) -> Result<Arc<StructureScene>, String> {
   let bytes = std::fs::read(path).map_err(|error| format!("cannot read '{}': {error}", path.display()))?;
   let extension = path
     .extension()
@@ -128,5 +125,7 @@ fn load_structure_scene(path: &Path) -> Result<StructureScene, String> {
       .map_err(|error| error.to_string())?,
     _ => return Err("expected a .pdb, .ent, .cif, or .mmcif file".to_string()),
   };
-  StructureScene::from_first_model(&structure).map_err(|error| error.to_string())
+  StructureScene::from_first_model(&structure)
+    .map(Arc::new)
+    .map_err(|error| error.to_string())
 }

@@ -3,7 +3,7 @@
 //! `ChitinApp` owns desktop-level state such as the active activity, currently
 //! opened project workspace, and project sidebar state.
 
-use std::path::PathBuf;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use chitin_ui::{
   composite::{
@@ -29,7 +29,6 @@ use crate::{
 };
 
 pub use crate::components::document_area::state::{WgpuDocumentView, WgpuDocumentViewFactory};
-pub use crate::components::document_area::structure::build_structure_view;
 
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
@@ -53,8 +52,8 @@ pub struct ChitinApp {
   pub(crate) command_panel: CommandPanelController,
   /// Application-wide executor and registry for background work.
   pub(crate) tasks: BackgroundTaskCenter,
-  /// Optional factory for structure-aware WGPU document views.
-  pub(crate) wgpu_document_view_factory: Option<WgpuDocumentViewFactory>,
+  /// Structure paths currently being read and parsed off the UI thread.
+  pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
   /// Primitive button state for platform window actions.
   pub(crate) window_bar_controls: Option<WindowBarControls>,
   /// Primitive button state for activity-bar navigation controls.
@@ -64,12 +63,6 @@ pub struct ChitinApp {
 }
 
 impl ChitinApp {
-  /// Attaches a factory used to render PDB and mmCIF files from the project tree.
-  pub fn with_wgpu_document_factory(mut self, factory: WgpuDocumentViewFactory) -> Self {
-    self.wgpu_document_view_factory = Some(factory);
-    self
-  }
-
   /// Creates root app state from an optional project path.
   ///
   /// If no path is provided, the current working directory is used. Workspace
@@ -137,7 +130,7 @@ impl ChitinApp {
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
       tasks: BackgroundTaskCenter::new(),
-      wgpu_document_view_factory: None,
+      pending_structure_loads: BTreeSet::new(),
       window_bar_controls: None,
       activity_bar_controls: None,
       document_options_controls: None,
@@ -190,7 +183,6 @@ impl ChitinApp {
   ) -> Self {
     let title = title.into();
     let mut app = Self::new_with_project_sidebar_focus(project_path, project_sidebar_focus);
-    app.wgpu_document_view_factory = Some(clone_wgpu_panel.clone());
     app.document_panels = DocumentPanelState::with_content(DocumentPanelContent::wgpu_interactive(
       Some(PathBuf::from(&title)),
       title,
