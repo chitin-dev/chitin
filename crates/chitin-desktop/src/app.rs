@@ -20,7 +20,7 @@ use crate::{
   components::{
     activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
-    document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
+    document_area::{DocumentOptionsControls, DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::{WindowBarControls, render_window_bar},
   },
@@ -59,6 +59,8 @@ pub struct ChitinApp {
   pub(crate) window_bar_controls: Option<WindowBarControls>,
   /// Primitive button state for activity-bar navigation controls.
   pub(crate) activity_bar_controls: Option<ActivityBarControls>,
+  /// Persistent semantic controls for molecular document options.
+  pub(crate) document_options_controls: Option<DocumentOptionsControls>,
 }
 
 impl ChitinApp {
@@ -138,6 +140,7 @@ impl ChitinApp {
       wgpu_document_view_factory: None,
       window_bar_controls: None,
       activity_bar_controls: None,
+      document_options_controls: None,
     }
   }
 
@@ -398,6 +401,18 @@ impl ChitinApp {
     self.activity_bar_controls = Some(controls.clone());
     controls
   }
+
+  /// Returns persistent semantic controls for molecular document options.
+  fn document_options_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> DocumentOptionsControls {
+    if let Some(controls) = self.document_options_controls.as_ref() {
+      return controls.clone();
+    }
+
+    let controls = DocumentOptionsControls::new(cx);
+    controls.subscribe(window, cx);
+    self.document_options_controls = Some(controls.clone());
+    controls
+  }
 }
 
 impl Render for ChitinApp {
@@ -425,6 +440,7 @@ impl Render for ChitinApp {
     let theme = builtins::dark();
     let window_bar_controls = self.window_bar_controls(window, cx);
     let activity_bar_controls = self.activity_bar_controls(window, cx);
+    let document_options_controls = self.document_options_controls(window, cx);
     let command_panel_search_input = self.command_panel_search_input(window, cx);
     self.command_panel_rcsb_form(window, cx);
     let app = cx.weak_entity();
@@ -553,6 +569,7 @@ impl Render for ChitinApp {
             theme,
             &document_panel_focus,
             app.clone(),
+            document_options_controls,
             cx,
           )),
       )

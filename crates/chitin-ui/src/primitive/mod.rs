@@ -6,6 +6,8 @@ pub mod button;
 pub mod icon;
 /// Input controls and their state models.
 pub mod input;
+/// Semantic popup menus with keyboard navigation and selection events.
+pub mod menu;
 /// Window-bounded modal popovers with arbitrary scrollable content.
 pub mod popover;
 /// Read-only progress indicators for long-running work.

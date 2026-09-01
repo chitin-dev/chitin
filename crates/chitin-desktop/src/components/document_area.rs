@@ -11,6 +11,7 @@ pub(crate) mod structure;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use render::DocumentOptionsControls;
 pub use render::render_document_area;
 pub(crate) use state::DocumentPanelState;
 pub use state::OpenedProjectDocument;
