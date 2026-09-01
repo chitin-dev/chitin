@@ -33,6 +33,12 @@ const SPLIT_VERTICAL_ICON_PATH: &str = "icons/panel-split-vertical.svg";
 const PANEL_MORE_ICON_PATH: &str = "icons/panel-more.svg";
 /// Asset path for the selected menu item indicator.
 const CHECK_ICON_PATH: &str = "icons/check.svg";
+/// Asset path for the stick representation icon.
+const STICK_ICON_PATH: &str = "icons/atom-stick.svg";
+/// Asset path for the ball-and-stick representation icon.
+const BALL_AND_STICK_ICON_PATH: &str = "icons/atom-ball-and-stick.svg";
+/// Asset path for the sphere representation icon.
+const SPHERE_ICON_PATH: &str = "icons/atom-sphere.svg";
 /// Asset path for document tab close buttons.
 const TAB_CLOSE_ICON_PATH: &str = "icons/tab-close.svg";
 /// Size used by tab strip action icons.
@@ -402,7 +408,7 @@ fn build_document_options_popover(
   app: WeakEntity<ChitinApp>,
   options_menu_anchor: Option<gpui::Bounds<Pixels>>,
 ) -> Popover {
-  let mut representation_section = div().flex().flex_col().p_1().child(
+  let mut representation_section = div().flex().flex_col().text_size(px(12.0)).child(
     div()
       .h(px(28.0))
       .flex()
@@ -467,12 +473,16 @@ fn render_atom_representation_item(
   div()
     .flex()
     .items_center()
+    .justify_between()
     .h(px(30.0))
     .px_2()
     .gap_2()
-    .rounded_sm()
     .cursor_pointer()
-    .when(selected, |item| item.bg(theme.background.selection))
+    .bg(if selected {
+      theme.background.hover
+    } else {
+      theme.background.secondary
+    })
     .hover(move |style| style.bg(theme.background.hover).text_color(theme.text.primary))
     .on_mouse_up(MouseButton::Left, move |_, _, cx| {
       let _ = app.update(cx, |app, cx| {
@@ -485,18 +495,32 @@ fn render_atom_representation_item(
       div()
         .flex()
         .items_center()
-        .justify_center()
-        .size(px(16.0))
-        .when(selected, |indicator| {
-          indicator.child(
-            svg()
-              .path(CHECK_ICON_PATH)
-              .size(px(14.0))
-              .text_color(theme.text.primary),
-          )
-        }),
+        .gap_2()
+        .child(
+          svg()
+            .path(atom_representation_icon_path(representation))
+            .size(px(16.0))
+            .text_color(theme.text.primary),
+        )
+        .child(atom_representation_label(representation)),
     )
-    .child(atom_representation_label(representation))
+    .when(selected, |item| {
+      item.child(
+        svg()
+          .path(CHECK_ICON_PATH)
+          .size(px(14.0))
+          .text_color(theme.text.primary),
+      )
+    })
+}
+
+/// Returns the icon associated with an atom representation.
+fn atom_representation_icon_path(representation: AtomRepresentation) -> &'static str {
+  match representation {
+    AtomRepresentation::Stick => STICK_ICON_PATH,
+    AtomRepresentation::BallAndStick => BALL_AND_STICK_ICON_PATH,
+    AtomRepresentation::Sphere => SPHERE_ICON_PATH,
+  }
 }
 
 /// Returns the display label for an atom representation menu item.
