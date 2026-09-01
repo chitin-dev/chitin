@@ -286,16 +286,20 @@ impl StructureBuilder {
       atom_id,
     );
     if let Some(((chain_id, sequence_number), atom_name)) = label_lookup {
-      self.lookup_ids.insert(
-        AtomLookupKey {
+      // Author and label identifiers share this normalized key shape. Keep
+      // the author mapping when a label alias happens to use the same text,
+      // otherwise a later atom from another chain can redirect author-based
+      // connections to the wrong coordinate.
+      self
+        .lookup_ids
+        .entry(AtomLookupKey {
           chain_id: Some(chain_id),
           sequence_number,
           atom_name,
           insertion_code: lookup_insertion_code,
           altloc: lookup_altloc,
-        },
-        atom_id,
-      );
+        })
+        .or_insert(atom_id);
     }
 
     self.structure.coordinates[coordinate_set_id.index()].positions[atom_id.index()] = record.position;
