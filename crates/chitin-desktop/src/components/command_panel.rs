@@ -23,11 +23,15 @@ use chitin_ui::{
   themes::UIThemes,
 };
 use gpui::{
-  App, Context, Div, Entity, InteractiveElement, KeyDownEvent, ParentElement, Styled, Subscription, WeakEntity, Window,
-  div, px,
+  App, AppContext, Context, Div, Entity, InteractiveElement, KeyDownEvent, ParentElement, Styled, Subscription,
+  WeakEntity, Window, div, px,
 };
 
-use crate::{app::ChitinApp, tasks::rcsb::submit_downloads};
+use crate::{
+  app::ChitinApp,
+  components::document_area::state::OpenedProjectDocument,
+  tasks::{TaskOutput, TaskState, rcsb::submit_downloads},
+};
 
 /// Callback invoked when a rendered command row is selected.
 type CommandPanelSelectHandler = dyn for<'a, 'b> Fn(usize, &'a mut Window, &'b mut App);
@@ -183,7 +187,7 @@ impl ChitinApp {
   }
 
   /// Submits the current RCSB form and closes its modal panel.
-  fn submit_rcsb_form(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+  fn submit_rcsb_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let Some(form) = self.command_panel.rcsb_form_if_created() else {
       return;
     };
@@ -244,16 +248,25 @@ impl ChitinApp {
     let pdb_id_state = form.pdb_id.clone();
     let format_state = form.format.clone();
     let submit_state = form.submit.clone();
+    let window_handle = window.window_handle();
     cx.spawn(async move |app, cx| {
       while let Some(snapshot) = task.changed().await {
         let terminal = snapshot.state.is_terminal();
-        let _ = app.update(cx, |_, cx| {
-          download_state.update(cx, |state, cx| state.apply_task_snapshot(&snapshot, total_items, cx));
-          if terminal {
-            pdb_id_state.update(cx, |state, cx| state.set_disabled(false, cx));
-            format_state.update(cx, |state, cx| state.set_disabled(false, cx));
-            submit_state.update(cx, |state, cx| state.set_disabled(false, cx));
-          }
+        let _ = cx.update_window(window_handle, |_, window, cx| {
+          let _ = app.update(cx, |this, cx| {
+            download_state.update(cx, |state, cx| state.apply_task_snapshot(&snapshot, total_items, cx));
+            if terminal {
+              pdb_id_state.update(cx, |state, cx| state.set_disabled(false, cx));
+              format_state.update(cx, |state, cx| state.set_disabled(false, cx));
+              submit_state.update(cx, |state, cx| state.set_disabled(false, cx));
+              if snapshot.state == TaskState::Completed {
+                for output in &snapshot.outputs {
+                  let TaskOutput::PersistedArtifact(artifact) = output;
+                  this.open_project_document_with_window(OpenedProjectDocument::new(&artifact.path), window, cx);
+                }
+              }
+            }
+          });
         });
         if terminal {
           break;
