@@ -234,6 +234,8 @@ pub enum BondSource {
   Conect,
   /// Explicit mmCIF _struct_conn relation.
   StructConn,
+  /// Metal-coordination relation declared by mmCIF `_struct_conn`.
+  StructConnMetalCoordination,
   /// Inferred from polymer topology.
   PolymerInference,
   /// Inferred from a distance heuristic.

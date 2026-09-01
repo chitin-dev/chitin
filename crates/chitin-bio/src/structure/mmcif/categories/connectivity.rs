@@ -22,6 +22,14 @@ pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Resul
     return Ok(());
   };
   for row in category.rows() {
+    let bond_source = if row
+      .conn_type_id()
+      .is_some_and(|connection_type| connection_type.eq_ignore_ascii_case("metalc"))
+    {
+      BondSource::StructConnMetalCoordination
+    } else {
+      BondSource::StructConn
+    };
     // Auth and label identifiers may be mixed within one endpoint in RCSB
     // files, so fallback is performed independently for every identifier.
     let first = endpoint(
@@ -50,7 +58,7 @@ pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Resul
       row.row_number(),
       first,
       second,
-      BondSource::StructConn,
+      bond_source,
       "MMCIF_STRUCT_CONN_UNKNOWN_ATOM",
     );
   }

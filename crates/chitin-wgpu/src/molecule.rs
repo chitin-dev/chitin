@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chitin_bio::structure::{ElementCategory, StructureScene};
+use chitin_bio::structure::{BondSource, ElementCategory, StructureScene};
 use wgpu::util::DeviceExt;
 
 use crate::{DepthTarget, RenderTargetSize};
@@ -11,6 +11,12 @@ use crate::{DepthTarget, RenderTargetSize};
 const SHADER: &str = include_str!("molecule.wgsl");
 /// Default ChimeraX-inspired stick cylinder radius in source ångström units.
 const DEFAULT_STICK_RADIUS: f32 = 0.20;
+/// Preferred visible segment length for metal-coordination dashes, in ångströms.
+const METAL_COORDINATION_DASH_LENGTH: f32 = 0.45;
+/// Empty distance separating metal-coordination dashes, in ångströms.
+const METAL_COORDINATION_GAP_LENGTH: f32 = 0.28;
+/// Radius of metal-coordination dashes relative to ordinary sticks.
+const METAL_COORDINATION_RADIUS_SCALE: f32 = 0.40;
 /// Fraction of the normalized scene radius reserved for the fitted structure.
 const FIT_RADIUS: f32 = 0.90;
 /// Number of rendered frames between camera-dependent diagnostic samples.
@@ -1031,9 +1037,66 @@ fn bond_instances(
       .unwrap_or(ElementCategory::Other);
     let start_color = style.palette.for_element(start_element).color;
     let end_color = style.palette.for_element(end_element).color;
-    instances.push(bond_instance(start, end, style.bond_radius, start_color, end_color));
+    if bond.source == BondSource::StructConnMetalCoordination {
+      append_metal_coordination_instances(
+        &mut instances,
+        start,
+        end,
+        style.bond_radius * METAL_COORDINATION_RADIUS_SCALE,
+        start_color,
+        end_color,
+      );
+    } else {
+      instances.push(bond_instance(start, end, style.bond_radius, start_color, end_color));
+    }
   }
   instances
+}
+
+/// Appends evenly spaced cylinder segments for a metal-coordination relation.
+fn append_metal_coordination_instances(
+  instances: &mut Vec<[f32; 16]>,
+  start: [f32; 3],
+  end: [f32; 3],
+  radius: f32,
+  start_color: [f32; 3],
+  end_color: [f32; 3],
+) {
+  let start = glam::Vec3::from_array(start);
+  let end = glam::Vec3::from_array(end);
+  let axis = end - start;
+  let length = axis.length();
+  if !length.is_finite() || length <= f32::EPSILON {
+    return;
+  }
+
+  let dash_count = ((length + METAL_COORDINATION_GAP_LENGTH)
+    / (METAL_COORDINATION_DASH_LENGTH + METAL_COORDINATION_GAP_LENGTH))
+    .ceil()
+    .max(1.0) as usize;
+  let total_gap_length = METAL_COORDINATION_GAP_LENGTH * dash_count.saturating_sub(1) as f32;
+  let dash_length = (length - total_gap_length) / dash_count as f32;
+  let direction = axis / length;
+
+  for dash_index in 0..dash_count {
+    let dash_start_distance = dash_index as f32 * (dash_length + METAL_COORDINATION_GAP_LENGTH);
+    let dash_end_distance = dash_start_distance + dash_length;
+    let dash_start = start + direction * dash_start_distance;
+    let dash_end = start + direction * dash_end_distance;
+    let midpoint = (dash_start_distance + dash_end_distance) * 0.5;
+    let color = if midpoint < length * 0.5 {
+      start_color
+    } else {
+      end_color
+    };
+    instances.push(bond_instance(
+      dash_start.to_array(),
+      dash_end.to_array(),
+      radius,
+      color,
+      color,
+    ));
+  }
 }
 
 /// Packs one colored cylinder instance for the molecule vertex shader.
@@ -1179,6 +1242,31 @@ mod tests {
     let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
 
     assert_eq!(instances.len(), 1);
+  }
+
+  #[test]
+  fn metal_coordination_should_expand_into_separated_dash_instances() {
+    let mut scene = bonded_scene("O");
+    scene.bonds[0].source = BondSource::StructConnMetalCoordination;
+    scene.bonds[0].positions[1] = [3.0, 0.0, 0.0];
+
+    let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
+    let contains_gap = instances
+      .windows(2)
+      .all(|pair| pair[1][0] - pair[0][4] >= METAL_COORDINATION_GAP_LENGTH - f32::EPSILON);
+
+    assert!(instances.len() > 1 && contains_gap);
+  }
+
+  #[test]
+  fn metal_coordination_should_use_a_thinner_radius_than_covalent_sticks() {
+    let mut scene = bonded_scene("O");
+    scene.bonds[0].source = BondSource::StructConnMetalCoordination;
+    let style = BallAndStickStyle::default();
+
+    let instances = bond_instances(&scene, &style, AtomRepresentation::Stick);
+
+    assert_eq!(instances[0][3], style.bond_radius * METAL_COORDINATION_RADIUS_SCALE);
   }
 
   #[test]
