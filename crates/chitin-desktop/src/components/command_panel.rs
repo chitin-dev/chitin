@@ -332,7 +332,7 @@ impl ChitinApp {
         if command == ChitinCommand::Application(ApplicationCommand::ToggleCommandPanel) {
           cx.notify();
         } else {
-          self.dispatch_command(command, cx);
+          self.dispatch_command_with_window(command, window, cx);
         }
       }
     }
