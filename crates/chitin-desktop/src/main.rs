@@ -3,10 +3,7 @@
 
 use std::{borrow::Cow, collections::BTreeSet, path::PathBuf};
 
-use chitin_desktop::{
-  app::{ChitinApp, WgpuDocumentViewFactory, build_structure_view},
-  keybindings::default_key_bindings,
-};
+use chitin_desktop::{app::ChitinApp, keybindings::default_key_bindings};
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
@@ -84,11 +81,7 @@ fn main() {
         let project_sidebar_focus = cx.focus_handle();
         window.focus(&project_sidebar_focus, cx);
         window.activate_window();
-        let structure_factory = WgpuDocumentViewFactory::new_for_document(build_structure_view);
-        cx.new(|_| {
-          ChitinApp::new_with_project_sidebar_focus(project_path, project_sidebar_focus)
-            .with_wgpu_document_factory(structure_factory)
-        })
+        cx.new(|_| ChitinApp::new_with_project_sidebar_focus(project_path, project_sidebar_focus))
       },
     );
 

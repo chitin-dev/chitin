@@ -3,7 +3,7 @@
 //! `ChitinApp` owns desktop-level state such as the active activity, currently
 //! opened project workspace, and project sidebar state.
 
-use std::path::PathBuf;
+use std::{collections::BTreeSet, path::PathBuf};
 
 use chitin_ui::{
   composite::{
@@ -20,7 +20,7 @@ use crate::{
   components::{
     activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
-    document_area::{DocumentPanelState, render_document_area, state::DocumentPanelContent},
+    document_area::{DocumentOptionsControls, DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
     window_bar::{WindowBarControls, render_window_bar},
   },
@@ -29,7 +29,6 @@ use crate::{
 };
 
 pub use crate::components::document_area::state::{WgpuDocumentView, WgpuDocumentViewFactory};
-pub use crate::components::document_area::structure::build_structure_view;
 
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
@@ -53,21 +52,17 @@ pub struct ChitinApp {
   pub(crate) command_panel: CommandPanelController,
   /// Application-wide executor and registry for background work.
   pub(crate) tasks: BackgroundTaskCenter,
-  /// Optional factory for structure-aware WGPU document views.
-  pub(crate) wgpu_document_view_factory: Option<WgpuDocumentViewFactory>,
+  /// Structure paths currently being read and parsed off the UI thread.
+  pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
   /// Primitive button state for platform window actions.
   pub(crate) window_bar_controls: Option<WindowBarControls>,
   /// Primitive button state for activity-bar navigation controls.
   pub(crate) activity_bar_controls: Option<ActivityBarControls>,
+  /// Persistent semantic controls for molecular document options.
+  pub(crate) document_options_controls: Option<DocumentOptionsControls>,
 }
 
 impl ChitinApp {
-  /// Attaches a factory used to render PDB and mmCIF files from the project tree.
-  pub fn with_wgpu_document_factory(mut self, factory: WgpuDocumentViewFactory) -> Self {
-    self.wgpu_document_view_factory = Some(factory);
-    self
-  }
-
   /// Creates root app state from an optional project path.
   ///
   /// If no path is provided, the current working directory is used. Workspace
@@ -135,9 +130,10 @@ impl ChitinApp {
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
       tasks: BackgroundTaskCenter::new(),
-      wgpu_document_view_factory: None,
+      pending_structure_loads: BTreeSet::new(),
       window_bar_controls: None,
       activity_bar_controls: None,
+      document_options_controls: None,
     }
   }
 
@@ -187,7 +183,6 @@ impl ChitinApp {
   ) -> Self {
     let title = title.into();
     let mut app = Self::new_with_project_sidebar_focus(project_path, project_sidebar_focus);
-    app.wgpu_document_view_factory = Some(clone_wgpu_panel.clone());
     app.document_panels = DocumentPanelState::with_content(DocumentPanelContent::wgpu_interactive(
       Some(PathBuf::from(&title)),
       title,
@@ -398,6 +393,18 @@ impl ChitinApp {
     self.activity_bar_controls = Some(controls.clone());
     controls
   }
+
+  /// Returns persistent semantic controls for molecular document options.
+  fn document_options_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> DocumentOptionsControls {
+    if let Some(controls) = self.document_options_controls.as_ref() {
+      return controls.clone();
+    }
+
+    let controls = DocumentOptionsControls::new(cx);
+    controls.subscribe(window, cx);
+    self.document_options_controls = Some(controls.clone());
+    controls
+  }
 }
 
 impl Render for ChitinApp {
@@ -425,6 +432,7 @@ impl Render for ChitinApp {
     let theme = builtins::dark();
     let window_bar_controls = self.window_bar_controls(window, cx);
     let activity_bar_controls = self.activity_bar_controls(window, cx);
+    let document_options_controls = self.document_options_controls(window, cx);
     let command_panel_search_input = self.command_panel_search_input(window, cx);
     self.command_panel_rcsb_form(window, cx);
     let app = cx.weak_entity();
@@ -553,6 +561,7 @@ impl Render for ChitinApp {
             theme,
             &document_panel_focus,
             app.clone(),
+            document_options_controls,
             cx,
           )),
       )

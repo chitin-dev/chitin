@@ -3,7 +3,7 @@
 use chitin_command::{
   ApplicationCommand, ChitinCommand, DatabaseCommand, PanelTabCommand, StructureCommand, WorkspaceCommand,
 };
-use gpui::Context;
+use gpui::{Context, Window};
 
 use crate::{app::ChitinApp, components::workspace_tree::WorkspaceTreeNavigation};
 
@@ -26,6 +26,24 @@ impl WorkspaceCommandDesktopExt for WorkspaceCommand {
 }
 
 impl ChitinApp {
+  /// Executes a command from a UI path that can provide a window context.
+  ///
+  /// Project-tree activation needs the window to create specialized document
+  /// views, such as the molecular PDB/mmCIF renderer. Other commands retain
+  /// the regular context-only dispatch path.
+  pub(crate) fn dispatch_command_with_window(
+    &mut self,
+    command: ChitinCommand,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    if matches!(command, ChitinCommand::Workspace(WorkspaceCommand::ActivateFocused)) {
+      self.activate_focused_project_tree_entry_with_window(window, cx);
+    } else {
+      self.dispatch_command(command, cx);
+    }
+  }
+
   /// Executes a typed command against desktop state.
   ///
   /// # Parameters
