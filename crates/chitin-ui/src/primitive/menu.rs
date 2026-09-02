@@ -128,6 +128,11 @@ impl MenuState {
     self.selected_id.as_deref()
   }
 
+  /// Returns the option currently highlighted for keyboard navigation.
+  pub(crate) fn highlighted_index(&self) -> Option<usize> {
+    self.highlighted_index
+  }
+
   /// Replaces options while preserving a valid selection.
   ///
   /// # Parameters
@@ -156,7 +161,11 @@ impl MenuState {
   /// This is intended for reflecting external application state when a menu
   /// opens; user activation should use [`Self::select`] instead.
   pub fn set_selected_id(&mut self, id: Option<impl Into<SharedString>>, cx: &mut Context<Self>) {
-    self.selected_id = id.map(Into::into);
+    let selected_id = id.map(Into::into);
+    if self.selected_id == selected_id {
+      return;
+    }
+    self.selected_id = selected_id;
     self.highlighted_index = self
       .selected_id
       .as_deref()
@@ -280,6 +289,7 @@ impl RenderOnce for Menu {
     let state_for_keys = self.state.clone();
     let options = self.state.read(cx).options().to_vec();
     let selected_id = self.state.read(cx).selected_id().map(str::to_owned);
+    let highlighted_index = self.state.read(cx).highlighted_index();
     let theme = self.theme;
     let mut content = div()
       .flex()
@@ -293,6 +303,7 @@ impl RenderOnce for Menu {
     for (index, option) in options.into_iter().enumerate() {
       let state_for_click = self.state.clone();
       let selected = selected_id.as_deref() == Some(option.id());
+      let highlighted = highlighted_index == Some(index);
       let disabled = option.is_disabled();
       content = content.child(
         div()
@@ -308,7 +319,7 @@ impl RenderOnce for Menu {
           } else {
             theme.text.primary
           })
-          .bg(if selected {
+          .bg(if selected || highlighted {
             theme.background.hover
           } else {
             theme.background.secondary
