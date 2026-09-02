@@ -64,6 +64,8 @@ fn two_tab_document_panel_state() -> DocumentPanelState {
     resize_drag: None,
     tab_drag: None,
     tab_scroll: PanelTabScrollState::new(),
+    options_menu_panel_id: None,
+    options_menu_anchor: None,
   }
 }
 
@@ -327,6 +329,8 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
     resize_drag: None,
     tab_drag: None,
     tab_scroll: PanelTabScrollState::new(),
+    options_menu_panel_id: None,
+    options_menu_anchor: None,
   };
 
   let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
@@ -580,6 +584,19 @@ fn open_document_as_tab_should_focus_existing_tab_in_focused_panel() {
   assert_eq!(leaf.tabs.len(), 2);
   assert_eq!(leaf.active_tab, Some(PanelTabId::new(2)));
   assert_eq!(leaf.tabs[1].payload.title(), "beta.rs");
+}
+
+/// Verifies that the structure-loading preflight activates an existing path without adding a tab.
+#[test]
+fn activate_path_in_focused_panel_should_reuse_existing_tab() {
+  let mut state = two_tab_document_panel_state();
+
+  assert!(state.activate_path_in_focused_panel(&test_document("beta.rs").path));
+
+  let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
+    panic!("default panel should exist");
+  };
+  assert_eq!((leaf.tabs.len(), leaf.active_tab), (2, Some(PanelTabId::new(2))));
 }
 
 /// Verifies that new documents open in the currently focused split panel.

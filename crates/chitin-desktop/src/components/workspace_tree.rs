@@ -15,7 +15,7 @@ use chitin_ui::{
 use chitin_utils::workspace::{ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace, ProjectWorkspaceError};
 use gpui::{
   Context, InteractiveElement, IntoElement, MouseButton, ParentElement, ScrollStrategy, SharedString, Styled, Task,
-  WeakEntity, div, prelude::*, px, svg,
+  WeakEntity, Window, div, prelude::*, px, svg,
 };
 
 use crate::{
@@ -180,6 +180,37 @@ impl ChitinApp {
     }
   }
 
+  /// Activates a tree entry with access to the window needed for structure views.
+  pub(crate) fn activate_project_tree_entry_with_window(
+    &mut self,
+    path: &Path,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(kind) = self.project_tree_entry_kind(path) else {
+      return;
+    };
+    if kind == ProjectTreeEntryKind::File {
+      self.project_sidebar_state.focus_entry(path);
+      self.project_sidebar_state.select_entry(path);
+      self.open_project_file_with_window(path, window, cx);
+      return;
+    }
+    self.activate_project_tree_entry(path, cx);
+  }
+
+  /// Activates the keyboard-focused entry with access to the WGPU window.
+  pub(crate) fn activate_focused_project_tree_entry_with_window(
+    &mut self,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(path) = self.project_sidebar_state.focused_path.clone() else {
+      return;
+    };
+    self.activate_project_tree_entry_with_window(&path, window, cx);
+  }
+
   /// Applies tree activation without spawning follow-up asynchronous work.
   ///
   /// This helper performs the synchronous part of row activation. It focuses
@@ -226,6 +257,11 @@ impl ChitinApp {
   fn open_project_file(&mut self, path: &Path) {
     self.project_sidebar_state.select_entry(path);
     self.open_project_document(OpenedProjectDocument::new(path));
+  }
+
+  fn open_project_file_with_window(&mut self, path: &Path, window: &mut Window, cx: &mut Context<Self>) {
+    self.project_sidebar_state.select_entry(path);
+    self.open_project_document_with_window(OpenedProjectDocument::new(path), window, cx);
   }
 
   /// Finds the project tree entry kind for a filesystem path.
@@ -495,9 +531,9 @@ struct WorkspaceEntryRow {
 /// Renders a workspace tree rooted at `root`.
 ///
 /// `state` controls which directory rows are expanded, loading, selected, or
-/// focused. Clicking a row delegates to
-/// `ChitinApp::activate_project_tree_entry` with the original [`PathBuf`],
-/// which avoids lossy string round trips for non-UTF-8 filesystem paths.
+/// focused. Clicking a row delegates to the window-aware activation method
+/// with the original [`PathBuf`], which avoids lossy string round trips for
+/// non-UTF-8 filesystem paths and allows structure files to create a viewport.
 ///
 /// # Parameters
 ///
@@ -803,9 +839,9 @@ fn render_workspace_entry_row(
 
   row = row.on_mouse_up(MouseButton::Left, {
     let app = app.clone();
-    move |_, _, cx| {
+    move |_, window, cx| {
       let _ = app.update(cx, |this, cx| {
-        this.activate_project_tree_entry(&path, cx);
+        this.activate_project_tree_entry_with_window(&path, window, cx);
         cx.notify();
       });
     }

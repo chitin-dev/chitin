@@ -67,6 +67,15 @@ impl WgpuPanelScene for ExampleMoleculeScene {
   fn interaction_hint(&self) -> &'static str {
     "Atom representation | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
   }
+
+  fn set_atom_representation(&mut self, representation: AtomRepresentation) -> bool {
+    if self.representation == representation {
+      return false;
+    }
+    self.representation = representation;
+    self.renderer = None;
+    true
+  }
 }
 
 /// Reads the optional molecule shader diagnostic mode from the environment.
