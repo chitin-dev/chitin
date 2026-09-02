@@ -163,6 +163,8 @@ impl MenuState {
   pub fn set_selected_id(&mut self, id: Option<impl Into<SharedString>>, cx: &mut Context<Self>) {
     let selected_id = id.map(Into::into);
     if self.selected_id == selected_id {
+      // Rendering may synchronize the external selection on every frame;
+      // preserve a highlight that the user moved with the arrow keys.
       return;
     }
     self.selected_id = selected_id;
@@ -207,6 +209,15 @@ impl MenuState {
     }
   }
 
+  /// Moves the keyboard highlight to the next enabled option.
+  ///
+  /// Navigation wraps around the option list and skips disabled options. A
+  /// state notification is emitted only when a new enabled option is found.
+  ///
+  /// # Parameters
+  ///
+  /// * `direction` is `-1` for upward navigation and `1` for downward navigation.
+  /// * `cx` notifies the owner after the highlight changes.
   fn move_highlight(&mut self, direction: isize, cx: &mut Context<Self>) {
     let Some(current) = self.highlighted_index.or_else(|| first_enabled(&self.options)) else {
       return;
@@ -222,6 +233,16 @@ impl MenuState {
     }
   }
 
+  /// Activates an enabled option, updates selection, and emits its event.
+  ///
+  /// # Returns
+  ///
+  /// `true` when `index` identifies an enabled option; otherwise `false`.
+  ///
+  /// # Parameters
+  ///
+  /// * `index` identifies the option to activate.
+  /// * `cx` emits the selection event and notifies the owner.
   fn activate_index(&mut self, index: usize, cx: &mut Context<Self>) -> bool {
     let Some(option) = self.options.get(index).filter(|option| !option.is_disabled()) else {
       return false;
@@ -235,6 +256,12 @@ impl MenuState {
     true
   }
 
+  /// Synchronizes focus state and emits a focus transition event when needed.
+  ///
+  /// # Parameters
+  ///
+  /// * `focused` is the latest focus state reported by the window.
+  /// * `cx` emits the transition event and notifies the owner.
   pub(crate) fn sync_focus(&mut self, focused: bool, cx: &mut Context<Self>) {
     if self.focused == focused {
       return;
@@ -302,6 +329,7 @@ impl RenderOnce for Menu {
       });
     for (index, option) in options.into_iter().enumerate() {
       let state_for_click = self.state.clone();
+      // Selection owns the checkmark; highlighting owns keyboard navigation.
       let selected = selected_id.as_deref() == Some(option.id());
       let highlighted = highlighted_index == Some(index);
       let disabled = option.is_disabled();
