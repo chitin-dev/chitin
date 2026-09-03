@@ -1,6 +1,6 @@
 //! Small WGPU helpers shared by UI adapters.
 
-use std::sync::Arc;
+use crate::GpuHandle;
 
 /// Physical size of a WGPU render target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,9 +103,9 @@ impl DepthTarget {
 /// Renderer that clears a color target and maintains a matching depth target.
 pub struct ClearRenderer {
   /// Shared WGPU device used for encoder and texture creation.
-  device: Arc<wgpu::Device>,
+  device: GpuHandle<wgpu::Device>,
   /// Shared WGPU queue used for command submission.
-  queue: Arc<wgpu::Queue>,
+  queue: GpuHandle<wgpu::Queue>,
   /// Size-dependent depth target.
   depth: DepthTarget,
   /// Clear color applied to the render target.
@@ -126,8 +126,8 @@ impl ClearRenderer {
   ///
   /// A renderer that can clear matching WGPU texture views.
   pub fn new(
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    device: GpuHandle<wgpu::Device>,
+    queue: GpuHandle<wgpu::Queue>,
     size: RenderTargetSize,
     clear_color: wgpu::Color,
   ) -> Self {

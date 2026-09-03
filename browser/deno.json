@@ -1,0 +1,14 @@
+{
+  "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
+  "nodeModulesDir": "manual",
+  "tasks": {
+    "setup": "pnpm install && pnpm wasm:build",
+    "dev": "pnpm dev",
+    "build": "pnpm build",
+    "check": "pnpm check",
+    "lint": "pnpm lint",
+    "fmt": "pnpm format",
+    "validate": "pnpm validate"
+  },
+  "exclude": ["dist", "node_modules"]
+}

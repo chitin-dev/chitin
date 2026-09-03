@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": ["dist/**", "node_modules/**", "pnpm-lock.yaml"],
+  "printWidth": 120,
+  "semi": true,
+  "singleQuote": false,
+  "sortImports": true,
+  "sortPackageJson": true,
+  "svelte": true,
+  "tabWidth": 2,
+  "trailingComma": "all"
+}

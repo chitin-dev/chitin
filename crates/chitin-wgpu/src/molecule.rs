@@ -1,9 +1,9 @@
 //! Instanced atom and bond rendering for molecular structure scenes.
 
-use std::sync::Arc;
-
 use chitin_bio::structure::{BondSource, ElementCategory, StructureScene};
 use wgpu::util::DeviceExt;
+
+use crate::GpuHandle;
 
 use crate::{DepthTarget, RenderTargetSize};
 
@@ -366,9 +366,9 @@ pub struct MoleculeRenderer {
   /// Size-dependent depth target.
   depth: DepthTarget,
   /// Shared WGPU device used to resize and encode frames.
-  device: Arc<wgpu::Device>,
+  device: GpuHandle<wgpu::Device>,
   /// Shared WGPU queue used to update uniforms and submit frames.
-  queue: Arc<wgpu::Queue>,
+  queue: GpuHandle<wgpu::Queue>,
   /// Current render target size in physical pixels.
   size: RenderTargetSize,
   /// Shader output selected for visual diagnostics.
@@ -392,8 +392,8 @@ impl MoleculeRenderer {
   ///
   /// A renderer ready to draw `scene` into compatible texture views.
   pub fn new(
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    device: GpuHandle<wgpu::Device>,
+    queue: GpuHandle<wgpu::Queue>,
     size: RenderTargetSize,
     color_format: wgpu::TextureFormat,
     scene: &StructureScene,
@@ -424,8 +424,8 @@ impl MoleculeRenderer {
   ///
   /// A renderer ready to draw `scene` with the requested visual parameters.
   pub fn new_with_style(
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    device: GpuHandle<wgpu::Device>,
+    queue: GpuHandle<wgpu::Queue>,
     size: RenderTargetSize,
     color_format: wgpu::TextureFormat,
     scene: &StructureScene,
@@ -458,8 +458,8 @@ impl MoleculeRenderer {
   ///
   /// A renderer ready to draw `scene` with the requested representation.
   pub fn new_with_representation(
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    device: GpuHandle<wgpu::Device>,
+    queue: GpuHandle<wgpu::Queue>,
     size: RenderTargetSize,
     color_format: wgpu::TextureFormat,
     scene: &StructureScene,
