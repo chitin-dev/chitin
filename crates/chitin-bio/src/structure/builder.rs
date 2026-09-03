@@ -10,8 +10,8 @@ use std::collections::{HashMap, HashSet};
 use super::error::{Diagnostic, DiagnosticSeverity, StructureBuildError, StructureParseResult};
 use super::model::*;
 use super::projection::{
-  AtomLookupKey, ProjectedAtom, ProjectedMissingResidue, ProjectedNamedBond, ProjectedSecondaryRange,
-  ProjectedSerialBond, StructureInput,
+  AtomLookupKey, AtomLookupNamespace, ProjectedAtom, ProjectedMissingResidue, ProjectedNamedBond,
+  ProjectedSecondaryRange, ProjectedSerialBond, StructureInput,
 };
 
 /// Lookup key for a chain shared by all coordinate models.
@@ -277,6 +277,7 @@ impl StructureBuilder {
 
     self.lookup_ids.insert(
       AtomLookupKey {
+        namespace: AtomLookupNamespace::Author,
         chain_id: lookup_chain_id,
         sequence_number: lookup_sequence_number,
         atom_name: lookup_atom_name,
@@ -293,6 +294,7 @@ impl StructureBuilder {
       self
         .lookup_ids
         .entry(AtomLookupKey {
+          namespace: AtomLookupNamespace::Label,
           chain_id: Some(chain_id),
           sequence_number,
           atom_name,

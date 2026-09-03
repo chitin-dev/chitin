@@ -229,10 +229,20 @@ pub(crate) struct ProjectedAtom {
   pub(crate) label_entity_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AtomLookupNamespace {
+  /// Author-provided chain, residue, and atom identifiers.
+  Author,
+  /// Internally assigned label chain, residue, and atom identifiers.
+  Label,
+}
+
 /// Normalized atom identity used by projected cross-references.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AtomLookupKey {
-  /// Chain identifier in either the author or label namespace.
+  /// Namespace that owns the identifiers in this key.
+  pub(crate) namespace: AtomLookupNamespace,
+  /// Chain identifier in the selected namespace.
   pub(crate) chain_id: Option<String>,
   /// Residue sequence number in the selected namespace.
   pub(crate) sequence_number: i32,

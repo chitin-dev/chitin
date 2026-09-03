@@ -553,4 +553,42 @@ metalc G 87 OD1 G 601 MG
     assert_eq!(parsed.structure.bonds[0].a.index(), 0);
     assert_eq!(parsed.structure.bonds[0].b.index(), 2);
   }
+
+  #[test]
+  fn label_atom_lookup_should_not_be_overwritten_by_a_later_author_alias() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 OD1 ASP G 87 OD1 ASP A 87 0.0 0.0 0.0 O
+ATOM 2 OD1 ASP F 87 OD1 ASP G 87 40.0 0.0 0.0 O
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_label_asym_id
+_struct_conn.ptnr1_label_seq_id
+_struct_conn.ptnr1_label_atom_id
+_struct_conn.ptnr2_label_asym_id
+_struct_conn.ptnr2_label_seq_id
+_struct_conn.ptnr2_label_atom_id
+metalc G 87 OD1 A 87 OD1
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("label lookup collision fixture should parse: {error}"));
+
+    assert_eq!(parsed.structure.bonds[0].a.index(), 0);
+    assert_eq!(parsed.structure.bonds[0].b.index(), 1);
+  }
 }
