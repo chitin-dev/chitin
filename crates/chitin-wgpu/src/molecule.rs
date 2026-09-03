@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chitin_bio::structure::{ElementCategory, StructureScene};
+use chitin_bio::structure::{BondSource, ElementCategory, StructureScene};
 use wgpu::util::DeviceExt;
 
 use crate::{DepthTarget, RenderTargetSize};
@@ -11,6 +11,39 @@ use crate::{DepthTarget, RenderTargetSize};
 const SHADER: &str = include_str!("molecule.wgsl");
 /// Default ChimeraX-inspired stick cylinder radius in source ångström units.
 const DEFAULT_STICK_RADIUS: f32 = 0.20;
+/// Preferred visible segment length for metal-coordination dashes, in ångströms.
+const METAL_COORDINATION_DASH_LENGTH: f32 = 0.45;
+/// Empty distance separating metal-coordination dashes, in ångströms.
+const METAL_COORDINATION_GAP_LENGTH: f32 = 0.28;
+/// Radius of metal-coordination dashes relative to ordinary sticks.
+const METAL_COORDINATION_RADIUS_SCALE: f32 = 0.40;
+/// Shared dash length for non-covalent interaction markers, in ångströms.
+const SPECIAL_BOND_DASH_LENGTH: f32 = METAL_COORDINATION_DASH_LENGTH;
+/// Shared gap length for non-covalent interaction markers, in ångströms.
+const SPECIAL_BOND_GAP_LENGTH: f32 = METAL_COORDINATION_GAP_LENGTH;
+/// Maximum distance for rendering a special relation, in ångströms.
+///
+/// Special connections are local chemical interactions. Rejecting outliers
+/// here also bounds CPU-side dash tessellation for malformed coordinates.
+const MAX_SPECIAL_BOND_LENGTH: f32 = 25.0;
+/// RGB color for metal coordination markers.
+const METAL_COORDINATION_COLOR: [f32; 3] = [0.95, 0.20, 0.85];
+/// RGB color for hydrogen-bond markers.
+const HYDROGEN_BOND_COLOR: [f32; 3] = [0.0, 0.95, 0.95];
+/// RGB color for salt-bridge markers.
+const SALT_BRIDGE_COLOR: [f32; 3] = [0.90, 0.62, 0.0];
+/// RGB color for disulfide-bridge markers.
+const DISULFIDE_COLOR: [f32; 3] = [0.95, 0.76, 0.08];
+/// RGB color for mismatched-base markers.
+const BASE_MISMATCH_COLOR: [f32; 3] = [0.80, 0.47, 0.65];
+/// RGB color for covalent base modifications.
+const COVALENT_BASE_COLOR: [f32; 3] = [0.30, 0.85, 0.40];
+/// RGB color for covalent phosphate modifications.
+const COVALENT_PHOSPHATE_COLOR: [f32; 3] = [0.45, 0.75, 1.0];
+/// RGB color for covalent sugar modifications.
+const COVALENT_SUGAR_COLOR: [f32; 3] = [0.75, 0.50, 0.95];
+/// RGB color for general residue modifications.
+const RESIDUE_MODIFICATION_COLOR: [f32; 3] = [0.0, 0.62, 0.45];
 /// Fraction of the normalized scene radius reserved for the fitted structure.
 const FIT_RADIUS: f32 = 0.90;
 /// Number of rendered frames between camera-dependent diagnostic samples.
@@ -1031,9 +1064,93 @@ fn bond_instances(
       .unwrap_or(ElementCategory::Other);
     let start_color = style.palette.for_element(start_element).color;
     let end_color = style.palette.for_element(end_element).color;
-    instances.push(bond_instance(start, end, style.bond_radius, start_color, end_color));
+    if let Some((radius, dash_color, dash_length, gap_length)) = special_bond_style(bond.source, style.bond_radius) {
+      let length = glam::Vec3::from_array(start).distance(glam::Vec3::from_array(end));
+      if !length.is_finite() || length > MAX_SPECIAL_BOND_LENGTH {
+        continue;
+      }
+      if is_continuous_special_bond(bond.source) {
+        instances.push(bond_instance(start, end, radius, dash_color, dash_color));
+      } else {
+        append_dashed_bond_instances(&mut instances, start, end, radius, dash_color, dash_length, gap_length);
+      }
+    } else {
+      instances.push(bond_instance(start, end, style.bond_radius, start_color, end_color));
+    }
   }
   instances
+}
+
+/// Returns the visual style used for a non-covalent or disulfide relation.
+fn special_bond_style(source: BondSource, bond_radius: f32) -> Option<(f32, [f32; 3], f32, f32)> {
+  let style = match source {
+    BondSource::StructConnMetalCoordination => (METAL_COORDINATION_RADIUS_SCALE, METAL_COORDINATION_COLOR),
+    BondSource::StructConnHydrogenBond => (0.32, HYDROGEN_BOND_COLOR),
+    BondSource::StructConnSaltBridge => (0.32, SALT_BRIDGE_COLOR),
+    BondSource::StructConnDisulfide => (0.58, DISULFIDE_COLOR),
+    BondSource::StructConnBaseMismatch => (0.32, BASE_MISMATCH_COLOR),
+    BondSource::StructConnCovalentBase => (0.70, COVALENT_BASE_COLOR),
+    BondSource::StructConnCovalentPhosphate => (0.70, COVALENT_PHOSPHATE_COLOR),
+    BondSource::StructConnCovalentSugar => (0.70, COVALENT_SUGAR_COLOR),
+    BondSource::StructConnResidueModification => (0.70, RESIDUE_MODIFICATION_COLOR),
+    _ => return None,
+  };
+  Some((
+    bond_radius * style.0,
+    style.1,
+    SPECIAL_BOND_DASH_LENGTH,
+    SPECIAL_BOND_GAP_LENGTH,
+  ))
+}
+
+/// Reports whether a special relation should remain one continuous cylinder.
+fn is_continuous_special_bond(source: BondSource) -> bool {
+  matches!(
+    source,
+    BondSource::StructConnDisulfide
+      | BondSource::StructConnCovalentBase
+      | BondSource::StructConnCovalentPhosphate
+      | BondSource::StructConnCovalentSugar
+      | BondSource::StructConnResidueModification
+  )
+}
+
+/// Appends evenly spaced cylinder segments for a special structure relation.
+fn append_dashed_bond_instances(
+  instances: &mut Vec<[f32; 16]>,
+  start: [f32; 3],
+  end: [f32; 3],
+  radius: f32,
+  color: [f32; 3],
+  dash_length: f32,
+  gap_length: f32,
+) {
+  let start = glam::Vec3::from_array(start);
+  let end = glam::Vec3::from_array(end);
+  let axis = end - start;
+  let length = axis.length();
+  if !length.is_finite() || length <= f32::EPSILON {
+    return;
+  }
+
+  let dash_count = ((length + gap_length) / (dash_length + gap_length)).ceil().max(1.0) as usize;
+  let total_gap_length = gap_length * dash_count.saturating_sub(1) as f32;
+  let dash_length = (length - total_gap_length) / dash_count as f32;
+  let direction = axis / length;
+
+  for dash_index in 0..dash_count {
+    let dash_start_distance = dash_index as f32 * (dash_length + gap_length);
+    let dash_end_distance = dash_start_distance + dash_length;
+    let dash_start = start + direction * dash_start_distance;
+    let dash_end = start + direction * dash_end_distance;
+    instances.push(bond_instance(
+      dash_start.to_array(),
+      dash_end.to_array(),
+      radius,
+      color,
+      color,
+    ));
+  }
 }
 
 /// Packs one colored cylinder instance for the molecule vertex shader.
@@ -1179,6 +1296,54 @@ mod tests {
     let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
 
     assert_eq!(instances.len(), 1);
+  }
+
+  #[test]
+  fn metal_coordination_should_expand_into_separated_dash_instances() {
+    let mut scene = bonded_scene("O");
+    scene.bonds[0].source = BondSource::StructConnMetalCoordination;
+    scene.bonds[0].positions[1] = [3.0, 0.0, 0.0];
+
+    let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
+    let contains_gap = instances
+      .windows(2)
+      .all(|pair| pair[1][0] - pair[0][4] >= METAL_COORDINATION_GAP_LENGTH - f32::EPSILON);
+
+    assert!(instances.len() > 1 && contains_gap);
+  }
+
+  #[test]
+  fn distant_special_bonds_should_not_be_tessellated() {
+    let mut scene = bonded_scene("O");
+    scene.bonds[0].source = BondSource::StructConnMetalCoordination;
+    scene.bonds[0].positions[1] = [MAX_SPECIAL_BOND_LENGTH + 1.0, 0.0, 0.0];
+
+    let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
+
+    assert!(instances.is_empty());
+  }
+
+  #[test]
+  fn metal_coordination_should_use_a_thinner_radius_than_covalent_sticks() {
+    let mut scene = bonded_scene("O");
+    scene.bonds[0].source = BondSource::StructConnMetalCoordination;
+    let style = BallAndStickStyle::default();
+
+    let instances = bond_instances(&scene, &style, AtomRepresentation::Stick);
+
+    assert_eq!(instances[0][3], style.bond_radius * METAL_COORDINATION_RADIUS_SCALE);
+  }
+
+  #[test]
+  fn hydrogen_bonds_and_metal_coordination_should_use_distinct_colors() {
+    let color_distance = METAL_COORDINATION_COLOR
+      .into_iter()
+      .zip(HYDROGEN_BOND_COLOR)
+      .map(|(metal, hydrogen)| (metal - hydrogen).powi(2))
+      .sum::<f32>()
+      .sqrt();
+
+    assert!(color_distance > 1.0);
   }
 
   #[test]

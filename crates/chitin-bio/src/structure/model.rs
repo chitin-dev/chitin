@@ -234,6 +234,24 @@ pub enum BondSource {
   Conect,
   /// Explicit mmCIF _struct_conn relation.
   StructConn,
+  /// Metal-coordination relation declared by mmCIF `_struct_conn`.
+  StructConnMetalCoordination,
+  /// Hydrogen-bond relation declared by mmCIF `_struct_conn`.
+  StructConnHydrogenBond,
+  /// Ionic salt-bridge relation declared by mmCIF `_struct_conn`.
+  StructConnSaltBridge,
+  /// Disulfide bridge declared by mmCIF `_struct_conn`.
+  StructConnDisulfide,
+  /// Mismatched base-pair relation declared by mmCIF `_struct_conn`.
+  StructConnBaseMismatch,
+  /// Covalent nucleotide-base modification declared by mmCIF `_struct_conn`.
+  StructConnCovalentBase,
+  /// Covalent nucleotide-phosphate modification declared by mmCIF `_struct_conn`.
+  StructConnCovalentPhosphate,
+  /// Covalent nucleotide-sugar modification declared by mmCIF `_struct_conn`.
+  StructConnCovalentSugar,
+  /// Covalent residue modification declared by mmCIF `_struct_conn`.
+  StructConnResidueModification,
   /// Inferred from polymer topology.
   PolymerInference,
   /// Inferred from a distance heuristic.

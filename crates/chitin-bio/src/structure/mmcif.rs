@@ -117,7 +117,7 @@ impl MmcifParser {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::structure::SecondaryStructure;
+  use crate::structure::{BondSource, SecondaryStructure};
 
   #[test]
   fn parses_quotes_and_comments() {
@@ -412,6 +412,7 @@ sheet1 1 A 2 . A 2 .
       .parse_bytes(input)
       .unwrap_or_else(|error| panic!("struct_conn fixture should parse: {error}"));
     assert_eq!(parsed.structure.bonds.len(), 1);
+    assert_eq!(parsed.structure.bonds[0].source, BondSource::StructConn);
     assert_eq!(parsed.structure.secondary_ranges.len(), 2);
     assert_eq!(
       parsed.structure.residues[0].secondary_structure,
@@ -422,5 +423,210 @@ sheet1 1 A 2 . A 2 .
       SecondaryStructure::Sheet
     );
     assert_eq!(parsed.structure.secondary_ranges[1].kind, SecondaryStructure::Sheet);
+  }
+
+  #[test]
+  fn classifies_metal_coordination_struct_conn() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 O HOH A 1 O HOH A 1 0.0 0.0 0.0 O
+HETATM 2 MG MG A 2 MG MG B 1 2.1 0.0 0.0 MG
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_auth_asym_id
+_struct_conn.ptnr1_auth_seq_id
+_struct_conn.ptnr1_auth_atom_id
+_struct_conn.ptnr2_auth_asym_id
+_struct_conn.ptnr2_auth_seq_id
+_struct_conn.ptnr2_auth_atom_id
+metalc A 1 O A 2 MG
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("metal-coordination fixture should parse: {error}"));
+
+    assert_eq!(
+      parsed.structure.bonds[0].source,
+      BondSource::StructConnMetalCoordination
+    );
+  }
+
+  #[test]
+  fn classifies_non_covalent_struct_conn_types() {
+    let expected = [
+      ("hydrog", BondSource::StructConnHydrogenBond),
+      ("saltbr", BondSource::StructConnSaltBridge),
+      ("disulf", BondSource::StructConnDisulfide),
+      ("mismat", BondSource::StructConnBaseMismatch),
+      ("covale_base", BondSource::StructConnCovalentBase),
+      ("covale_phosphate", BondSource::StructConnCovalentPhosphate),
+      ("covale_sugar", BondSource::StructConnCovalentSugar),
+      ("modres", BondSource::StructConnResidueModification),
+    ];
+    for (connection_type, expected_source) in expected {
+      let input = format!(
+        r#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 N ARG A 1 N ARG A 1 0.0 0.0 0.0 N
+ATOM 2 O GLU A 2 O GLU A 2 3.0 0.0 0.0 O
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_auth_asym_id
+_struct_conn.ptnr1_auth_seq_id
+_struct_conn.ptnr1_auth_atom_id
+_struct_conn.ptnr2_auth_asym_id
+_struct_conn.ptnr2_auth_seq_id
+_struct_conn.ptnr2_auth_atom_id
+{connection_type} A 1 N A 2 O
+"#
+      );
+      let parsed = MmcifParser::new()
+        .parse_bytes(input.as_bytes())
+        .unwrap_or_else(|error| panic!("special struct-conn fixture should parse: {error}"));
+      assert_eq!(parsed.structure.bonds[0].source, expected_source);
+    }
+  }
+
+  #[test]
+  fn special_struct_conn_source_replaces_duplicate_ordinary_connection() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 N ARG A 1 0.0 0.0 0.0 N
+ATOM 2 O GLU A 2 3.0 0.0 0.0 O
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_auth_asym_id
+_struct_conn.ptnr1_auth_seq_id
+_struct_conn.ptnr1_auth_atom_id
+_struct_conn.ptnr2_auth_asym_id
+_struct_conn.ptnr2_auth_seq_id
+_struct_conn.ptnr2_auth_atom_id
+covale A 1 N A 2 O
+metalc A 1 N A 2 O
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("duplicate struct-conn fixture should parse: {error}"));
+
+    assert_eq!(parsed.structure.bonds.len(), 1);
+    assert_eq!(
+      parsed.structure.bonds[0].source,
+      BondSource::StructConnMetalCoordination
+    );
+  }
+
+  #[test]
+  fn author_atom_lookup_should_not_be_overwritten_by_a_label_alias() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 OD1 ASP G 87 OD1 ASP A 87 0.0 0.0 0.0 O
+ATOM 2 OD1 ASP F 87 OD1 ASP G 87 40.0 0.0 0.0 O
+HETATM 3 MG MG G 601 MG MG O . 2.1 0.0 0.0 MG
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_auth_asym_id
+_struct_conn.ptnr1_auth_seq_id
+_struct_conn.ptnr1_auth_atom_id
+_struct_conn.ptnr2_auth_asym_id
+_struct_conn.ptnr2_auth_seq_id
+_struct_conn.ptnr2_auth_atom_id
+metalc G 87 OD1 G 601 MG
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("lookup collision fixture should parse: {error}"));
+
+    assert_eq!(parsed.structure.bonds[0].a.index(), 0);
+    assert_eq!(parsed.structure.bonds[0].b.index(), 2);
+  }
+
+  #[test]
+  fn label_atom_lookup_should_not_be_overwritten_by_a_later_author_alias() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 OD1 ASP G 87 OD1 ASP A 87 0.0 0.0 0.0 O
+ATOM 2 OD1 ASP F 87 OD1 ASP G 87 40.0 0.0 0.0 O
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_label_asym_id
+_struct_conn.ptnr1_label_seq_id
+_struct_conn.ptnr1_label_atom_id
+_struct_conn.ptnr2_label_asym_id
+_struct_conn.ptnr2_label_seq_id
+_struct_conn.ptnr2_label_atom_id
+metalc G 87 OD1 A 87 OD1
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("label lookup collision fixture should parse: {error}"));
+
+    assert_eq!(parsed.structure.bonds[0].a.index(), 0);
+    assert_eq!(parsed.structure.bonds[0].b.index(), 1);
   }
 }

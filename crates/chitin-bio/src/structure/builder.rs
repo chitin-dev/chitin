@@ -10,9 +10,27 @@ use std::collections::{HashMap, HashSet};
 use super::error::{Diagnostic, DiagnosticSeverity, StructureBuildError, StructureParseResult};
 use super::model::*;
 use super::projection::{
-  AtomLookupKey, ProjectedAtom, ProjectedMissingResidue, ProjectedNamedBond, ProjectedSecondaryRange,
-  ProjectedSerialBond, StructureInput,
+  AtomLookupKey, AtomLookupNamespace, ProjectedAtom, ProjectedMissingResidue, ProjectedNamedBond,
+  ProjectedSecondaryRange, ProjectedSerialBond, StructureInput,
 };
+
+/// Ranks bond provenance so richer source annotations survive deduplication.
+fn bond_source_priority(source: BondSource) -> u8 {
+  match source {
+    BondSource::StructConnMetalCoordination
+    | BondSource::StructConnHydrogenBond
+    | BondSource::StructConnSaltBridge
+    | BondSource::StructConnDisulfide
+    | BondSource::StructConnBaseMismatch
+    | BondSource::StructConnCovalentBase
+    | BondSource::StructConnCovalentPhosphate
+    | BondSource::StructConnCovalentSugar
+    | BondSource::StructConnResidueModification => 3,
+    BondSource::StructConn => 2,
+    BondSource::Conect | BondSource::PolymerInference => 1,
+    BondSource::DistanceInference => 0,
+  }
+}
 
 /// Lookup key for a chain shared by all coordinate models.
 ///
@@ -277,6 +295,7 @@ impl StructureBuilder {
 
     self.lookup_ids.insert(
       AtomLookupKey {
+        namespace: AtomLookupNamespace::Author,
         chain_id: lookup_chain_id,
         sequence_number: lookup_sequence_number,
         atom_name: lookup_atom_name,
@@ -286,16 +305,21 @@ impl StructureBuilder {
       atom_id,
     );
     if let Some(((chain_id, sequence_number), atom_name)) = label_lookup {
-      self.lookup_ids.insert(
-        AtomLookupKey {
+      // Author and label identifiers share this normalized key shape. Keep
+      // the author mapping when a label alias happens to use the same text,
+      // otherwise a later atom from another chain can redirect author-based
+      // connections to the wrong coordinate.
+      self
+        .lookup_ids
+        .entry(AtomLookupKey {
+          namespace: AtomLookupNamespace::Label,
           chain_id: Some(chain_id),
           sequence_number,
           atom_name,
           insertion_code: lookup_insertion_code,
           altloc: lookup_altloc,
-        },
-        atom_id,
-      );
+        })
+        .or_insert(atom_id);
     }
 
     self.structure.coordinates[coordinate_set_id.index()].positions[atom_id.index()] = record.position;
@@ -738,7 +762,11 @@ impl StructureBuilder {
       } else {
         (target, source)
       };
-      if !self.structure.bonds.iter().any(|bond| bond.a == a && bond.b == b) {
+      if let Some(existing) = self.structure.bonds.iter_mut().find(|bond| bond.a == a && bond.b == b) {
+        if bond_source_priority(pending.bond_source) > bond_source_priority(existing.source) {
+          existing.source = pending.bond_source;
+        }
+      } else {
         self.structure.bonds.push(Bond {
           a,
           b,
@@ -790,7 +818,11 @@ impl StructureBuilder {
       } else {
         (second, first)
       };
-      if !self.structure.bonds.iter().any(|bond| bond.a == a && bond.b == b) {
+      if let Some(existing) = self.structure.bonds.iter_mut().find(|bond| bond.a == a && bond.b == b) {
+        if bond_source_priority(pending.bond_source) > bond_source_priority(existing.source) {
+          existing.source = pending.bond_source;
+        }
+      } else {
         self.structure.bonds.push(Bond {
           a,
           b,
