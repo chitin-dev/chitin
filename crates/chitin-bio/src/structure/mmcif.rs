@@ -516,6 +516,44 @@ _struct_conn.ptnr2_auth_atom_id
   }
 
   #[test]
+  fn special_struct_conn_source_replaces_duplicate_ordinary_connection() {
+    let input = br#"data_demo
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.auth_atom_id
+_atom_site.auth_comp_id
+_atom_site.auth_asym_id
+_atom_site.auth_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.type_symbol
+ATOM 1 N ARG A 1 0.0 0.0 0.0 N
+ATOM 2 O GLU A 2 3.0 0.0 0.0 O
+loop_
+_struct_conn.conn_type_id
+_struct_conn.ptnr1_auth_asym_id
+_struct_conn.ptnr1_auth_seq_id
+_struct_conn.ptnr1_auth_atom_id
+_struct_conn.ptnr2_auth_asym_id
+_struct_conn.ptnr2_auth_seq_id
+_struct_conn.ptnr2_auth_atom_id
+covale A 1 N A 2 O
+metalc A 1 N A 2 O
+"#;
+    let parsed = MmcifParser::new()
+      .parse_bytes(input)
+      .unwrap_or_else(|error| panic!("duplicate struct-conn fixture should parse: {error}"));
+
+    assert_eq!(parsed.structure.bonds.len(), 1);
+    assert_eq!(
+      parsed.structure.bonds[0].source,
+      BondSource::StructConnMetalCoordination
+    );
+  }
+
+  #[test]
   fn author_atom_lookup_should_not_be_overwritten_by_a_label_alias() {
     let input = br#"data_demo
 loop_

@@ -14,6 +14,24 @@ use super::projection::{
   ProjectedSecondaryRange, ProjectedSerialBond, StructureInput,
 };
 
+/// Ranks bond provenance so richer source annotations survive deduplication.
+fn bond_source_priority(source: BondSource) -> u8 {
+  match source {
+    BondSource::StructConnMetalCoordination
+    | BondSource::StructConnHydrogenBond
+    | BondSource::StructConnSaltBridge
+    | BondSource::StructConnDisulfide
+    | BondSource::StructConnBaseMismatch
+    | BondSource::StructConnCovalentBase
+    | BondSource::StructConnCovalentPhosphate
+    | BondSource::StructConnCovalentSugar
+    | BondSource::StructConnResidueModification => 3,
+    BondSource::StructConn => 2,
+    BondSource::Conect | BondSource::PolymerInference => 1,
+    BondSource::DistanceInference => 0,
+  }
+}
+
 /// Lookup key for a chain shared by all coordinate models.
 ///
 /// The model is deliberately absent: when model 2 repeats chain A, it must
@@ -744,7 +762,11 @@ impl StructureBuilder {
       } else {
         (target, source)
       };
-      if !self.structure.bonds.iter().any(|bond| bond.a == a && bond.b == b) {
+      if let Some(existing) = self.structure.bonds.iter_mut().find(|bond| bond.a == a && bond.b == b) {
+        if bond_source_priority(pending.bond_source) > bond_source_priority(existing.source) {
+          existing.source = pending.bond_source;
+        }
+      } else {
         self.structure.bonds.push(Bond {
           a,
           b,
@@ -796,7 +818,11 @@ impl StructureBuilder {
       } else {
         (second, first)
       };
-      if !self.structure.bonds.iter().any(|bond| bond.a == a && bond.b == b) {
+      if let Some(existing) = self.structure.bonds.iter_mut().find(|bond| bond.a == a && bond.b == b) {
+        if bond_source_priority(pending.bond_source) > bond_source_priority(existing.source) {
+          existing.source = pending.bond_source;
+        }
+      } else {
         self.structure.bonds.push(Bond {
           a,
           b,
