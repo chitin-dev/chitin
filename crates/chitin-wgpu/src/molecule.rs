@@ -21,6 +21,11 @@ const METAL_COORDINATION_RADIUS_SCALE: f32 = 0.40;
 const SPECIAL_BOND_DASH_LENGTH: f32 = METAL_COORDINATION_DASH_LENGTH;
 /// Shared gap length for non-covalent interaction markers, in ångströms.
 const SPECIAL_BOND_GAP_LENGTH: f32 = METAL_COORDINATION_GAP_LENGTH;
+/// Maximum distance for rendering a special relation, in ångströms.
+///
+/// Special connections are local chemical interactions. Rejecting outliers
+/// here also bounds CPU-side dash tessellation for malformed coordinates.
+const MAX_SPECIAL_BOND_LENGTH: f32 = 25.0;
 /// RGB color for metal coordination markers.
 const METAL_COORDINATION_COLOR: [f32; 3] = [0.95, 0.20, 0.85];
 /// RGB color for hydrogen-bond markers.
@@ -1060,6 +1065,10 @@ fn bond_instances(
     let start_color = style.palette.for_element(start_element).color;
     let end_color = style.palette.for_element(end_element).color;
     if let Some((radius, dash_color, dash_length, gap_length)) = special_bond_style(bond.source, style.bond_radius) {
+      let length = glam::Vec3::from_array(start).distance(glam::Vec3::from_array(end));
+      if !length.is_finite() || length > MAX_SPECIAL_BOND_LENGTH {
+        continue;
+      }
       if is_continuous_special_bond(bond.source) {
         instances.push(bond_instance(start, end, radius, dash_color, dash_color));
       } else {
@@ -1301,6 +1310,17 @@ mod tests {
       .all(|pair| pair[1][0] - pair[0][4] >= METAL_COORDINATION_GAP_LENGTH - f32::EPSILON);
 
     assert!(instances.len() > 1 && contains_gap);
+  }
+
+  #[test]
+  fn distant_special_bonds_should_not_be_tessellated() {
+    let mut scene = bonded_scene("O");
+    scene.bonds[0].source = BondSource::StructConnMetalCoordination;
+    scene.bonds[0].positions[1] = [MAX_SPECIAL_BOND_LENGTH + 1.0, 0.0, 0.0];
+
+    let instances = bond_instances(&scene, &BallAndStickStyle::default(), AtomRepresentation::Stick);
+
+    assert!(instances.is_empty());
   }
 
   #[test]
