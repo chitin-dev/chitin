@@ -16,3 +16,24 @@
 development suite.
 
 See [ROADMAP.md](ROADMAP.md) for the project roadmap.
+
+## ❄️ Development with Nix
+
+The repository provides reproducible development shells for Rust/WGPU work,
+documentation, and F* verification. Enter the default shell and run the same
+tasks used by CI:
+
+```bash
+env -u LD_LIBRARY_PATH nix develop
+just ci
+```
+
+Use the specialised shells when needed:
+
+```bash
+env -u LD_LIBRARY_PATH nix develop .#docs
+env -u LD_LIBRARY_PATH nix develop .#formal
+```
+
+The `LD_LIBRARY_PATH` cleanup is needed only when a host shell globally sets it;
+mixing host libraries with Nix libraries can cause glibc symbol errors.
