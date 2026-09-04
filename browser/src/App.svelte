@@ -30,6 +30,7 @@ END
   let viewer: MoleculeViewer | undefined;
   let frameHandle = 0;
   let resizeObserver: ResizeObserver | undefined;
+  let disposed = false;
   let statusKind: "working" | "ready" | "error" = "working";
   let statusText = "Initializing WebGPU";
   let structureName = "Web sample";
@@ -39,11 +40,14 @@ END
 
   // WebGPU can only be initialized after Svelte has mounted the canvas.
   onMount(() => {
+    disposed = false;
     void start();
     resizeObserver = new ResizeObserver(resizeCanvas);
     resizeObserver.observe(viewport);
 
     return () => {
+      // `start` may still be suspended in WASM or WebGPU initialization.
+      disposed = true;
       cancelAnimationFrame(frameHandle);
       resizeObserver?.disconnect();
       viewer?.free();
@@ -57,12 +61,19 @@ END
         throw new Error("WebGPU is unavailable. Use a current browser with WebGPU enabled.");
       }
       await initWasm();
+      if (disposed) return;
       resizeCanvas();
-      viewer = await create_viewer(canvas);
-      structureSummary = viewer.load_structure(new TextEncoder().encode(SAMPLE_PDB), "pdb");
+      const nextViewer = await create_viewer(canvas);
+      if (disposed) {
+        nextViewer.free();
+        return;
+      }
+      viewer = nextViewer;
+      structureSummary = nextViewer.load_structure(new TextEncoder().encode(SAMPLE_PDB), "pdb");
       setReady("WebGPU ready");
       frameHandle = requestAnimationFrame(renderFrame);
     } catch (error) {
+      if (disposed) return;
       setError(error);
     }
   }
@@ -70,11 +81,12 @@ END
   // Keep presenting frames while the viewer is healthy; the error path stops
   // the loop so a failed device does not produce an unbounded callback chain.
   function renderFrame(): void {
-    if (!viewer) return;
+    if (disposed || !viewer) return;
     try {
       viewer.render();
       frameHandle = requestAnimationFrame(renderFrame);
     } catch (error) {
+      if (disposed) return;
       setError(error);
     }
   }
