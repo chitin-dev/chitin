@@ -31,6 +31,8 @@ END
   let frameHandle = 0;
   let resizeObserver: ResizeObserver | undefined;
   let disposed = false;
+  // Only the latest file request may update the viewer or its metadata.
+  let loadGeneration = 0;
   let statusKind: "working" | "ready" | "error" = "working";
   let statusText = "Initializing WebGPU";
   let structureName = "Web sample";
@@ -48,6 +50,7 @@ END
     return () => {
       // `start` may still be suspended in WASM or WebGPU initialization.
       disposed = true;
+      loadGeneration += 1;
       cancelAnimationFrame(frameHandle);
       resizeObserver?.disconnect();
       viewer?.free();
@@ -105,15 +108,25 @@ END
   // JavaScript owns file selection and decoding; Rust receives only the bytes
   // and the format needed by its existing structure parsers.
   async function loadFile(file: File): Promise<void> {
+    const generation = ++loadGeneration;
+
     try {
       const format = structureFormat(file.name);
       setWorking(`Parsing ${file.name}`);
       const bytes = new Uint8Array(await file.arrayBuffer());
+
+      // A newer selection may have started while this file was being read.
+      if (disposed || generation !== loadGeneration) return;
       if (!viewer) throw new Error("The WebGPU viewer is not initialized");
-      structureSummary = viewer.load_structure(bytes, format);
+
+      const summary = viewer.load_structure(bytes, format);
+      if (disposed || generation !== loadGeneration) return;
+
+      structureSummary = summary;
       structureName = file.name;
       setReady("Structure loaded");
     } catch (error) {
+      if (disposed || generation !== loadGeneration) return;
       setError(error);
     }
   }
