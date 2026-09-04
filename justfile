@@ -47,6 +47,11 @@ generate-mmcif-schema:
 desktop path=".":
   cargo run -p chitin-desktop -- "{{path}}"
 
+# Rebuild the browser WASM package before starting Vite's development server.
+browser-dev:
+  pnpm --dir browser wasm:build
+  pnpm --dir browser dev
+
 wgpu-example path="." *args:
   cargo run --example chitin-wgpu-desktop -- "{{path}}" {{args}}
 

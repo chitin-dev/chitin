@@ -9,6 +9,12 @@ pnpm wasm:build
 pnpm dev
 ```
 
+From the repository root, the same rebuild-and-run flow is available as:
+
+```sh
+just browser-dev
+```
+
 Deno can run the same project tasks without creating a second dependency graph:
 
 ```sh
