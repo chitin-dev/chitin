@@ -286,7 +286,9 @@ impl MoleculeViewer {
       return;
     };
     let delta_x = x - drag.last_x;
-    let delta_y = y - drag.last_y;
+    // DOM coordinates grow downward, while the desktop GPUI adapter converts
+    // vertical movement into the camera's upward-positive convention.
+    let delta_y = -(y - drag.last_y);
     match drag.mode {
       DragMode::Rotate => self.camera.rotate_pixels(delta_x, delta_y),
       DragMode::Pan => self.camera.pan_pixels(delta_x, delta_y),
