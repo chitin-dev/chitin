@@ -3,8 +3,6 @@
   // follow the same lifecycle as the canvas element.
   import { onMount } from "svelte";
 
-  import initWasm, { create_viewer, type MoleculeViewer } from "../../crates/chitin-wasm/pkg/chitin_wasm.js";
-
   // A small built-in structure makes the viewer useful before a file is chosen.
   const SAMPLE_PDB = `HEADER    CHITIN WEB SAMPLE
 ATOM      1  N   GLY A   1      -1.230   0.120   0.050  1.00 10.00           N
@@ -27,12 +25,18 @@ END
   // reported without losing the rest of the page state.
   let canvas: HTMLCanvasElement;
   let viewport: HTMLElement;
-  let viewer: MoleculeViewer | undefined;
-  let frameHandle = 0;
+  type WorkerResponse =
+    | { type: "ready" }
+    | { type: "loaded"; generation: number; summary: string }
+    | { type: "error"; generation?: number; message: string };
+
+  let viewerWorker: Worker | undefined;
+  let workerReady = false;
   let resizeObserver: ResizeObserver | undefined;
   let disposed = false;
   // Only the latest file request may update the viewer or its metadata.
   let loadGeneration = 0;
+  const pendingStructureNames = new Map<number, string>();
   let statusKind: "working" | "ready" | "error" = "working";
   let statusText = "Initializing WebGPU";
   let structureName = "Web sample";
@@ -43,7 +47,7 @@ END
   // WebGPU can only be initialized after Svelte has mounted the canvas.
   onMount(() => {
     disposed = false;
-    void start();
+    start();
     resizeObserver = new ResizeObserver(resizeCanvas);
     resizeObserver.observe(viewport);
 
@@ -51,46 +55,55 @@ END
       // `start` may still be suspended in WASM or WebGPU initialization.
       disposed = true;
       loadGeneration += 1;
-      cancelAnimationFrame(frameHandle);
       resizeObserver?.disconnect();
-      viewer?.free();
+      viewerWorker?.terminate();
     };
   });
 
-  // Initializes the WASM module, creates the GPU viewer, and loads the sample.
-  async function start(): Promise<void> {
+  // Transfers the canvas to a worker, which owns WASM, WebGPU, and rendering.
+  function start(): void {
     try {
       if (!("gpu" in navigator)) {
         throw new Error("WebGPU is unavailable. Use a current browser with WebGPU enabled.");
       }
-      await initWasm();
-      if (disposed) return;
-      resizeCanvas();
-      const nextViewer = await create_viewer(canvas);
-      if (disposed) {
-        nextViewer.free();
-        return;
-      }
-      viewer = nextViewer;
-      structureSummary = nextViewer.load_structure(new TextEncoder().encode(SAMPLE_PDB), "pdb");
-      setReady("WebGPU ready");
-      frameHandle = requestAnimationFrame(renderFrame);
+      const worker = new Worker(new URL("./viewer-worker.ts", import.meta.url), { type: "module" });
+      worker.addEventListener("message", handleWorkerMessage);
+      viewerWorker = worker;
+      const offscreenCanvas = canvas.transferControlToOffscreen();
+      worker.postMessage(
+        {
+          type: "init",
+          canvas: offscreenCanvas,
+          width: Math.max(1, canvas.width),
+          height: Math.max(1, canvas.height),
+        },
+        [offscreenCanvas],
+      );
     } catch (error) {
-      if (disposed) return;
       setError(error);
     }
   }
 
-  // Keep presenting frames while the viewer is healthy; the error path stops
-  // the loop so a failed device does not produce an unbounded callback chain.
-  function renderFrame(): void {
-    if (disposed || !viewer) return;
-    try {
-      viewer.render();
-      frameHandle = requestAnimationFrame(renderFrame);
-    } catch (error) {
-      if (disposed) return;
-      setError(error);
+  // Apply worker results only while this component remains mounted. The load
+  // generation rejects responses for older file selections.
+  function handleWorkerMessage(event: MessageEvent<WorkerResponse>): void {
+    const message = event.data;
+    if (message.type === "ready") {
+      workerReady = true;
+      pendingStructureNames.set(0, "Web sample");
+      const sampleBytes = new TextEncoder().encode(SAMPLE_PDB);
+      viewerWorker?.postMessage({ type: "load", generation: 0, bytes: sampleBytes.buffer, format: "pdb" }, [
+        sampleBytes.buffer,
+      ]);
+    } else if (message.type === "loaded") {
+      if (disposed || message.generation !== loadGeneration) return;
+      structureSummary = message.summary;
+      structureName = pendingStructureNames.get(message.generation) ?? structureName;
+      pendingStructureNames.delete(message.generation);
+      setReady("Structure loaded");
+    } else if (message.type === "error") {
+      if (disposed || (message.generation !== undefined && message.generation !== loadGeneration)) return;
+      setError(new Error(message.message));
     }
   }
 
@@ -102,7 +115,7 @@ END
     if (canvas.width === width && canvas.height === height) return;
     canvas.width = width;
     canvas.height = height;
-    viewer?.resize(width, height);
+    if (workerReady) viewerWorker?.postMessage({ type: "resize", width, height });
   }
 
   // JavaScript owns file selection and decoding; Rust receives only the bytes
@@ -117,14 +130,10 @@ END
 
       // A newer selection may have started while this file was being read.
       if (disposed || generation !== loadGeneration) return;
-      if (!viewer) throw new Error("The WebGPU viewer is not initialized");
+      if (!viewerWorker || !workerReady) throw new Error("The WebGPU viewer worker is not initialized");
 
-      const summary = viewer.load_structure(bytes, format);
-      if (disposed || generation !== loadGeneration) return;
-
-      structureSummary = summary;
-      structureName = file.name;
-      setReady("Structure loaded");
+      pendingStructureNames.set(generation, file.name);
+      viewerWorker.postMessage({ type: "load", generation, bytes: bytes.buffer, format }, [bytes.buffer]);
     } catch (error) {
       if (disposed || generation !== loadGeneration) return;
       setError(error);
@@ -140,28 +149,38 @@ END
 
   // Rebuilding the renderer is handled by the WASM bridge after a mode change.
   function handleRepresentation(): void {
-    try {
-      viewer?.set_representation(representation);
-    } catch (error) {
-      setError(error);
-    }
+    viewerWorker?.postMessage({ type: "representation", value: representation });
   }
 
   // Pointer coordinates are canvas-local so camera movement is independent of
   // the canvas position in the surrounding layout.
   function handlePointerDown(event: PointerEvent): void {
     canvas.setPointerCapture(event.pointerId);
-    viewer?.pointer_down(event.button, event.shiftKey, event.offsetX, event.offsetY);
+    viewerWorker?.postMessage({
+      type: "pointer-down",
+      button: event.button,
+      shiftKey: event.shiftKey,
+      x: event.offsetX,
+      y: event.offsetY,
+    });
   }
 
   function handlePointerUp(event: PointerEvent): void {
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-    viewer?.pointer_up();
+    viewerWorker?.postMessage({ type: "pointer-up" });
+  }
+
+  function handlePointerMove(event: PointerEvent): void {
+    viewerWorker?.postMessage({ type: "pointer-move", x: event.offsetX, y: event.offsetY });
+  }
+
+  function handlePointerCancel(): void {
+    viewerWorker?.postMessage({ type: "pointer-up" });
   }
 
   function handleWheel(event: WheelEvent): void {
     event.preventDefault();
-    viewer?.zoom(event.deltaY);
+    viewerWorker?.postMessage({ type: "zoom", deltaY: event.deltaY });
   }
 
   // Drag-and-drop state is intentionally visual-only; parsing still goes
@@ -183,7 +202,9 @@ END
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key.toLowerCase() === "r" && event.target === document.body) viewer?.reset_camera();
+    if (event.key.toLowerCase() === "r" && event.target === document.body) {
+      viewerWorker?.postMessage({ type: "reset-camera" });
+    }
   }
 
   // File extensions are mapped to the parser names exported by the Rust bridge.
@@ -207,7 +228,6 @@ END
   }
 
   function setError(error: unknown): void {
-    cancelAnimationFrame(frameHandle);
     statusKind = "error";
     statusText = error instanceof Error ? error.message : String(error);
     console.error(error);
@@ -259,7 +279,12 @@ END
           </select>
         </label>
 
-        <button class="reset-button" id="reset-camera" type="button" onclick={() => viewer?.reset_camera()}>
+        <button
+          class="reset-button"
+          id="reset-camera"
+          type="button"
+          onclick={() => viewerWorker?.postMessage({ type: "reset-camera" })}
+        >
           Reset camera <span class="key-cap">R</span>
         </button>
       </div>
@@ -285,11 +310,11 @@ END
         bind:this={canvas}
         aria-label="Interactive molecular structure"
         oncontextmenu={(event) => event.preventDefault()}
-        ondblclick={() => viewer?.reset_camera()}
+        ondblclick={() => viewerWorker?.postMessage({ type: "reset-camera" })}
         onpointerdown={handlePointerDown}
-        onpointermove={(event) => viewer?.pointer_move(event.offsetX, event.offsetY)}
+        onpointermove={handlePointerMove}
         onpointerup={handlePointerUp}
-        onpointercancel={() => viewer?.pointer_up()}
+        onpointercancel={handlePointerCancel}
         onwheel={handleWheel}
       ></canvas>
       <div class="viewport-label"><span class="text-acid">WEBGPU</span> LIVE</div>

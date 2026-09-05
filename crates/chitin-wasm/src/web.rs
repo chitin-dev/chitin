@@ -14,14 +14,15 @@ use chitin_wgpu::{
   ViewerCamera, ViewportDrag,
 };
 use wasm_bindgen::prelude::*;
-use web_sys::HtmlCanvasElement;
+use web_sys::OffscreenCanvas;
 use wgpu::{CurrentSurfaceTexture, SurfaceTarget};
 
-/// Creates a browser molecule viewer attached to an HTML canvas.
+/// Creates a browser molecule viewer attached to an offscreen canvas.
 ///
 /// # Parameters
 ///
-/// * `canvas` is the HTML canvas that owns the browser presentation surface.
+/// * `canvas` is the [`OffscreenCanvas`] transferred to the worker that owns
+///   the browser presentation surface.
 ///
 /// # Returns
 ///
@@ -29,7 +30,7 @@ use wgpu::{CurrentSurfaceTexture, SurfaceTarget};
 /// size-dependent render resources, or a JavaScript error when WebGPU cannot
 /// create a compatible adapter or device.
 #[wasm_bindgen]
-pub async fn create_viewer(canvas: HtmlCanvasElement) -> Result<MoleculeViewer, JsValue> {
+pub async fn create_viewer(canvas: OffscreenCanvas) -> Result<MoleculeViewer, JsValue> {
   // Install readable panic messages before any asynchronous GPU operation can
   // fail; these messages are otherwise difficult to diagnose from JavaScript.
   console_error_panic_hook::set_once();
@@ -44,7 +45,7 @@ pub async fn create_viewer(canvas: HtmlCanvasElement) -> Result<MoleculeViewer, 
   // The canvas is cloned because wgpu keeps the browser surface target alive
   // for as long as the surface is used by the viewer.
   let surface = instance
-    .create_surface(SurfaceTarget::Canvas(canvas.clone()))
+    .create_surface(SurfaceTarget::OffscreenCanvas(canvas.clone()))
     .map_err(|error| js_error(format!("failed to create WebGPU canvas surface: {error}")))?;
   // Prefer a high-performance adapter while requiring presentation to this
   // exact canvas; an adapter without a compatible surface is not useful here.

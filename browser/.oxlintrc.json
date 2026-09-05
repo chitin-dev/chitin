@@ -11,5 +11,8 @@
     "node": true
   },
   "ignorePatterns": ["dist/**", "node_modules/**"],
-  "plugins": ["oxc", "typescript", "unicorn"]
+  "plugins": ["oxc", "typescript", "unicorn"],
+  "rules": {
+    "unicorn/require-post-message-target-origin": "off"
+  }
 }
