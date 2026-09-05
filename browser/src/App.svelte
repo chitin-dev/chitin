@@ -66,6 +66,10 @@ END
       if (!("gpu" in navigator)) {
         throw new Error("WebGPU is unavailable. Use a current browser with WebGPU enabled.");
       }
+      // Set the real drawing-buffer size before transferring the canvas. The
+      // default HTML canvas size is only 300x150 and would make the viewer
+      // appear blurry when stretched across the viewport.
+      resizeCanvas();
       const worker = new Worker(new URL("./viewer-worker.ts", import.meta.url), { type: "module" });
       worker.addEventListener("message", handleWorkerMessage);
       viewerWorker = worker;
@@ -113,9 +117,12 @@ END
     const width = Math.max(1, Math.round(viewport.clientWidth * scale));
     const height = Math.max(1, Math.round(viewport.clientHeight * scale));
     if (canvas.width === width && canvas.height === height) return;
+    if (workerReady) {
+      viewerWorker?.postMessage({ type: "resize", width, height });
+      return;
+    }
     canvas.width = width;
     canvas.height = height;
-    if (workerReady) viewerWorker?.postMessage({ type: "resize", width, height });
   }
 
   // JavaScript owns file selection and decoding; Rust receives only the bytes

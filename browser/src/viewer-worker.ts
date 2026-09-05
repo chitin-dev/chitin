@@ -24,6 +24,7 @@ const workerScope = globalThis as unknown as {
 };
 
 let viewer: MoleculeViewer | undefined;
+let canvas: OffscreenCanvas | undefined;
 
 // Keep all parsing, bond inference, scene extraction, and GPU renderer work in
 // this worker so the browser main thread remains available for UI input.
@@ -35,6 +36,9 @@ async function handleCommand(command: WorkerCommand): Promise<void> {
   try {
     if (command.type === "init") {
       await initWasm();
+      canvas = command.canvas;
+      canvas.width = command.width;
+      canvas.height = command.height;
       viewer = await create_viewer(command.canvas);
       viewer.resize(command.width, command.height);
       viewer.render();
@@ -52,6 +56,10 @@ async function handleCommand(command: WorkerCommand): Promise<void> {
         break;
       }
       case "resize":
+        if (canvas) {
+          canvas.width = command.width;
+          canvas.height = command.height;
+        }
         viewer.resize(command.width, command.height);
         viewer.render();
         break;
