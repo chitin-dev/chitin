@@ -283,6 +283,7 @@ END
             <option value="ball-and-stick">Ball &amp; stick</option>
             <option value="stick">Stick</option>
             <option value="sphere">Space filling</option>
+            <option value="cartoon">Cartoon</option>
           </select>
         </label>
 
