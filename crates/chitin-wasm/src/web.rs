@@ -9,10 +9,10 @@
 use std::rc::Rc;
 
 use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
-use chitin_wgpu::{
-  AtomRepresentation, BallAndStickStyle, ClearRenderer, DragMode, GpuHandle, MoleculeRenderer, RenderTargetSize,
-  ViewerCamera, ViewportDrag,
+use chitin_molecule_renderer::{
+  AtomRepresentation, BallAndStickStyle, DragMode, MoleculeRenderer, ViewerCamera, ViewportDrag,
 };
+use chitin_wgpu::{ClearRenderer, GpuHandle, RenderTargetSize};
 use wasm_bindgen::prelude::*;
 use web_sys::OffscreenCanvas;
 use wgpu::{CurrentSurfaceTexture, SurfaceTarget};
@@ -160,11 +160,11 @@ impl MoleculeViewer {
     Ok(summary)
   }
 
-  /// Selects `stick`, `ball-and-stick`, or `sphere` atom rendering.
+  /// Selects an atom or polymer-cartoon molecular representation.
   ///
   /// # Parameters
   ///
-  /// * `representation` is one of `stick`, `ball-and-stick`, or `sphere`.
+  /// * `representation` is one of `stick`, `ball-and-stick`, `sphere`, or `cartoon`.
   ///
   /// # Returns
   ///
@@ -176,6 +176,7 @@ impl MoleculeViewer {
       "stick" => AtomRepresentation::Stick,
       "ball-and-stick" => AtomRepresentation::BallAndStick,
       "sphere" => AtomRepresentation::Sphere,
+      "cartoon" => AtomRepresentation::Cartoon,
       _ => return Err(js_error(format!("unsupported representation: {representation}"))),
     };
     self.rebuild_renderer();

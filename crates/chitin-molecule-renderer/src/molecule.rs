@@ -1,14 +1,16 @@
 //! Instanced atom and bond rendering for molecular structure scenes.
 
-use chitin_bio::structure::{BondSource, ElementCategory, StructureScene};
+use chitin_bio::structure::{BondSource, ElementCategory, ResidueKind, StructureScene};
 use wgpu::util::DeviceExt;
 
-use crate::GpuHandle;
+use chitin_wgpu::{DepthTarget, GpuHandle, RenderTargetSize};
 
-use crate::{DepthTarget, RenderTargetSize};
+use crate::cartoon::cartoon_mesh;
 
 /// WGSL shader shared by the atom and bond pipelines.
 const SHADER: &str = include_str!("molecule.wgsl");
+/// WGSL shader used by the tessellated polymer cartoon pipeline.
+const CARTOON_SHADER: &str = include_str!("cartoon.wgsl");
 /// Default ChimeraX-inspired stick cylinder radius in source ångström units.
 const DEFAULT_STICK_RADIUS: f32 = 0.20;
 /// Preferred visible segment length for metal-coordination dashes, in ångströms.
@@ -112,7 +114,7 @@ pub enum MoleculeDebugMode {
   ElementColor = 6,
 }
 
-/// Atom-level representation used by the molecular renderer.
+/// Molecular representation used by the renderer and its frontend controls.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum AtomRepresentation {
   /// Draw atoms with the bond radius and show bonds.
@@ -122,15 +124,18 @@ pub enum AtomRepresentation {
   BallAndStick,
   /// Draw element-colored atoms without bonds.
   Sphere,
+  /// Draw polymer backbones as secondary-structure ribbons and hetero atoms as balls and sticks.
+  Cartoon,
 }
 
 impl AtomRepresentation {
-  /// Parses a command-line representation name.
+  /// Parses a frontend or command-line representation name.
   pub fn from_name(name: &str) -> Option<Self> {
     match name.trim().to_ascii_lowercase().as_str() {
       "stick" => Some(Self::Stick),
       "ball-and-stick" | "ball_and_stick" | "ballandstick" => Some(Self::BallAndStick),
       "sphere" | "spheres" => Some(Self::Sphere),
+      "cartoon" | "ribbon" => Some(Self::Cartoon),
       _ => None,
     }
   }
@@ -328,15 +333,19 @@ impl Default for BallAndStickStyle {
   }
 }
 
-/// Instanced renderer for atoms and source or inferred scene bonds.
+/// GPU renderer for atom surfaces, bonds, and polymer cartoons.
 ///
-/// One shared billboard quad is uploaded per renderer. Fragment shaders solve
-/// analytic sphere and cylinder intersections and write their exact depth.
+/// Atoms and bonds use one shared instanced billboard with analytic fragment
+/// intersections. Cartoons use an indexed triangle mesh generated from the
+/// scene's residue-level polymer traces, while all representations share camera,
+/// lighting, depth, and depth-cue resources.
 pub struct MoleculeRenderer {
   /// Pipeline for instanced atom spheres.
   atom_pipeline: wgpu::RenderPipeline,
   /// Pipeline for instanced bond cylinders.
   bond_pipeline: wgpu::RenderPipeline,
+  /// Pipeline for tessellated polymer cartoon triangles.
+  cartoon_pipeline: wgpu::RenderPipeline,
   /// Shared billboard vertices used by both analytic surface pipelines.
   quad_vertex_buffer: wgpu::Buffer,
   /// Shared billboard triangle indices.
@@ -351,6 +360,12 @@ pub struct MoleculeRenderer {
   bond_instance_buffer: wgpu::Buffer,
   /// Number of bond instances to draw.
   bond_count: u32,
+  /// Interleaved cartoon position, normal, and color vertices.
+  cartoon_vertex_buffer: wgpu::Buffer,
+  /// Triangle indices for the complete polymer cartoon mesh.
+  cartoon_index_buffer: wgpu::Buffer,
+  /// Number of cartoon indices to draw.
+  cartoon_index_count: u32,
   /// Uniform buffer containing the current model-view-projection matrix.
   uniform_buffer: wgpu::Buffer,
   /// Bind group exposing `uniform_buffer` to both vertex shaders.
@@ -451,7 +466,7 @@ impl MoleculeRenderer {
   /// * `size` is the initial render target size in physical pixels.
   /// * `color_format` is the UI-owned target texture format.
   /// * `scene` supplies renderer-neutral atom, bond, and bounds data.
-  /// * `representation` selects stick, ball-and-stick, or sphere rendering.
+  /// * `representation` selects an atom surface or polymer cartoon rendering.
   /// * `style` supplies atom radii, bond thickness, colors, and material light.
   ///
   /// # Returns
@@ -469,6 +484,10 @@ impl MoleculeRenderer {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
       label: Some("chitin_molecule_shader"),
       source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+    });
+    let cartoon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+      label: Some("chitin_cartoon_shader"),
+      source: wgpu::ShaderSource::Wgsl(CARTOON_SHADER.into()),
     });
     let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
       label: Some("chitin_molecule_uniforms"),
@@ -514,11 +533,19 @@ impl MoleculeRenderer {
         fragment_entry: "bond_fragment",
       },
     );
+    let cartoon_pipeline = create_cartoon_pipeline(&device, &pipeline_layout, &cartoon_shader, color_format);
 
     let (quad_vertices, quad_indices) = billboard_quad_mesh();
     let atom_instances = atom_instances(scene, style, representation);
     let bond_instances = bond_instances(scene, style, representation);
+    let cartoon = if representation == AtomRepresentation::Cartoon {
+      cartoon_mesh(scene)
+    } else {
+      Default::default()
+    };
+    let atom_count = atom_instances.len() as u32;
     let bond_count = bond_instances.len() as u32;
+    let cartoon_index_count = cartoon.indices.len() as u32;
     let quad_vertex_buffer = create_buffer(
       &device,
       "chitin_molecule_billboard_vertices",
@@ -531,11 +558,38 @@ impl MoleculeRenderer {
       &quad_indices,
       wgpu::BufferUsages::INDEX,
     );
+    let atom_buffer_data = if atom_instances.is_empty() {
+      vec![[0.0; 8]]
+    } else {
+      atom_instances
+    };
     let atom_instance_buffer = create_buffer(
       &device,
       "chitin_molecule_atom_instances",
-      &atom_instances,
+      &atom_buffer_data,
       wgpu::BufferUsages::VERTEX,
+    );
+    let cartoon_vertices = if cartoon.vertices.is_empty() {
+      vec![[0.0; 9]]
+    } else {
+      cartoon.vertices
+    };
+    let cartoon_indices = if cartoon.indices.is_empty() {
+      vec![0_u32]
+    } else {
+      cartoon.indices
+    };
+    let cartoon_vertex_buffer = create_buffer(
+      &device,
+      "chitin_cartoon_vertices",
+      &cartoon_vertices,
+      wgpu::BufferUsages::VERTEX,
+    );
+    let cartoon_index_buffer = create_buffer(
+      &device,
+      "chitin_cartoon_indices",
+      &cartoon_indices,
+      wgpu::BufferUsages::INDEX,
     );
     // WGPU buffers cannot have a zero-byte binding range. Keep a single dummy
     // row when the scene has no bonds, while drawing zero rows.
@@ -565,7 +619,7 @@ impl MoleculeRenderer {
     };
 
     log::debug!(
-      target: "chitin_wgpu::molecule",
+      target: "chitin_molecule_renderer::molecule",
       "molecule renderer initialized: representation={representation:?}, atoms={}, bonds={}, bond_radius={:.3} A, key={:?}@{:.3}, fill={:?}@{:.3}, ambient={:.3}, diffuse={:.3}, specular={:.3}, shininess={:.1}, depth_cue=[{:.3}, {:.3}]@{:.3}",
       scene.atoms.len(),
       scene.bonds.len(),
@@ -586,13 +640,17 @@ impl MoleculeRenderer {
     Self {
       atom_pipeline,
       bond_pipeline,
+      cartoon_pipeline,
       quad_vertex_buffer,
       quad_index_buffer,
       quad_index_count: quad_indices.len() as u32,
       atom_instance_buffer,
-      atom_count: scene.atoms.len() as u32,
+      atom_count,
       bond_instance_buffer,
       bond_count,
+      cartoon_vertex_buffer,
+      cartoon_index_buffer,
+      cartoon_index_count,
       uniform_buffer,
       bind_group,
       fit_transform,
@@ -630,10 +688,12 @@ impl MoleculeRenderer {
       return;
     }
     self.debug_mode = mode;
-    log::info!(target: "chitin_wgpu::molecule", "molecule debug mode changed to {mode:?}");
+    log::info!(target: "chitin_molecule_renderer::molecule", "molecule debug mode changed to {mode:?}");
   }
 
-  /// Draws the molecule with camera-space lighting and linear depth cueing.
+  /// Draws the active molecular representation with camera-space lighting and
+  /// linear depth cueing. Cartoon geometry is drawn first when selected, and
+  /// hetero atoms/bonds are then drawn using the shared analytic pipelines.
   ///
   /// # Parameters
   ///
@@ -700,6 +760,14 @@ impl MoleculeRenderer {
         multiview_mask: None,
       });
 
+      if self.cartoon_index_count > 0 {
+        pass.set_pipeline(&self.cartoon_pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(0, self.cartoon_vertex_buffer.slice(..));
+        pass.set_index_buffer(self.cartoon_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.cartoon_index_count, 0, 0..1);
+      }
+
       if self.bond_count > 0 {
         pass.set_pipeline(&self.bond_pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
@@ -734,7 +802,7 @@ impl MoleculeRenderer {
   fn log_diagnostics(&mut self, model_view: glam::Mat4, depth_cue: [f32; 4]) {
     self.diagnostics.frame_count = self.diagnostics.frame_count.wrapping_add(1);
     let frame = self.diagnostics.frame_count;
-    if !log::log_enabled!(target: "chitin_wgpu::molecule", log::Level::Debug)
+    if !log::log_enabled!(target: "chitin_molecule_renderer::molecule", log::Level::Debug)
       || (frame != 1 && !frame.is_multiple_of(DIAGNOSTIC_FRAME_INTERVAL))
       || self.diagnostics.sample_positions.is_empty()
     {
@@ -763,7 +831,7 @@ impl MoleculeRenderer {
 
     let sample_count = self.diagnostics.sample_positions.len() as f32;
     log::debug!(
-      target: "chitin_wgpu::molecule",
+      target: "chitin_molecule_renderer::molecule",
       "molecule frame diagnostics: frame={frame}, mode={:?}, samples={}, view_depth=[{depth_min:.5}, mean={:.5}, {depth_max:.5}], cue_range=[{cue_start:.5}, {cue_end:.5}], depth_cue=[{cue_min:.5}, mean={:.5}, {cue_max:.5}]",
       self.debug_mode,
       self.diagnostics.sample_positions.len(),
@@ -884,6 +952,76 @@ fn create_pipeline(
   })
 }
 
+/// Creates the non-instanced indexed-triangle pipeline used by cartoons.
+fn create_cartoon_pipeline(
+  device: &wgpu::Device,
+  layout: &wgpu::PipelineLayout,
+  shader: &wgpu::ShaderModule,
+  color_format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+  device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    label: Some("chitin_cartoon_pipeline"),
+    layout: Some(layout),
+    vertex: wgpu::VertexState {
+      module: shader,
+      entry_point: Some("cartoon_vertex"),
+      buffers: &[Some(cartoon_vertex_layout())],
+      compilation_options: Default::default(),
+    },
+    fragment: Some(wgpu::FragmentState {
+      module: shader,
+      entry_point: Some("cartoon_fragment"),
+      targets: &[Some(wgpu::ColorTargetState {
+        format: color_format,
+        blend: None,
+        write_mask: wgpu::ColorWrites::ALL,
+      })],
+      compilation_options: Default::default(),
+    }),
+    primitive: wgpu::PrimitiveState {
+      topology: wgpu::PrimitiveTopology::TriangleList,
+      front_face: wgpu::FrontFace::Ccw,
+      cull_mode: None,
+      ..Default::default()
+    },
+    depth_stencil: Some(wgpu::DepthStencilState {
+      format: wgpu::TextureFormat::Depth32Float,
+      depth_write_enabled: Some(true),
+      depth_compare: Some(wgpu::CompareFunction::Less),
+      stencil: Default::default(),
+      bias: Default::default(),
+    }),
+    multisample: wgpu::MultisampleState::default(),
+    multiview_mask: None,
+    cache: None,
+  })
+}
+
+/// Returns the source position, normal, and color layout of cartoon vertices.
+fn cartoon_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+  wgpu::VertexBufferLayout {
+    array_stride: 36,
+    step_mode: wgpu::VertexStepMode::Vertex,
+    attributes: &[
+      wgpu::VertexAttribute {
+        offset: 0,
+        shader_location: 0,
+        format: wgpu::VertexFormat::Float32x3,
+      },
+      wgpu::VertexAttribute {
+        offset: 12,
+        shader_location: 1,
+        format: wgpu::VertexFormat::Float32x3,
+      },
+      wgpu::VertexAttribute {
+        offset: 24,
+        shader_location: 2,
+        format: wgpu::VertexFormat::Float32x3,
+      },
+    ],
+  }
+}
+
 /// Returns the shared position-and-normal mesh vertex layout.
 fn mesh_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
   wgpu::VertexBufferLayout {
@@ -1000,12 +1138,15 @@ fn atom_instances(
     .atoms
     .iter()
     .enumerate()
+    .filter(|(_, atom)| representation != AtomRepresentation::Cartoon || atom.residue_kind == ResidueKind::Hetero)
     .map(|(index, atom)| {
       let visual = style.palette.for_element(atom.element);
       let radius = match representation {
         AtomRepresentation::Sphere => visual.radius,
         AtomRepresentation::Stick => maximum_bond_radii[index].max(style.bond_radius),
-        AtomRepresentation::BallAndStick => (visual.radius * style.ball_radius_scale).max(style.bond_radius),
+        AtomRepresentation::BallAndStick | AtomRepresentation::Cartoon => {
+          (visual.radius * style.ball_radius_scale).max(style.bond_radius)
+        }
       };
       [
         atom.position[0],
@@ -1047,12 +1188,24 @@ fn bond_instances(
     .max()
     .map_or(0, |index| index + 1);
   let mut elements = vec![ElementCategory::Other; table_len];
+  let mut residue_kinds = vec![ResidueKind::Polymer; table_len];
   for atom in &scene.atoms {
     elements[atom.atom_id.index()] = atom.element;
+    residue_kinds[atom.atom_id.index()] = atom.residue_kind;
   }
 
   let mut instances = Vec::with_capacity(scene.bonds.len());
   for bond in &scene.bonds {
+    if representation == AtomRepresentation::Cartoon {
+      let endpoint_is_hetero = |atom_id: chitin_bio::structure::AtomId| {
+        residue_kinds
+          .get(atom_id.index())
+          .is_some_and(|kind| *kind == ResidueKind::Hetero)
+      };
+      if !bond.atom_ids.into_iter().all(endpoint_is_hetero) {
+        continue;
+      }
+    }
     let [start, end] = bond.positions;
     let start_element = elements
       .get(bond.atom_ids[0].index())
@@ -1234,6 +1387,13 @@ fn representation_surface_radius(
       AtomRepresentation::Stick => style.bond_radius,
       AtomRepresentation::BallAndStick => element_radius * style.ball_radius_scale,
       AtomRepresentation::Sphere => element_radius,
+      AtomRepresentation::Cartoon => {
+        if atom.residue_kind == ResidueKind::Hetero {
+          element_radius * style.ball_radius_scale
+        } else {
+          0.72
+        }
+      }
     };
     maximum.max(rendered_radius)
   })
@@ -1413,6 +1573,10 @@ mod tests {
       AtomRepresentation::from_name("sphere"),
       Some(AtomRepresentation::Sphere)
     );
+    assert_eq!(
+      AtomRepresentation::from_name("cartoon"),
+      Some(AtomRepresentation::Cartoon)
+    );
     assert_eq!(AtomRepresentation::default(), AtomRepresentation::Stick);
   }
 
@@ -1446,5 +1610,19 @@ mod tests {
     validator
       .validate(&module)
       .unwrap_or_else(|error| panic!("molecule shader should validate: {error}"));
+  }
+
+  #[test]
+  fn cartoon_shader_should_parse_and_validate() {
+    let module = wgpu::naga::front::wgsl::parse_str(CARTOON_SHADER)
+      .unwrap_or_else(|error| panic!("cartoon shader should parse: {error}"));
+    let mut validator = wgpu::naga::valid::Validator::new(
+      wgpu::naga::valid::ValidationFlags::all(),
+      wgpu::naga::valid::Capabilities::all(),
+    );
+
+    validator
+      .validate(&module)
+      .unwrap_or_else(|error| panic!("cartoon shader should validate: {error}"));
   }
 }

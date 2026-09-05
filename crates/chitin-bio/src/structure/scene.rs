@@ -4,7 +4,12 @@ use thiserror::Error;
 
 use crate::chemistry::{BondInferenceConfig, BondInferenceError, infer_bonds};
 
-use super::{AtomId, BondOrder, BondSource, Element, ModelId, ResidueId, Structure};
+use super::{
+  AtomId, BondOrder, BondSource, ChainId, Element, ModelId, ResidueId, ResidueKind, SecondaryStructure, Structure,
+};
+
+/// Maximum C-alpha separation retained inside one continuous polymer trace.
+const MAX_POLYMER_TRACE_STEP: f32 = 4.5;
 
 /// Broad element families used by default molecular visualizations.
 ///
@@ -92,10 +97,55 @@ pub struct AtomSceneInstance {
   pub atom_id: AtomId,
   /// Parent residue identifier used for residue-level interaction.
   pub residue_id: ResidueId,
+  /// Whether the parent residue belongs to a polymer or hetero component.
+  pub residue_kind: ResidueKind,
   /// Cartesian position in ångströms.
   pub position: [f32; 3],
   /// Element family used by the default renderer color and radius policy.
   pub element: ElementCategory,
+}
+
+/// Broad secondary-structure shape requested for one polymer trace point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PolymerTraceKind {
+  /// Flexible or unannotated backbone rendered as a narrow tube.
+  Coil,
+  /// Alpha, three-ten, or pi helix rendered as a broad rounded ribbon.
+  Helix,
+  /// Beta strand rendered as a flat ribbon with a terminal arrow.
+  Strand,
+}
+
+impl From<SecondaryStructure> for PolymerTraceKind {
+  fn from(value: SecondaryStructure) -> Self {
+    match value {
+      SecondaryStructure::Helix | SecondaryStructure::Helix310 | SecondaryStructure::PiHelix => Self::Helix,
+      SecondaryStructure::Sheet => Self::Strand,
+      SecondaryStructure::Unknown | SecondaryStructure::Coil => Self::Coil,
+    }
+  }
+}
+
+/// One residue-level control point used to construct a polymer cartoon.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PolymerTracePoint {
+  /// Stable residue identifier used by later selection and picking work.
+  pub residue_id: ResidueId,
+  /// C-alpha backbone position in ångströms.
+  pub position: [f32; 3],
+  /// Carbonyl oxygen, or a fallback backbone atom, used to orient the ribbon.
+  pub guide: [f32; 3],
+  /// Coarse cross-section selected from the residue annotation.
+  pub kind: PolymerTraceKind,
+}
+
+/// One chain-continuous run of residue-level polymer control points.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PolymerTrace {
+  /// Chain containing every point in this trace.
+  pub chain_id: ChainId,
+  /// Ordered residue control points; coordinate gaps start a new trace.
+  pub points: Vec<PolymerTracePoint>,
 }
 
 /// One coordinate-bearing explicit or inferred bond prepared for rendering.
@@ -142,6 +192,8 @@ pub struct StructureScene {
   pub atoms: Vec<AtomSceneInstance>,
   /// Bonds whose two endpoints both have finite coordinates.
   pub bonds: Vec<BondSceneInstance>,
+  /// Chain-continuous protein backbone traces used by cartoon renderers.
+  pub polymer_traces: Vec<PolymerTrace>,
   /// Bounds enclosing every scene atom.
   pub bounds: SceneBounds,
 }
@@ -258,6 +310,7 @@ impl StructureScene {
       atoms.push(AtomSceneInstance {
         atom_id: AtomId::from_index(atom_index),
         residue_id: atom.residue_id,
+        residue_kind: structure.residues[atom.residue_id.index()].kind,
         position,
         element: ElementCategory::from_element(atom.element.as_ref()),
       });
@@ -304,10 +357,13 @@ impl StructureScene {
       }));
     }
 
+    let polymer_traces = extract_polymer_traces(structure, model, coordinates);
+
     Ok(Self {
       model_id,
       atoms,
       bonds,
+      polymer_traces,
       bounds: SceneBounds {
         min: bounds_min,
         max: bounds_max,
@@ -335,6 +391,114 @@ impl StructureScene {
   }
 }
 
+/// Extracts chain-continuous protein backbone control points for cartoons.
+///
+/// # Parameters
+///
+/// * `structure` supplies chain, residue, atom-name, and secondary-structure data.
+/// * `model` selects the chains represented by the current coordinate model.
+/// * `coordinates` supplies positions indexed by atom identifier.
+///
+/// # Returns
+///
+/// Ordered traces containing residues with finite C-alpha positions. Missing
+/// centers and implausibly large backbone steps split traces so renderers never
+/// interpolate across unresolved coordinates or chain breaks.
+fn extract_polymer_traces(
+  structure: &Structure,
+  model: &super::Model,
+  coordinates: &super::CoordinateSet,
+) -> Vec<PolymerTrace> {
+  let mut traces = Vec::new();
+
+  for &chain_id in &model.chain_ids {
+    let Some(chain) = structure.chains.get(chain_id.index()) else {
+      continue;
+    };
+    let mut points = Vec::new();
+
+    for &residue_id in &chain.residue_ids {
+      let Some(residue) = structure.residues.get(residue_id.index()) else {
+        continue;
+      };
+      let point = (residue.kind == ResidueKind::Polymer)
+        .then(|| polymer_trace_point(structure, coordinates, residue_id))
+        .flatten();
+
+      let Some(point) = point else {
+        finish_polymer_trace(&mut traces, chain_id, &mut points);
+        continue;
+      };
+      let separated = points.last().is_some_and(|previous: &PolymerTracePoint| {
+        squared_distance(previous.position, point.position) > MAX_POLYMER_TRACE_STEP * MAX_POLYMER_TRACE_STEP
+      });
+      if separated {
+        finish_polymer_trace(&mut traces, chain_id, &mut points);
+      }
+      points.push(point);
+    }
+    finish_polymer_trace(&mut traces, chain_id, &mut points);
+  }
+
+  traces
+}
+
+/// Builds one control point from named protein-backbone atoms.
+fn polymer_trace_point(
+  structure: &Structure,
+  coordinates: &super::CoordinateSet,
+  residue_id: ResidueId,
+) -> Option<PolymerTracePoint> {
+  let residue = structure.residues.get(residue_id.index())?;
+  let position = residue_atom_position(structure, coordinates, residue, "CA")?;
+  let guide = ["O", "C", "N"]
+    .into_iter()
+    .find_map(|name| residue_atom_position(structure, coordinates, residue, name))
+    .unwrap_or(position);
+  Some(PolymerTracePoint {
+    residue_id,
+    position,
+    guide,
+    kind: residue.secondary_structure.into(),
+  })
+}
+
+/// Finds a finite coordinate for one normalized atom name inside a residue.
+fn residue_atom_position(
+  structure: &Structure,
+  coordinates: &super::CoordinateSet,
+  residue: &super::Residue,
+  name: &str,
+) -> Option<[f32; 3]> {
+  residue.atom_ids.iter().find_map(|atom_id| {
+    let atom = structure.atoms.get(atom_id.index())?;
+    (atom.name == name)
+      .then(|| coordinates.positions.get(atom_id.index()).copied())
+      .flatten()
+      .filter(is_finite_position)
+  })
+}
+
+/// Moves a usable point run into the result while discarding isolated points.
+fn finish_polymer_trace(traces: &mut Vec<PolymerTrace>, chain_id: ChainId, points: &mut Vec<PolymerTracePoint>) {
+  if points.len() >= 2 {
+    traces.push(PolymerTrace {
+      chain_id,
+      points: std::mem::take(points),
+    });
+  } else {
+    points.clear();
+  }
+}
+
+/// Returns squared Cartesian distance without introducing a renderer math dependency.
+fn squared_distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+  let dx = a[0] - b[0];
+  let dy = a[1] - b[1];
+  let dz = a[2] - b[2];
+  dx * dx + dy * dy + dz * dz
+}
+
 /// Reports whether all three Cartesian components are finite numbers.
 fn is_finite_position(position: &[f32; 3]) -> bool {
   position.iter().all(|component| component.is_finite())
@@ -358,10 +522,44 @@ mod tests {
     assert_eq!(scene.atoms.len(), 2);
     assert_eq!(scene.atoms[0].atom_id.index(), 0);
     assert_eq!(scene.atoms[0].element, ElementCategory::Nitrogen);
+    assert_eq!(scene.atoms[0].residue_kind, ResidueKind::Polymer);
     assert_eq!(scene.atoms[1].element, ElementCategory::Carbon);
     assert_eq!(scene.bounds.min, [1.0, 2.0, 3.0]);
     assert_eq!(scene.bounds.max, [5.0, 6.0, 7.0]);
     assert_eq!(scene.bounds.center(), [3.0, 4.0, 5.0]);
+  }
+
+  #[test]
+  fn scene_extracts_continuous_ca_trace_with_backbone_guides() {
+    let pdb = b"ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \nATOM      2  O   GLY A   1       0.000   1.000   0.000  1.00 10.00           O  \nATOM      3  CA  ALA A   2       3.800   0.000   0.000  1.00 10.00           C  \nATOM      4  O   ALA A   2       3.800   1.000   0.000  1.00 10.00           O  \nEND\n";
+    let parsed = PdbParser::new()
+      .parse_bytes(pdb)
+      .unwrap_or_else(|error| panic!("polymer trace fixture should parse: {error}"));
+    let mut structure = parsed.structure;
+    structure.residues[0].secondary_structure = SecondaryStructure::Helix;
+    structure.residues[1].secondary_structure = SecondaryStructure::Sheet;
+    let scene = StructureScene::from_first_model(&structure)
+      .unwrap_or_else(|error| panic!("polymer trace fixture should produce a scene: {error}"));
+
+    assert_eq!(scene.polymer_traces.len(), 1);
+    assert_eq!(scene.polymer_traces[0].points.len(), 2);
+    assert_eq!(scene.polymer_traces[0].points[0].position, [0.0, 0.0, 0.0]);
+    assert_eq!(scene.polymer_traces[0].points[0].guide, [0.0, 1.0, 0.0]);
+    assert_eq!(scene.polymer_traces[0].points[0].kind, PolymerTraceKind::Helix);
+    assert_eq!(scene.polymer_traces[0].points[1].kind, PolymerTraceKind::Strand);
+  }
+
+  #[test]
+  fn scene_does_not_bridge_large_polymer_coordinate_gaps() {
+    let pdb = b"ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \nATOM      2  CA  ALA A   2       3.800   0.000   0.000  1.00 10.00           C  \nATOM      3  CA  SER A   3      20.000   0.000   0.000  1.00 10.00           C  \nATOM      4  CA  THR A   4      23.800   0.000   0.000  1.00 10.00           C  \nEND\n";
+    let parsed = PdbParser::new()
+      .parse_bytes(pdb)
+      .unwrap_or_else(|error| panic!("polymer gap fixture should parse: {error}"));
+    let scene = StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("polymer gap fixture should produce a scene: {error}"));
+
+    assert_eq!(scene.polymer_traces.len(), 2);
+    assert!(scene.polymer_traces.iter().all(|trace| trace.points.len() == 2));
   }
 
   #[test]

@@ -6,6 +6,7 @@ use std::{
   rc::Rc,
 };
 
+use chitin_molecule_renderer::AtomRepresentation;
 use chitin_ui::{
   composite::panel::{
     PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag, PanelTabDragState,
@@ -13,7 +14,6 @@ use chitin_ui::{
   },
   primitive::resize::ResizeGesture,
 };
-use chitin_wgpu::AtomRepresentation;
 use gpui::{AnyView, App, Bounds, Pixels, Window};
 
 /// Callback that applies an atom representation to one WGPU document view.

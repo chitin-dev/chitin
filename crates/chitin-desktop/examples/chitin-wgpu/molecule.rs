@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chitin_bio::structure::StructureScene;
 use chitin_desktop::wgpu_panel::{WgpuPanelFrame, WgpuPanelScene};
-use chitin_wgpu::{AtomRepresentation, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer};
+use chitin_molecule_renderer::{AtomRepresentation, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer};
 
 /// Lazily initializes a reusable molecular renderer for a structure scene.
 pub struct ExampleMoleculeScene {

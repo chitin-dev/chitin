@@ -3,6 +3,7 @@
 use std::{rc::Rc, time::Instant};
 
 use chitin_command::PanelTabCommand;
+use chitin_molecule_renderer::AtomRepresentation;
 use chitin_ui::{
   composite::panel::{
     PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
@@ -16,7 +17,6 @@ use chitin_ui::{
   },
   themes::UIThemes,
 };
-use chitin_wgpu::AtomRepresentation;
 use gpui::{
   AnyElement, App, AppContext, AsyncApp, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
   MouseButton, ParentElement, Pixels, RenderOnce, Styled, Subscription, WeakEntity, Window, div, point,
@@ -86,6 +86,7 @@ impl DocumentOptionsControls {
           MenuOption::new("stick", "Stick").icon(STICK_ICON_PATH),
           MenuOption::new("ball-and-stick", "Ball and stick").icon(BALL_AND_STICK_ICON_PATH),
           MenuOption::new("sphere", "Sphere").icon(SPHERE_ICON_PATH),
+          MenuOption::new("cartoon", "Cartoon").icon(STICK_ICON_PATH),
         ],
         cx,
       )
@@ -128,6 +129,7 @@ impl DocumentOptionsControls {
         "stick" => AtomRepresentation::Stick,
         "ball-and-stick" => AtomRepresentation::BallAndStick,
         "sphere" => AtomRepresentation::Sphere,
+        "cartoon" => AtomRepresentation::Cartoon,
         _ => return,
       };
       app.select_document_atom_representation(panel_id, representation, cx);
@@ -559,6 +561,7 @@ fn atom_representation_id(representation: AtomRepresentation) -> &'static str {
     AtomRepresentation::Stick => "stick",
     AtomRepresentation::BallAndStick => "ball-and-stick",
     AtomRepresentation::Sphere => "sphere",
+    AtomRepresentation::Cartoon => "cartoon",
   }
 }
 

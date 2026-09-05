@@ -2,7 +2,7 @@
 //! Chitin desktop shell with an interactive WGPU document-area panel.
 //!
 //! Run with `cargo run --example chitin-wgpu-desktop -- . structure.pdb`.
-//! Add `--representation stick|ball-and-stick|sphere` to choose the atom view.
+//! Add `--representation stick|ball-and-stick|sphere|cartoon` to choose the molecular view.
 //!
 //! This example validates the integration path where GPUI owns the app shell,
 //! document tabs, splits, and side panels while WGPU renders an interactive
@@ -24,7 +24,7 @@ use chitin_desktop::{
   keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
-use chitin_wgpu::AtomRepresentation;
+use chitin_molecule_renderer::AtomRepresentation;
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
@@ -50,14 +50,16 @@ fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
     let argument = argument.to_string_lossy();
     if argument == "--representation" {
       let Some(value) = arguments.next() else {
-        return Err("--representation requires stick, ball-and-stick, or sphere".to_string());
+        return Err("--representation requires stick, ball-and-stick, sphere, or cartoon".to_string());
       };
       let value = value.to_string_lossy();
-      representation = AtomRepresentation::from_name(&value)
-        .ok_or_else(|| format!("unknown representation {value:?}; expected stick, ball-and-stick, or sphere"))?;
+      representation = AtomRepresentation::from_name(&value).ok_or_else(|| {
+        format!("unknown representation {value:?}; expected stick, ball-and-stick, sphere, or cartoon")
+      })?;
     } else if let Some(value) = argument.strip_prefix("--representation=") {
-      representation = AtomRepresentation::from_name(value)
-        .ok_or_else(|| format!("unknown representation {value:?}; expected stick, ball-and-stick, or sphere"))?;
+      representation = AtomRepresentation::from_name(value).ok_or_else(|| {
+        format!("unknown representation {value:?}; expected stick, ball-and-stick, sphere, or cartoon")
+      })?;
     } else if argument.starts_with('-') {
       return Err(format!("unknown option {argument:?}"));
     } else {

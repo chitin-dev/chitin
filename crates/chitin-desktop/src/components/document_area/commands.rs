@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
+use chitin_molecule_renderer::AtomRepresentation;
 use chitin_ui::composite::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
-use chitin_wgpu::AtomRepresentation;
 use gpui::{App, AppContext, AsyncApp, Context, Pixels, WeakEntity, Window};
 
 use crate::{

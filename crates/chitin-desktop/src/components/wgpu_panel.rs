@@ -5,7 +5,8 @@ use std::{
   time::{Duration, Instant},
 };
 
-use chitin_wgpu::{AtomRepresentation, ClearRenderer, DragMode, RenderTargetSize, ViewerCamera, ViewportDrag};
+use chitin_molecule_renderer::{AtomRepresentation, DragMode, ViewerCamera, ViewportDrag};
+use chitin_wgpu::{ClearRenderer, RenderTargetSize};
 use gpui::{
   Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollWheelEvent,
   WgpuSurfaceHandle, Window, div, prelude::*, px, rgb, wgpu_surface,

@@ -7,6 +7,7 @@ members = [
   "crates/chitin-utils",
   "crates/chitin-databases",
   "crates/chitin-desktop",
+  "crates/chitin-molecule-renderer",
   "crates/chitin-ui",
   "crates/chitin-wgpu",
   "crates/chitin-wasm",

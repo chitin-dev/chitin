@@ -3,7 +3,7 @@
 use std::{path::Path, sync::Arc};
 
 use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
-use chitin_wgpu::{AtomRepresentation, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer};
+use chitin_molecule_renderer::{AtomRepresentation, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer};
 use gpui::{App, AppContext, Window};
 
 use crate::components::{
@@ -69,6 +69,9 @@ impl WgpuPanelScene for StructureMoleculeScene {
       }
       AtomRepresentation::Sphere => {
         "Atom representation: Sphere | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
+      }
+      AtomRepresentation::Cartoon => {
+        "Molecule representation: Cartoon | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
       }
     }
   }
