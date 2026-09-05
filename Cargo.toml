@@ -9,6 +9,7 @@ members = [
   "crates/chitin-desktop",
   "crates/chitin-ui",
   "crates/chitin-wgpu",
+  "crates/chitin-wasm",
   "tools/chitin-mmcif-schema",
 ]
 resolver = "2"

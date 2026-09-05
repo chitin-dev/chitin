@@ -10,7 +10,12 @@ bytemuck = "1.24"
 chitin-bio = { path = "../chitin-bio" }
 glam = "0.33"
 log = "0.4"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["webgpu", "wgsl"] }
 
 [lints]
 workspace = true

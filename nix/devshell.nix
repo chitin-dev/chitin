@@ -8,10 +8,13 @@ pkgs.mkShell {
     just
     mdbook
     mdbook-katex
+    nodejs
+    pnpm
     pkg-config
     rustc
     rustfmt
     typst
+    wasm-pack
     z3
   ];
   buildInputs = platform;

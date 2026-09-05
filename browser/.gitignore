@@ -1,0 +1,3 @@
+# Frontend dependencies and Vite output are local build artifacts.
+/node_modules/
+/dist/
