@@ -99,6 +99,8 @@ pub struct AtomSceneInstance {
   pub residue_id: ResidueId,
   /// Whether the parent residue belongs to a polymer or hetero component.
   pub residue_kind: ResidueKind,
+  /// Whether this atom belongs to the protein backbone represented by a cartoon trace.
+  pub is_polymer_backbone: bool,
   /// Whether the parent residue is a common crystallographic solvent molecule.
   pub is_solvent: bool,
   /// Cartesian position in ångströms.
@@ -309,11 +311,13 @@ impl StructureScene {
         bounds_min[axis] = bounds_min[axis].min(position[axis]);
         bounds_max[axis] = bounds_max[axis].max(position[axis]);
       }
+      let residue = &structure.residues[atom.residue_id.index()];
       atoms.push(AtomSceneInstance {
         atom_id: AtomId::from_index(atom_index),
         residue_id: atom.residue_id,
-        residue_kind: structure.residues[atom.residue_id.index()].kind,
-        is_solvent: is_solvent_residue(&structure.residues[atom.residue_id.index()].name),
+        residue_kind: residue.kind,
+        is_polymer_backbone: is_polymer_backbone_atom(residue.kind, &atom.name),
+        is_solvent: is_solvent_residue(&residue.name),
         position,
         element: ElementCategory::from_element(atom.element.as_ref()),
       });
@@ -401,6 +405,11 @@ fn is_solvent_residue(name: &str) -> bool {
     || name.eq_ignore_ascii_case("WAT")
     || name.eq_ignore_ascii_case("DOD")
     || name.eq_ignore_ascii_case("H2O")
+}
+
+/// Recognizes protein-backbone atoms covered by the current C-alpha cartoon trace.
+fn is_polymer_backbone_atom(residue_kind: ResidueKind, atom_name: &str) -> bool {
+  residue_kind == ResidueKind::Polymer && matches!(atom_name.trim(), "N" | "CA" | "C" | "O" | "OXT")
 }
 
 /// Extracts chain-continuous protein backbone control points for cartoons.
@@ -551,6 +560,21 @@ mod tests {
       .unwrap_or_else(|error| panic!("solvent fixture should produce a scene: {error}"));
 
     assert_eq!((scene.atoms[0].is_solvent, scene.atoms[1].is_solvent), (true, false));
+  }
+
+  #[test]
+  fn scene_distinguishes_polymer_backbone_from_side_chain_atoms() {
+    let pdb = b"ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 10.00           C  \nATOM      2  CB  ALA A   1       0.000   1.500   0.000  1.00 10.00           C  \nEND\n";
+    let parsed = PdbParser::new()
+      .parse_bytes(pdb)
+      .unwrap_or_else(|error| panic!("polymer atom fixture should parse: {error}"));
+    let scene = StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("polymer atom fixture should produce a scene: {error}"));
+
+    assert_eq!(
+      (scene.atoms[0].is_polymer_backbone, scene.atoms[1].is_polymer_backbone),
+      (true, false),
+    );
   }
 
   #[test]

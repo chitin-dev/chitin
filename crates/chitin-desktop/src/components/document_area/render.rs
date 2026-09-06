@@ -3,7 +3,7 @@
 use std::{rc::Rc, time::Instant};
 
 use chitin_command::PanelTabCommand;
-use chitin_molecule_renderer::AtomRepresentation;
+use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers};
 use chitin_ui::{
   composite::panel::{
     PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
@@ -58,8 +58,8 @@ const DOCUMENT_OPTIONS_MENU_WIDTH: Pixels = px(220.0);
 struct DocumentOptionsMenu {
   /// Panel whose active molecular view receives menu changes.
   panel_id: PanelId,
-  /// Representation selected when this menu is rendered.
-  atom_representation: AtomRepresentation,
+  /// Representation layers selected when this menu is rendered.
+  representation_layers: RepresentationLayers,
   /// Semantic colors for the menu surface and rows.
   theme: UIThemes,
   /// Weak root app entity used by dismissal and selection callbacks.
@@ -75,8 +75,10 @@ struct DocumentOptionsMenu {
 pub(crate) struct DocumentOptionsControls {
   /// Button state for the ellipsis trigger.
   more: Entity<ButtonState>,
-  /// Menu state for atom representation choices.
+  /// Menu state for atom style choices.
   menu: Entity<MenuState>,
+  /// Button state for independently toggling the polymer Cartoon layer.
+  cartoon: Entity<ButtonState>,
 }
 
 impl DocumentOptionsControls {
@@ -88,7 +90,6 @@ impl DocumentOptionsControls {
           MenuOption::new("stick", "Stick").icon(STICK_ICON_PATH),
           MenuOption::new("ball-and-stick", "Ball and stick").icon(BALL_AND_STICK_ICON_PATH),
           MenuOption::new("sphere", "Sphere").icon(SPHERE_ICON_PATH),
-          MenuOption::new("cartoon", "Cartoon").icon(CARTOON_ICON_PATH),
         ],
         cx,
       )
@@ -96,6 +97,7 @@ impl DocumentOptionsControls {
     Self {
       more: cx.new(ButtonState::new),
       menu,
+      cartoon: cx.new(ButtonState::new),
     }
   }
 
@@ -127,14 +129,38 @@ impl DocumentOptionsControls {
       let Some(panel_id) = app.document_panels.options_menu_panel_id else {
         return;
       };
-      let representation = match selected_id.as_ref() {
-        "stick" => AtomRepresentation::Stick,
-        "ball-and-stick" => AtomRepresentation::BallAndStick,
-        "sphere" => AtomRepresentation::Sphere,
-        "cartoon" => AtomRepresentation::Cartoon,
+      let atom_style = match selected_id.as_ref() {
+        "stick" => AtomStyle::Stick,
+        "ball-and-stick" => AtomStyle::BallAndStick,
+        "sphere" => AtomStyle::Sphere,
         _ => return,
       };
-      app.select_document_atom_representation(panel_id, representation, cx);
+      let representation = app
+        .document_panels
+        .active_representation_layers(panel_id)
+        .unwrap_or_default()
+        .with_atom(atom_style);
+      app.select_document_representation_layers(panel_id, representation, cx);
+      cx.notify();
+    });
+    subscription.detach();
+
+    let subscription: Subscription = cx.subscribe_in(&self.cartoon, window, move |app, _, event, _, cx| {
+      if !matches!(event, ButtonEvent::Click) {
+        return;
+      }
+      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+        return;
+      };
+      let Some(representation) = app.document_panels.active_representation_layers(panel_id) else {
+        return;
+      };
+      let representation = if representation.polymer_style() == Some(PolymerStyle::Cartoon) {
+        representation.without_polymer()
+      } else {
+        representation.with_polymer(PolymerStyle::Cartoon)
+      };
+      app.select_document_representation_layers(panel_id, representation, cx);
       cx.notify();
     });
     subscription.detach();
@@ -250,14 +276,14 @@ fn render_opened_document_panels(
   let actions_app = app.clone();
   let panel_state = document_panels.clone();
   let render_tab_strip_actions = Rc::new(move |panel_id| {
-    let atom_representation = panel_state.active_atom_representation(panel_id);
+    let representation_layers = panel_state.active_representation_layers(panel_id);
     let options_menu_open = panel_state.options_menu_panel_id == Some(panel_id);
     let options_menu_anchor = options_menu_open.then_some(panel_state.options_menu_anchor).flatten();
     render_panel_tab_strip_actions(
       panel_id,
       theme,
       actions_app.clone(),
-      atom_representation,
+      representation_layers,
       options_menu_open,
       options_menu_anchor,
       controls.clone(),
@@ -354,7 +380,7 @@ fn render_panel_tab_strip_actions(
   panel_id: PanelId,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
-  atom_representation: Option<AtomRepresentation>,
+  representation_layers: Option<RepresentationLayers>,
   options_menu_open: bool,
   options_menu_anchor: Option<gpui::Bounds<Pixels>>,
   controls: DocumentOptionsControls,
@@ -367,10 +393,10 @@ fn render_panel_tab_strip_actions(
     .border_l_1()
     .border_color(theme.border.primary)
     .bg(theme.background.primary);
-  if let Some(atom_representation) = atom_representation {
+  if let Some(representation_layers) = representation_layers {
     actions = actions.child(render_document_options_button(
       panel_id,
-      atom_representation,
+      representation_layers,
       options_menu_open,
       theme,
       app.clone(),
@@ -402,7 +428,7 @@ fn render_panel_tab_strip_actions(
 /// options remain focusable after the panel is redrawn.
 fn render_document_options_button(
   panel_id: PanelId,
-  atom_representation: AtomRepresentation,
+  representation_layers: RepresentationLayers,
   open: bool,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
@@ -446,7 +472,7 @@ fn render_document_options_button(
     .when(open && options_menu_anchor.is_some(), |anchor| {
       anchor.child(render_document_options_menu(
         panel_id,
-        atom_representation,
+        representation_layers,
         theme,
         app,
         options_menu_anchor,
@@ -462,7 +488,7 @@ fn render_document_options_button(
 /// overlay layer.
 fn render_document_options_menu(
   panel_id: PanelId,
-  atom_representation: AtomRepresentation,
+  representation_layers: RepresentationLayers,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
   options_menu_anchor: Option<gpui::Bounds<Pixels>>,
@@ -470,7 +496,7 @@ fn render_document_options_menu(
 ) -> DocumentOptionsMenu {
   DocumentOptionsMenu {
     panel_id,
-    atom_representation,
+    representation_layers,
     theme,
     app,
     options_menu_anchor,
@@ -480,13 +506,14 @@ fn render_document_options_menu(
 
 impl RenderOnce for DocumentOptionsMenu {
   fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-    let selected_id = atom_representation_id(self.atom_representation);
+    let selected_id = representation_preset_id(self.representation_layers);
     self
       .controls
       .menu
       .update(cx, |state, cx| state.set_selected_id(Some(selected_id), cx));
     let popover = build_document_options_popover(
       self.panel_id,
+      self.representation_layers,
       self.theme,
       self.app,
       self.options_menu_anchor,
@@ -506,11 +533,18 @@ impl RenderOnce for DocumentOptionsMenu {
 /// the generic menu remain unaware of panel layout state.
 fn build_document_options_popover(
   panel_id: PanelId,
+  representation_layers: RepresentationLayers,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
   options_menu_anchor: Option<gpui::Bounds<Pixels>>,
   controls: DocumentOptionsControls,
 ) -> Popover {
+  let cartoon_enabled = representation_layers.polymer_style() == Some(PolymerStyle::Cartoon);
+  let cartoon_label = if cartoon_enabled {
+    "Disable polymer cartoon"
+  } else {
+    "Enable polymer cartoon"
+  };
   let representation_section = div()
     .flex()
     .flex_col()
@@ -523,9 +557,33 @@ fn build_document_options_popover(
         .px_2()
         .text_xs()
         .text_color(theme.text.secondary)
-        .child("Atom representation"),
+        .child("Atom style"),
     )
-    .child(Menu::new(controls.menu).theme(theme).width(DOCUMENT_OPTIONS_MENU_WIDTH));
+    .child(
+      Menu::new(controls.menu.clone())
+        .theme(theme)
+        .width(DOCUMENT_OPTIONS_MENU_WIDTH),
+    )
+    .child(
+      div().p_2().border_t_1().border_color(theme.border.primary).child(
+        Button::new(controls.cartoon.clone())
+          .size(ButtonSize::Small)
+          .variant(if cartoon_enabled {
+            ButtonVariant::Primary
+          } else {
+            ButtonVariant::Secondary
+          })
+          .full_width(true)
+          .theme(theme)
+          .child(
+            svg()
+              .path(CARTOON_ICON_PATH)
+              .size(PANEL_ACTION_ICON_SIZE)
+              .text_color(theme.text.primary),
+          )
+          .child(cartoon_label),
+      ),
+    );
 
   let dismiss_app = app;
   let mut popover = Popover::new(("document-options-menu", panel_id.value()), representation_section)
@@ -557,13 +615,13 @@ fn build_document_options_popover(
   popover
 }
 
-/// Returns the stable menu identifier for one atom representation.
-fn atom_representation_id(representation: AtomRepresentation) -> &'static str {
-  match representation {
-    AtomRepresentation::Stick => "stick",
-    AtomRepresentation::BallAndStick => "ball-and-stick",
-    AtomRepresentation::Sphere => "sphere",
-    AtomRepresentation::Cartoon => "cartoon",
+/// Returns the stable menu identifier for the active atom style.
+fn representation_preset_id(representation: RepresentationLayers) -> &'static str {
+  match representation.atom_style() {
+    Some(AtomStyle::Stick) => "stick",
+    Some(AtomStyle::BallAndStick) => "ball-and-stick",
+    Some(AtomStyle::Sphere) => "sphere",
+    None => "stick",
   }
 }
 

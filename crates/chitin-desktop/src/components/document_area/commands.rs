@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chitin_molecule_renderer::AtomRepresentation;
+use chitin_molecule_renderer::RepresentationLayers;
 use chitin_ui::composite::panel::{
   PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
 };
@@ -162,16 +162,16 @@ impl ChitinApp {
     self.document_panels.dismiss_options_menu()
   }
 
-  /// Applies an atom representation to the active molecular document.
-  pub(crate) fn select_document_atom_representation(
+  /// Applies representation layers to the active molecular document.
+  pub(crate) fn select_document_representation_layers(
     &mut self,
     panel_id: PanelId,
-    representation: AtomRepresentation,
+    representation: RepresentationLayers,
     cx: &mut Context<Self>,
   ) -> bool {
     let Some(on_change) = self
       .document_panels
-      .select_atom_representation(panel_id, representation)
+      .select_representation_layers(panel_id, representation)
     else {
       self.document_panels.dismiss_options_menu();
       return false;

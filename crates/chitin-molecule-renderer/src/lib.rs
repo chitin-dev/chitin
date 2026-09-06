@@ -7,14 +7,16 @@
 //! The public [`MoleculeRenderer`] API is shared by the desktop GPUI adapter
 //! and the browser WASM bridge. Callers provide a
 //! [`chitin_bio::structure::StructureScene`], select a
-//! [`AtomRepresentation`], and retain ownership of the target surface.
+//! [`RepresentationLayers`], and retain ownership of the target surface.
 
 pub mod camera;
 mod cartoon;
 pub mod molecule;
+pub mod representation;
 
 pub use camera::{DragMode, ViewerCamera, ViewportDrag};
 pub use molecule::{
-  AtomRepresentation, BallAndStickElementStyle, BallAndStickMaterial, BallAndStickPalette, BallAndStickStyle,
-  MoleculeDebugMode, MoleculeRenderer,
+  BallAndStickElementStyle, BallAndStickMaterial, BallAndStickPalette, BallAndStickStyle, MoleculeDebugMode,
+  MoleculeRenderer,
 };
+pub use representation::{AtomStyle, PolymerStyle, RepresentationLayer, RepresentationLayers, SurfaceStyle};

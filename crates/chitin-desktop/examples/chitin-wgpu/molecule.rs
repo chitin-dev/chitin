@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chitin_bio::structure::StructureScene;
 use chitin_desktop::wgpu_panel::{WgpuPanelFrame, WgpuPanelScene};
-use chitin_molecule_renderer::{AtomRepresentation, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer};
+use chitin_molecule_renderer::{BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer, RepresentationLayers};
 
 /// Lazily initializes a reusable molecular renderer for a structure scene.
 pub struct ExampleMoleculeScene {
@@ -14,13 +14,13 @@ pub struct ExampleMoleculeScene {
   renderer: Option<MoleculeRenderer>,
   /// Shader output selected through `CHITIN_MOLECULE_DEBUG_MODE`.
   debug_mode: MoleculeDebugMode,
-  /// Atom-level representation selected by the example command line.
-  representation: AtomRepresentation,
+  /// Representation layers selected by the example command line.
+  representation: RepresentationLayers,
 }
 
 impl ExampleMoleculeScene {
   /// Creates a lazy molecule scene from shared renderer-neutral data.
-  pub fn new(scene: Arc<StructureScene>, representation: AtomRepresentation) -> Self {
+  pub fn new(scene: Arc<StructureScene>, representation: RepresentationLayers) -> Self {
     let debug_mode = molecule_debug_mode_from_env();
     Self {
       scene,
@@ -43,7 +43,7 @@ impl WgpuPanelScene for ExampleMoleculeScene {
   /// The queue submission index used by the panel to present the frame.
   fn render_frame(&mut self, frame: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex {
     let renderer = self.renderer.get_or_insert_with(|| {
-      MoleculeRenderer::new_with_representation(
+      MoleculeRenderer::new_with_layers(
         Arc::new(frame.device.clone()),
         Arc::new(frame.queue.clone()),
         frame.size,
@@ -68,7 +68,7 @@ impl WgpuPanelScene for ExampleMoleculeScene {
     "Atom representation | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
   }
 
-  fn set_atom_representation(&mut self, representation: AtomRepresentation) -> bool {
+  fn set_representation_layers(&mut self, representation: RepresentationLayers) -> bool {
     if self.representation == representation {
       return false;
     }

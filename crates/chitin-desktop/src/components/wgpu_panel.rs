@@ -5,7 +5,7 @@ use std::{
   time::{Duration, Instant},
 };
 
-use chitin_molecule_renderer::{AtomRepresentation, DragMode, ViewerCamera, ViewportDrag};
+use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportDrag};
 use chitin_wgpu::{ClearRenderer, RenderTargetSize};
 use gpui::{
   Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollWheelEvent,
@@ -56,8 +56,8 @@ pub trait WgpuPanelScene {
     DEFAULT_INTERACTION_HINT
   }
 
-  /// Applies an atom representation when the hosted scene is molecular.
-  fn set_atom_representation(&mut self, _representation: AtomRepresentation) -> bool {
+  /// Applies molecule representation layers when the hosted scene is molecular.
+  fn set_representation_layers(&mut self, _representation: RepresentationLayers) -> bool {
     false
   }
 }
@@ -165,8 +165,8 @@ impl ChitinWgpuDocumentPanel {
   }
 
   /// Changes the hosted molecular scene representation when supported.
-  pub fn set_atom_representation(&mut self, representation: AtomRepresentation) -> bool {
-    self.scene.set_atom_representation(representation)
+  pub fn set_representation_layers(&mut self, representation: RepresentationLayers) -> bool {
+    self.scene.set_representation_layers(representation)
   }
 
   /// Renders one frame into the surface back buffer when available.

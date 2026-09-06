@@ -24,7 +24,7 @@ use chitin_desktop::{
   keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
-use chitin_molecule_renderer::AtomRepresentation;
+use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers};
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
@@ -36,14 +36,14 @@ struct ExampleArguments {
   project_path: Option<PathBuf>,
   /// PDB or mmCIF file to display.
   structure_path: PathBuf,
-  /// Atom-level display representation.
-  representation: AtomRepresentation,
+  /// Molecular representation layers selected by the example arguments.
+  representation: RepresentationLayers,
 }
 
 /// Parses positional paths and the atom representation option.
 fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
   let mut positional = Vec::new();
-  let mut representation = AtomRepresentation::default();
+  let mut representation = RepresentationLayers::default();
   let mut arguments = std::env::args_os().skip(1);
 
   while let Some(argument) = arguments.next() {
@@ -53,11 +53,11 @@ fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
         return Err("--representation requires stick, ball-and-stick, sphere, or cartoon".to_string());
       };
       let value = value.to_string_lossy();
-      representation = AtomRepresentation::from_name(&value).ok_or_else(|| {
+      representation = representation_preset(&value).ok_or_else(|| {
         format!("unknown representation {value:?}; expected stick, ball-and-stick, sphere, or cartoon")
       })?;
     } else if let Some(value) = argument.strip_prefix("--representation=") {
-      representation = AtomRepresentation::from_name(value).ok_or_else(|| {
+      representation = representation_preset(value).ok_or_else(|| {
         format!("unknown representation {value:?}; expected stick, ball-and-stick, sphere, or cartoon")
       })?;
     } else if argument.starts_with('-') {
@@ -81,6 +81,14 @@ fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
     structure_path,
     representation,
   })
+}
+
+/// Parses one legacy command-line name into a representation-layer preset.
+fn representation_preset(name: &str) -> Option<RepresentationLayers> {
+  match name {
+    "cartoon" | "ribbon" => Some(RepresentationLayers::atom(AtomStyle::Stick).with_polymer(PolymerStyle::Cartoon)),
+    _ => AtomStyle::from_name(name).map(RepresentationLayers::atom),
+  }
 }
 
 /// GPUI asset source backed by the repository's `assets/` directory.
@@ -179,9 +187,9 @@ fn main() {
             let panel_scene = ExampleMoleculeScene::new(Arc::clone(&factory_scene), factory_representation);
             let panel = cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, panel_scene));
             let controlled_panel = panel.clone();
-            WgpuDocumentView::with_atom_representation(panel, factory_representation, move |representation, cx| {
+            WgpuDocumentView::with_representation_layers(panel, factory_representation, move |representation, cx| {
               controlled_panel.update(cx, |panel, cx| {
-                if panel.set_atom_representation(representation) {
+                if panel.set_representation_layers(representation) {
                   cx.notify();
                 }
               });

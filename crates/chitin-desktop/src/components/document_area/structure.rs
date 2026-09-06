@@ -3,7 +3,9 @@
 use std::{path::Path, sync::Arc};
 
 use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
-use chitin_molecule_renderer::{AtomRepresentation, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer};
+use chitin_molecule_renderer::{
+  AtomStyle, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer, PolymerStyle, RepresentationLayers,
+};
 use gpui::{App, AppContext, Window};
 
 use crate::components::{
@@ -12,7 +14,8 @@ use crate::components::{
 };
 
 /// Default representation used when GPUI opens a PDB or mmCIF document.
-const DEFAULT_STRUCTURE_REPRESENTATION: AtomRepresentation = AtomRepresentation::Cartoon;
+const DEFAULT_STRUCTURE_REPRESENTATION: RepresentationLayers =
+  RepresentationLayers::atom(AtomStyle::Stick).with_polymer(PolymerStyle::Cartoon);
 
 /// Molecular scene backed by one parsed structure and a selectable representation.
 pub(crate) struct StructureMoleculeScene {
@@ -22,13 +25,13 @@ pub(crate) struct StructureMoleculeScene {
   renderer: Option<MoleculeRenderer>,
   /// Shader output selected through the optional debug environment variable.
   debug_mode: MoleculeDebugMode,
-  /// Atom representation currently rendered by this scene.
-  representation: AtomRepresentation,
+  /// Representation layers currently rendered by this scene.
+  representation: RepresentationLayers,
 }
 
 impl StructureMoleculeScene {
-  /// Creates a lazy molecular scene with the selected atom representation.
-  pub(crate) fn new(scene: Arc<StructureScene>, representation: AtomRepresentation) -> Self {
+  /// Creates a lazy molecular scene with the selected representation layers.
+  pub(crate) fn new(scene: Arc<StructureScene>, representation: RepresentationLayers) -> Self {
     Self {
       scene,
       renderer: None,
@@ -42,7 +45,7 @@ impl WgpuPanelScene for StructureMoleculeScene {
   /// Renders one fitted molecular frame into the GPUI-owned surface.
   fn render_frame(&mut self, frame: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex {
     let renderer = self.renderer.get_or_insert_with(|| {
-      MoleculeRenderer::new_with_representation(
+      MoleculeRenderer::new_with_layers(
         Arc::new(frame.device.clone()),
         Arc::new(frame.queue.clone()),
         frame.size,
@@ -63,23 +66,23 @@ impl WgpuPanelScene for StructureMoleculeScene {
 
   /// Returns the interaction hint displayed over a molecular viewport.
   fn interaction_hint(&self) -> &'static str {
-    match self.representation {
-      AtomRepresentation::Stick => {
-        "Atom representation: Stick | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
+    match (self.representation.atom_style(), self.representation.polymer_style()) {
+      (Some(AtomStyle::Stick), None) => "Atom style: Stick | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom",
+      (Some(AtomStyle::BallAndStick), None) => {
+        "Atom style: Ball and stick | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
       }
-      AtomRepresentation::BallAndStick => {
-        "Atom representation: Ball and stick | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
+      (Some(AtomStyle::Sphere), None) => "Atom style: Sphere | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom",
+      (Some(AtomStyle::Stick), Some(PolymerStyle::Cartoon)) => {
+        "Molecule representations: Stick + Cartoon | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
       }
-      AtomRepresentation::Sphere => {
-        "Atom representation: Sphere | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
+      (_, Some(PolymerStyle::Cartoon)) => {
+        "Molecule representation includes Cartoon | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
       }
-      AtomRepresentation::Cartoon => {
-        "Molecule representation: Cartoon | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-      }
+      (None, None) => "No molecule representation | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom",
     }
   }
 
-  fn set_atom_representation(&mut self, representation: AtomRepresentation) -> bool {
+  fn set_representation_layers(&mut self, representation: RepresentationLayers) -> bool {
     if self.representation == representation {
       return false;
     }
@@ -107,9 +110,9 @@ pub(crate) fn build_structure_view_from_scene(
     )
   });
   let controlled_panel = panel.clone();
-  WgpuDocumentView::with_atom_representation(panel, DEFAULT_STRUCTURE_REPRESENTATION, move |representation, cx| {
+  WgpuDocumentView::with_representation_layers(panel, DEFAULT_STRUCTURE_REPRESENTATION, move |representation, cx| {
     controlled_panel.update(cx, |panel, cx| {
-      if panel.set_atom_representation(representation) {
+      if panel.set_representation_layers(representation) {
         cx.notify();
       }
     });
