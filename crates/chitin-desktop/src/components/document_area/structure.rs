@@ -11,6 +11,9 @@ use crate::components::{
   wgpu_panel::{ChitinWgpuDocumentPanel, WgpuPanelFrame, WgpuPanelScene},
 };
 
+/// Default representation used when GPUI opens a PDB or mmCIF document.
+const DEFAULT_STRUCTURE_REPRESENTATION: AtomRepresentation = AtomRepresentation::Cartoon;
+
 /// Molecular scene backed by one parsed structure and a selectable representation.
 pub(crate) struct StructureMoleculeScene {
   /// Renderer-neutral structure data shared by split-panel clones.
@@ -98,10 +101,13 @@ pub(crate) fn build_structure_view_from_scene(
 ) -> WgpuDocumentView {
   let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
   let panel = cx.new(|_| {
-    ChitinWgpuDocumentPanel::new_with_scene(surface, StructureMoleculeScene::new(scene, AtomRepresentation::Stick))
+    ChitinWgpuDocumentPanel::new_with_scene(
+      surface,
+      StructureMoleculeScene::new(scene, DEFAULT_STRUCTURE_REPRESENTATION),
+    )
   });
   let controlled_panel = panel.clone();
-  WgpuDocumentView::with_atom_representation(panel, AtomRepresentation::Stick, move |representation, cx| {
+  WgpuDocumentView::with_atom_representation(panel, DEFAULT_STRUCTURE_REPRESENTATION, move |representation, cx| {
     controlled_panel.update(cx, |panel, cx| {
       if panel.set_atom_representation(representation) {
         cx.notify();
