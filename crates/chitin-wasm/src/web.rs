@@ -34,6 +34,10 @@ pub async fn create_viewer(canvas: OffscreenCanvas) -> Result<MoleculeViewer, Js
   // Install readable panic messages before any asynchronous GPU operation can
   // fail; these messages are otherwise difficult to diagnose from JavaScript.
   console_error_panic_hook::set_once();
+  // Forward Rust `log` records, including cartoon frame diagnostics, to the
+  // browser console. The logger is installed once because the worker can
+  // create more than one viewer during its lifetime.
+  let _ = console_log::init_with_level(log::Level::Debug);
 
   // Browser WebGPU does not use the native display-handle backends. Restricting
   // the instance here also prevents an accidental fallback to an unavailable

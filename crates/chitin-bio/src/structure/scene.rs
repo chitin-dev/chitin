@@ -99,6 +99,8 @@ pub struct AtomSceneInstance {
   pub residue_id: ResidueId,
   /// Whether the parent residue belongs to a polymer or hetero component.
   pub residue_kind: ResidueKind,
+  /// Whether the parent residue is a common crystallographic solvent molecule.
+  pub is_solvent: bool,
   /// Cartesian position in ångströms.
   pub position: [f32; 3],
   /// Element family used by the default renderer color and radius policy.
@@ -311,6 +313,7 @@ impl StructureScene {
         atom_id: AtomId::from_index(atom_index),
         residue_id: atom.residue_id,
         residue_kind: structure.residues[atom.residue_id.index()].kind,
+        is_solvent: is_solvent_residue(&structure.residues[atom.residue_id.index()].name),
         position,
         element: ElementCategory::from_element(atom.element.as_ref()),
       });
@@ -389,6 +392,15 @@ impl StructureScene {
       .ok_or(StructureSceneError::NoModels)?;
     Self::from_model(structure, model_id)
   }
+}
+
+/// Recognizes common water residue names used by PDB and mmCIF structures.
+fn is_solvent_residue(name: &str) -> bool {
+  let name = name.trim();
+  name.eq_ignore_ascii_case("HOH")
+    || name.eq_ignore_ascii_case("WAT")
+    || name.eq_ignore_ascii_case("DOD")
+    || name.eq_ignore_ascii_case("H2O")
 }
 
 /// Extracts chain-continuous protein backbone control points for cartoons.
@@ -527,6 +539,18 @@ mod tests {
     assert_eq!(scene.bounds.min, [1.0, 2.0, 3.0]);
     assert_eq!(scene.bounds.max, [5.0, 6.0, 7.0]);
     assert_eq!(scene.bounds.center(), [3.0, 4.0, 5.0]);
+  }
+
+  #[test]
+  fn scene_classifies_common_water_names_as_solvent() {
+    let pdb = b"HETATM    1  O   HOH A   1       0.000   0.000   0.000  1.00 10.00           O  \nHETATM    2  C1  LIG A   2       4.000   0.000   0.000  1.00 10.00           C  \nEND\n";
+    let parsed = PdbParser::new()
+      .parse_bytes(pdb)
+      .unwrap_or_else(|error| panic!("solvent fixture should parse: {error}"));
+    let scene = StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("solvent fixture should produce a scene: {error}"));
+
+    assert_eq!((scene.atoms[0].is_solvent, scene.atoms[1].is_solvent), (true, false));
   }
 
   #[test]

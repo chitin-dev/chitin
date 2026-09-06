@@ -1,17 +1,19 @@
-//! Instanced atom and bond rendering for molecular structure scenes.
+//! Instanced atom, bond, and polymer-cartoon rendering for molecular scenes.
 
-use chitin_bio::structure::{BondSource, ElementCategory, ResidueKind, StructureScene};
+use std::collections::HashSet;
+
+use chitin_bio::structure::{AtomId, BondSource, ElementCategory, ResidueId, StructureScene};
 use wgpu::util::DeviceExt;
 
 use chitin_wgpu::{DepthTarget, GpuHandle, RenderTargetSize};
 
-use crate::cartoon::cartoon_mesh;
+use crate::cartoon::{CARTOON_HALF_WIDTH, cartoon_mesh};
 
 /// WGSL shader shared by the atom and bond pipelines.
 const SHADER: &str = include_str!("molecule.wgsl");
 /// WGSL shader used by the tessellated polymer cartoon pipeline.
 const CARTOON_SHADER: &str = include_str!("cartoon.wgsl");
-/// Default ChimeraX-inspired stick cylinder radius in source ångström units.
+/// Default stick cylinder radius in source ångström units.
 const DEFAULT_STICK_RADIUS: f32 = 0.20;
 /// Preferred visible segment length for metal-coordination dashes, in ångströms.
 const METAL_COORDINATION_DASH_LENGTH: f32 = 0.45;
@@ -124,7 +126,7 @@ pub enum AtomRepresentation {
   BallAndStick,
   /// Draw element-colored atoms without bonds.
   Sphere,
-  /// Draw polymer backbones as secondary-structure ribbons and hetero atoms as balls and sticks.
+  /// Draw polymer backbones as ribbons and uncovered or specially connected residues as sticks.
   Cartoon,
 }
 
@@ -539,7 +541,7 @@ impl MoleculeRenderer {
     let atom_instances = atom_instances(scene, style, representation);
     let bond_instances = bond_instances(scene, style, representation);
     let cartoon = if representation == AtomRepresentation::Cartoon {
-      cartoon_mesh(scene)
+      cartoon_mesh(scene, style.palette.carbon.color)
     } else {
       Default::default()
     };
@@ -693,7 +695,8 @@ impl MoleculeRenderer {
 
   /// Draws the active molecular representation with camera-space lighting and
   /// linear depth cueing. Cartoon geometry is drawn first when selected, and
-  /// hetero atoms/bonds are then drawn using the shared analytic pipelines.
+  /// uncovered and specially connected residues are then drawn as sticks using
+  /// the shared analytic pipelines.
   ///
   /// # Parameters
   ///
@@ -1120,11 +1123,16 @@ fn billboard_quad_mesh() -> ([[f32; 6]; 4], [u16; 6]) {
 }
 
 /// Converts scene atoms into tightly packed GPU instance rows.
+///
+/// Cartoon mode omits atoms covered only by the polymer mesh and ordinary
+/// solvent atoms. Non-solvent residues outside the mesh and complete residues
+/// touching a recognized special bond remain visible as stick-radius spheres.
 fn atom_instances(
   scene: &StructureScene,
   style: &BallAndStickStyle,
   representation: AtomRepresentation,
 ) -> Vec<[f32; 8]> {
+  let cartoon_stick_atom_ids = cartoon_stick_atom_ids(scene);
   let mut maximum_bond_radii = vec![0.0_f32; scene.atoms.len()];
   for bond in &scene.bonds {
     for atom_id in bond.atom_ids {
@@ -1138,15 +1146,14 @@ fn atom_instances(
     .atoms
     .iter()
     .enumerate()
-    .filter(|(_, atom)| representation != AtomRepresentation::Cartoon || atom.residue_kind == ResidueKind::Hetero)
+    .filter(|(_, atom)| representation != AtomRepresentation::Cartoon || cartoon_stick_atom_ids.contains(&atom.atom_id))
     .map(|(index, atom)| {
       let visual = style.palette.for_element(atom.element);
       let radius = match representation {
         AtomRepresentation::Sphere => visual.radius,
         AtomRepresentation::Stick => maximum_bond_radii[index].max(style.bond_radius),
-        AtomRepresentation::BallAndStick | AtomRepresentation::Cartoon => {
-          (visual.radius * style.ball_radius_scale).max(style.bond_radius)
-        }
+        AtomRepresentation::BallAndStick => (visual.radius * style.ball_radius_scale).max(style.bond_radius),
+        AtomRepresentation::Cartoon => style.bond_radius,
       };
       [
         atom.position[0],
@@ -1172,7 +1179,10 @@ fn atom_instances(
 /// # Returns
 ///
 /// One packed cylinder per bond. The shader selects the endpoint color on each
-/// side of the midpoint without splitting the geometry.
+/// side of the midpoint without splitting the geometry. In Cartoon mode,
+/// ordinary bonds inside the polymer mesh are omitted. Bonds within residues
+/// exposed by a special relationship remain visible, and the special bond
+/// itself remains eligible even when it crosses the cartoon boundary.
 fn bond_instances(
   scene: &StructureScene,
   style: &BallAndStickStyle,
@@ -1188,23 +1198,24 @@ fn bond_instances(
     .max()
     .map_or(0, |index| index + 1);
   let mut elements = vec![ElementCategory::Other; table_len];
-  let mut residue_kinds = vec![ResidueKind::Polymer; table_len];
+  let cartoon_stick_atom_ids = cartoon_stick_atom_ids(scene);
   for atom in &scene.atoms {
     elements[atom.atom_id.index()] = atom.element;
-    residue_kinds[atom.atom_id.index()] = atom.residue_kind;
   }
 
   let mut instances = Vec::with_capacity(scene.bonds.len());
   for bond in &scene.bonds {
-    if representation == AtomRepresentation::Cartoon {
-      let endpoint_is_hetero = |atom_id: chitin_bio::structure::AtomId| {
-        residue_kinds
-          .get(atom_id.index())
-          .is_some_and(|kind| *kind == ResidueKind::Hetero)
-      };
-      if !bond.atom_ids.into_iter().all(endpoint_is_hetero) {
-        continue;
-      }
+    if representation == AtomRepresentation::Cartoon
+      && special_bond_style(bond.source, style.bond_radius).is_none()
+      && !bond
+        .atom_ids
+        .into_iter()
+        .all(|atom_id| cartoon_stick_atom_ids.contains(&atom_id))
+    {
+      // Ordinary backbone bonds are already represented by the cartoon mesh.
+      // A cylinder is retained only when both endpoints belong to residues
+      // selected for explicit stick rendering.
+      continue;
     }
     let [start, end] = bond.positions;
     let start_element = elements
@@ -1234,6 +1245,58 @@ fn bond_instances(
   instances
 }
 
+/// Returns residues represented by at least one complete cartoon control point.
+fn cartoon_residue_ids(scene: &StructureScene) -> HashSet<ResidueId> {
+  scene
+    .polymer_traces
+    .iter()
+    .flat_map(|trace| trace.points.iter().map(|point| point.residue_id))
+    .collect()
+}
+
+/// Returns atom IDs that remain explicitly visible beside the cartoon mesh.
+///
+/// Non-solvent residues not represented by a polymer trace are visible by
+/// default. If a recognized special bond touches any residue, every atom in
+/// both endpoint residues is included so the interaction is anchored to
+/// complete chemical groups rather than isolated atoms.
+fn cartoon_stick_atom_ids(scene: &StructureScene) -> HashSet<AtomId> {
+  let cartoon_residue_ids = cartoon_residue_ids(scene);
+  let mut stick_residue_ids: HashSet<_> = scene
+    .atoms
+    .iter()
+    .filter(|atom| !atom.is_solvent && !cartoon_residue_ids.contains(&atom.residue_id))
+    .map(|atom| atom.residue_id)
+    .collect();
+  let table_len = scene
+    .atoms
+    .iter()
+    .map(|atom| atom.atom_id.index())
+    .max()
+    .map_or(0, |index| index + 1);
+  let mut residue_by_atom_id = vec![None; table_len];
+  for atom in &scene.atoms {
+    residue_by_atom_id[atom.atom_id.index()] = Some(atom.residue_id);
+  }
+  for bond in &scene.bonds {
+    if !is_special_bond(bond.source) {
+      continue;
+    }
+    for atom_id in bond.atom_ids {
+      if let Some(Some(residue_id)) = residue_by_atom_id.get(atom_id.index()) {
+        stick_residue_ids.insert(*residue_id);
+      }
+    }
+  }
+
+  scene
+    .atoms
+    .iter()
+    .filter(|atom| stick_residue_ids.contains(&atom.residue_id))
+    .map(|atom| atom.atom_id)
+    .collect()
+}
+
 /// Returns the visual style used for a non-covalent or disulfide relation.
 fn special_bond_style(source: BondSource, bond_radius: f32) -> Option<(f32, [f32; 3], f32, f32)> {
   let style = match source {
@@ -1254,6 +1317,22 @@ fn special_bond_style(source: BondSource, bond_radius: f32) -> Option<(f32, [f32
     SPECIAL_BOND_DASH_LENGTH,
     SPECIAL_BOND_GAP_LENGTH,
   ))
+}
+
+/// Returns whether a structure relation has a dedicated visual style.
+fn is_special_bond(source: BondSource) -> bool {
+  matches!(
+    source,
+    BondSource::StructConnMetalCoordination
+      | BondSource::StructConnHydrogenBond
+      | BondSource::StructConnSaltBridge
+      | BondSource::StructConnDisulfide
+      | BondSource::StructConnBaseMismatch
+      | BondSource::StructConnCovalentBase
+      | BondSource::StructConnCovalentPhosphate
+      | BondSource::StructConnCovalentSugar
+      | BondSource::StructConnResidueModification
+  )
 }
 
 /// Reports whether a special relation should remain one continuous cylinder.
@@ -1381,19 +1460,17 @@ fn representation_surface_radius(
   style: &BallAndStickStyle,
   representation: AtomRepresentation,
 ) -> f32 {
+  if representation == AtomRepresentation::Cartoon {
+    return CARTOON_HALF_WIDTH.max(style.bond_radius);
+  }
   scene.atoms.iter().fold(style.bond_radius, |maximum, atom| {
     let element_radius = style.palette.for_element(atom.element).radius;
-    let rendered_radius = match representation {
-      AtomRepresentation::Stick => style.bond_radius,
-      AtomRepresentation::BallAndStick => element_radius * style.ball_radius_scale,
-      AtomRepresentation::Sphere => element_radius,
-      AtomRepresentation::Cartoon => {
-        if atom.residue_kind == ResidueKind::Hetero {
-          element_radius * style.ball_radius_scale
-        } else {
-          0.72
-        }
-      }
+    let rendered_radius = if representation == AtomRepresentation::Stick {
+      style.bond_radius
+    } else if representation == AtomRepresentation::BallAndStick {
+      element_radius * style.ball_radius_scale
+    } else {
+      element_radius
     };
     maximum.max(rendered_radius)
   })
@@ -1421,7 +1498,7 @@ fn fit_geometry(scene: &StructureScene, surface_radius: f32) -> (glam::Mat4, gla
 #[cfg(test)]
 mod tests {
   use super::*;
-  use chitin_bio::structure::{PdbParser, StructureScene};
+  use chitin_bio::structure::{BondOrder, BondSceneInstance, PdbParser, StructureScene};
 
   /// Parses a two-atom inferred bond for instance-data tests.
   fn bonded_scene(second_element: &str) -> StructureScene {
@@ -1433,6 +1510,16 @@ mod tests {
       .unwrap_or_else(|error| panic!("ball-and-stick fixture should parse: {error}"));
     StructureScene::from_first_model(&parsed.structure)
       .unwrap_or_else(|error| panic!("ball-and-stick fixture should produce a scene: {error}"))
+  }
+
+  /// Parses two protein backbone residues and one ligand for Cartoon filtering tests.
+  fn cartoon_scene() -> StructureScene {
+    let pdb = b"ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 10.00           C  \nATOM      2  O   ALA A   1       0.000   1.000   0.000  1.00 10.00           O  \nATOM      3  CB  ALA A   1       0.000   0.000   1.500  1.00 10.00           C  \nATOM      4  CA  ALA A   2       3.800   0.000   0.000  1.00 10.00           C  \nATOM      5  O   ALA A   2       3.800   1.000   0.000  1.00 10.00           O  \nHETATM    6  C1  LIG B   1      10.000   0.000   0.000  1.00 10.00           C  \nHETATM    7  O   HOH C   1      12.000   0.000   0.000  1.00 10.00           O  \nEND\n";
+    let parsed = PdbParser::new()
+      .parse_bytes(pdb)
+      .unwrap_or_else(|error| panic!("cartoon filtering fixture should parse: {error}"));
+    StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("cartoon filtering fixture should produce a scene: {error}"))
   }
 
   #[test]
@@ -1561,6 +1648,58 @@ mod tests {
     let style = BallAndStickStyle::default();
 
     assert!(bond_instances(&scene, &style, AtomRepresentation::Sphere).is_empty());
+  }
+
+  #[test]
+  fn cartoon_should_render_non_solvent_ligands_with_stick_radius() {
+    let scene = cartoon_scene();
+    let style = BallAndStickStyle::default();
+    let instances = atom_instances(&scene, &style, AtomRepresentation::Cartoon);
+
+    assert_eq!(instances.len(), 1);
+    assert_eq!(instances[0][3], style.bond_radius);
+  }
+
+  #[test]
+  fn cartoon_should_show_complete_residues_at_special_bonds() {
+    let mut scene = cartoon_scene();
+    let backbone = scene.atoms[0];
+    let protein = scene.atoms[2];
+    let ligand = scene.atoms[5];
+    scene.bonds.push(BondSceneInstance {
+      atom_ids: [backbone.atom_id, protein.atom_id],
+      positions: [backbone.position, protein.position],
+      order: BondOrder::Unknown,
+      source: BondSource::DistanceInference,
+    });
+    scene.bonds.push(BondSceneInstance {
+      atom_ids: [protein.atom_id, ligand.atom_id],
+      positions: [protein.position, ligand.position],
+      order: BondOrder::Unknown,
+      source: BondSource::StructConnHydrogenBond,
+    });
+    let style = BallAndStickStyle::default();
+    let atom_instances = atom_instances(&scene, &style, AtomRepresentation::Cartoon);
+    let bond_instances = bond_instances(&scene, &style, AtomRepresentation::Cartoon);
+    let contains_atom = |position: [f32; 3]| {
+      atom_instances
+        .iter()
+        .any(|instance| [instance[0], instance[1], instance[2]] == position)
+    };
+
+    assert_eq!(atom_instances.len(), 4);
+    assert!(scene.atoms[0..3].iter().all(|atom| contains_atom(atom.position)));
+    assert!(contains_atom(ligand.position));
+    assert!(scene.atoms[3..5].iter().all(|atom| !contains_atom(atom.position)));
+    assert!(bond_instances.iter().any(|instance| {
+      [instance[0], instance[1], instance[2]] == backbone.position
+        && [instance[4], instance[5], instance[6]] == protein.position
+    }));
+    assert!(
+      bond_instances
+        .iter()
+        .any(|instance| [instance[8], instance[9], instance[10]] == HYDROGEN_BOND_COLOR)
+    );
   }
 
   #[test]
