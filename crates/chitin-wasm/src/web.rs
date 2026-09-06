@@ -10,7 +10,8 @@ use std::rc::Rc;
 
 use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
 use chitin_molecule_renderer::{
-  AtomRepresentation, BallAndStickStyle, DragMode, MoleculeRenderer, ViewerCamera, ViewportDrag,
+  AtomStyle, BallAndStickStyle, DragMode, MoleculeRenderer, PolymerStyle, RepresentationLayers, ViewerCamera,
+  ViewportDrag,
 };
 use chitin_wgpu::{ClearRenderer, GpuHandle, RenderTargetSize};
 use wasm_bindgen::prelude::*;
@@ -106,7 +107,7 @@ pub async fn create_viewer(canvas: OffscreenCanvas) -> Result<MoleculeViewer, Js
     clear_renderer,
     renderer: None,
     scene: None,
-    representation: AtomRepresentation::BallAndStick,
+    representation: RepresentationLayers::atom(AtomStyle::BallAndStick),
     camera: ViewerCamera::default(),
     active_drag: None,
   })
@@ -134,7 +135,7 @@ pub struct MoleculeViewer {
   /// Renderer-neutral scene retained for representation changes.
   scene: Option<StructureScene>,
   /// Representation used when rebuilding the molecule renderer.
-  representation: AtomRepresentation,
+  representation: RepresentationLayers,
   /// Camera state shared by pointer, wheel, and render operations.
   camera: ViewerCamera,
   /// Pointer gesture currently being applied to the camera.
@@ -164,7 +165,7 @@ impl MoleculeViewer {
     Ok(summary)
   }
 
-  /// Selects an atom or polymer-cartoon molecular representation.
+  /// Applies a legacy single-name representation preset.
   ///
   /// # Parameters
   ///
@@ -177,14 +178,41 @@ impl MoleculeViewer {
   /// mode. When no scene is loaded, the mode is used by the next load operation.
   pub fn set_representation(&mut self, representation: &str) -> Result<(), JsValue> {
     self.representation = match representation {
-      "stick" => AtomRepresentation::Stick,
-      "ball-and-stick" => AtomRepresentation::BallAndStick,
-      "sphere" => AtomRepresentation::Sphere,
-      "cartoon" => AtomRepresentation::Cartoon,
+      "stick" => RepresentationLayers::atom(AtomStyle::Stick),
+      "ball-and-stick" => RepresentationLayers::atom(AtomStyle::BallAndStick),
+      "sphere" => RepresentationLayers::atom(AtomStyle::Sphere),
+      "cartoon" => RepresentationLayers::atom(AtomStyle::Stick).with_polymer(PolymerStyle::Cartoon),
       _ => return Err(js_error(format!("unsupported representation: {representation}"))),
     };
     self.rebuild_renderer();
     Ok(())
+  }
+
+  /// Changes the atom layer style without changing other representation layers.
+  ///
+  /// # Parameters
+  ///
+  /// * `style` is one of `stick`, `ball-and-stick`, or `sphere`.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after rebuilding retained scene geometry, or a
+  /// JavaScript error when `style` is unsupported.
+  pub fn set_atom_style(&mut self, style: &str) -> Result<(), JsValue> {
+    let style = AtomStyle::from_name(style).ok_or_else(|| js_error(format!("unsupported atom style: {style}")))?;
+    self.representation = self.representation.with_atom(style);
+    self.rebuild_renderer();
+    Ok(())
+  }
+
+  /// Enables or disables the polymer Cartoon layer without changing the atom layer.
+  pub fn set_cartoon_enabled(&mut self, enabled: bool) {
+    self.representation = if enabled {
+      self.representation.with_polymer(PolymerStyle::Cartoon)
+    } else {
+      self.representation.without_polymer()
+    };
+    self.rebuild_renderer();
   }
 
   /// Resizes the surface and size-dependent depth resources.
@@ -333,7 +361,7 @@ impl MoleculeViewer {
       return;
     };
     let size = RenderTargetSize::new(self.config.width, self.config.height);
-    self.renderer = Some(MoleculeRenderer::new_with_representation(
+    self.renderer = Some(MoleculeRenderer::new_with_layers(
       Rc::clone(&self.device),
       Rc::clone(&self.queue),
       size,

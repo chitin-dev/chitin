@@ -9,7 +9,8 @@ type WorkerCommand =
   | { type: "pointer-up" }
   | { type: "zoom"; deltaY: number }
   | { type: "reset-camera" }
-  | { type: "representation"; value: string };
+  | { type: "atom-style"; value: string }
+  | { type: "cartoon-enabled"; enabled: boolean };
 
 type WorkerResponse =
   | { type: "ready" }
@@ -81,8 +82,12 @@ async function handleCommand(command: WorkerCommand): Promise<void> {
         viewer.reset_camera();
         viewer.render();
         break;
-      case "representation":
-        viewer.set_representation(command.value);
+      case "atom-style":
+        viewer.set_atom_style(command.value);
+        viewer.render();
+        break;
+      case "cartoon-enabled":
+        viewer.set_cartoon_enabled(command.enabled);
         viewer.render();
         break;
     }

@@ -41,7 +41,8 @@ END
   let statusText = "Initializing WebGPU";
   let structureName = "Web sample";
   let structureSummary = "Loading…";
-  let representation = "ball-and-stick";
+  let atomStyle = "ball-and-stick";
+  let cartoonEnabled = false;
   let dropVisible = false;
 
   // WebGPU can only be initialized after Svelte has mounted the canvas.
@@ -154,9 +155,13 @@ END
     if (file) void loadFile(file);
   }
 
-  // Rebuilding the renderer is handled by the WASM bridge after a mode change.
-  function handleRepresentation(): void {
-    viewerWorker?.postMessage({ type: "representation", value: representation });
+  // Atom and polymer layers are updated independently by the WASM bridge.
+  function handleAtomStyle(): void {
+    viewerWorker?.postMessage({ type: "atom-style", value: atomStyle });
+  }
+
+  function handleCartoonEnabled(): void {
+    viewerWorker?.postMessage({ type: "cartoon-enabled", enabled: cartoonEnabled });
   }
 
   // Pointer coordinates are canvas-local so camera movement is independent of
@@ -277,14 +282,23 @@ END
           />
         </label>
 
-        <label class="select-control" for="representation">
-          <span class="control-label">Representation</span>
-          <select class="select-input" id="representation" bind:value={representation} onchange={handleRepresentation}>
+        <label class="select-control" for="atom-style">
+          <span class="control-label">Atom style</span>
+          <select class="select-input" id="atom-style" bind:value={atomStyle} onchange={handleAtomStyle}>
             <option value="ball-and-stick">Ball &amp; stick</option>
             <option value="stick">Stick</option>
             <option value="sphere">Space filling</option>
-            <option value="cartoon">Cartoon</option>
           </select>
+        </label>
+
+        <label class="flex cursor-pointer items-center gap-2 text-xs">
+          <input
+            class="h-4 w-4 accent-sky-500"
+            type="checkbox"
+            bind:checked={cartoonEnabled}
+            onchange={handleCartoonEnabled}
+          />
+          <span>Polymer cartoon</span>
         </label>
 
         <button
