@@ -3,8 +3,9 @@
 use std::{rc::Rc, time::Instant};
 
 use chitin_command::PanelTabCommand;
-use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers};
+use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers, SurfaceStyle};
 use chitin_ui::{
+  composite::grouped_select::{GroupedSelect, GroupedSelectGroup},
   composite::panel::{
     PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
     PanelTabCloseIconRenderer, PanelTabDragConfig, PanelTabDragStartHandler, PanelTabDragTargetHandler,
@@ -13,7 +14,7 @@ use chitin_ui::{
   primitive::popover::{Popover, PopoverPlacement, PopoverStyle},
   primitive::{
     button::{Button, ButtonEvent, ButtonSize, ButtonState, ButtonStyle, ButtonVariant},
-    menu::{Menu, MenuEvent, MenuOption, MenuState},
+    input::select::{SelectContent, SelectGroup, SelectInputEvent, SelectInputState, SelectItem, SelectOption},
   },
   themes::UIThemes,
 };
@@ -44,6 +45,8 @@ const BALL_AND_STICK_ICON_PATH: &str = "icons/atom-ball-and-stick.svg";
 const SPHERE_ICON_PATH: &str = "icons/atom-sphere.svg";
 /// Asset path for the cartoon representation icon.
 const CARTOON_ICON_PATH: &str = "icons/atom-cartoon.svg";
+/// Asset path for the disabled representation icon.
+const REPRESENTATION_NONE_ICON_PATH: &str = "icons/representation-none.svg";
 /// Asset path for document tab close buttons.
 const TAB_CLOSE_ICON_PATH: &str = "icons/tab-close.svg";
 /// Size used by tab strip action icons.
@@ -75,29 +78,97 @@ struct DocumentOptionsMenu {
 pub(crate) struct DocumentOptionsControls {
   /// Button state for the ellipsis trigger.
   more: Entity<ButtonState>,
-  /// Menu state for atom style choices.
-  menu: Entity<MenuState>,
-  /// Button state for independently toggling the polymer Cartoon layer.
-  cartoon: Entity<ButtonState>,
+  /// Single-selection state for atom-layer styles.
+  atom: Entity<SelectInputState>,
+  /// Single-selection state for polymer-layer styles.
+  polymer: Entity<SelectInputState>,
+  /// Single-selection state for surface-layer styles.
+  surface: Entity<SelectInputState>,
+}
+
+/// Declarative data used to build one representation-layer selector.
+struct SelectOptionSpec {
+  /// Stable identifier consumed by the representation event handler.
+  id: &'static str,
+  /// Human-readable label displayed by the selector.
+  label: &'static str,
+  /// Asset-relative icon path displayed beside the option.
+  icon: Option<&'static str>,
+}
+
+impl SelectOptionSpec {
+  /// Creates one representation selector option description.
+  const fn new(id: &'static str, label: &'static str, icon: &'static str) -> Self {
+    Self {
+      id,
+      label,
+      icon: Some(icon),
+    }
+  }
+
+  /// Creates a representation option without a leading icon.
+  const fn without_icon(id: &'static str, label: &'static str) -> Self {
+    Self { id, label, icon: None }
+  }
+}
+
+/// Creates a select state with a valid initial representation choice.
+fn new_representation_select(
+  cx: &mut Context<ChitinApp>,
+  specs: impl IntoIterator<Item = SelectOptionSpec>,
+  selected_id: &str,
+) -> Entity<SelectInputState> {
+  let options = specs
+    .into_iter()
+    .map(|spec| {
+      let option = SelectOption::new(spec.id, spec.label);
+      match spec.icon {
+        Some(icon) => option.icon(icon),
+        None => option,
+      }
+    })
+    .collect::<Vec<_>>();
+  let state = cx.new(|cx| SelectInputState::new(options.clone(), cx));
+  state.update(cx, |state, cx| {
+    state.select(selected_id, cx);
+  });
+  state
 }
 
 impl DocumentOptionsControls {
   /// Creates the persistent trigger and representation menu state.
   pub(crate) fn new(cx: &mut Context<ChitinApp>) -> Self {
-    let menu = cx.new(|cx| {
-      MenuState::new(
-        [
-          MenuOption::new("stick", "Stick").icon(STICK_ICON_PATH),
-          MenuOption::new("ball-and-stick", "Ball and stick").icon(BALL_AND_STICK_ICON_PATH),
-          MenuOption::new("sphere", "Sphere").icon(SPHERE_ICON_PATH),
-        ],
-        cx,
-      )
-    });
+    let atom = new_representation_select(
+      cx,
+      [
+        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
+        SelectOptionSpec::new("stick", "Stick", STICK_ICON_PATH),
+        SelectOptionSpec::new("ball-and-stick", "Ball and stick", BALL_AND_STICK_ICON_PATH),
+        SelectOptionSpec::new("sphere", "Space filling", SPHERE_ICON_PATH),
+      ],
+      "stick",
+    );
+    let polymer = new_representation_select(
+      cx,
+      [
+        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
+        SelectOptionSpec::new("cartoon", "Cartoon", CARTOON_ICON_PATH),
+      ],
+      "none",
+    );
+    let surface = new_representation_select(
+      cx,
+      [
+        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
+        SelectOptionSpec::without_icon("solid", "Solid"),
+      ],
+      "none",
+    );
     Self {
       more: cx.new(ButtonState::new),
-      menu,
-      cartoon: cx.new(ButtonState::new),
+      atom,
+      polymer,
+      surface,
     }
   }
 
@@ -108,57 +179,77 @@ impl DocumentOptionsControls {
   /// * `window` supplies focus routing for the menu when it opens.
   /// * `cx` owns subscriptions and updates the application state.
   pub(crate) fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
-    let menu = self.menu.clone();
+    let atom = self.atom.clone();
     let subscription: Subscription = cx.subscribe_in(&self.more, window, move |app, _, event, window, cx| {
       if !matches!(event, ButtonEvent::Click) {
         return;
       }
       let panel_id = app.document_panels.focused_panel_id;
       if app.toggle_document_options_menu(panel_id) && app.document_panels.options_menu_panel_id == Some(panel_id) {
-        let focus = menu.read(cx).focus_handle().clone();
+        let focus = atom.read(cx).focus_handle().clone();
         window.focus(&focus, cx);
       }
       cx.notify();
     });
     subscription.detach();
 
-    let subscription: Subscription = cx.subscribe_in(&self.menu, window, move |app, _, event, _, cx| {
-      let MenuEvent::SelectionChange { selected_id } = event else {
+    let subscription: Subscription = cx.subscribe_in(&self.atom, window, move |app, _, event, _, cx| {
+      let SelectInputEvent::SelectionChange { selected_id } = event else {
         return;
       };
       let Some(panel_id) = app.document_panels.options_menu_panel_id else {
         return;
       };
-      let atom_style = match selected_id.as_ref() {
-        "stick" => AtomStyle::Stick,
-        "ball-and-stick" => AtomStyle::BallAndStick,
-        "sphere" => AtomStyle::Sphere,
-        _ => return,
-      };
       let representation = app
         .document_panels
         .active_representation_layers(panel_id)
-        .unwrap_or_default()
-        .with_atom(atom_style);
+        .unwrap_or_else(RepresentationLayers::empty);
+      let representation = match selected_id.as_deref() {
+        Some("none") => representation.without_atom(),
+        Some("stick") => representation.with_atom(AtomStyle::Stick),
+        Some("ball-and-stick") => representation.with_atom(AtomStyle::BallAndStick),
+        Some("sphere") => representation.with_atom(AtomStyle::Sphere),
+        _ => return,
+      };
       app.select_document_representation_layers(panel_id, representation, cx);
       cx.notify();
     });
     subscription.detach();
 
-    let subscription: Subscription = cx.subscribe_in(&self.cartoon, window, move |app, _, event, _, cx| {
-      if !matches!(event, ButtonEvent::Click) {
+    let subscription: Subscription = cx.subscribe_in(&self.polymer, window, move |app, _, event, _, cx| {
+      let SelectInputEvent::SelectionChange { selected_id } = event else {
         return;
-      }
+      };
       let Some(panel_id) = app.document_panels.options_menu_panel_id else {
         return;
       };
       let Some(representation) = app.document_panels.active_representation_layers(panel_id) else {
         return;
       };
-      let representation = if representation.polymer_style() == Some(PolymerStyle::Cartoon) {
-        representation.without_polymer()
-      } else {
-        representation.with_polymer(PolymerStyle::Cartoon)
+      let representation = match selected_id.as_deref() {
+        Some("none") => representation.without_polymer(),
+        Some("cartoon") => representation.with_polymer(PolymerStyle::Cartoon),
+        _ => return,
+      };
+      app.select_document_representation_layers(panel_id, representation, cx);
+      cx.notify();
+    });
+    subscription.detach();
+
+    let subscription: Subscription = cx.subscribe_in(&self.surface, window, move |app, _, event, _, cx| {
+      let SelectInputEvent::SelectionChange { selected_id } = event else {
+        return;
+      };
+      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+        return;
+      };
+      let Some(representation) = app.document_panels.active_representation_layers(panel_id) else {
+        return;
+      };
+      let representation = match selected_id.as_deref() {
+        Some("none") => representation.without_surface(),
+        Some("solid") => representation.with_surface(SurfaceStyle::Solid),
+        _ => return,
       };
       app.select_document_representation_layers(panel_id, representation, cx);
       cx.notify();
@@ -506,14 +597,9 @@ fn render_document_options_menu(
 
 impl RenderOnce for DocumentOptionsMenu {
   fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-    let selected_id = representation_preset_id(self.representation_layers);
-    self
-      .controls
-      .menu
-      .update(cx, |state, cx| state.set_selected_id(Some(selected_id), cx));
+    sync_representation_selectors(&self.controls, self.representation_layers, cx);
     let popover = build_document_options_popover(
       self.panel_id,
-      self.representation_layers,
       self.theme,
       self.app,
       self.options_menu_anchor,
@@ -528,62 +614,45 @@ impl RenderOnce for DocumentOptionsMenu {
 
 /// Builds the molecular document popover surface and dismissal interaction.
 ///
-/// Selection itself is handled by [`MenuState`] and routed through
-/// [`MenuEvent`] by [`DocumentOptionsControls`]. Keeping dismissal here lets
-/// the generic menu remain unaware of panel layout state.
+/// Selection is handled independently by each nested [`SelectInputState`].
+/// Keeping dismissal here lets the reusable grouped selector remain unaware of
+/// panel layout state.
 fn build_document_options_popover(
   panel_id: PanelId,
-  representation_layers: RepresentationLayers,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
   options_menu_anchor: Option<gpui::Bounds<Pixels>>,
   controls: DocumentOptionsControls,
 ) -> Popover {
-  let cartoon_enabled = representation_layers.polymer_style() == Some(PolymerStyle::Cartoon);
-  let cartoon_label = if cartoon_enabled {
-    "Disable polymer cartoon"
-  } else {
-    "Enable polymer cartoon"
-  };
-  let representation_section = div()
-    .flex()
-    .flex_col()
-    .text_size(px(12.0))
-    .child(
-      div()
-        .h(px(28.0))
-        .flex()
-        .items_center()
-        .px_2()
-        .text_xs()
-        .text_color(theme.text.secondary)
-        .child("Atom style"),
-    )
-    .child(
-      Menu::new(controls.menu.clone())
-        .theme(theme)
-        .width(DOCUMENT_OPTIONS_MENU_WIDTH),
-    )
-    .child(
-      div().p_2().border_t_1().border_color(theme.border.primary).child(
-        Button::new(controls.cartoon.clone())
-          .size(ButtonSize::Small)
-          .variant(if cartoon_enabled {
-            ButtonVariant::Primary
-          } else {
-            ButtonVariant::Secondary
-          })
-          .full_width(true)
-          .theme(theme)
-          .child(
-            svg()
-              .path(CARTOON_ICON_PATH)
-              .size(PANEL_ACTION_ICON_SIZE)
-              .text_color(theme.text.primary),
-          )
-          .child(cartoon_label),
-      ),
-    );
+  let representation_section = GroupedSelect::new()
+    .theme(theme)
+    .width(DOCUMENT_OPTIONS_MENU_WIDTH)
+    .group(GroupedSelectGroup::new(
+      "Atom style",
+      controls.atom,
+      representation_content([
+        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
+        SelectOptionSpec::new("stick", "Stick", STICK_ICON_PATH),
+        SelectOptionSpec::new("ball-and-stick", "Ball and stick", BALL_AND_STICK_ICON_PATH),
+        SelectOptionSpec::new("sphere", "Space filling", SPHERE_ICON_PATH),
+      ]),
+    ))
+    .group(GroupedSelectGroup::new(
+      "Polymer style",
+      controls.polymer,
+      representation_content([
+        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
+        SelectOptionSpec::new("cartoon", "Cartoon", CARTOON_ICON_PATH),
+      ]),
+    ))
+    .group(GroupedSelectGroup::new(
+      "Surface style",
+      controls.surface,
+      representation_content([
+        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
+        SelectOptionSpec::without_icon("solid", "Solid"),
+      ]),
+    ));
 
   let dismiss_app = app;
   let mut popover = Popover::new(("document-options-menu", panel_id.value()), representation_section)
@@ -615,13 +684,50 @@ fn build_document_options_popover(
   popover
 }
 
-/// Returns the stable menu identifier for the active atom style.
-fn representation_preset_id(representation: RepresentationLayers) -> &'static str {
-  match representation.atom_style() {
+/// Converts representation option descriptions into one grouped select popup.
+fn representation_content<const N: usize>(specs: [SelectOptionSpec; N]) -> SelectContent {
+  let group = specs.into_iter().fold(SelectGroup::new(), |group, spec| {
+    let item = SelectItem::new(spec.id, spec.label);
+    match spec.icon {
+      Some(icon) => group.item(item.icon(icon)),
+      None => group.item(item),
+    }
+  });
+  SelectContent::new()
+    .position(chitin_ui::primitive::input::select::SelectContentPosition::Popper)
+    .group(group)
+}
+
+/// Synchronizes all three selector states with the active representation.
+fn sync_representation_selectors(
+  controls: &DocumentOptionsControls,
+  representation: RepresentationLayers,
+  cx: &mut App,
+) {
+  let atom_id = match representation.atom_style() {
     Some(AtomStyle::Stick) => "stick",
     Some(AtomStyle::BallAndStick) => "ball-and-stick",
     Some(AtomStyle::Sphere) => "sphere",
-    None => "stick",
+    None => "none",
+  };
+  let polymer_id = if representation.polymer_style().is_some() {
+    "cartoon"
+  } else {
+    "none"
+  };
+  let surface_id = if representation.surface_style().is_some() {
+    "solid"
+  } else {
+    "none"
+  };
+  for (state, id) in [
+    (&controls.atom, atom_id),
+    (&controls.polymer, polymer_id),
+    (&controls.surface, surface_id),
+  ] {
+    state.update(cx, |state, cx| {
+      state.select(id, cx);
+    });
   }
 }
 
