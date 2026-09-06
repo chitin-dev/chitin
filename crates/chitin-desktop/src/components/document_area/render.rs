@@ -42,6 +42,8 @@ const STICK_ICON_PATH: &str = "icons/atom-stick.svg";
 const BALL_AND_STICK_ICON_PATH: &str = "icons/atom-ball-and-stick.svg";
 /// Asset path for the sphere representation icon.
 const SPHERE_ICON_PATH: &str = "icons/atom-sphere.svg";
+/// Asset path for the cartoon representation icon.
+const CARTOON_ICON_PATH: &str = "icons/atom-cartoon.svg";
 /// Asset path for document tab close buttons.
 const TAB_CLOSE_ICON_PATH: &str = "icons/tab-close.svg";
 /// Size used by tab strip action icons.
@@ -86,7 +88,7 @@ impl DocumentOptionsControls {
           MenuOption::new("stick", "Stick").icon(STICK_ICON_PATH),
           MenuOption::new("ball-and-stick", "Ball and stick").icon(BALL_AND_STICK_ICON_PATH),
           MenuOption::new("sphere", "Sphere").icon(SPHERE_ICON_PATH),
-          MenuOption::new("cartoon", "Cartoon").icon(STICK_ICON_PATH),
+          MenuOption::new("cartoon", "Cartoon").icon(CARTOON_ICON_PATH),
         ],
         cx,
       )
