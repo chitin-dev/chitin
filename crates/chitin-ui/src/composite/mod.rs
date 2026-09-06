@@ -3,6 +3,9 @@
 /// Vertical activity-bar composition.
 pub mod activity_bar;
 
+/// Independently single-selectable groups composed from select primitives.
+pub mod grouped_select;
+
 /// IDE-style multi-panel container composition.
 pub mod panel;
 
