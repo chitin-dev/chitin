@@ -59,8 +59,9 @@ pub enum RepresentationLayer {
 /// Independently configurable molecular representation layers.
 ///
 /// Atom, polymer, and surface layers are optional and may be enabled together.
-/// The renderer currently implements atom and polymer layers; surface state is
-/// reserved for the surface mesh pass.
+/// The renderer uses a rolling-probe SES for the surface layer's initial solid
+/// style; additional surface methods and display styles can be added without
+/// changing the layer-composition model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RepresentationLayers {
   atom: Option<AtomStyle>,

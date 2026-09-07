@@ -13,6 +13,7 @@ pub mod camera;
 mod cartoon;
 pub mod molecule;
 pub mod representation;
+mod surface;
 
 pub use camera::{DragMode, ViewerCamera, ViewportDrag};
 pub use molecule::{

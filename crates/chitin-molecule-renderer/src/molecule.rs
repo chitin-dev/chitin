@@ -10,6 +10,7 @@ use chitin_wgpu::{DepthTarget, GpuHandle, RenderTargetSize};
 use crate::{
   cartoon::{CARTOON_HALF_WIDTH, cartoon_mesh},
   representation::{AtomStyle, PolymerStyle, RepresentationLayers},
+  surface::ses_mesh,
 };
 
 /// WGSL shader shared by the atom and bond pipelines.
@@ -324,6 +325,8 @@ pub struct MoleculeRenderer {
   bond_pipeline: wgpu::RenderPipeline,
   /// Pipeline for tessellated polymer cartoon triangles.
   cartoon_pipeline: wgpu::RenderPipeline,
+  /// Pipeline for the solvent-excluded surface mesh.
+  surface_pipeline: wgpu::RenderPipeline,
   /// Shared billboard vertices used by both analytic surface pipelines.
   quad_vertex_buffer: wgpu::Buffer,
   /// Shared billboard triangle indices.
@@ -344,6 +347,12 @@ pub struct MoleculeRenderer {
   cartoon_index_buffer: wgpu::Buffer,
   /// Number of cartoon indices to draw.
   cartoon_index_count: u32,
+  /// Interleaved SES position, normal, and color vertices.
+  surface_vertex_buffer: wgpu::Buffer,
+  /// Triangle indices for the SES mesh.
+  surface_index_buffer: wgpu::Buffer,
+  /// Number of SES indices to draw.
+  surface_index_count: u32,
   /// Uniform buffer containing the current model-view-projection matrix.
   uniform_buffer: wgpu::Buffer,
   /// Bind group exposing `uniform_buffer` to both vertex shaders.
@@ -511,7 +520,22 @@ impl MoleculeRenderer {
         fragment_entry: "bond_fragment",
       },
     );
-    let cartoon_pipeline = create_cartoon_pipeline(&device, &pipeline_layout, &cartoon_shader, color_format);
+    let cartoon_pipeline = create_cartoon_pipeline(
+      &device,
+      &pipeline_layout,
+      &cartoon_shader,
+      color_format,
+      "chitin_cartoon_pipeline",
+      None,
+    );
+    let surface_pipeline = create_cartoon_pipeline(
+      &device,
+      &pipeline_layout,
+      &cartoon_shader,
+      color_format,
+      "chitin_ses_pipeline",
+      Some(wgpu::Face::Back),
+    );
 
     let (quad_vertices, quad_indices) = billboard_quad_mesh();
     let atom_instances = atom_instances(scene, style, layers);
@@ -520,15 +544,14 @@ impl MoleculeRenderer {
       Some(PolymerStyle::Cartoon) => cartoon_mesh(scene, style.palette.carbon.color),
       None => Default::default(),
     };
-    if let Some(surface_style) = layers.surface_style() {
-      log::warn!(
-        target: "chitin_molecule_renderer::molecule",
-        "surface layer {surface_style:?} is configured but surface tessellation is not implemented",
-      );
-    }
+    let surface = match layers.surface_style() {
+      Some(_) => ses_mesh(scene, style.palette.carbon.color),
+      None => Default::default(),
+    };
     let atom_count = atom_instances.len() as u32;
     let bond_count = bond_instances.len() as u32;
     let cartoon_index_count = cartoon.indices.len() as u32;
+    let surface_index_count = surface.indices.len() as u32;
     let quad_vertex_buffer = create_buffer(
       &device,
       "chitin_molecule_billboard_vertices",
@@ -572,6 +595,28 @@ impl MoleculeRenderer {
       &device,
       "chitin_cartoon_indices",
       &cartoon_indices,
+      wgpu::BufferUsages::INDEX,
+    );
+    let surface_vertices = if surface.vertices.is_empty() {
+      vec![[0.0; 9]]
+    } else {
+      surface.vertices
+    };
+    let surface_indices = if surface.indices.is_empty() {
+      vec![0_u32]
+    } else {
+      surface.indices
+    };
+    let surface_vertex_buffer = create_buffer(
+      &device,
+      "chitin_ses_vertices",
+      &surface_vertices,
+      wgpu::BufferUsages::VERTEX,
+    );
+    let surface_index_buffer = create_buffer(
+      &device,
+      "chitin_ses_indices",
+      &surface_indices,
       wgpu::BufferUsages::INDEX,
     );
     // WGPU buffers cannot have a zero-byte binding range. Keep a single dummy
@@ -624,6 +669,7 @@ impl MoleculeRenderer {
       atom_pipeline,
       bond_pipeline,
       cartoon_pipeline,
+      surface_pipeline,
       quad_vertex_buffer,
       quad_index_buffer,
       quad_index_count: quad_indices.len() as u32,
@@ -634,6 +680,9 @@ impl MoleculeRenderer {
       cartoon_vertex_buffer,
       cartoon_index_buffer,
       cartoon_index_count,
+      surface_vertex_buffer,
+      surface_index_buffer,
+      surface_index_count,
       uniform_buffer,
       bind_group,
       fit_transform,
@@ -743,6 +792,14 @@ impl MoleculeRenderer {
         occlusion_query_set: None,
         multiview_mask: None,
       });
+
+      if self.surface_index_count > 0 {
+        pass.set_pipeline(&self.surface_pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(0, self.surface_vertex_buffer.slice(..));
+        pass.set_index_buffer(self.surface_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.surface_index_count, 0, 0..1);
+      }
 
       if self.cartoon_index_count > 0 {
         pass.set_pipeline(&self.cartoon_pipeline);
@@ -936,15 +993,17 @@ fn create_pipeline(
   })
 }
 
-/// Creates the non-instanced indexed-triangle pipeline used by cartoons.
+/// Creates a non-instanced indexed-triangle pipeline for mesh representations.
 fn create_cartoon_pipeline(
   device: &wgpu::Device,
   layout: &wgpu::PipelineLayout,
   shader: &wgpu::ShaderModule,
   color_format: wgpu::TextureFormat,
+  label: &'static str,
+  cull_mode: Option<wgpu::Face>,
 ) -> wgpu::RenderPipeline {
   device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-    label: Some("chitin_cartoon_pipeline"),
+    label: Some(label),
     layout: Some(layout),
     vertex: wgpu::VertexState {
       module: shader,
@@ -965,7 +1024,7 @@ fn create_cartoon_pipeline(
     primitive: wgpu::PrimitiveState {
       topology: wgpu::PrimitiveTopology::TriangleList,
       front_face: wgpu::FrontFace::Ccw,
-      cull_mode: None,
+      cull_mode,
       ..Default::default()
     },
     depth_stencil: Some(wgpu::DepthStencilState {
