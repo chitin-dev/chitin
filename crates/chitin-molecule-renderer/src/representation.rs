@@ -34,10 +34,9 @@ pub enum PolymerStyle {
 
 /// Visual style used by the molecular-surface representation layer.
 ///
-/// Surface state is modeled alongside the implemented layers so frontends do
-/// not need another representation-state migration when surface tessellation
-/// is added. The current renderer reports this layer as unsupported instead of
-/// silently pretending that a surface was drawn.
+/// This type controls presentation only. Scientific surface type, atom scope,
+/// and calculation-domain partitioning belong to the precomputed surface
+/// artifact supplied to the renderer.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum SurfaceStyle {
   /// Draw a filled molecular surface.
@@ -59,9 +58,8 @@ pub enum RepresentationLayer {
 /// Independently configurable molecular representation layers.
 ///
 /// Atom, polymer, and surface layers are optional and may be enabled together.
-/// The renderer uses a rolling-probe SES for the surface layer's initial solid
-/// style; additional surface methods and display styles can be added without
-/// changing the layer-composition model.
+/// Enabling the surface layer draws a caller-supplied surface artifact and does
+/// not perform scientific geometry generation inside the renderer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RepresentationLayers {
   atom: Option<AtomStyle>,

@@ -8,10 +8,12 @@
 
 use std::rc::Rc;
 
-use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
+use chitin_bio::structure::{
+  MmcifParser, MolecularSurfaceArtifact, MolecularSurfaceRequest, PdbParser, StructureScene, generate_molecular_surface,
+};
 use chitin_molecule_renderer::{
-  AtomStyle, BallAndStickStyle, DragMode, MoleculeRenderer, PolymerStyle, RepresentationLayers, ViewerCamera,
-  ViewportDrag,
+  AtomStyle, BallAndStickStyle, DragMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle, RepresentationLayers,
+  SurfaceStyle, ViewerCamera, ViewportDrag,
 };
 use chitin_wgpu::{ClearRenderer, GpuHandle, RenderTargetSize};
 use wasm_bindgen::prelude::*;
@@ -107,6 +109,7 @@ pub async fn create_viewer(canvas: OffscreenCanvas) -> Result<MoleculeViewer, Js
     clear_renderer,
     renderer: None,
     scene: None,
+    molecular_surface: None,
     representation: RepresentationLayers::atom(AtomStyle::BallAndStick),
     camera: ViewerCamera::default(),
     active_drag: None,
@@ -134,6 +137,8 @@ pub struct MoleculeViewer {
   renderer: Option<MoleculeRenderer>,
   /// Renderer-neutral scene retained for representation changes.
   scene: Option<StructureScene>,
+  /// Scientific surface geometry computed independently of GPU resources.
+  molecular_surface: Option<MolecularSurfaceArtifact>,
   /// Representation used when rebuilding the molecule renderer.
   representation: RepresentationLayers,
   /// Camera state shared by pointer, wheel, and render operations.
@@ -211,6 +216,19 @@ impl MoleculeViewer {
       self.representation.with_polymer(PolymerStyle::Cartoon)
     } else {
       self.representation.without_polymer()
+    };
+    self.rebuild_renderer();
+  }
+
+  /// Enables or disables the solvent-excluded molecular surface layer.
+  ///
+  /// The first surface implementation uses a 1.4 Å rolling probe and keeps
+  /// the atom and polymer layers unchanged when the surface is toggled.
+  pub fn set_surface_enabled(&mut self, enabled: bool) {
+    self.representation = if enabled {
+      self.representation.with_surface(SurfaceStyle::Solid)
+    } else {
+      self.representation.without_surface()
     };
     self.rebuild_renderer();
   }
@@ -358,7 +376,13 @@ impl MoleculeViewer {
   fn rebuild_renderer(&mut self) {
     let Some(scene) = self.scene.as_ref() else {
       self.renderer = None;
+      self.molecular_surface = None;
       return;
+    };
+    self.molecular_surface = match (self.representation.surface_style(), self.molecular_surface.take()) {
+      (Some(_), Some(surface)) => Some(surface),
+      (Some(_), None) => Some(generate_molecular_surface(scene, MolecularSurfaceRequest::default())),
+      (None, _) => None,
     };
     let size = RenderTargetSize::new(self.config.width, self.config.height);
     self.renderer = Some(MoleculeRenderer::new_with_layers(
@@ -366,7 +390,10 @@ impl MoleculeViewer {
       Rc::clone(&self.queue),
       size,
       self.config.format,
-      scene,
+      MoleculeRenderInput {
+        scene,
+        surface: self.molecular_surface.as_ref(),
+      },
       self.representation,
       &BallAndStickStyle::default(),
     ));

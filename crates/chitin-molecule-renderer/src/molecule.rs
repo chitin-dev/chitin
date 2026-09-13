@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use chitin_bio::structure::{AtomId, BondSource, ElementCategory, ResidueId, StructureScene};
+use chitin_bio::structure::{AtomId, BondSource, ElementCategory, MolecularSurfaceArtifact, ResidueId, StructureScene};
 use wgpu::util::DeviceExt;
 
 use chitin_wgpu::{DepthTarget, GpuHandle, RenderTargetSize};
@@ -10,7 +10,7 @@ use chitin_wgpu::{DepthTarget, GpuHandle, RenderTargetSize};
 use crate::{
   cartoon::{CARTOON_HALF_WIDTH, cartoon_mesh},
   representation::{AtomStyle, PolymerStyle, RepresentationLayers},
-  surface::ses_mesh,
+  surface::surface_mesh_vertices,
 };
 
 /// WGSL shader shared by the atom and bond pipelines.
@@ -312,6 +312,28 @@ impl Default for BallAndStickStyle {
   }
 }
 
+/// Renderer input combining a structure scene with optional precomputed surface geometry.
+#[derive(Clone, Copy)]
+pub struct MoleculeRenderInput<'a> {
+  /// Renderer-neutral atom, bond, polymer, and bounds data.
+  pub scene: &'a StructureScene,
+  /// Scientific molecular-surface artifact to draw when its layer is enabled.
+  pub surface: Option<&'a MolecularSurfaceArtifact>,
+}
+
+impl<'a> MoleculeRenderInput<'a> {
+  /// Creates render input without molecular-surface geometry.
+  pub const fn new(scene: &'a StructureScene) -> Self {
+    Self { scene, surface: None }
+  }
+
+  /// Attaches precomputed molecular-surface geometry.
+  pub const fn with_surface(mut self, surface: &'a MolecularSurfaceArtifact) -> Self {
+    self.surface = Some(surface);
+    self
+  }
+}
+
 /// GPU renderer for atom surfaces, bonds, and polymer cartoons.
 ///
 /// Atoms and bonds use one shared instanced billboard with analytic fragment
@@ -405,7 +427,7 @@ impl MoleculeRenderer {
       queue,
       size,
       color_format,
-      scene,
+      MoleculeRenderInput::new(scene),
       RepresentationLayers::default(),
       &BallAndStickStyle::default(),
     )
@@ -438,7 +460,7 @@ impl MoleculeRenderer {
       queue,
       size,
       color_format,
-      scene,
+      MoleculeRenderInput::new(scene),
       RepresentationLayers::default(),
       style,
     )
@@ -452,22 +474,23 @@ impl MoleculeRenderer {
   /// * `queue` updates uniforms and submits encoded frames.
   /// * `size` is the initial render target size in physical pixels.
   /// * `color_format` is the UI-owned target texture format.
-  /// * `scene` supplies renderer-neutral atom, bond, and bounds data.
-  /// * `layers` independently selects atom, polymer, and future surface rendering.
+  /// * `input` supplies the structure scene and optional precomputed surface.
+  /// * `layers` independently selects atom, polymer, and surface rendering.
   /// * `style` supplies atom radii, bond thickness, colors, and material light.
   ///
   /// # Returns
   ///
-  /// A renderer ready to draw `scene` with the requested layers.
+  /// A renderer ready to draw the input scene with the requested layers.
   pub fn new_with_layers(
     device: GpuHandle<wgpu::Device>,
     queue: GpuHandle<wgpu::Queue>,
     size: RenderTargetSize,
     color_format: wgpu::TextureFormat,
-    scene: &StructureScene,
+    input: MoleculeRenderInput<'_>,
     layers: RepresentationLayers,
     style: &BallAndStickStyle,
   ) -> Self {
+    let MoleculeRenderInput { scene, surface } = input;
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
       label: Some("chitin_molecule_shader"),
       source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -544,14 +567,14 @@ impl MoleculeRenderer {
       Some(PolymerStyle::Cartoon) => cartoon_mesh(scene, style.palette.carbon.color),
       None => Default::default(),
     };
-    let surface = match layers.surface_style() {
-      Some(_) => ses_mesh(scene, style.palette.carbon.color),
+    let (surface_vertices, surface_indices) = match layers.surface_style() {
+      Some(_) => surface_mesh_vertices(surface, style.palette.carbon.color),
       None => Default::default(),
     };
     let atom_count = atom_instances.len() as u32;
     let bond_count = bond_instances.len() as u32;
     let cartoon_index_count = cartoon.indices.len() as u32;
-    let surface_index_count = surface.indices.len() as u32;
+    let surface_index_count = surface_indices.len() as u32;
     let quad_vertex_buffer = create_buffer(
       &device,
       "chitin_molecule_billboard_vertices",
@@ -597,15 +620,15 @@ impl MoleculeRenderer {
       &cartoon_indices,
       wgpu::BufferUsages::INDEX,
     );
-    let surface_vertices = if surface.vertices.is_empty() {
+    let surface_vertices = if surface_vertices.is_empty() {
       vec![[0.0; 9]]
     } else {
-      surface.vertices
+      surface_vertices
     };
-    let surface_indices = if surface.indices.is_empty() {
+    let surface_indices = if surface_indices.is_empty() {
       vec![0_u32]
     } else {
-      surface.indices
+      surface_indices
     };
     let surface_vertex_buffer = create_buffer(
       &device,

@@ -2,9 +2,12 @@
 
 use std::{path::Path, sync::Arc};
 
-use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
+use chitin_bio::structure::{
+  MmcifParser, MolecularSurfaceArtifact, MolecularSurfaceRequest, PdbParser, StructureScene, generate_molecular_surface,
+};
 use chitin_molecule_renderer::{
-  AtomStyle, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderer, PolymerStyle, RepresentationLayers,
+  AtomStyle, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle,
+  RepresentationLayers,
 };
 use gpui::{App, AppContext, Window};
 
@@ -23,6 +26,8 @@ pub(crate) struct StructureMoleculeScene {
   scene: Arc<StructureScene>,
   /// GPU resources created lazily after a surface device is available.
   renderer: Option<MoleculeRenderer>,
+  /// Scientific surface geometry computed independently of GPU resources.
+  surface: Option<MolecularSurfaceArtifact>,
   /// Shader output selected through the optional debug environment variable.
   debug_mode: MoleculeDebugMode,
   /// Representation layers currently rendered by this scene.
@@ -32,9 +37,11 @@ pub(crate) struct StructureMoleculeScene {
 impl StructureMoleculeScene {
   /// Creates a lazy molecular scene with the selected representation layers.
   pub(crate) fn new(scene: Arc<StructureScene>, representation: RepresentationLayers) -> Self {
+    let surface = molecular_surface_for_layers(&scene, representation, None);
     Self {
       scene,
       renderer: None,
+      surface,
       debug_mode: MoleculeDebugMode::Final,
       representation,
     }
@@ -50,7 +57,10 @@ impl WgpuPanelScene for StructureMoleculeScene {
         Arc::new(frame.queue.clone()),
         frame.size,
         frame.format,
-        &self.scene,
+        MoleculeRenderInput {
+          scene: &self.scene,
+          surface: self.surface.as_ref(),
+        },
         self.representation,
         &BallAndStickStyle::default(),
       )
@@ -87,8 +97,22 @@ impl WgpuPanelScene for StructureMoleculeScene {
       return false;
     }
     self.representation = representation;
+    self.surface = molecular_surface_for_layers(&self.scene, representation, self.surface.take());
     self.renderer = None;
     true
+  }
+}
+
+/// Computes the default protein-chain surface only when its layer is enabled.
+fn molecular_surface_for_layers(
+  scene: &StructureScene,
+  representation: RepresentationLayers,
+  current: Option<MolecularSurfaceArtifact>,
+) -> Option<MolecularSurfaceArtifact> {
+  match (representation.surface_style(), current) {
+    (Some(_), Some(surface)) => Some(surface),
+    (Some(_), None) => Some(generate_molecular_surface(scene, MolecularSurfaceRequest::default())),
+    (None, _) => None,
   }
 }
 

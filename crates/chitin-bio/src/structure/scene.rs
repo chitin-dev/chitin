@@ -97,6 +97,8 @@ pub struct AtomSceneInstance {
   pub atom_id: AtomId,
   /// Parent residue identifier used for residue-level interaction.
   pub residue_id: ResidueId,
+  /// Parent chain used to partition chain-scoped representations.
+  pub chain_id: ChainId,
   /// Whether the parent residue belongs to a polymer or hetero component.
   pub residue_kind: ResidueKind,
   /// Whether this atom belongs to the protein backbone represented by a cartoon trace.
@@ -315,6 +317,7 @@ impl StructureScene {
       atoms.push(AtomSceneInstance {
         atom_id: AtomId::from_index(atom_index),
         residue_id: atom.residue_id,
+        chain_id: residue.chain_id,
         residue_kind: residue.kind,
         is_polymer_backbone: is_polymer_backbone_atom(residue.kind, &atom.name),
         is_solvent: is_solvent_residue(&residue.name),
@@ -575,6 +578,18 @@ mod tests {
       (scene.atoms[0].is_polymer_backbone, scene.atoms[1].is_polymer_backbone),
       (true, false),
     );
+  }
+
+  #[test]
+  fn scene_preserves_atom_chain_membership() {
+    let pdb = b"ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \nATOM      2  CA  GLY B   1       1.000   0.000   0.000  1.00 10.00           C  \nEND\n";
+    let parsed = PdbParser::new()
+      .parse_bytes(pdb)
+      .unwrap_or_else(|error| panic!("multi-chain fixture should parse: {error}"));
+    let scene = StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("multi-chain fixture should produce a scene: {error}"));
+
+    assert_ne!(scene.atoms[0].chain_id, scene.atoms[1].chain_id);
   }
 
   #[test]

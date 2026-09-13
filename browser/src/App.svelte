@@ -43,6 +43,7 @@ END
   let structureSummary = "Loading…";
   let atomStyle = "ball-and-stick";
   let cartoonEnabled = false;
+  let surfaceEnabled = false;
   let dropVisible = false;
 
   // WebGPU can only be initialized after Svelte has mounted the canvas.
@@ -162,6 +163,10 @@ END
 
   function handleCartoonEnabled(): void {
     viewerWorker?.postMessage({ type: "cartoon-enabled", enabled: cartoonEnabled });
+  }
+
+  function handleSurfaceEnabled(): void {
+    viewerWorker?.postMessage({ type: "surface-enabled", enabled: surfaceEnabled });
   }
 
   // Pointer coordinates are canvas-local so camera movement is independent of
@@ -299,6 +304,16 @@ END
             onchange={handleCartoonEnabled}
           />
           <span>Polymer cartoon</span>
+        </label>
+
+        <label class="flex cursor-pointer items-center gap-2 text-xs">
+          <input
+            class="h-4 w-4 accent-sky-500"
+            type="checkbox"
+            bind:checked={surfaceEnabled}
+            onchange={handleSurfaceEnabled}
+          />
+          <span>SES surface</span>
         </label>
 
         <button

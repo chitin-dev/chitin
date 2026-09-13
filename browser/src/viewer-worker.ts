@@ -10,7 +10,8 @@ type WorkerCommand =
   | { type: "zoom"; deltaY: number }
   | { type: "reset-camera" }
   | { type: "atom-style"; value: string }
-  | { type: "cartoon-enabled"; enabled: boolean };
+  | { type: "cartoon-enabled"; enabled: boolean }
+  | { type: "surface-enabled"; enabled: boolean };
 
 type WorkerResponse =
   | { type: "ready" }
@@ -88,6 +89,10 @@ async function handleCommand(command: WorkerCommand): Promise<void> {
         break;
       case "cartoon-enabled":
         viewer.set_cartoon_enabled(command.enabled);
+        viewer.render();
+        break;
+      case "surface-enabled":
+        viewer.set_surface_enabled(command.enabled);
         viewer.render();
         break;
     }

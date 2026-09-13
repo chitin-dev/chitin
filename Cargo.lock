@@ -704,6 +704,7 @@ version = "0.1.0"
 dependencies = [
  "chitin-bio-macros",
  "chitin-databases",
+ "glam",
  "serde",
  "serde_yaml",
  "tempfile",

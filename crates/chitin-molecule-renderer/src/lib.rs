@@ -18,6 +18,6 @@ mod surface;
 pub use camera::{DragMode, ViewerCamera, ViewportDrag};
 pub use molecule::{
   BallAndStickElementStyle, BallAndStickMaterial, BallAndStickPalette, BallAndStickStyle, MoleculeDebugMode,
-  MoleculeRenderer,
+  MoleculeRenderInput, MoleculeRenderer,
 };
 pub use representation::{AtomStyle, PolymerStyle, RepresentationLayer, RepresentationLayers, SurfaceStyle};
