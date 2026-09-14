@@ -12,6 +12,9 @@ use chitin_bio::structure::{
 };
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
+#[cfg(feature = "surface-profiling")]
+use chitin_bio::structure::profile_molecular_surface;
+
 /// Atom counts used to expose scaling without making the baseline impractical.
 const SINGLE_CHAIN_ATOM_COUNTS: &[usize] = &[64, 512, 2_048];
 /// Number of atoms in the partition-strategy comparison.
@@ -79,6 +82,11 @@ fn bench_single_chain_scaling(c: &mut Criterion) {
 
   for &atom_count in SINGLE_CHAIN_ATOM_COUNTS {
     let scene = synthetic_scene(atom_count, 1);
+    #[cfg(feature = "surface-profiling")]
+    if atom_count == 512 {
+      let profile = profile_molecular_surface(&scene, MolecularSurfaceRequest::default());
+      eprintln!("512-atom surface profile: {:#?}", profile.timings);
+    }
     group.throughput(Throughput::Elements(atom_count as u64));
     group.bench_with_input(BenchmarkId::from_parameter(atom_count), &scene, |b, scene| {
       b.iter(|| {

@@ -32,3 +32,5 @@ pub use surface::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, SesParameters, SurfaceAtomScope,
   SurfaceDomainArtifact, SurfaceMesh, SurfacePartition, generate_molecular_surface,
 };
+#[cfg(feature = "surface-profiling")]
+pub use surface::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};
