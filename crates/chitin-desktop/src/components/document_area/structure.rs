@@ -1,6 +1,6 @@
 //! Structure-file loading and molecular WGPU scene integration.
 
-use std::{path::Path, sync::Arc};
+use std::{cell::Cell, path::Path, rc::Rc, sync::Arc};
 
 use chitin_bio::structure::{
   MmcifParser, MolecularSurfaceArtifact, MolecularSurfaceRequest, PdbParser, StructureScene, generate_molecular_surface,
@@ -9,7 +9,7 @@ use chitin_molecule_renderer::{
   AtomStyle, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle,
   RepresentationLayers,
 };
-use gpui::{App, AppContext, Window};
+use gpui::{App, AppContext, AsyncApp, Window};
 
 use crate::components::{
   document_area::state::WgpuDocumentView,
@@ -37,11 +37,10 @@ pub(crate) struct StructureMoleculeScene {
 impl StructureMoleculeScene {
   /// Creates a lazy molecular scene with the selected representation layers.
   pub(crate) fn new(scene: Arc<StructureScene>, representation: RepresentationLayers) -> Self {
-    let surface = molecular_surface_for_layers(&scene, representation, None);
     Self {
       scene,
       renderer: None,
-      surface,
+      surface: None,
       debug_mode: MoleculeDebugMode::Final,
       representation,
     }
@@ -97,22 +96,26 @@ impl WgpuPanelScene for StructureMoleculeScene {
       return false;
     }
     self.representation = representation;
-    self.surface = molecular_surface_for_layers(&self.scene, representation, self.surface.take());
-    self.renderer = None;
+    if let Some(renderer) = self.renderer.as_mut() {
+      renderer.set_representation_layers(
+        MoleculeRenderInput {
+          scene: &self.scene,
+          surface: self.surface.as_ref(),
+        },
+        representation,
+        &BallAndStickStyle::default(),
+      );
+    }
     true
   }
-}
 
-/// Computes the default protein-chain surface only when its layer is enabled.
-fn molecular_surface_for_layers(
-  scene: &StructureScene,
-  representation: RepresentationLayers,
-  current: Option<MolecularSurfaceArtifact>,
-) -> Option<MolecularSurfaceArtifact> {
-  match (representation.surface_style(), current) {
-    (Some(_), Some(surface)) => Some(surface),
-    (Some(_), None) => Some(generate_molecular_surface(scene, MolecularSurfaceRequest::default())),
-    (None, _) => None,
+  fn set_molecular_surface(&mut self, surface: MolecularSurfaceArtifact) -> bool {
+    let is_visible = self.representation.surface_style().is_some();
+    if is_visible && let Some(renderer) = self.renderer.as_mut() {
+      renderer.set_surface_artifact(&self.scene, &surface, &BallAndStickStyle::default());
+    }
+    self.surface = Some(surface);
+    is_visible
   }
 }
 
@@ -127,6 +130,7 @@ pub(crate) fn build_structure_view_from_scene(
   cx: &mut App,
 ) -> WgpuDocumentView {
   let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
+  let calculation_scene = Arc::clone(&scene);
   let panel = cx.new(|_| {
     ChitinWgpuDocumentPanel::new_with_scene(
       surface,
@@ -134,12 +138,31 @@ pub(crate) fn build_structure_view_from_scene(
     )
   });
   let controlled_panel = panel.clone();
+  let surface_calculation_started = Rc::new(Cell::new(false));
   WgpuDocumentView::with_representation_layers(panel, DEFAULT_STRUCTURE_REPRESENTATION, move |representation, cx| {
     controlled_panel.update(cx, |panel, cx| {
       if panel.set_representation_layers(representation) {
         cx.notify();
       }
     });
+    if representation.surface_style().is_none() || surface_calculation_started.replace(true) {
+      return;
+    }
+
+    let scene = Arc::clone(&calculation_scene);
+    let panel = controlled_panel.downgrade();
+    cx.spawn(async move |async_cx: &mut AsyncApp| {
+      let surface = async_cx
+        .background_executor()
+        .spawn(async move { generate_molecular_surface(&scene, MolecularSurfaceRequest::default()) })
+        .await;
+      let _ = panel.update(async_cx, |panel, cx| {
+        if panel.set_molecular_surface(surface) {
+          cx.notify();
+        }
+      });
+    })
+    .detach();
   })
 }
 
@@ -164,4 +187,39 @@ pub(crate) fn load_structure_scene(path: &Path) -> Result<Arc<StructureScene>, S
   StructureScene::from_first_model(&structure)
     .map(Arc::new)
     .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use chitin_molecule_renderer::SurfaceStyle;
+
+  fn single_atom_scene() -> Arc<StructureScene> {
+    let parsed = PdbParser::new()
+      .parse_bytes(b"ATOM      1  C   GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \nEND\n")
+      .unwrap_or_else(|error| panic!("surface fixture should parse: {error}"));
+    StructureScene::from_first_model(&parsed.structure)
+      .map(Arc::new)
+      .unwrap_or_else(|error| panic!("surface fixture should produce a scene: {error}"))
+  }
+
+  #[test]
+  fn enabling_surface_should_defer_calculation() {
+    let mut scene = StructureMoleculeScene::new(single_atom_scene(), DEFAULT_STRUCTURE_REPRESENTATION);
+    let representation = DEFAULT_STRUCTURE_REPRESENTATION.with_surface(SurfaceStyle::Solid);
+
+    assert!(scene.set_representation_layers(representation));
+    assert!(scene.surface.is_none());
+    assert_eq!(scene.representation, representation);
+  }
+
+  #[test]
+  fn completed_surface_should_remain_cached_when_hidden() {
+    let structure = single_atom_scene();
+    let surface = generate_molecular_surface(&structure, MolecularSurfaceRequest::default());
+    let mut scene = StructureMoleculeScene::new(structure, DEFAULT_STRUCTURE_REPRESENTATION);
+
+    assert!(!scene.set_molecular_surface(surface));
+    assert!(scene.surface.is_some());
+  }
 }

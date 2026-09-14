@@ -369,12 +369,20 @@ pub struct MoleculeRenderer {
   cartoon_index_buffer: wgpu::Buffer,
   /// Number of cartoon indices to draw.
   cartoon_index_count: u32,
+  /// Number of indices in the cached cartoon mesh.
+  cartoon_mesh_index_count: u32,
+  /// Whether cartoon geometry has been generated for this scene.
+  cartoon_geometry_ready: bool,
   /// Interleaved SES position, normal, and color vertices.
   surface_vertex_buffer: wgpu::Buffer,
   /// Triangle indices for the SES mesh.
   surface_index_buffer: wgpu::Buffer,
   /// Number of SES indices to draw.
   surface_index_count: u32,
+  /// Number of indices in the cached SES mesh.
+  surface_mesh_index_count: u32,
+  /// Whether a surface artifact has been uploaded for this scene.
+  surface_geometry_ready: bool,
   /// Uniform buffer containing the current model-view-projection matrix.
   uniform_buffer: wgpu::Buffer,
   /// Bind group exposing `uniform_buffer` to both vertex shaders.
@@ -397,6 +405,8 @@ pub struct MoleculeRenderer {
   size: RenderTargetSize,
   /// Shader output selected for visual diagnostics.
   debug_mode: MoleculeDebugMode,
+  /// Representation layers currently selected for drawing.
+  layers: RepresentationLayers,
   /// Low-frequency numeric diagnostics for the current scene.
   diagnostics: MoleculeDiagnostics,
 }
@@ -703,9 +713,13 @@ impl MoleculeRenderer {
       cartoon_vertex_buffer,
       cartoon_index_buffer,
       cartoon_index_count,
+      cartoon_mesh_index_count: cartoon_index_count,
+      cartoon_geometry_ready: layers.polymer_style().is_some(),
       surface_vertex_buffer,
       surface_index_buffer,
       surface_index_count,
+      surface_mesh_index_count: surface_index_count,
+      surface_geometry_ready: layers.surface_style().is_some() && surface.is_some(),
       uniform_buffer,
       bind_group,
       fit_transform,
@@ -722,8 +736,149 @@ impl MoleculeRenderer {
       queue,
       size,
       debug_mode: MoleculeDebugMode::Final,
+      layers,
       diagnostics,
     }
+  }
+
+  /// Changes representation geometry without recreating shaders or pipelines.
+  pub fn set_representation_layers(
+    &mut self,
+    input: MoleculeRenderInput<'_>,
+    layers: RepresentationLayers,
+    style: &BallAndStickStyle,
+  ) {
+    if self.layers == layers {
+      return;
+    }
+
+    let MoleculeRenderInput { scene, surface } = input;
+    if self.layers.atom_style() != layers.atom_style() || self.layers.polymer_style() != layers.polymer_style() {
+      self.replace_atom_and_bond_buffers(scene, layers, style);
+    }
+
+    if layers.polymer_style().is_some() && !self.cartoon_geometry_ready {
+      self.replace_cartoon_buffers(scene, style);
+    }
+    self.cartoon_index_count = if layers.polymer_style().is_some() {
+      self.cartoon_mesh_index_count
+    } else {
+      0
+    };
+
+    if layers.surface_style().is_some()
+      && !self.surface_geometry_ready
+      && let Some(surface) = surface
+    {
+      self.replace_surface_buffers(surface, style);
+    }
+    self.surface_index_count = if layers.surface_style().is_some() {
+      self.surface_mesh_index_count
+    } else {
+      0
+    };
+
+    let surface_radius = representation_surface_radius(scene, style, layers);
+    (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
+    self.layers = layers;
+  }
+
+  /// Uploads a newly computed scientific surface artifact into existing GPU resources.
+  pub fn set_surface_artifact(
+    &mut self,
+    scene: &StructureScene,
+    surface: &MolecularSurfaceArtifact,
+    style: &BallAndStickStyle,
+  ) {
+    self.replace_surface_buffers(surface, style);
+    self.surface_index_count = if self.layers.surface_style().is_some() {
+      self.surface_mesh_index_count
+    } else {
+      0
+    };
+    let surface_radius = representation_surface_radius(scene, style, self.layers);
+    (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
+  }
+
+  /// Rebuilds atom and bond instance buffers for the selected layers.
+  fn replace_atom_and_bond_buffers(
+    &mut self,
+    scene: &StructureScene,
+    layers: RepresentationLayers,
+    style: &BallAndStickStyle,
+  ) {
+    let atom_instances = atom_instances(scene, style, layers);
+    self.atom_count = atom_instances.len() as u32;
+    let atom_buffer_data = if atom_instances.is_empty() {
+      vec![[0.0; 8]]
+    } else {
+      atom_instances
+    };
+    self.atom_instance_buffer = create_buffer(
+      &self.device,
+      "chitin_molecule_atom_instances",
+      &atom_buffer_data,
+      wgpu::BufferUsages::VERTEX,
+    );
+
+    let bond_instances = bond_instances(scene, style, layers);
+    self.bond_count = bond_instances.len() as u32;
+    let bond_buffer_data = if bond_instances.is_empty() {
+      vec![[0.0; 16]]
+    } else {
+      bond_instances
+    };
+    self.bond_instance_buffer = create_buffer(
+      &self.device,
+      "chitin_molecule_bond_instances",
+      &bond_buffer_data,
+      wgpu::BufferUsages::VERTEX,
+    );
+  }
+
+  /// Generates and uploads cartoon geometry once, retaining it across toggles.
+  fn replace_cartoon_buffers(&mut self, scene: &StructureScene, style: &BallAndStickStyle) {
+    let cartoon = cartoon_mesh(scene, style.palette.carbon.color);
+    self.cartoon_mesh_index_count = cartoon.indices.len() as u32;
+    let vertices = if cartoon.vertices.is_empty() {
+      vec![[0.0; 9]]
+    } else {
+      cartoon.vertices
+    };
+    let indices = if cartoon.indices.is_empty() {
+      vec![0_u32]
+    } else {
+      cartoon.indices
+    };
+    self.cartoon_vertex_buffer = create_buffer(
+      &self.device,
+      "chitin_cartoon_vertices",
+      &vertices,
+      wgpu::BufferUsages::VERTEX,
+    );
+    self.cartoon_index_buffer = create_buffer(
+      &self.device,
+      "chitin_cartoon_indices",
+      &indices,
+      wgpu::BufferUsages::INDEX,
+    );
+    self.cartoon_geometry_ready = true;
+  }
+
+  /// Packs and uploads a computed surface while retaining all pipeline state.
+  fn replace_surface_buffers(&mut self, surface: &MolecularSurfaceArtifact, style: &BallAndStickStyle) {
+    let (vertices, indices) = surface_mesh_vertices(Some(surface), style.palette.carbon.color);
+    self.surface_mesh_index_count = indices.len() as u32;
+    let vertices = if vertices.is_empty() { vec![[0.0; 9]] } else { vertices };
+    let indices = if indices.is_empty() { vec![0_u32] } else { indices };
+    self.surface_vertex_buffer = create_buffer(
+      &self.device,
+      "chitin_ses_vertices",
+      &vertices,
+      wgpu::BufferUsages::VERTEX,
+    );
+    self.surface_index_buffer = create_buffer(&self.device, "chitin_ses_indices", &indices, wgpu::BufferUsages::INDEX);
+    self.surface_geometry_ready = true;
   }
 
   /// Recreates size-dependent depth resources when the target changes.

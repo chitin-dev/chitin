@@ -5,6 +5,7 @@ use std::{
   time::{Duration, Instant},
 };
 
+use chitin_bio::structure::MolecularSurfaceArtifact;
 use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportDrag};
 use chitin_wgpu::{ClearRenderer, RenderTargetSize};
 use gpui::{
@@ -58,6 +59,11 @@ pub trait WgpuPanelScene {
 
   /// Applies molecule representation layers when the hosted scene is molecular.
   fn set_representation_layers(&mut self, _representation: RepresentationLayers) -> bool {
+    false
+  }
+
+  /// Installs a computed molecular surface when the hosted scene supports it.
+  fn set_molecular_surface(&mut self, _surface: MolecularSurfaceArtifact) -> bool {
     false
   }
 }
@@ -167,6 +173,11 @@ impl ChitinWgpuDocumentPanel {
   /// Changes the hosted molecular scene representation when supported.
   pub fn set_representation_layers(&mut self, representation: RepresentationLayers) -> bool {
     self.scene.set_representation_layers(representation)
+  }
+
+  /// Installs a background-computed molecular surface when supported.
+  pub fn set_molecular_surface(&mut self, surface: MolecularSurfaceArtifact) -> bool {
+    self.scene.set_molecular_surface(surface)
   }
 
   /// Renders one frame into the surface back buffer when available.
