@@ -2,7 +2,10 @@
 
 use std::collections::HashSet;
 
-use chitin_bio::structure::{AtomId, BondSource, ElementCategory, MolecularSurfaceArtifact, ResidueId, StructureScene};
+use chitin_bio::{
+  structure::{AtomId, BondSource, ElementCategory, ResidueId, StructureScene},
+  surface::MolecularSurfaceArtifact,
+};
 use wgpu::util::DeviceExt;
 
 use chitin_wgpu::{DepthTarget, GpuHandle, RenderTargetSize};

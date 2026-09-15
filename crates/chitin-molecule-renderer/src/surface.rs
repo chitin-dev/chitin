@@ -1,6 +1,6 @@
 //! GPU-facing packing for renderer-neutral molecular-surface meshes.
 
-use chitin_bio::structure::MolecularSurfaceArtifact;
+use chitin_bio::surface::MolecularSurfaceArtifact;
 
 /// Packs all computed surface domains into the renderer's interleaved vertex layout.
 pub(crate) fn surface_mesh_vertices(
@@ -32,7 +32,10 @@ pub(crate) fn surface_mesh_vertices(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use chitin_bio::structure::{MolecularSurfaceRequest, PdbParser, StructureScene, generate_molecular_surface};
+  use chitin_bio::{
+    structure::{PdbParser, StructureScene},
+    surface::{MolecularSurfaceRequest, generate_molecular_surface},
+  };
 
   #[test]
   fn packing_should_add_visual_color_without_changing_scientific_vertices() {

@@ -5,7 +5,7 @@ use std::{
   time::{Duration, Instant},
 };
 
-use chitin_bio::structure::MolecularSurfaceArtifact;
+use chitin_bio::surface::MolecularSurfaceArtifact;
 use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportDrag};
 use chitin_wgpu::{ClearRenderer, RenderTargetSize};
 use gpui::{

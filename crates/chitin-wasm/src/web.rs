@@ -8,8 +8,9 @@
 
 use std::rc::Rc;
 
-use chitin_bio::structure::{
-  MmcifParser, MolecularSurfaceArtifact, MolecularSurfaceRequest, PdbParser, StructureScene, generate_molecular_surface,
+use chitin_bio::{
+  structure::{MmcifParser, PdbParser, StructureScene},
+  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_molecular_surface},
 };
 use chitin_molecule_renderer::{
   AtomStyle, BallAndStickStyle, DragMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle, RepresentationLayers,
