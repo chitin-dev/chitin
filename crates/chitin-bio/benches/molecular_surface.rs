@@ -6,14 +6,14 @@
 
 use std::time::Duration;
 
-use chitin_bio::structure::{
-  MolecularSurfaceRequest, PdbParser, SesParameters, StructureScene, StructureSceneOptions, SurfacePartition,
-  generate_molecular_surface,
+use chitin_bio::{
+  structure::{PdbParser, StructureScene, StructureSceneOptions},
+  surface::{MolecularSurfaceRequest, SesParameters, SurfacePartition, generate_molecular_surface},
 };
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 #[cfg(feature = "surface-profiling")]
-use chitin_bio::structure::profile_molecular_surface;
+use chitin_bio::surface::profile_molecular_surface;
 
 /// Atom counts used to expose scaling without making the baseline impractical.
 const SINGLE_CHAIN_ATOM_COUNTS: &[usize] = &[64, 512, 2_048];

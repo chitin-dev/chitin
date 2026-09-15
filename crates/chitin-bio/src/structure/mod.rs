@@ -12,7 +12,6 @@ mod model;
 mod pdb;
 pub(crate) mod projection;
 mod scene;
-mod surface;
 
 pub use error::{Diagnostic, DiagnosticSeverity, MmcifParseError, PdbParseError, StructureParseResult};
 pub use mmcif::MmcifParser;
@@ -28,9 +27,3 @@ pub use scene::{
   AtomSceneInstance, BondSceneInstance, ElementCategory, PolymerTrace, PolymerTraceKind, PolymerTracePoint,
   SceneBounds, StructureScene, StructureSceneError, StructureSceneOptions,
 };
-pub use surface::{
-  MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, SesParameters, SurfaceAtomScope,
-  SurfaceDomainArtifact, SurfaceMesh, SurfacePartition, generate_molecular_surface,
-};
-#[cfg(feature = "surface-profiling")]
-pub use surface::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};
