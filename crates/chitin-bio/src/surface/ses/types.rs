@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::structure::ChainId;
 
 use super::{
-  DEFAULT_SES_GRID_SPACING, DEFAULT_SES_PROBE_RADIUS,
+  DEFAULT_SES_GRID_SPACING, DEFAULT_SES_MAX_GRID_POINTS, DEFAULT_SES_PROBE_RADIUS, MIN_SES_MAX_GRID_POINTS,
   field::{grid_index, grid_position},
 };
 
@@ -43,6 +43,7 @@ pub enum SurfacePartition {
 pub struct SesParameters {
   probe_radius: f32,
   grid_spacing: f32,
+  max_grid_points: usize,
 }
 
 impl SesParameters {
@@ -57,7 +58,20 @@ impl SesParameters {
     Ok(Self {
       probe_radius,
       grid_spacing,
+      max_grid_points: DEFAULT_SES_MAX_GRID_POINTS,
     })
+  }
+
+  /// Sets the maximum number of samples in each calculation-domain scalar grid.
+  pub fn with_max_grid_points(mut self, max_grid_points: usize) -> Result<Self, MolecularSurfaceParameterError> {
+    if max_grid_points < MIN_SES_MAX_GRID_POINTS {
+      return Err(MolecularSurfaceParameterError::InvalidMaxGridPoints {
+        value: max_grid_points,
+        minimum: MIN_SES_MAX_GRID_POINTS,
+      });
+    }
+    self.max_grid_points = max_grid_points;
+    Ok(self)
   }
 
   /// Returns the rolling-probe radius in ångströms.
@@ -69,6 +83,11 @@ impl SesParameters {
   pub const fn grid_spacing(self) -> f32 {
     self.grid_spacing
   }
+
+  /// Returns the maximum sample count in each calculation-domain scalar grid.
+  pub const fn max_grid_points(self) -> usize {
+    self.max_grid_points
+  }
 }
 
 impl Default for SesParameters {
@@ -76,6 +95,7 @@ impl Default for SesParameters {
     Self {
       probe_radius: DEFAULT_SES_PROBE_RADIUS,
       grid_spacing: DEFAULT_SES_GRID_SPACING,
+      max_grid_points: DEFAULT_SES_MAX_GRID_POINTS,
     }
   }
 }
@@ -89,6 +109,9 @@ pub enum MolecularSurfaceParameterError {
   /// Grid spacing must be finite and positive.
   #[error("molecular-surface grid spacing must be finite and positive, got {0}")]
   InvalidGridSpacing(f32),
+  /// A three-dimensional scalar grid requires at least one cell.
+  #[error("molecular-surface grid point budget must be at least {minimum}, got {value}")]
+  InvalidMaxGridPoints { value: usize, minimum: usize },
 }
 
 /// Scientific request describing atom scope and calculation-domain partitioning.

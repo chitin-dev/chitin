@@ -369,3 +369,33 @@ fn ses_parameters_should_reject_non_finite_grid_spacing() {
     Err(MolecularSurfaceParameterError::InvalidGridSpacing(value)) if value.is_nan()
   ));
 }
+
+#[test]
+fn ses_parameters_should_preserve_the_default_grid_budget() {
+  assert_eq!(SesParameters::default().max_grid_points(), 750_000);
+}
+
+#[test]
+fn ses_parameters_should_reject_a_budget_smaller_than_one_cell() {
+  assert_eq!(
+    SesParameters::default().with_max_grid_points(7),
+    Err(MolecularSurfaceParameterError::InvalidMaxGridPoints { value: 7, minimum: 8 })
+  );
+}
+
+#[test]
+fn budgeted_grid_layout_should_honor_the_configured_point_limit() {
+  let (spacing, dimensions) = budgeted_grid_layout(glam::Vec3::splat(100.0), 0.5, 100_000);
+
+  assert!(
+    grid_point_count(dimensions) <= 100_000,
+    "spacing {spacing} produced {dimensions:?}"
+  );
+}
+
+#[test]
+fn budgeted_grid_layout_should_retain_a_preferred_spacing_that_fits() {
+  let (spacing, _) = budgeted_grid_layout(glam::Vec3::splat(4.0), 0.5, 10_000);
+
+  assert_eq!(spacing, 0.5);
+}

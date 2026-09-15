@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 use crate::structure::StructureScene;
 
 use super::{
-  DISTANCE_FIELD_RANGE, MAX_GRID_POINTS, SMOOTHING_ITERATIONS, SurfaceAtom, atom_bounds,
+  DISTANCE_FIELD_RANGE, SMOOTHING_ITERATIONS, SurfaceAtom, atom_bounds, budgeted_grid_layout,
   contour::contour_field,
-  field::{atom_surface_distance, compose_inner_surface_field, grid_dimensions, probe_surface_distance, sample_field},
+  field::{atom_surface_distance, compose_inner_surface_field, probe_surface_distance, sample_field},
   merge_close_probe_centers,
   postprocess::{orient_inner_surface, recompute_inner_surface_normals, smooth_mesh},
   spatial::{AtomGrid, PointGrid},
@@ -165,15 +165,9 @@ fn ses_mesh_for_atoms_profiled(
   let bounds_min = atom_bounds_min - glam::Vec3::splat(margin);
   let bounds_max = atom_bounds_max + glam::Vec3::splat(margin);
   let extent = bounds_max - bounds_min;
-  let mut spacing = preferred_spacing;
-  let mut dimensions = grid_dimensions(extent, spacing);
-  let point_count = dimensions[0] * dimensions[1] * dimensions[2];
-  if point_count > MAX_GRID_POINTS {
-    spacing *= (point_count as f32 / MAX_GRID_POINTS as f32).cbrt();
-    dimensions = grid_dimensions(extent, spacing);
-  }
+  let (spacing, dimensions) = budgeted_grid_layout(extent, preferred_spacing, parameters.max_grid_points());
 
-  let grid_points = dimensions[0] * dimensions[1] * dimensions[2];
+  let grid_points = dimensions.into_iter().product();
   let sas_field = metrics.measure(SurfaceStage::SasFieldSampling, || {
     sample_field(bounds_min, spacing, dimensions, |position| {
       atom_surface_distance(position, &atom_grid, probe_radius, spacing)

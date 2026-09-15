@@ -32,8 +32,10 @@ pub use self::types::{
 const DEFAULT_SES_PROBE_RADIUS: f32 = 1.4;
 /// Default spacing between scalar-field samples.
 const DEFAULT_SES_GRID_SPACING: f32 = 0.5;
-/// Maximum number of scalar-field samples allocated for one surface.
-const MAX_GRID_POINTS: usize = 750_000;
+/// Default maximum number of samples in each domain's scalar-grid layout.
+const DEFAULT_SES_MAX_GRID_POINTS: usize = 750_000;
+/// Smallest budget capable of describing one three-dimensional grid cell.
+const MIN_SES_MAX_GRID_POINTS: usize = 8;
 /// Number of grid cells over which a truncated distance field is evaluated.
 const DISTANCE_FIELD_RANGE: f32 = 2.0;
 /// Cell width tuned so the default atom-plus-probe query visits adjacent cells.
@@ -291,13 +293,7 @@ fn ses_kernel_for_atoms(
   let bounds_min = atom_bounds_min - glam::Vec3::splat(margin);
   let bounds_max = atom_bounds_max + glam::Vec3::splat(margin);
   let extent = bounds_max - bounds_min;
-  let mut spacing = preferred_spacing;
-  let mut dimensions = grid_dimensions(extent, spacing);
-  let point_count = dimensions[0] * dimensions[1] * dimensions[2];
-  if point_count > MAX_GRID_POINTS {
-    spacing *= (point_count as f32 / MAX_GRID_POINTS as f32).cbrt();
-    dimensions = grid_dimensions(extent, spacing);
-  }
+  let (spacing, dimensions) = budgeted_grid_layout(extent, preferred_spacing, parameters.max_grid_points());
 
   let sas_field = sample_field(bounds_min, spacing, dimensions, |position| {
     atom_surface_distance(position, &atom_grid, probe_radius, spacing)
@@ -334,6 +330,45 @@ fn ses_kernel_for_atoms(
   capture(SesKernelStage::SmoothedInnerSurface(&mesh));
   recompute_inner_surface_normals(&mut mesh, bounds_min, spacing, dimensions, &inner_surface_field);
   mesh
+}
+
+/// Resolves a regular-grid layout that does not exceed a point budget.
+///
+/// The preferred spacing is retained whenever its grid fits. Otherwise the
+/// spacing grows approximately by the cube root of the excess sample ratio;
+/// the small safety factor accounts for dimension rounding at cell boundaries.
+///
+/// # Parameters
+///
+/// * `extent` is the molecular-space size covered by the scalar grid.
+/// * `preferred_spacing` is the finest spacing requested by the caller.
+/// * `max_grid_points` is the maximum number of samples in each domain grid.
+///
+/// # Returns
+///
+/// The effective spacing and corresponding grid dimensions.
+///
+/// # Examples
+///
+/// For an extent whose preferred grid contains 200,000 samples and a budget
+/// of 100,000, the returned spacing is greater than the preferred spacing and
+/// the product of the returned dimensions is at most 100,000.
+fn budgeted_grid_layout(extent: glam::Vec3, preferred_spacing: f32, max_grid_points: usize) -> (f32, [usize; 3]) {
+  let mut spacing = preferred_spacing;
+  let mut dimensions = grid_dimensions(extent, spacing);
+  let mut point_count = grid_point_count(dimensions);
+  while point_count > max_grid_points {
+    let excess_ratio = point_count as f32 / max_grid_points as f32;
+    spacing *= excess_ratio.cbrt().max(1.01);
+    dimensions = grid_dimensions(extent, spacing);
+    point_count = grid_point_count(dimensions);
+  }
+  (spacing, dimensions)
+}
+
+/// Returns the saturating number of samples in a three-dimensional grid.
+fn grid_point_count(dimensions: [usize; 3]) -> usize {
+  dimensions.into_iter().fold(1, usize::saturating_mul)
 }
 
 /// Accumulated probe-center position and averaged surface normal.

@@ -6,6 +6,7 @@ mod scalar_slice;
 use std::{
   cell::RefCell,
   collections::HashMap,
+  ffi::OsString,
   fs,
   path::{Path, PathBuf},
   rc::Rc,
@@ -16,8 +17,8 @@ use std::{
 use chitin_bio::{
   structure::{MmcifParser, PdbParser, StructureScene},
   surface::{
-    MolecularSurfaceArtifact, MolecularSurfaceRequest, ScalarFieldGrid, SesDomainTrace, SurfaceMesh, SurfacePartition,
-    trace_molecular_surface,
+    MolecularSurfaceArtifact, MolecularSurfaceRequest, ScalarFieldGrid, SesDomainTrace, SesParameters, SurfaceMesh,
+    SurfacePartition, trace_molecular_surface,
   },
 };
 use chitin_desktop::wgpu_panel::{ChitinWgpuDocumentPanel, WgpuPanelFrame, WgpuPanelScene};
@@ -42,6 +43,15 @@ const SLICE_SLIDER_WIDTH: f32 = 220.0;
 const SLICE_PLAYBACK_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// Fraction of the Z range traversed by one automatic update.
 const SLICE_PLAYBACK_STEP: f32 = 16.0 / 6_000.0;
+/// Usage shown when the example receives invalid command-line arguments.
+const USAGE: &str = "usage: ses-debug [STRUCTURE] [--max-grid-points POINTS]";
+
+/// Validated inputs used to construct one SES diagnostic run.
+#[derive(Debug, PartialEq)]
+struct SesDebugOptions {
+  path: PathBuf,
+  ses: SesParameters,
+}
 
 /// Renderable checkpoints in the simplified SES diagnostic pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -737,14 +747,73 @@ fn load_scene(path: &Path) -> Result<StructureScene, String> {
   StructureScene::from_first_model(&structure).map_err(|error| error.to_string())
 }
 
+/// Parses the input path and scalar-grid budget accepted by the example.
+///
+/// # Parameters
+///
+/// * `arguments` contains command-line values after the executable name.
+///
+/// # Returns
+///
+/// Validated debug options, or a readable error for a missing, duplicate,
+/// unknown, or invalid argument.
+///
+/// # Examples
+///
+/// Both `structure.cif --max-grid-points 4000000` and
+/// `--max-grid-points 4_000_000 structure.cif` select the same budget.
+fn parse_options(arguments: impl IntoIterator<Item = OsString>) -> Result<SesDebugOptions, String> {
+  let mut arguments = arguments.into_iter();
+  let mut path = None;
+  let mut ses = SesParameters::default();
+  let mut has_grid_budget = false;
+
+  while let Some(argument) = arguments.next() {
+    if argument == "--max-grid-points" {
+      if has_grid_budget {
+        return Err("--max-grid-points may only be specified once".to_string());
+      }
+      let value = arguments
+        .next()
+        .ok_or_else(|| "--max-grid-points requires an integer value".to_string())?;
+      let value = value.to_string_lossy();
+      let max_grid_points = value
+        .replace('_', "")
+        .parse::<usize>()
+        .map_err(|_| format!("invalid --max-grid-points value: {value}"))?;
+      ses = ses
+        .with_max_grid_points(max_grid_points)
+        .map_err(|error| error.to_string())?;
+      has_grid_budget = true;
+    } else if argument.to_string_lossy().starts_with('-') {
+      return Err(format!("unknown option: {}", argument.to_string_lossy()));
+    } else if path.is_some() {
+      return Err(format!(
+        "unexpected extra structure path: {}",
+        argument.to_string_lossy()
+      ));
+    } else {
+      path = Some(PathBuf::from(argument));
+    }
+  }
+
+  Ok(SesDebugOptions {
+    path: path.unwrap_or_else(|| PathBuf::from("structure.cif")),
+    ses,
+  })
+}
+
 /// Starts the stand-alone SES diagnostic window.
 pub(super) fn run() {
   env_logger::init();
-  let path = std::env::args_os()
-    .nth(1)
-    .map(PathBuf::from)
-    .unwrap_or_else(|| PathBuf::from("structure.cif"));
-  let scene = match load_scene(&path) {
+  let options = match parse_options(std::env::args_os().skip(1)) {
+    Ok(options) => options,
+    Err(error) => {
+      eprintln!("failed to start SES debug: {error}\n{USAGE}");
+      return;
+    }
+  };
+  let scene = match load_scene(&options.path) {
     Ok(scene) => Arc::new(scene),
     Err(error) => {
       eprintln!("failed to load structure: {error}");
@@ -759,6 +828,7 @@ pub(super) fn run() {
     &scene,
     MolecularSurfaceRequest {
       partition: SurfacePartition::Unified,
+      ses: options.ses,
       ..MolecularSurfaceRequest::default()
     },
   );
@@ -772,7 +842,8 @@ pub(super) fn run() {
     let probe_center_count = trace.probe_centers.len();
     let grid_diagnostics = GridDiagnostics::from_grid(&trace.sas_field);
     log::info!(
-      "SES scalar grid: spacing={:.3} A, dimensions={}x{}x{}, samples={}",
+      "SES scalar grid: budget={}, spacing={:.3} A, dimensions={}x{}x{}, samples={}",
+      options.ses.max_grid_points(),
       grid_diagnostics.spacing,
       grid_diagnostics.dimensions[0],
       grid_diagnostics.dimensions[1],
@@ -845,6 +916,46 @@ mod tests {
     let diagnostics = GridDiagnostics::from_grid(&example_grid());
 
     assert_eq!(diagnostics.label(), "Grid 12 × 12 × 12 · Δ 0.500 Å · 1728 samples");
+  }
+
+  #[test]
+  fn parse_options_should_accept_a_grouped_grid_budget_after_the_path() {
+    let options = parse_options([
+      OsString::from("structure.cif"),
+      OsString::from("--max-grid-points"),
+      OsString::from("4_000_000"),
+    ])
+    .unwrap_or_else(|error| panic!("valid SES debug arguments should parse: {error}"));
+
+    assert_eq!(options.ses.max_grid_points(), 4_000_000);
+  }
+
+  #[test]
+  fn parse_options_should_accept_the_grid_budget_before_the_path() {
+    let options = parse_options([
+      OsString::from("--max-grid-points"),
+      OsString::from("4000000"),
+      OsString::from("structure.cif"),
+    ])
+    .unwrap_or_else(|error| panic!("valid SES debug arguments should parse: {error}"));
+
+    assert_eq!(options.path, PathBuf::from("structure.cif"));
+  }
+
+  #[test]
+  fn parse_options_should_reject_a_missing_grid_budget_value() {
+    assert_eq!(
+      parse_options([OsString::from("--max-grid-points")]),
+      Err("--max-grid-points requires an integer value".to_string())
+    );
+  }
+
+  #[test]
+  fn parse_options_should_reject_an_unknown_option() {
+    assert_eq!(
+      parse_options([OsString::from("--quality")]),
+      Err("unknown option: --quality".to_string())
+    );
   }
 
   #[test]
