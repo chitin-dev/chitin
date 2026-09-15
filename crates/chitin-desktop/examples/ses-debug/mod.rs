@@ -16,7 +16,7 @@ use std::{
 use chitin_bio::{
   structure::{MmcifParser, PdbParser, StructureScene},
   surface::{
-    MolecularSurfaceArtifact, MolecularSurfaceRequest, SesDomainTrace, SurfaceMesh, SurfacePartition,
+    MolecularSurfaceArtifact, MolecularSurfaceRequest, ScalarFieldGrid, SesDomainTrace, SurfaceMesh, SurfacePartition,
     trace_molecular_surface,
   },
 };
@@ -356,6 +356,36 @@ struct SesDebugView {
   slice_z_bounds: [f32; 2],
   /// Number of merged centers represented by the probe-center and probe-field stages.
   probe_center_count: usize,
+  /// Effective scalar-grid resolution after the SES point-budget adjustment.
+  grid_diagnostics: GridDiagnostics,
+}
+
+/// Compact description of the scalar lattice used by the traced SES domain.
+#[derive(Clone, Copy)]
+struct GridDiagnostics {
+  spacing: f32,
+  dimensions: [usize; 3],
+  sample_count: usize,
+}
+
+impl GridDiagnostics {
+  /// Captures the effective geometry of a sampled scalar field.
+  fn from_grid(grid: &ScalarFieldGrid) -> Self {
+    Self {
+      spacing: grid.spacing,
+      dimensions: grid.dimensions,
+      sample_count: grid.values.len(),
+    }
+  }
+
+  /// Formats the diagnostics displayed over the SES viewport.
+  fn label(self) -> String {
+    let [x, y, z] = self.dimensions;
+    format!(
+      "Grid {x} × {y} × {z} · Δ {:.3} Å · {} samples",
+      self.spacing, self.sample_count
+    )
+  }
 }
 
 impl SesDebugView {
@@ -509,6 +539,7 @@ impl Render for SesDebugView {
     };
     let previous = cx.entity().clone();
     let next = cx.entity().clone();
+    let grid_description = self.grid_diagnostics.label();
     let stage_description = if matches!(stage, Stage::ProbeCenters | Stage::ProbeField) {
       format!("{} · {} centers", stage.label(), self.probe_center_count)
     } else {
@@ -523,7 +554,27 @@ impl Render for SesDebugView {
       // The wrapper must itself establish a flex formatting context. Without
       // it, the panel's internal `flex_1` has no parent flex axis and the WGPU
       // viewport can collapse to zero height while the control bar remains.
-      .child(div().flex().flex_1().min_h_0().child(self.panel.clone()))
+      .child(
+        div()
+          .relative()
+          .flex()
+          .flex_1()
+          .min_h_0()
+          .child(self.panel.clone())
+          .child(
+            div()
+              .absolute()
+              .top_2()
+              .right_2()
+              .px_2()
+              .py_1()
+              .rounded_sm()
+              .bg(gpui::rgba(0x000000a8))
+              .text_xs()
+              .text_color(rgb(0xd7e0f2))
+              .child(grid_description),
+          ),
+      )
       .child(
         div()
           .flex()
@@ -719,6 +770,15 @@ pub(super) fn run() {
   Application::new().run(move |cx: &mut App| {
     let slice_z_bounds = [trace.sas_field.bounds_min[2], trace.sas_field.bounds_max()[2]];
     let probe_center_count = trace.probe_centers.len();
+    let grid_diagnostics = GridDiagnostics::from_grid(&trace.sas_field);
+    log::info!(
+      "SES scalar grid: spacing={:.3} A, dimensions={}x{}x{}, samples={}",
+      grid_diagnostics.spacing,
+      grid_diagnostics.dimensions[0],
+      grid_diagnostics.dimensions[1],
+      grid_diagnostics.dimensions[2],
+      grid_diagnostics.sample_count,
+    );
     let state = Rc::new(RefCell::new(DebugState {
       stage: Stage::Atoms,
       revision: 1,
@@ -749,6 +809,7 @@ pub(super) fn run() {
           slider_dragging: false,
           slice_z_bounds,
           probe_center_count,
+          grid_diagnostics,
         })
       },
     );
@@ -762,8 +823,6 @@ pub(super) fn run() {
 
 #[cfg(test)]
 mod tests {
-  use chitin_bio::surface::ScalarFieldGrid;
-
   use super::*;
   use super::{
     geometry::{probe_center_mesh, visible_grid_coordinates},
@@ -779,6 +838,13 @@ mod tests {
       dimensions: [RESOLUTION; 3],
       values: vec![0.0; RESOLUTION.pow(3)],
     }
+  }
+
+  #[test]
+  fn grid_diagnostics_should_report_effective_grid_geometry() {
+    let diagnostics = GridDiagnostics::from_grid(&example_grid());
+
+    assert_eq!(diagnostics.label(), "Grid 12 × 12 × 12 · Δ 0.500 Å · 1728 samples");
   }
 
   #[test]
