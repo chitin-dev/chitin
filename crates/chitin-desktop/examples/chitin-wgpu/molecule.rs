@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use chitin_bio::structure::{
-  MolecularSurfaceArtifact, MolecularSurfaceRequest, StructureScene, generate_molecular_surface,
+use chitin_bio::{
+  structure::StructureScene,
+  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_molecular_surface},
 };
 use chitin_desktop::wgpu_panel::{WgpuPanelFrame, WgpuPanelScene};
 use chitin_molecule_renderer::{
