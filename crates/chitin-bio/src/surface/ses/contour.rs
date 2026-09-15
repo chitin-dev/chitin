@@ -195,7 +195,10 @@ impl MeshBuilder<'_> {
     let pb = vertex_position(&self.vertices[b as usize]);
     let pc = vertex_position(&self.vertices[c as usize]);
     let normal = (pb - pa).cross(pc - pa);
-    if normal.length_squared() < f32::EPSILON {
+    // Very small contour triangles are still topologically significant. A
+    // scale-based epsilon removes valid slivers and opens cracks in detailed
+    // molecular surfaces, so discard only exactly collapsed intersections.
+    if normal.length_squared() == 0.0 {
       return;
     }
     let gradient = field_gradient(

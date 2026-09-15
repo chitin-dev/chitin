@@ -15,11 +15,8 @@ use rayon::prelude::*;
 
 use self::{
   contour::{contour_field, vertex_position},
-  field::{atom_surface_distance, grid_dimensions, probe_surface_distance, sample_field},
-  postprocess::{
-    orient_inner_surface, recompute_inner_surface_normals, recompute_surface_normals, retain_inner_components,
-    smooth_mesh,
-  },
+  field::{atom_surface_distance, compose_inner_surface_field, grid_dimensions, probe_surface_distance, sample_field},
+  postprocess::{orient_inner_surface, recompute_inner_surface_normals, recompute_surface_normals, smooth_mesh},
   spatial::{AtomGrid, PointGrid, point_grid_cell},
 };
 
@@ -74,7 +71,6 @@ enum SesKernelStage<'a> {
     dimensions: [usize; 3],
     values: &'a [f32],
   },
-  RawProbeSurface(&'a SurfaceMesh),
   InnerProbeSurface(&'a SurfaceMesh),
   SmoothedInnerSurface(&'a SurfaceMesh),
 }
@@ -118,6 +114,7 @@ impl SesTraceRecorder {
         dimensions,
         values,
       } => {
+        self.raw_probe_surface = contour_field(bounds_min, spacing, dimensions, values);
         self.probe_field = ScalarFieldGrid {
           bounds_min: bounds_min.to_array(),
           spacing,
@@ -125,7 +122,6 @@ impl SesTraceRecorder {
           values: values.to_vec(),
         };
       }
-      SesKernelStage::RawProbeSurface(mesh) => self.raw_probe_surface = mesh.clone(),
       SesKernelStage::InnerProbeSurface(mesh) => {
         self.inner_probe_surface = mesh.clone();
         recompute_surface_normals(&mut self.inner_probe_surface);
@@ -252,8 +248,9 @@ fn surface_atom_groups(
 ///
 /// The algorithm first contours the solvent-accessible surface formed by atoms
 /// expanded by the probe radius. Those contour vertices become probe centers
-/// for a second distance field. Its inward connected components form the SES;
-/// the outward offset components are discarded before conservative smoothing.
+/// for a second distance field. The SAS exterior is filled into that field
+/// before contouring, leaving only the molecular-side boundary for conservative
+/// smoothing and normal reconstruction.
 ///
 /// # Parameters
 ///
@@ -329,14 +326,13 @@ fn ses_kernel_for_atoms(
     dimensions,
     values: &ses_field,
   });
-  let mesh = contour_field(bounds_min, spacing, dimensions, &ses_field);
-  capture(SesKernelStage::RawProbeSurface(&mesh));
-  let mut mesh = retain_inner_components(mesh, &atom_grid, probe_radius);
-  orient_inner_surface(&mut mesh, bounds_min, spacing, dimensions, &ses_field);
+  let inner_surface_field = compose_inner_surface_field(&ses_field, &sas_field);
+  let mut mesh = contour_field(bounds_min, spacing, dimensions, &inner_surface_field);
+  orient_inner_surface(&mut mesh, bounds_min, spacing, dimensions, &inner_surface_field);
   capture(SesKernelStage::InnerProbeSurface(&mesh));
   smooth_mesh(&mut mesh, SMOOTHING_ITERATIONS);
   capture(SesKernelStage::SmoothedInnerSurface(&mesh));
-  recompute_inner_surface_normals(&mut mesh, bounds_min, spacing, dimensions, &ses_field);
+  recompute_inner_surface_normals(&mut mesh, bounds_min, spacing, dimensions, &inner_surface_field);
   mesh
 }
 

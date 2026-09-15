@@ -178,7 +178,7 @@ pub struct SesDomainTrace {
   pub probe_field: ScalarFieldGrid,
   /// Complete probe-field zero contour containing inner and outer sheets.
   pub raw_probe_surface: SurfaceMesh,
-  /// Atom-facing components after filtering and orientation, before smoothing.
+  /// Molecular-side contour of the composite inner field, before smoothing.
   pub inner_probe_surface: SurfaceMesh,
   /// Inner surface after positional smoothing and before field-guided normals.
   pub smoothed_inner_surface: SurfaceMesh,

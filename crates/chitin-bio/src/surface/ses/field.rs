@@ -79,6 +79,29 @@ pub(super) fn probe_surface_distance(
   distance
 }
 
+/// Fills the SAS exterior into the probe field before inner-surface contouring.
+///
+/// If `g` is the signed distance to the union of boundary probe spheres and
+/// `f` is the first-pass SAS field, `min(g, -f)` is negative both inside the
+/// probe shell and throughout the SAS exterior. Its zero contour therefore
+/// contains the inner solvent-excluded boundary without the outer offset sheet.
+///
+/// # Parameters
+///
+/// * `probe_field` contains signed distances to the boundary probe spheres.
+/// * `sas_field` contains signed distances to the expanded atom union.
+///
+/// # Returns
+///
+/// A field whose zero contour is the molecular-side probe boundary.
+pub(super) fn compose_inner_surface_field(probe_field: &[f32], sas_field: &[f32]) -> Vec<f32> {
+  probe_field
+    .par_iter()
+    .zip(sas_field.par_iter())
+    .map(|(probe, sas)| probe.min(-sas))
+    .collect()
+}
+
 /// Evaluates the gradient of a trilinearly interpolated scalar field.
 ///
 /// Coordinates are clamped to the final grid cell so positions moved slightly

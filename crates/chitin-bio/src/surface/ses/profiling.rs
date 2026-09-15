@@ -7,9 +7,9 @@ use crate::structure::StructureScene;
 use super::{
   DISTANCE_FIELD_RANGE, MAX_GRID_POINTS, SMOOTHING_ITERATIONS, SurfaceAtom, atom_bounds,
   contour::contour_field,
-  field::{atom_surface_distance, grid_dimensions, probe_surface_distance, sample_field},
+  field::{atom_surface_distance, compose_inner_surface_field, grid_dimensions, probe_surface_distance, sample_field},
   merge_close_probe_centers,
-  postprocess::{orient_inner_surface, recompute_inner_surface_normals, retain_inner_components, smooth_mesh},
+  postprocess::{orient_inner_surface, recompute_inner_surface_normals, smooth_mesh},
   spatial::{AtomGrid, PointGrid},
   surface_atom_groups,
   types::{MolecularSurfaceArtifact, MolecularSurfaceRequest, SesParameters, SurfaceDomainArtifact, SurfaceMesh},
@@ -33,8 +33,8 @@ pub struct MolecularSurfaceTimings {
   pub ses_field_sampling: Duration,
   /// Time spent extracting second-pass solvent-excluded contours.
   pub ses_contouring: Duration,
-  /// Time spent retaining molecular-side connected components.
-  pub component_filtering: Duration,
+  /// Time spent filling the SAS exterior into the probe distance field.
+  pub inner_field_composition: Duration,
   /// Time spent making retained triangle winding consistent.
   pub orientation: Duration,
   /// Time spent smoothing retained meshes.
@@ -90,7 +90,7 @@ enum SurfaceStage {
   ProbeCenterMerging,
   SesFieldSampling,
   SesContouring,
-  ComponentFiltering,
+  InnerFieldComposition,
   Orientation,
   Smoothing,
   NormalRecomputation,
@@ -129,7 +129,7 @@ impl SurfaceGenerationMetrics {
       SurfaceStage::ProbeCenterMerging => &mut self.timings.probe_center_merging,
       SurfaceStage::SesFieldSampling => &mut self.timings.ses_field_sampling,
       SurfaceStage::SesContouring => &mut self.timings.ses_contouring,
-      SurfaceStage::ComponentFiltering => &mut self.timings.component_filtering,
+      SurfaceStage::InnerFieldComposition => &mut self.timings.inner_field_composition,
       SurfaceStage::Orientation => &mut self.timings.orientation,
       SurfaceStage::Smoothing => &mut self.timings.smoothing,
       SurfaceStage::NormalRecomputation => &mut self.timings.normal_recomputation,
@@ -199,20 +199,20 @@ fn ses_mesh_for_atoms_profiled(
       probe_surface_distance(position, &probe_grid, probe_radius, spacing)
     })
   });
-  let mesh = metrics.measure(SurfaceStage::SesContouring, || {
-    contour_field(bounds_min, spacing, dimensions, &ses_field)
+  let inner_surface_field = metrics.measure(SurfaceStage::InnerFieldComposition, || {
+    compose_inner_surface_field(&ses_field, &sas_field)
   });
-  let mut mesh = metrics.measure(SurfaceStage::ComponentFiltering, || {
-    retain_inner_components(mesh, &atom_grid, probe_radius)
+  let mut mesh = metrics.measure(SurfaceStage::SesContouring, || {
+    contour_field(bounds_min, spacing, dimensions, &inner_surface_field)
   });
   metrics.measure(SurfaceStage::Orientation, || {
-    orient_inner_surface(&mut mesh, bounds_min, spacing, dimensions, &ses_field);
+    orient_inner_surface(&mut mesh, bounds_min, spacing, dimensions, &inner_surface_field);
   });
   metrics.measure(SurfaceStage::Smoothing, || {
     smooth_mesh(&mut mesh, SMOOTHING_ITERATIONS);
   });
   metrics.measure(SurfaceStage::NormalRecomputation, || {
-    recompute_inner_surface_normals(&mut mesh, bounds_min, spacing, dimensions, &ses_field);
+    recompute_inner_surface_normals(&mut mesh, bounds_min, spacing, dimensions, &inner_surface_field);
   });
   metrics.record_sizes(grid_points, probe_center_count, sas_triangles, mesh.indices.len() / 3);
   mesh

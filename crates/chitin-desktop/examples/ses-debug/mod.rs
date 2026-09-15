@@ -5,6 +5,7 @@ mod scalar_slice;
 
 use std::{
   cell::RefCell,
+  collections::HashMap,
   fs,
   path::{Path, PathBuf},
   rc::Rc,
@@ -15,7 +16,8 @@ use std::{
 use chitin_bio::{
   structure::{MmcifParser, PdbParser, StructureScene},
   surface::{
-    MolecularSurfaceArtifact, MolecularSurfaceRequest, SesDomainTrace, SurfacePartition, trace_molecular_surface,
+    MolecularSurfaceArtifact, MolecularSurfaceRequest, SesDomainTrace, SurfaceMesh, SurfacePartition,
+    trace_molecular_surface,
   },
 };
 use chitin_desktop::wgpu_panel::{ChitinWgpuDocumentPanel, WgpuPanelFrame, WgpuPanelScene};
@@ -132,7 +134,7 @@ struct SesDebugScene {
   surface: Option<MolecularSurfaceArtifact>,
   /// Unfiltered zero contour containing both probe-field offset sheets.
   raw_probe_surface: MolecularSurfaceArtifact,
-  /// Atom-facing components retained from the raw probe-field contour.
+  /// Molecular-side contour extracted from the composite inner field.
   inner_probe_surface: MolecularSurfaceArtifact,
   /// Position-smoothed inner contour before field-guided normal correction.
   smoothed_inner_surface: MolecularSurfaceArtifact,
@@ -146,11 +148,12 @@ impl SesDebugScene {
   /// Creates a scene whose CPU geometry is rebuilt only after navigation.
   fn new(scene: Arc<StructureScene>, trace: Arc<SesDomainTrace>, state: Rc<RefCell<DebugState>>) -> Self {
     log::info!(
-      "precomputed probe contours: raw_vertices={}, raw_triangles={}, inner_vertices={}, inner_triangles={}, smoothed_vertices={}, smoothed_triangles={}",
+      "precomputed probe contours: raw_vertices={}, raw_triangles={}, inner_vertices={}, inner_triangles={}, inner_invalid_edges={}, smoothed_vertices={}, smoothed_triangles={}",
       trace.raw_probe_surface.vertices.len(),
       trace.raw_probe_surface.indices.len() / 3,
       trace.inner_probe_surface.vertices.len(),
       trace.inner_probe_surface.indices.len() / 3,
+      invalid_edge_count(&trace.inner_probe_surface),
       trace.smoothed_inner_surface.vertices.len(),
       trace.smoothed_inner_surface.indices.len() / 3,
     );
@@ -227,6 +230,26 @@ impl SesDebugScene {
       _ => self.surface.as_ref(),
     }
   }
+}
+
+/// Counts open or non-manifold edges in one diagnostic surface mesh.
+fn invalid_edge_count(mesh: &SurfaceMesh) -> usize {
+  let mut uses = HashMap::new();
+  for triangle in mesh.indices.chunks_exact(3) {
+    for [first, second] in [
+      [triangle[0], triangle[1]],
+      [triangle[1], triangle[2]],
+      [triangle[2], triangle[0]],
+    ] {
+      let edge = if first < second {
+        (first, second)
+      } else {
+        (second, first)
+      };
+      *uses.entry(edge).or_insert(0_u8) += 1;
+    }
+  }
+  uses.values().filter(|count| **count != 2).count()
 }
 
 impl WgpuPanelScene for SesDebugScene {

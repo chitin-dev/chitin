@@ -1,69 +1,8 @@
-//! Topological filtering, orientation, smoothing, and normal reconstruction.
+//! Topological orientation, smoothing, and normal reconstruction.
 
 use std::collections::{HashMap, VecDeque};
 
-use rayon::prelude::*;
-
-use super::{
-  SMOOTHING_LAMBDA, SMOOTHING_MU, SurfaceMesh, contour::vertex_position, field::field_gradient, spatial::AtomGrid,
-};
-
-/// Removes the outward probe offset and isolated contour fragments.
-///
-/// The second distance map contains both sides of the probe spheres. A
-/// connected component is retained only when at least one of its vertices lies
-/// less than one and a half probe radii from an atom's van der Waals surface.
-///
-/// # Parameters
-///
-/// * `mesh` is the contour of the probe-center distance field.
-/// * `atom_grid` provides the atom-surface proximity test.
-///
-/// # Returns
-///
-/// A compact mesh containing only components classified as the molecular SES.
-pub(super) fn retain_inner_components(mesh: SurfaceMesh, atom_grid: &AtomGrid, probe_radius: f32) -> SurfaceMesh {
-  if mesh.indices.is_empty() {
-    return mesh;
-  }
-
-  let mut components = DisjointSet::new(mesh.vertices.len());
-  for triangle in mesh.indices.chunks_exact(3) {
-    components.union(triangle[0] as usize, triangle[1] as usize);
-    components.union(triangle[1] as usize, triangle[2] as usize);
-  }
-
-  let threshold = 1.5 * probe_radius;
-  let component_roots = (0..mesh.vertices.len())
-    .map(|index| components.find(index))
-    .collect::<Vec<_>>();
-  let near_atom_surface = mesh
-    .vertices
-    .par_iter()
-    .map(|vertex| {
-      let position = vertex_position(vertex);
-      let mut clearance = threshold;
-      atom_grid.for_each_nearby(position, atom_grid.max_radius + threshold, |atom| {
-        clearance = clearance.min(position.distance(atom.position) - atom.radius);
-      });
-      clearance < threshold
-    })
-    .collect::<Vec<_>>();
-  let mut retain = vec![false; mesh.vertices.len()];
-  for (root, is_near) in component_roots.iter().zip(near_atom_surface) {
-    if is_near {
-      retain[*root] = true;
-    }
-  }
-
-  let mut indices = Vec::with_capacity(mesh.indices.len());
-  for triangle in mesh.indices.chunks_exact(3) {
-    if retain[component_roots[triangle[0] as usize]] {
-      indices.extend_from_slice(triangle);
-    }
-  }
-  compact_mesh(mesh.vertices, indices)
-}
+use super::{SMOOTHING_LAMBDA, SMOOTHING_MU, SurfaceMesh, contour::vertex_position, field::field_gradient};
 
 /// Makes every connected component consistently wound and outward-facing.
 ///
@@ -294,76 +233,5 @@ pub(super) fn recompute_inner_surface_normals(
     vertex[3] = normal.x;
     vertex[4] = normal.y;
     vertex[5] = normal.z;
-  }
-}
-
-/// Removes vertices that are no longer referenced after component filtering.
-///
-/// # Parameters
-///
-/// * `vertices` contains the source vertex records.
-/// * `indices` contains the retained triangle-list indices.
-///
-/// # Returns
-///
-/// A mesh whose vertex array contains only vertices referenced by `indices`.
-fn compact_mesh(vertices: Vec<[f32; 6]>, indices: Vec<u32>) -> SurfaceMesh {
-  let mut remap = vec![usize::MAX; vertices.len()];
-  let mut compact_vertices = Vec::new();
-  let mut compact_indices = Vec::with_capacity(indices.len());
-  for index in indices {
-    let source = index as usize;
-    let target = if remap[source] == usize::MAX {
-      let target = compact_vertices.len();
-      compact_vertices.push(vertices[source]);
-      remap[source] = target;
-      target
-    } else {
-      remap[source]
-    };
-    compact_indices.push(target as u32);
-  }
-  SurfaceMesh {
-    vertices: compact_vertices,
-    indices: compact_indices,
-  }
-}
-
-/// Union-find structure used to label connected triangle components.
-struct DisjointSet {
-  /// Parent pointer for each set element.
-  parents: Vec<usize>,
-}
-
-impl DisjointSet {
-  /// Creates one singleton set for every mesh vertex.
-  fn new(length: usize) -> Self {
-    Self {
-      parents: (0..length).collect(),
-    }
-  }
-
-  /// Returns the representative of a set and compresses its path.
-  fn find(&mut self, index: usize) -> usize {
-    let mut root = index;
-    while self.parents[root] != root {
-      root = self.parents[root];
-    }
-    let mut current = index;
-    while self.parents[current] != root {
-      let parent = self.parents[current];
-      self.parents[current] = root;
-      current = parent;
-    }
-    root
-  }
-
-  /// Merges the sets containing two vertex indices.
-  fn union(&mut self, first: usize, second: usize) {
-    let first_root = self.find(first);
-    let second_root = self.find(second);
-    if first_root != second_root {
-      self.parents[second_root] = first_root;
-    }
   }
 }

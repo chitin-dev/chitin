@@ -224,7 +224,7 @@ pub(super) fn probe_center_stage_mesh(grid: &ScalarFieldGrid, centers: &[[f32; 3
 /// # Parameters
 ///
 /// * `grid` supplies the preceding sampling-grid geometry.
-/// * `surface` is the raw or filtered second-field isosurface to overlay.
+/// * `surface` is the raw or inner second-field isosurface to overlay.
 ///
 /// # Returns
 ///

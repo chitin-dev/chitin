@@ -20,6 +20,26 @@ fn default_mesh(scene: &StructureScene) -> SurfaceMesh {
     .map_or_else(SurfaceMesh::default, |domain| domain.mesh)
 }
 
+/// Counts edges that do not have exactly two incident triangles.
+fn invalid_edge_count(mesh: &SurfaceMesh) -> usize {
+  let mut edge_use_counts = HashMap::new();
+  for triangle in mesh.indices.chunks_exact(3) {
+    for [first, second] in [
+      [triangle[0], triangle[1]],
+      [triangle[1], triangle[2]],
+      [triangle[2], triangle[0]],
+    ] {
+      let edge = if first < second {
+        (first, second)
+      } else {
+        (second, first)
+      };
+      *edge_use_counts.entry(edge).or_insert(0_u8) += 1;
+    }
+  }
+  edge_use_counts.values().filter(|count| **count != 2).count()
+}
+
 #[test]
 fn ses_mesh_should_generate_triangles_for_one_atom() {
   let mesh = default_mesh(&one_atom_scene());
@@ -63,23 +83,30 @@ fn ses_mesh_should_not_contain_grid_scale_spikes() {
 #[test]
 fn ses_mesh_should_be_watertight_for_one_atom() {
   let mesh = default_mesh(&one_atom_scene());
-  let mut edge_use_counts = HashMap::new();
-  for triangle in mesh.indices.chunks_exact(3) {
-    for [first, second] in [
-      [triangle[0], triangle[1]],
-      [triangle[1], triangle[2]],
-      [triangle[2], triangle[0]],
-    ] {
-      let edge = if first < second {
-        (first, second)
-      } else {
-        (second, first)
-      };
-      *edge_use_counts.entry(edge).or_insert(0_u8) += 1;
-    }
-  }
-  let invalid_edge_count = edge_use_counts.values().filter(|count| **count != 2).count();
-  assert_eq!(invalid_edge_count, 0, "surface contains open or non-manifold edges");
+  assert_eq!(
+    invalid_edge_count(&mesh),
+    0,
+    "surface contains open or non-manifold edges"
+  );
+}
+
+#[test]
+fn contour_should_preserve_sliver_triangles_near_grid_samples() {
+  let bounds_min = glam::Vec3::splat(-2.0);
+  let spacing = 1.0;
+  let dimensions = [5, 5, 5];
+  let field = sample_field(bounds_min, spacing, dimensions, |position| {
+    position.length() - (1.0 + 1.0e-5)
+  });
+
+  let mesh = contour_field(bounds_min, spacing, dimensions, &field);
+
+  assert!(!mesh.indices.is_empty());
+  assert_eq!(
+    invalid_edge_count(&mesh),
+    0,
+    "discarding contour slivers opened the mesh"
+  );
 }
 
 #[test]
@@ -178,6 +205,16 @@ fn parallel_field_sampling_should_preserve_row_major_order() {
       0.0, 1.0, 2.0, 10.0, 11.0, 12.0, 100.0, 101.0, 102.0, 110.0, 111.0, 112.0
     ]
   );
+}
+
+#[test]
+fn inner_surface_field_should_fill_the_sas_exterior() {
+  let probe_field = vec![1.0, -0.5, 1.0];
+  let sas_field = vec![-1.0, 0.5, 1.0];
+
+  let field = field::compose_inner_surface_field(&probe_field, &sas_field);
+
+  assert_eq!(field, vec![1.0, -0.5, -1.0]);
 }
 
 #[test]
@@ -282,7 +319,7 @@ fn trace_fields_should_contain_one_value_per_grid_sample() {
 }
 
 #[test]
-fn trace_inner_surface_should_be_filtered_from_raw_probe_surface() {
+fn trace_inner_surface_should_exclude_the_raw_outer_sheet() {
   let trace = trace_molecular_surface(
     &one_atom_scene(),
     MolecularSurfaceRequest {
@@ -292,7 +329,8 @@ fn trace_inner_surface_should_be_filtered_from_raw_probe_surface() {
   );
   let domain = &trace.domains[0];
 
-  assert!(domain.inner_probe_surface.indices.len() <= domain.raw_probe_surface.indices.len());
+  assert!(!domain.inner_probe_surface.indices.is_empty());
+  assert!(domain.inner_probe_surface.indices.len() < domain.raw_probe_surface.indices.len());
 }
 
 #[test]
