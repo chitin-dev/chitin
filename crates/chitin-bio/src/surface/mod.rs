@@ -8,7 +8,7 @@ pub mod ses;
 
 pub use ses::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
-  ScalarFieldGrid, SesDomainTrace, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact, SurfaceMesh,
+  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact, SurfaceMesh,
   SurfacePartition, generate_molecular_surface, trace_molecular_surface,
 };
 #[cfg(feature = "surface-profiling")]

@@ -5,7 +5,8 @@ use thiserror::Error;
 use crate::structure::ChainId;
 
 use super::{
-  DEFAULT_SES_GRID_SPACING, DEFAULT_SES_MAX_GRID_POINTS, DEFAULT_SES_PROBE_RADIUS, MIN_SES_MAX_GRID_POINTS,
+  DEFAULT_SES_GRID_MEMORY_LIMIT_BYTES, DEFAULT_SES_GRID_SPACING, DEFAULT_SES_PROBE_RADIUS,
+  ESTIMATED_SES_BYTES_PER_GRID_POINT, MIN_SES_GRID_MEMORY_LIMIT_BYTES, MIN_SES_MAX_GRID_POINTS,
   field::{grid_index, grid_position},
 };
 
@@ -43,7 +44,24 @@ pub enum SurfacePartition {
 pub struct SesParameters {
   probe_radius: f32,
   grid_spacing: f32,
-  max_grid_points: usize,
+  grid_budget: SesGridBudget,
+}
+
+/// Resource policy used to resolve the scalar grid for one SES domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SesGridBudget {
+  /// Preserve the preferred spacing while the estimated peak fits in memory.
+  Automatic { memory_limit_bytes: usize },
+  /// Enforce an explicit upper bound on samples in each scalar grid.
+  Fixed { max_grid_points: usize },
+}
+
+impl Default for SesGridBudget {
+  fn default() -> Self {
+    Self::Automatic {
+      memory_limit_bytes: DEFAULT_SES_GRID_MEMORY_LIMIT_BYTES,
+    }
+  }
 }
 
 impl SesParameters {
@@ -58,19 +76,22 @@ impl SesParameters {
     Ok(Self {
       probe_radius,
       grid_spacing,
-      max_grid_points: DEFAULT_SES_MAX_GRID_POINTS,
+      grid_budget: SesGridBudget::default(),
     })
   }
 
-  /// Sets the maximum number of samples in each calculation-domain scalar grid.
+  /// Uses a fixed maximum number of samples in each calculation-domain grid.
   pub fn with_max_grid_points(mut self, max_grid_points: usize) -> Result<Self, MolecularSurfaceParameterError> {
-    if max_grid_points < MIN_SES_MAX_GRID_POINTS {
-      return Err(MolecularSurfaceParameterError::InvalidMaxGridPoints {
-        value: max_grid_points,
-        minimum: MIN_SES_MAX_GRID_POINTS,
-      });
-    }
-    self.max_grid_points = max_grid_points;
+    self.grid_budget = validate_grid_budget(SesGridBudget::Fixed { max_grid_points })?;
+    Ok(self)
+  }
+
+  /// Uses automatic grid sizing under a peak-memory safety limit.
+  pub fn with_automatic_grid_budget(
+    mut self,
+    memory_limit_bytes: usize,
+  ) -> Result<Self, MolecularSurfaceParameterError> {
+    self.grid_budget = validate_grid_budget(SesGridBudget::Automatic { memory_limit_bytes })?;
     Ok(self)
   }
 
@@ -84,9 +105,17 @@ impl SesParameters {
     self.grid_spacing
   }
 
-  /// Returns the maximum sample count in each calculation-domain scalar grid.
+  /// Returns the configured automatic or fixed resource policy.
+  pub const fn grid_budget(self) -> SesGridBudget {
+    self.grid_budget
+  }
+
+  /// Returns the effective hard sample limit for one scalar grid.
   pub const fn max_grid_points(self) -> usize {
-    self.max_grid_points
+    match self.grid_budget {
+      SesGridBudget::Automatic { memory_limit_bytes } => memory_limit_bytes / ESTIMATED_SES_BYTES_PER_GRID_POINT,
+      SesGridBudget::Fixed { max_grid_points } => max_grid_points,
+    }
   }
 }
 
@@ -95,7 +124,7 @@ impl Default for SesParameters {
     Self {
       probe_radius: DEFAULT_SES_PROBE_RADIUS,
       grid_spacing: DEFAULT_SES_GRID_SPACING,
-      max_grid_points: DEFAULT_SES_MAX_GRID_POINTS,
+      grid_budget: SesGridBudget::default(),
     }
   }
 }
@@ -112,6 +141,28 @@ pub enum MolecularSurfaceParameterError {
   /// A three-dimensional scalar grid requires at least one cell.
   #[error("molecular-surface grid point budget must be at least {minimum}, got {value}")]
   InvalidMaxGridPoints { value: usize, minimum: usize },
+  /// Automatic sizing needs enough memory for at least one grid cell.
+  #[error("molecular-surface grid memory limit must be at least {minimum} bytes, got {value}")]
+  InvalidGridMemoryLimit { value: usize, minimum: usize },
+}
+
+/// Validates a scalar-grid resource policy before storing it in SES parameters.
+fn validate_grid_budget(budget: SesGridBudget) -> Result<SesGridBudget, MolecularSurfaceParameterError> {
+  match budget {
+    SesGridBudget::Automatic { memory_limit_bytes } if memory_limit_bytes < MIN_SES_GRID_MEMORY_LIMIT_BYTES => {
+      Err(MolecularSurfaceParameterError::InvalidGridMemoryLimit {
+        value: memory_limit_bytes,
+        minimum: MIN_SES_GRID_MEMORY_LIMIT_BYTES,
+      })
+    }
+    SesGridBudget::Fixed { max_grid_points } if max_grid_points < MIN_SES_MAX_GRID_POINTS => {
+      Err(MolecularSurfaceParameterError::InvalidMaxGridPoints {
+        value: max_grid_points,
+        minimum: MIN_SES_MAX_GRID_POINTS,
+      })
+    }
+    _ => Ok(budget),
+  }
 }
 
 /// Scientific request describing atom scope and calculation-domain partitioning.

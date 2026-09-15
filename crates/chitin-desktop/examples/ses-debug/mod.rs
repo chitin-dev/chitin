@@ -17,8 +17,8 @@ use std::{
 use chitin_bio::{
   structure::{MmcifParser, PdbParser, StructureScene},
   surface::{
-    MolecularSurfaceArtifact, MolecularSurfaceRequest, ScalarFieldGrid, SesDomainTrace, SesParameters, SurfaceMesh,
-    SurfacePartition, trace_molecular_surface,
+    MolecularSurfaceArtifact, MolecularSurfaceRequest, ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters,
+    SurfaceMesh, SurfacePartition, trace_molecular_surface,
   },
 };
 use chitin_desktop::wgpu_panel::{ChitinWgpuDocumentPanel, WgpuPanelFrame, WgpuPanelScene};
@@ -373,27 +373,42 @@ struct SesDebugView {
 /// Compact description of the scalar lattice used by the traced SES domain.
 #[derive(Clone, Copy)]
 struct GridDiagnostics {
+  budget: SesGridBudget,
+  preferred_spacing: f32,
   spacing: f32,
   dimensions: [usize; 3],
   sample_count: usize,
+  point_limit: usize,
 }
 
 impl GridDiagnostics {
   /// Captures the effective geometry of a sampled scalar field.
-  fn from_grid(grid: &ScalarFieldGrid) -> Self {
+  fn from_grid(grid: &ScalarFieldGrid, parameters: SesParameters) -> Self {
     Self {
+      budget: parameters.grid_budget(),
+      preferred_spacing: parameters.grid_spacing(),
       spacing: grid.spacing,
       dimensions: grid.dimensions,
       sample_count: grid.values.len(),
+      point_limit: parameters.max_grid_points(),
     }
   }
 
   /// Formats the diagnostics displayed over the SES viewport.
   fn label(self) -> String {
     let [x, y, z] = self.dimensions;
+    let budget = match self.budget {
+      SesGridBudget::Automatic { .. } => "Auto",
+      SesGridBudget::Fixed { .. } => "Fixed",
+    };
+    let resolution = if self.spacing > self.preferred_spacing * 1.001 {
+      format!("coarsened from {:.3} Å", self.preferred_spacing)
+    } else {
+      "target resolution".to_owned()
+    };
     format!(
-      "Grid {x} × {y} × {z} · Δ {:.3} Å · {} samples",
-      self.spacing, self.sample_count
+      "{budget} grid {x} × {y} × {z} · Δ {:.3} Å ({resolution}) · {} / {} samples",
+      self.spacing, self.sample_count, self.point_limit
     )
   }
 }
@@ -840,16 +855,8 @@ pub(super) fn run() {
   Application::new().run(move |cx: &mut App| {
     let slice_z_bounds = [trace.sas_field.bounds_min[2], trace.sas_field.bounds_max()[2]];
     let probe_center_count = trace.probe_centers.len();
-    let grid_diagnostics = GridDiagnostics::from_grid(&trace.sas_field);
-    log::info!(
-      "SES scalar grid: budget={}, spacing={:.3} A, dimensions={}x{}x{}, samples={}",
-      options.ses.max_grid_points(),
-      grid_diagnostics.spacing,
-      grid_diagnostics.dimensions[0],
-      grid_diagnostics.dimensions[1],
-      grid_diagnostics.dimensions[2],
-      grid_diagnostics.sample_count,
-    );
+    let grid_diagnostics = GridDiagnostics::from_grid(&trace.sas_field, options.ses);
+    log::info!("SES scalar grid: {}", grid_diagnostics.label(),);
     let state = Rc::new(RefCell::new(DebugState {
       stage: Stage::Atoms,
       revision: 1,
@@ -913,9 +920,23 @@ mod tests {
 
   #[test]
   fn grid_diagnostics_should_report_effective_grid_geometry() {
-    let diagnostics = GridDiagnostics::from_grid(&example_grid());
+    let parameters = SesParameters::new(1.4, 0.5)
+      .and_then(|parameters| parameters.with_max_grid_points(4_000))
+      .unwrap_or_else(|error| panic!("valid SES parameters should construct: {error}"));
+    let diagnostics = GridDiagnostics::from_grid(&example_grid(), parameters);
 
-    assert_eq!(diagnostics.label(), "Grid 12 × 12 × 12 · Δ 0.500 Å · 1728 samples");
+    assert_eq!(
+      diagnostics.label(),
+      "Fixed grid 12 × 12 × 12 · Δ 0.500 Å (target resolution) · 1728 / 4000 samples"
+    );
+  }
+
+  #[test]
+  fn parse_options_should_use_automatic_grid_sizing_by_default() {
+    let options = parse_options([OsString::from("structure.cif")])
+      .unwrap_or_else(|error| panic!("valid SES debug arguments should parse: {error}"));
+
+    assert!(matches!(options.ses.grid_budget(), SesGridBudget::Automatic { .. }));
   }
 
   #[test]

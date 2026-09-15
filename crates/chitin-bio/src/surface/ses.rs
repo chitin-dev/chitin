@@ -24,7 +24,7 @@ use self::{
 pub use self::profiling::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};
 pub use self::types::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
-  ScalarFieldGrid, SesDomainTrace, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact, SurfaceMesh,
+  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact, SurfaceMesh,
   SurfacePartition,
 };
 
@@ -32,10 +32,14 @@ pub use self::types::{
 const DEFAULT_SES_PROBE_RADIUS: f32 = 1.4;
 /// Default spacing between scalar-field samples.
 const DEFAULT_SES_GRID_SPACING: f32 = 0.5;
-/// Default maximum number of samples in each domain's scalar-grid layout.
-const DEFAULT_SES_MAX_GRID_POINTS: usize = 750_000;
+/// Default peak-memory allowance used by automatic SES grid sizing.
+const DEFAULT_SES_GRID_MEMORY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
+/// Conservative peak-memory estimate for each scalar-grid sample.
+const ESTIMATED_SES_BYTES_PER_GRID_POINT: usize = 64;
 /// Smallest budget capable of describing one three-dimensional grid cell.
 const MIN_SES_MAX_GRID_POINTS: usize = 8;
+/// Smallest automatic memory limit capable of describing one grid cell.
+const MIN_SES_GRID_MEMORY_LIMIT_BYTES: usize = MIN_SES_MAX_GRID_POINTS * ESTIMATED_SES_BYTES_PER_GRID_POINT;
 /// Number of grid cells over which a truncated distance field is evaluated.
 const DISTANCE_FIELD_RANGE: f32 = 2.0;
 /// Cell width tuned so the default atom-plus-probe query visits adjacent cells.

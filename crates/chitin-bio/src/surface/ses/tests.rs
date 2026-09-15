@@ -371,8 +371,13 @@ fn ses_parameters_should_reject_non_finite_grid_spacing() {
 }
 
 #[test]
-fn ses_parameters_should_preserve_the_default_grid_budget() {
-  assert_eq!(SesParameters::default().max_grid_points(), 750_000);
+fn ses_parameters_should_use_automatic_grid_sizing_by_default() {
+  assert_eq!(
+    SesParameters::default().grid_budget(),
+    SesGridBudget::Automatic {
+      memory_limit_bytes: 512 * 1024 * 1024,
+    }
+  );
 }
 
 #[test]
@@ -381,6 +386,33 @@ fn ses_parameters_should_reject_a_budget_smaller_than_one_cell() {
     SesParameters::default().with_max_grid_points(7),
     Err(MolecularSurfaceParameterError::InvalidMaxGridPoints { value: 7, minimum: 8 })
   );
+}
+
+#[test]
+fn ses_parameters_should_reject_an_automatic_memory_limit_smaller_than_one_cell() {
+  assert_eq!(
+    SesParameters::default().with_automatic_grid_budget(511),
+    Err(MolecularSurfaceParameterError::InvalidGridMemoryLimit {
+      value: 511,
+      minimum: 512,
+    })
+  );
+}
+
+#[test]
+fn automatic_grid_budget_should_preserve_target_spacing_beyond_the_old_limit() {
+  let parameters = SesParameters::default();
+  let (spacing, _) = budgeted_grid_layout(glam::Vec3::splat(100.0), 0.5, parameters.max_grid_points());
+
+  assert_eq!(spacing, 0.5);
+}
+
+#[test]
+fn automatic_grid_budget_should_coarsen_a_grid_beyond_its_memory_limit() {
+  let parameters = SesParameters::default();
+  let (spacing, _) = budgeted_grid_layout(glam::Vec3::splat(200.0), 0.5, parameters.max_grid_points());
+
+  assert!(spacing > 0.5);
 }
 
 #[test]
