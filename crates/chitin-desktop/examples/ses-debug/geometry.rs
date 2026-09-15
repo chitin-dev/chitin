@@ -219,23 +219,19 @@ pub(super) fn probe_center_stage_mesh(grid: &ScalarFieldGrid, centers: &[[f32; 3
   mesh
 }
 
-/// Combines the sampling grid, probe-center markers, and one extracted surface.
+/// Combines the sampling grid with one extracted probe-field surface.
 ///
 /// # Parameters
 ///
-/// * `grid` supplies the grid geometry and marker size.
-/// * `centers` contains the merged rolling-probe positions.
+/// * `grid` supplies the preceding sampling-grid geometry.
 /// * `surface` is the raw or filtered second-field isosurface to overlay.
 ///
 /// # Returns
 ///
-/// One diagnostic mesh retaining all geometry from the preceding stage.
-pub(super) fn probe_surface_stage_mesh(
-  grid: &ScalarFieldGrid,
-  centers: &[[f32; 3]],
-  surface: SurfaceMesh,
-) -> SurfaceMesh {
-  let mut mesh = probe_center_stage_mesh(grid, centers);
+/// One diagnostic mesh containing the grid and extracted surface, without the
+/// probe-center markers used by the preceding stages.
+pub(super) fn probe_surface_stage_mesh(grid: &ScalarFieldGrid, surface: SurfaceMesh) -> SurfaceMesh {
+  let mut mesh = grid_mesh(grid);
   append_mesh(&mut mesh, surface);
   mesh
 }

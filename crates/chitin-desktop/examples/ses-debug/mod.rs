@@ -9,6 +9,7 @@ use std::{
   path::{Path, PathBuf},
   rc::Rc,
   sync::Arc,
+  time::Duration,
 };
 
 use chitin_bio::{
@@ -22,8 +23,9 @@ use chitin_molecule_renderer::{
   AtomStyle, BallAndStickStyle, MoleculeRenderInput, MoleculeRenderer, RepresentationLayers, SurfaceStyle,
 };
 use gpui::{
-  App, AppContext, Application, Bounds, ClickEvent, Context, Entity, IntoElement, MouseButton, MouseDownEvent,
-  MouseMoveEvent, MouseUpEvent, Pixels, Render, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
+  App, AppContext, Application, AsyncApp, Bounds, ClickEvent, Context, Entity, IntoElement, MouseButton,
+  MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, Timer, WeakEntity, Window, WindowBounds, WindowOptions,
+  div, prelude::*, px, rgb, size,
 };
 
 use self::{
@@ -34,6 +36,10 @@ use self::{
 const STAGE_COUNT: usize = 8;
 /// Logical-pixel width of the scalar-slice position control.
 const SLICE_SLIDER_WIDTH: f32 = 220.0;
+/// Delay between automatic scalar-slice updates.
+const SLICE_PLAYBACK_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// Fraction of the Z range traversed by one automatic update.
+const SLICE_PLAYBACK_STEP: f32 = 16.0 / 6_000.0;
 
 /// Renderable checkpoints in the simplified SES diagnostic pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,6 +82,14 @@ impl Stage {
       Self::Ses => "Final SES",
     }
   }
+
+  /// Returns whether this stage displays a movable scalar-field slice.
+  fn has_slice(self) -> bool {
+    matches!(
+      self,
+      Self::ScalarField | Self::ProbeCenters | Self::ProbeField | Self::RawProbeSurface | Self::InnerProbeSurface
+    )
+  }
 }
 
 /// Shared UI state between the navigation bar and the WGPU scene.
@@ -86,6 +100,12 @@ struct DebugState {
   revision: u64,
   /// Normalized location of the XY slice between the minimum and maximum Z bounds.
   slice_fraction: f32,
+  /// Whether the scalar slice is advancing automatically.
+  slice_playing: bool,
+  /// Current normalized playback direction, either toward maximum or minimum Z.
+  slice_playback_direction: f32,
+  /// Identity used to invalidate a previously spawned playback loop.
+  playback_generation: u64,
 }
 
 /// Example-local WGPU scene that turns a selected SES checkpoint into geometry.
@@ -122,16 +142,8 @@ impl SesDebugScene {
       trace.inner_probe_surface.vertices.len(),
       trace.inner_probe_surface.indices.len() / 3,
     );
-    let raw_probe_stage_mesh = probe_surface_stage_mesh(
-      &trace.probe_field,
-      &trace.probe_centers,
-      trace.raw_probe_surface.clone(),
-    );
-    let inner_probe_stage_mesh = probe_surface_stage_mesh(
-      &trace.probe_field,
-      &trace.probe_centers,
-      trace.inner_probe_surface.clone(),
-    );
+    let raw_probe_stage_mesh = probe_surface_stage_mesh(&trace.probe_field, trace.raw_probe_surface.clone());
+    let inner_probe_stage_mesh = probe_surface_stage_mesh(&trace.probe_field, trace.inner_probe_surface.clone());
     Self {
       scene,
       trace,
@@ -323,6 +335,10 @@ impl SesDebugView {
       return;
     }
     state.revision = state.revision.wrapping_add(1);
+    if !state.stage.has_slice() {
+      state.slice_playing = false;
+      state.playback_generation = state.playback_generation.wrapping_add(1);
+    }
     log::debug!(
       "SES debug stage changed: {:?} -> {:?}, revision={}",
       previous_stage,
@@ -336,8 +352,66 @@ impl SesDebugView {
 
   /// Starts slider tracking and immediately applies the pointer position.
   fn on_slider_mouse_down(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    self.stop_slice_playback();
     self.slider_dragging = true;
     self.set_slice_from_pointer(event.position.x, cx);
+  }
+
+  /// Toggles automatic traversal of the current scalar-field slice.
+  fn toggle_slice_playback(&mut self, cx: &mut Context<Self>) {
+    let generation = {
+      let mut state = self.state.borrow_mut();
+      if !state.stage.has_slice() {
+        return;
+      }
+      state.slice_playing = !state.slice_playing;
+      state.playback_generation = state.playback_generation.wrapping_add(1);
+      state.playback_generation
+    };
+    cx.notify();
+    if !self.state.borrow().slice_playing {
+      return;
+    }
+
+    cx.spawn(move |this: WeakEntity<SesDebugView>, async_cx: &mut AsyncApp| {
+      let mut async_cx = async_cx.clone();
+      async move {
+        loop {
+          Timer::after(SLICE_PLAYBACK_FRAME_INTERVAL).await;
+          let should_continue = this
+            .update(&mut async_cx, |view, cx| view.advance_slice_playback(generation, cx))
+            .unwrap_or(false);
+          if !should_continue {
+            break;
+          }
+        }
+      }
+    })
+    .detach();
+  }
+
+  /// Advances one playback frame if the initiating playback loop is current.
+  fn advance_slice_playback(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+    let mut state = self.state.borrow_mut();
+    if !state.slice_playing || state.playback_generation != generation || !state.stage.has_slice() {
+      return false;
+    }
+    (state.slice_fraction, state.slice_playback_direction) =
+      advance_bouncing_slice(state.slice_fraction, state.slice_playback_direction);
+    drop(state);
+    self.panel.update(cx, |_, cx| cx.notify());
+    cx.notify();
+    true
+  }
+
+  /// Stops playback and invalidates its asynchronous update loop.
+  fn stop_slice_playback(&mut self) {
+    let mut state = self.state.borrow_mut();
+    if !state.slice_playing {
+      return;
+    }
+    state.slice_playing = false;
+    state.playback_generation = state.playback_generation.wrapping_add(1);
   }
 
   /// Updates an active slider gesture anywhere inside the example window.
@@ -385,16 +459,13 @@ impl SesDebugView {
 impl Render for SesDebugView {
   /// Renders the viewport above the left/right stage controls.
   fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let (stage, slice_fraction) = {
+    let (stage, slice_fraction, slice_playing) = {
       let state = self.state.borrow();
-      (state.stage, state.slice_fraction)
+      (state.stage, state.slice_fraction, state.slice_playing)
     };
     let previous = cx.entity().clone();
     let next = cx.entity().clone();
-    let stage_description = if matches!(
-      stage,
-      Stage::ProbeCenters | Stage::ProbeField | Stage::RawProbeSurface | Stage::InnerProbeSurface
-    ) {
+    let stage_description = if matches!(stage, Stage::ProbeCenters | Stage::ProbeField) {
       format!("{} · {} centers", stage.label(), self.probe_center_count)
     } else {
       stage.label().to_string()
@@ -422,24 +493,19 @@ impl Render for SesDebugView {
           .text_color(rgb(0xd7e0f2))
           .child(button("ses-debug-previous", "◀", previous, -1))
           .child(format!("{} / {} · {stage_description}", stage.index() + 1, STAGE_COUNT))
-          .when(
-            matches!(
-              stage,
-              Stage::ScalarField
-                | Stage::ProbeCenters
-                | Stage::ProbeField
-                | Stage::RawProbeSurface
-                | Stage::InnerProbeSurface
-            ),
-            |controls| {
-              controls.child(slice_slider(
+          .when(stage.has_slice(), |controls| {
+            controls
+              .child(playback_button(
+                if slice_playing { "Ⅱ Pause" } else { "▶ Auto" },
+                cx.entity().clone(),
+              ))
+              .child(slice_slider(
                 slice_fraction,
                 self.slice_z_bounds,
                 cx.entity().clone(),
                 cx,
               ))
-            },
-          )
+          })
           .child(button("ses-debug-next", "▶", next, 1)),
       )
   }
@@ -503,6 +569,43 @@ fn button(id: &'static str, label: &'static str, entity: Entity<SesDebugView>, d
     .on_click(move |_event: &ClickEvent, _window, cx| {
       entity.update(cx, |view, cx| view.step(delta, cx));
     })
+}
+
+/// Creates the play/pause control for scalar-slice animation.
+fn playback_button(label: &'static str, entity: Entity<SesDebugView>) -> impl IntoElement {
+  div()
+    .id("ses-debug-slice-playback")
+    .px_2()
+    .py_1()
+    .rounded_sm()
+    .cursor_pointer()
+    .bg(rgb(0x26344a))
+    .hover(|style| style.bg(rgb(0x354867)))
+    .child(label)
+    .on_click(move |_event: &ClickEvent, _window, cx| {
+      entity.update(cx, |view, cx| view.toggle_slice_playback(cx));
+    })
+}
+
+/// Advances a normalized slice position and reflects it at either boundary.
+///
+/// # Parameters
+///
+/// * `fraction` is the current normalized position in the closed range `[0, 1]`.
+/// * `direction` is positive toward maximum Z and negative toward minimum Z.
+///
+/// # Returns
+///
+/// The next position and its possibly reflected direction.
+fn advance_bouncing_slice(fraction: f32, direction: f32) -> (f32, f32) {
+  let next = fraction + SLICE_PLAYBACK_STEP * direction.signum();
+  if next >= 1.0 {
+    (2.0 - next, -1.0)
+  } else if next <= 0.0 {
+    (-next, 1.0)
+  } else {
+    (next, direction.signum())
+  }
 }
 
 /// Parses a local PDB or mmCIF file into the shared renderer-neutral scene.
@@ -576,6 +679,9 @@ pub(super) fn run() {
       stage: Stage::Atoms,
       revision: 1,
       slice_fraction: 0.5,
+      slice_playing: false,
+      slice_playback_direction: 1.0,
+      playback_generation: 0,
     }));
     let panel_state = Rc::clone(&state);
     let panel_scene = SesDebugScene::new(Arc::clone(&scene), Arc::clone(&trace), panel_state);
@@ -637,6 +743,29 @@ mod tests {
 
     assert_eq!(coordinates.first().copied(), Some(-2.0));
     assert_eq!(coordinates.last().copied(), Some(12.0));
+  }
+
+  #[test]
+  fn slice_playback_should_only_be_available_for_field_stages() {
+    assert!(!Stage::Atoms.has_slice());
+    assert!(!Stage::Grid.has_slice());
+    assert!(Stage::ScalarField.has_slice());
+    assert!(Stage::ProbeCenters.has_slice());
+    assert!(Stage::ProbeField.has_slice());
+    assert!(Stage::RawProbeSurface.has_slice());
+    assert!(Stage::InnerProbeSurface.has_slice());
+    assert!(!Stage::Ses.has_slice());
+  }
+
+  #[test]
+  fn slice_playback_should_reflect_at_both_boundaries() {
+    let (near_maximum, reverse) = advance_bouncing_slice(1.0, 1.0);
+    let (near_minimum, forward) = advance_bouncing_slice(0.0, -1.0);
+
+    assert!(near_maximum < 1.0);
+    assert_eq!(reverse, -1.0);
+    assert!(near_minimum > 0.0);
+    assert_eq!(forward, 1.0);
   }
 
   #[test]
