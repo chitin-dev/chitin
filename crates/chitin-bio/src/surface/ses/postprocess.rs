@@ -224,27 +224,8 @@ fn laplacian_pass(vertices: &mut [[f32; 6]], neighbors: &[Vec<usize>], factor: f
   }
 }
 
-/// Rebuilds outward normals for the inner boundary of the probe distance map.
-///
-/// The probe-sphere field increases toward the atom side of its inner boundary,
-/// opposite to the outward direction of the molecular surface.
-///
-/// # Parameters
-///
-/// * `mesh` is mutated in place.
-/// * `bounds_min`, `spacing`, and `dimensions` describe `field`.
-/// * `field` is the signed probe-center distance field.
-///
-/// # Returns
-///
-/// This function returns `()` after updating the vertex normals in `mesh`.
-pub(super) fn recompute_inner_surface_normals(
-  mesh: &mut SurfaceMesh,
-  bounds_min: glam::Vec3,
-  spacing: f32,
-  dimensions: [usize; 3],
-  field: &[f32],
-) {
+/// Rebuilds smooth vertex normals from the current oriented mesh geometry.
+pub(super) fn recompute_surface_normals(mesh: &mut SurfaceMesh) {
   let mut normals = vec![glam::Vec3::ZERO; mesh.vertices.len()];
   for triangle in mesh.indices.chunks_exact(3) {
     let [a, b, c] = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
@@ -274,7 +255,37 @@ pub(super) fn recompute_inner_surface_normals(
       .collect();
   }
 
-  for (vertex, mut normal) in mesh.vertices.iter_mut().zip(normals) {
+  for (vertex, normal) in mesh.vertices.iter_mut().zip(normals) {
+    vertex[3] = normal.x;
+    vertex[4] = normal.y;
+    vertex[5] = normal.z;
+  }
+}
+
+/// Rebuilds outward normals for the inner boundary of the probe distance map.
+///
+/// The probe-sphere field increases toward the atom side of its inner boundary,
+/// opposite to the outward direction of the molecular surface.
+///
+/// # Parameters
+///
+/// * `mesh` is mutated in place.
+/// * `bounds_min`, `spacing`, and `dimensions` describe `field`.
+/// * `field` is the signed probe-center distance field.
+///
+/// # Returns
+///
+/// This function returns `()` after updating the vertex normals in `mesh`.
+pub(super) fn recompute_inner_surface_normals(
+  mesh: &mut SurfaceMesh,
+  bounds_min: glam::Vec3,
+  spacing: f32,
+  dimensions: [usize; 3],
+  field: &[f32],
+) {
+  recompute_surface_normals(mesh);
+  for vertex in &mut mesh.vertices {
+    let mut normal = glam::Vec3::from_slice(&vertex[3..6]);
     let outward = -field_gradient(vertex_position(vertex), bounds_min, spacing, dimensions, field).normalize_or_zero();
     if normal.dot(outward) < 0.0 {
       normal = -normal;

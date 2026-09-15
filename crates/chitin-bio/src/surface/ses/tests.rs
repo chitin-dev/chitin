@@ -296,6 +296,27 @@ fn trace_inner_surface_should_be_filtered_from_raw_probe_surface() {
 }
 
 #[test]
+fn trace_smoothing_should_preserve_inner_surface_topology() {
+  let trace = trace_molecular_surface(
+    &one_atom_scene(),
+    MolecularSurfaceRequest {
+      partition: SurfacePartition::Unified,
+      ..MolecularSurfaceRequest::default()
+    },
+  );
+  let domain = &trace.domains[0];
+
+  assert_eq!(
+    domain.smoothed_inner_surface.indices,
+    domain.inner_probe_surface.indices
+  );
+  assert_eq!(
+    domain.smoothed_inner_surface.vertices.len(),
+    domain.inner_probe_surface.vertices.len()
+  );
+}
+
+#[test]
 fn ses_parameters_should_reject_non_positive_probe_radius() {
   assert_eq!(
     SesParameters::new(0.0, 0.5),

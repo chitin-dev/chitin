@@ -180,6 +180,8 @@ pub struct SesDomainTrace {
   pub raw_probe_surface: SurfaceMesh,
   /// Atom-facing components after filtering and orientation, before smoothing.
   pub inner_probe_surface: SurfaceMesh,
+  /// Inner surface after positional smoothing and before field-guided normals.
+  pub smoothed_inner_surface: SurfaceMesh,
   /// Final smoothed SES mesh produced by the same kernel.
   pub final_surface: SurfaceMesh,
 }

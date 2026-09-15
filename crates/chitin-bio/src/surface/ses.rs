@@ -16,7 +16,10 @@ use rayon::prelude::*;
 use self::{
   contour::{contour_field, vertex_position},
   field::{atom_surface_distance, grid_dimensions, probe_surface_distance, sample_field},
-  postprocess::{orient_inner_surface, recompute_inner_surface_normals, retain_inner_components, smooth_mesh},
+  postprocess::{
+    orient_inner_surface, recompute_inner_surface_normals, recompute_surface_normals, retain_inner_components,
+    smooth_mesh,
+  },
   spatial::{AtomGrid, PointGrid, point_grid_cell},
 };
 
@@ -73,6 +76,7 @@ enum SesKernelStage<'a> {
   },
   RawProbeSurface(&'a SurfaceMesh),
   InnerProbeSurface(&'a SurfaceMesh),
+  SmoothedInnerSurface(&'a SurfaceMesh),
 }
 
 /// Owned collector used only by the explicit trace API.
@@ -84,6 +88,7 @@ struct SesTraceRecorder {
   probe_field: ScalarFieldGrid,
   raw_probe_surface: SurfaceMesh,
   inner_probe_surface: SurfaceMesh,
+  smoothed_inner_surface: SurfaceMesh,
 }
 
 impl SesTraceRecorder {
@@ -121,7 +126,14 @@ impl SesTraceRecorder {
         };
       }
       SesKernelStage::RawProbeSurface(mesh) => self.raw_probe_surface = mesh.clone(),
-      SesKernelStage::InnerProbeSurface(mesh) => self.inner_probe_surface = mesh.clone(),
+      SesKernelStage::InnerProbeSurface(mesh) => {
+        self.inner_probe_surface = mesh.clone();
+        recompute_surface_normals(&mut self.inner_probe_surface);
+      }
+      SesKernelStage::SmoothedInnerSurface(mesh) => {
+        self.smoothed_inner_surface = mesh.clone();
+        recompute_surface_normals(&mut self.smoothed_inner_surface);
+      }
     }
   }
 
@@ -135,6 +147,7 @@ impl SesTraceRecorder {
       probe_field: self.probe_field,
       raw_probe_surface: self.raw_probe_surface,
       inner_probe_surface: self.inner_probe_surface,
+      smoothed_inner_surface: self.smoothed_inner_surface,
       final_surface,
     }
   }
@@ -322,6 +335,7 @@ fn ses_kernel_for_atoms(
   orient_inner_surface(&mut mesh, bounds_min, spacing, dimensions, &ses_field);
   capture(SesKernelStage::InnerProbeSurface(&mesh));
   smooth_mesh(&mut mesh, SMOOTHING_ITERATIONS);
+  capture(SesKernelStage::SmoothedInnerSurface(&mesh));
   recompute_inner_surface_normals(&mut mesh, bounds_min, spacing, dimensions, &ses_field);
   mesh
 }

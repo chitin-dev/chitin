@@ -33,7 +33,7 @@ use self::{
   scalar_slice::ScalarSliceRenderer,
 };
 
-const STAGE_COUNT: usize = 8;
+const STAGE_COUNT: usize = 9;
 /// Logical-pixel width of the scalar-slice position control.
 const SLICE_SLIDER_WIDTH: f32 = 220.0;
 /// Delay between automatic scalar-slice updates.
@@ -51,6 +51,7 @@ enum Stage {
   ProbeField,
   RawProbeSurface,
   InnerProbeSurface,
+  SmoothedInnerSurface,
   Ses,
 }
 
@@ -65,7 +66,8 @@ impl Stage {
       Self::ProbeField => 4,
       Self::RawProbeSurface => 5,
       Self::InnerProbeSurface => 6,
-      Self::Ses => 7,
+      Self::SmoothedInnerSurface => 7,
+      Self::Ses => 8,
     }
   }
 
@@ -79,6 +81,7 @@ impl Stage {
       Self::ProbeField => "Probe distance field",
       Self::RawProbeSurface => "Raw probe isosurface",
       Self::InnerProbeSurface => "Filtered inner surface",
+      Self::SmoothedInnerSurface => "Smoothed inner surface",
       Self::Ses => "Final SES",
     }
   }
@@ -87,7 +90,12 @@ impl Stage {
   fn has_slice(self) -> bool {
     matches!(
       self,
-      Self::ScalarField | Self::ProbeCenters | Self::ProbeField | Self::RawProbeSurface | Self::InnerProbeSurface
+      Self::ScalarField
+        | Self::ProbeCenters
+        | Self::ProbeField
+        | Self::RawProbeSurface
+        | Self::InnerProbeSurface
+        | Self::SmoothedInnerSurface
     )
   }
 }
@@ -126,6 +134,8 @@ struct SesDebugScene {
   raw_probe_surface: MolecularSurfaceArtifact,
   /// Atom-facing components retained from the raw probe-field contour.
   inner_probe_surface: MolecularSurfaceArtifact,
+  /// Position-smoothed inner contour before field-guided normal correction.
+  smoothed_inner_surface: MolecularSurfaceArtifact,
   /// Per-vertex-color slice overlay reused by scalar-field-dependent stages.
   scalar_slice_renderer: Option<ScalarSliceRenderer>,
   /// Slice overlay backed by the probe-sphere distance volume.
@@ -136,14 +146,17 @@ impl SesDebugScene {
   /// Creates a scene whose CPU geometry is rebuilt only after navigation.
   fn new(scene: Arc<StructureScene>, trace: Arc<SesDomainTrace>, state: Rc<RefCell<DebugState>>) -> Self {
     log::info!(
-      "precomputed probe contours: raw_vertices={}, raw_triangles={}, inner_vertices={}, inner_triangles={}",
+      "precomputed probe contours: raw_vertices={}, raw_triangles={}, inner_vertices={}, inner_triangles={}, smoothed_vertices={}, smoothed_triangles={}",
       trace.raw_probe_surface.vertices.len(),
       trace.raw_probe_surface.indices.len() / 3,
       trace.inner_probe_surface.vertices.len(),
       trace.inner_probe_surface.indices.len() / 3,
+      trace.smoothed_inner_surface.vertices.len(),
+      trace.smoothed_inner_surface.indices.len() / 3,
     );
     let raw_probe_stage_mesh = probe_surface_stage_mesh(&trace.probe_field, trace.raw_probe_surface.clone());
     let inner_probe_stage_mesh = probe_surface_stage_mesh(&trace.probe_field, trace.inner_probe_surface.clone());
+    let smoothed_inner_stage_mesh = probe_surface_stage_mesh(&trace.probe_field, trace.smoothed_inner_surface.clone());
     Self {
       scene,
       trace,
@@ -153,6 +166,7 @@ impl SesDebugScene {
       surface: None,
       raw_probe_surface: single_surface(raw_probe_stage_mesh),
       inner_probe_surface: single_surface(inner_probe_stage_mesh),
+      smoothed_inner_surface: single_surface(smoothed_inner_stage_mesh),
       scalar_slice_renderer: None,
       probe_field_renderer: None,
     }
@@ -179,7 +193,7 @@ impl SesDebugScene {
         &self.trace.probe_field,
         &self.trace.probe_centers,
       ))),
-      Stage::RawProbeSurface | Stage::InnerProbeSurface => None,
+      Stage::RawProbeSurface | Stage::InnerProbeSurface | Stage::SmoothedInnerSurface => None,
       Stage::Ses => Some(single_surface(self.trace.final_surface.clone())),
     };
     let (vertices, triangles) = self
@@ -209,6 +223,7 @@ impl SesDebugScene {
     match stage {
       Stage::RawProbeSurface => Some(&self.raw_probe_surface),
       Stage::InnerProbeSurface => Some(&self.inner_probe_surface),
+      Stage::SmoothedInnerSurface => Some(&self.smoothed_inner_surface),
       _ => self.surface.as_ref(),
     }
   }
@@ -237,7 +252,7 @@ impl WgpuPanelScene for SesDebugScene {
       // the scalar slice is submitted as the final overlay below.
       Stage::ProbeCenters => RepresentationLayers::atom(AtomStyle::Stick).with_surface(SurfaceStyle::Solid),
       Stage::ProbeField => RepresentationLayers::atom(AtomStyle::Stick).with_surface(SurfaceStyle::Solid),
-      Stage::RawProbeSurface | Stage::InnerProbeSurface => {
+      Stage::RawProbeSurface | Stage::InnerProbeSurface | Stage::SmoothedInnerSurface => {
         RepresentationLayers::atom(AtomStyle::Stick).with_surface(SurfaceStyle::Solid)
       }
       Stage::Ses => RepresentationLayers::empty().with_surface(SurfaceStyle::Solid),
@@ -245,6 +260,7 @@ impl WgpuPanelScene for SesDebugScene {
     let surface = match stage {
       Stage::RawProbeSurface => Some(&self.raw_probe_surface),
       Stage::InnerProbeSurface => Some(&self.inner_probe_surface),
+      Stage::SmoothedInnerSurface => Some(&self.smoothed_inner_surface),
       _ => self.surface.as_ref(),
     };
     let renderer = self.renderer.get_or_insert_with(|| {
@@ -269,12 +285,16 @@ impl WgpuPanelScene for SesDebugScene {
     );
     let field = match stage {
       Stage::ScalarField | Stage::ProbeCenters => &self.trace.sas_field,
-      Stage::ProbeField | Stage::RawProbeSurface | Stage::InnerProbeSurface => &self.trace.probe_field,
+      Stage::ProbeField | Stage::RawProbeSurface | Stage::InnerProbeSurface | Stage::SmoothedInnerSurface => {
+        &self.trace.probe_field
+      }
       _ => return molecule_submission,
     };
     let slice_renderer = match stage {
       Stage::ScalarField | Stage::ProbeCenters => &mut self.scalar_slice_renderer,
-      Stage::ProbeField | Stage::RawProbeSurface | Stage::InnerProbeSurface => &mut self.probe_field_renderer,
+      Stage::ProbeField | Stage::RawProbeSurface | Stage::InnerProbeSurface | Stage::SmoothedInnerSurface => {
+        &mut self.probe_field_renderer
+      }
       _ => return molecule_submission,
     };
     let slice = slice_renderer.get_or_insert_with(|| {
@@ -329,6 +349,7 @@ impl SesDebugView {
       4 => Stage::ProbeField,
       5 => Stage::RawProbeSurface,
       6 => Stage::InnerProbeSurface,
+      7 => Stage::SmoothedInnerSurface,
       _ => Stage::Ses,
     };
     if state.stage == previous_stage {
@@ -754,6 +775,7 @@ mod tests {
     assert!(Stage::ProbeField.has_slice());
     assert!(Stage::RawProbeSurface.has_slice());
     assert!(Stage::InnerProbeSurface.has_slice());
+    assert!(Stage::SmoothedInnerSurface.has_slice());
     assert!(!Stage::Ses.has_slice());
   }
 
