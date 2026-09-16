@@ -12,5 +12,8 @@ pub mod panel;
 /// Searchable quick-pick overlay composition.
 pub mod quickpick;
 
+/// Window-level stacked transient notifications.
+pub mod toast;
+
 /// Desktop window-title bar composition.
 pub mod window_bar;
