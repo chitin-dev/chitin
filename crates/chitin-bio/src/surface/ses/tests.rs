@@ -209,12 +209,12 @@ fn parallel_field_sampling_should_preserve_row_major_order() {
 
 #[test]
 fn inner_surface_field_should_fill_the_sas_exterior() {
-  let probe_field = vec![1.0, -0.5, 1.0];
+  let mut probe_field = vec![1.0, -0.5, 1.0];
   let sas_field = vec![-1.0, 0.5, 1.0];
 
-  let field = field::compose_inner_surface_field(&probe_field, &sas_field);
+  field::compose_inner_surface_field_in_place(&mut probe_field, &sas_field);
 
-  assert_eq!(field, vec![1.0, -0.5, -1.0]);
+  assert_eq!(probe_field, vec![1.0, -0.5, -1.0]);
 }
 
 #[test]

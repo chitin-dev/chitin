@@ -15,7 +15,9 @@ use rayon::prelude::*;
 
 use self::{
   contour::{contour_field, vertex_position},
-  field::{atom_surface_distance, compose_inner_surface_field, grid_dimensions, probe_surface_distance, sample_field},
+  field::{
+    atom_surface_distance, compose_inner_surface_field_in_place, grid_dimensions, probe_surface_distance, sample_field,
+  },
   postprocess::{orient_inner_surface, recompute_inner_surface_normals, recompute_surface_normals, smooth_mesh},
   spatial::{AtomGrid, PointGrid, point_grid_cell},
 };
@@ -302,6 +304,7 @@ fn ses_kernel_for_atoms(
   let sas_field = sample_field(bounds_min, spacing, dimensions, |position| {
     atom_surface_distance(position, &atom_grid, probe_radius, spacing)
   });
+  drop(atom_grid);
   capture(SesKernelStage::SasField {
     bounds_min,
     spacing,
@@ -316,17 +319,22 @@ fn ses_kernel_for_atoms(
 
   let probe_centers = merge_close_probe_centers(&sas_mesh, 0.35 * spacing);
   capture(SesKernelStage::ProbeCenters(&probe_centers));
+  drop(sas_mesh);
   let probe_grid = PointGrid::new(probe_centers, probe_radius + DISTANCE_FIELD_RANGE * spacing);
-  let ses_field = sample_field(bounds_min, spacing, dimensions, |position| {
+  let mut inner_surface_field = sample_field(bounds_min, spacing, dimensions, |position| {
     probe_surface_distance(position, &probe_grid, probe_radius, spacing)
   });
+  drop(probe_grid);
   capture(SesKernelStage::ProbeField {
     bounds_min,
     spacing,
     dimensions,
-    values: &ses_field,
+    values: &inner_surface_field,
   });
-  let inner_surface_field = compose_inner_surface_field(&ses_field, &sas_field);
+  // The trace callback has copied the raw probe field by this point, so the
+  // production path can reuse its allocation for the composed inner field.
+  compose_inner_surface_field_in_place(&mut inner_surface_field, &sas_field);
+  drop(sas_field);
   let mut mesh = contour_field(bounds_min, spacing, dimensions, &inner_surface_field);
   orient_inner_surface(&mut mesh, bounds_min, spacing, dimensions, &inner_surface_field);
   capture(SesKernelStage::InnerProbeSurface(&mesh));

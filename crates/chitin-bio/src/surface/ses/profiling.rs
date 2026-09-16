@@ -7,7 +7,7 @@ use crate::structure::StructureScene;
 use super::{
   DISTANCE_FIELD_RANGE, SMOOTHING_ITERATIONS, SurfaceAtom, atom_bounds, budgeted_grid_layout,
   contour::contour_field,
-  field::{atom_surface_distance, compose_inner_surface_field, probe_surface_distance, sample_field},
+  field::{atom_surface_distance, compose_inner_surface_field_in_place, probe_surface_distance, sample_field},
   merge_close_probe_centers,
   postprocess::{orient_inner_surface, recompute_inner_surface_normals, smooth_mesh},
   spatial::{AtomGrid, PointGrid},
@@ -173,6 +173,7 @@ fn ses_mesh_for_atoms_profiled(
       atom_surface_distance(position, &atom_grid, probe_radius, spacing)
     })
   });
+  drop(atom_grid);
   let sas_mesh = metrics.measure(SurfaceStage::SasContouring, || {
     contour_field(bounds_min, spacing, dimensions, &sas_field)
   });
@@ -185,17 +186,20 @@ fn ses_mesh_for_atoms_profiled(
     merge_close_probe_centers(&sas_mesh, 0.35 * spacing)
   });
   let probe_center_count = probe_centers.len();
+  drop(sas_mesh);
   let probe_grid = metrics.measure(SurfaceStage::SpatialIndexing, || {
     PointGrid::new(probe_centers, probe_radius + DISTANCE_FIELD_RANGE * spacing)
   });
-  let ses_field = metrics.measure(SurfaceStage::SesFieldSampling, || {
+  let mut inner_surface_field = metrics.measure(SurfaceStage::SesFieldSampling, || {
     sample_field(bounds_min, spacing, dimensions, |position| {
       probe_surface_distance(position, &probe_grid, probe_radius, spacing)
     })
   });
-  let inner_surface_field = metrics.measure(SurfaceStage::InnerFieldComposition, || {
-    compose_inner_surface_field(&ses_field, &sas_field)
+  drop(probe_grid);
+  metrics.measure(SurfaceStage::InnerFieldComposition, || {
+    compose_inner_surface_field_in_place(&mut inner_surface_field, &sas_field);
   });
+  drop(sas_field);
   let mut mesh = metrics.measure(SurfaceStage::SesContouring, || {
     contour_field(bounds_min, spacing, dimensions, &inner_surface_field)
   });
