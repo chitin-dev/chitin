@@ -165,7 +165,7 @@ fn validate_grid_budget(budget: SesGridBudget) -> Result<SesGridBudget, Molecula
   }
 }
 
-/// Scientific request describing atom scope and calculation-domain partitioning.
+/// Request describing an implicit-grid rendering surface.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct MolecularSurfaceRequest {
   /// Atoms eligible to participate in surface generation.
@@ -185,11 +185,25 @@ pub struct SurfaceDomainArtifact {
   pub mesh: SurfaceMesh,
 }
 
-/// Molecular-surface result retaining the request and resolved domain boundaries.
+/// Algorithm provenance attached to renderer-neutral molecular-surface geometry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SurfaceGeometrySource {
+  /// Surface extracted from Chitin's sampled scalar-field pipeline.
+  ImplicitGrid(MolecularSurfaceRequest),
+  /// Analytical MSMS patches tessellated at the given vertex density.
+  Msms {
+    /// Rolling solvent-probe radius in ångströms.
+    probe_radius: f64,
+    /// Requested tessellation vertices per square ångström.
+    vertex_density: f64,
+  },
+}
+
+/// Renderer-neutral molecular-surface geometry and its algorithm provenance.
 #[derive(Debug, PartialEq)]
 pub struct MolecularSurfaceArtifact {
-  /// Reproducible scientific request that produced this artifact.
-  pub request: MolecularSurfaceRequest,
+  /// Algorithm and parameters that produced this display geometry.
+  pub source: SurfaceGeometrySource,
   /// Independently calculated surface domains in deterministic order.
   pub domains: Vec<SurfaceDomainArtifact>,
 }

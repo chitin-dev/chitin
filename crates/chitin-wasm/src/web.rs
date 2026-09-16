@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use chitin_bio::{
   structure::{MmcifParser, PdbParser, StructureScene},
-  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_molecular_surface},
+  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_implicit_surface},
 };
 use chitin_molecule_renderer::{
   AtomStyle, BallAndStickStyle, DragMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle, RepresentationLayers,
@@ -386,7 +386,7 @@ impl MoleculeViewer {
     };
     self.molecular_surface = match (self.representation.surface_style(), self.molecular_surface.take()) {
       (Some(_), Some(surface)) => Some(surface),
-      (Some(_), None) => Some(generate_molecular_surface(scene, MolecularSurfaceRequest::default())),
+      (Some(_), None) => Some(generate_implicit_surface(scene, MolecularSurfaceRequest::default())),
       (None, _) => None,
     };
     let size = RenderTargetSize::new(self.config.width, self.config.height);

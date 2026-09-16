@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use chitin_bio::{
   structure::StructureScene,
-  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_molecular_surface},
+  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_implicit_surface},
 };
 use chitin_desktop::wgpu_panel::{WgpuPanelFrame, WgpuPanelScene};
 use chitin_molecule_renderer::{
@@ -99,7 +99,7 @@ fn molecular_surface_for_layers(
 ) -> Option<MolecularSurfaceArtifact> {
   match (representation.surface_style(), current) {
     (Some(_), Some(surface)) => Some(surface),
-    (Some(_), None) => Some(generate_molecular_surface(scene, MolecularSurfaceRequest::default())),
+    (Some(_), None) => Some(generate_implicit_surface(scene, MolecularSurfaceRequest::default())),
     (None, _) => None,
   }
 }

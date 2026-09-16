@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use chitin_bio::{
   structure::{PdbParser, StructureScene, StructureSceneOptions},
-  surface::{MolecularSurfaceRequest, SesParameters, SurfacePartition, generate_molecular_surface},
+  surface::{MolecularSurfaceRequest, SesParameters, SurfacePartition, generate_implicit_surface},
 };
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
@@ -90,7 +90,7 @@ fn bench_single_chain_scaling(c: &mut Criterion) {
     group.throughput(Throughput::Elements(atom_count as u64));
     group.bench_with_input(BenchmarkId::from_parameter(atom_count), &scene, |b, scene| {
       b.iter(|| {
-        black_box(generate_molecular_surface(
+        black_box(generate_implicit_surface(
           black_box(scene),
           black_box(MolecularSurfaceRequest::default()),
         ))
@@ -118,7 +118,7 @@ fn bench_grid_resolution(c: &mut Criterion) {
       BenchmarkId::new("angstrom", format!("{grid_spacing:.2}")),
       &request,
       |b, request| {
-        b.iter(|| black_box(generate_molecular_surface(black_box(&scene), black_box(*request))));
+        b.iter(|| black_box(generate_implicit_surface(black_box(&scene), black_box(*request))));
       },
     );
   }
@@ -142,7 +142,7 @@ fn bench_partition_strategy(c: &mut Criterion) {
       BenchmarkId::new(format!("{partition:?}"), ASSEMBLY_ATOM_COUNT),
       &request,
       |b, request| {
-        b.iter(|| black_box(generate_molecular_surface(black_box(&scene), black_box(*request))));
+        b.iter(|| black_box(generate_implicit_surface(black_box(&scene), black_box(*request))));
       },
     );
   }

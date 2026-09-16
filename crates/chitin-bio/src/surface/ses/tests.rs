@@ -13,7 +13,7 @@ fn one_atom_scene() -> StructureScene {
 
 /// Generates the first domain mesh used by focused numerical tests.
 fn default_mesh(scene: &StructureScene) -> SurfaceMesh {
-  generate_molecular_surface(scene, MolecularSurfaceRequest::default())
+  generate_implicit_surface(scene, MolecularSurfaceRequest::default())
     .domains
     .into_iter()
     .next()
@@ -171,7 +171,7 @@ fn ses_mesh_should_keep_chain_surfaces_independent() {
   let scene = StructureScene::from_first_model(&parsed.structure)
     .unwrap_or_else(|error| panic!("multi-chain fixture should produce a scene: {error}"));
 
-  let surface = generate_molecular_surface(&scene, MolecularSurfaceRequest::default());
+  let surface = generate_implicit_surface(&scene, MolecularSurfaceRequest::default());
 
   assert_eq!(surface.domains.len(), 2);
 }
@@ -185,7 +185,7 @@ fn parallel_surface_generation_should_preserve_domain_order() {
   let scene = StructureScene::from_first_model(&parsed.structure)
     .unwrap_or_else(|error| panic!("multi-chain fixture should produce a scene: {error}"));
 
-  let surface = generate_molecular_surface(&scene, MolecularSurfaceRequest::default());
+  let surface = generate_implicit_surface(&scene, MolecularSurfaceRequest::default());
   let domain_chain_ids = surface
     .domains
     .iter()
@@ -242,7 +242,7 @@ fn all_non_solvent_scope_should_include_hetero_residues_with_polymers() {
     .unwrap_or_else(|error| panic!("polymer-ligand fixture should parse: {error}"));
   let scene = StructureScene::from_first_model(&parsed.structure)
     .unwrap_or_else(|error| panic!("polymer-ligand fixture should produce a scene: {error}"));
-  let surface = generate_molecular_surface(
+  let surface = generate_implicit_surface(
     &scene,
     MolecularSurfaceRequest {
       atom_scope: SurfaceAtomScope::AllNonSolvent,
@@ -273,7 +273,7 @@ fn unified_partition_should_calculate_one_domain_for_multiple_chains() {
     .unwrap_or_else(|error| panic!("multi-chain fixture should parse: {error}"));
   let scene = StructureScene::from_first_model(&parsed.structure)
     .unwrap_or_else(|error| panic!("multi-chain fixture should produce a scene: {error}"));
-  let surface = generate_molecular_surface(
+  let surface = generate_implicit_surface(
     &scene,
     MolecularSurfaceRequest {
       partition: SurfacePartition::Unified,
@@ -292,7 +292,7 @@ fn traced_final_surface_should_match_normal_generation() {
     ..MolecularSurfaceRequest::default()
   };
 
-  let generated = generate_molecular_surface(&scene, request);
+  let generated = generate_implicit_surface(&scene, request);
   let traced = trace_molecular_surface(&scene, request);
 
   assert_eq!(traced.domains.len(), generated.domains.len());
@@ -395,11 +395,21 @@ fn ses_parameters_should_reject_a_budget_smaller_than_one_cell() {
 #[test]
 fn ses_parameters_should_reject_an_automatic_memory_limit_smaller_than_one_cell() {
   assert_eq!(
-    SesParameters::default().with_automatic_grid_budget(511),
+    SesParameters::default().with_automatic_grid_budget(127),
     Err(MolecularSurfaceParameterError::InvalidGridMemoryLimit {
-      value: 511,
-      minimum: 512,
+      value: 127,
+      minimum: 128,
     })
+  );
+}
+
+#[test]
+fn automatic_memory_budget_should_use_current_peak_bytes_per_grid_point() {
+  assert_eq!(
+    SesParameters::default()
+      .with_automatic_grid_budget(16 * 1_000)
+      .map(SesParameters::max_grid_points),
+    Ok(1_000)
   );
 }
 

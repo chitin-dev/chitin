@@ -1,4 +1,4 @@
-//! Renderer-neutral molecular-surface planning and CPU tessellation.
+//! Implicit scalar-field molecular-surface planning and CPU tessellation.
 
 mod contour;
 mod field;
@@ -26,8 +26,8 @@ use self::{
 pub use self::profiling::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};
 pub use self::types::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
-  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact, SurfaceMesh,
-  SurfacePartition,
+  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact,
+  SurfaceGeometrySource, SurfaceMesh, SurfacePartition,
 };
 
 /// Default water-probe radius used by molecular surfaces.
@@ -36,8 +36,12 @@ const DEFAULT_SES_PROBE_RADIUS: f32 = 1.4;
 const DEFAULT_SES_GRID_SPACING: f32 = 0.5;
 /// Default peak-memory allowance used by automatic SES grid sizing.
 const DEFAULT_SES_GRID_MEMORY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
-/// Conservative peak-memory estimate for each scalar-grid sample.
-const ESTIMATED_SES_BYTES_PER_GRID_POINT: usize = 64;
+/// Estimated peak working-set allowance for each scalar-grid sample.
+///
+/// The production kernel retains at most two dense `f32` fields at once. The
+/// remaining eight bytes reserve space for contour geometry, probe centers,
+/// spatial indices, and allocator overhead.
+const ESTIMATED_SES_BYTES_PER_GRID_POINT: usize = 16;
 /// Smallest budget capable of describing one three-dimensional grid cell.
 const MIN_SES_MAX_GRID_POINTS: usize = 8;
 /// Smallest automatic memory limit capable of describing one grid cell.
@@ -157,11 +161,12 @@ impl SesTraceRecorder {
   }
 }
 
-/// Generates rolling-probe solvent-excluded surfaces for a scientific request.
+/// Generates an approximate rolling-probe surface for interactive rendering.
 ///
 /// Atom scope and domain partitioning are resolved before each domain is sent
-/// independently to the numerical SES kernel. The default request uses a
-/// 1.4 Å probe; the initial implementation is a sampled-grid approximation.
+/// independently to the numerical SES kernel. The returned mesh is an implicit
+/// sampled-grid approximation and must not be used as an analytical SAS/SES
+/// area measurement. The default request uses a 1.4 Å probe.
 ///
 /// # Parameters
 ///
@@ -171,10 +176,7 @@ impl SesTraceRecorder {
 /// # Returns
 ///
 /// A surface artifact retaining independently calculated domain meshes.
-pub fn generate_molecular_surface(
-  scene: &StructureScene,
-  request: MolecularSurfaceRequest,
-) -> MolecularSurfaceArtifact {
+pub fn generate_implicit_surface(scene: &StructureScene, request: MolecularSurfaceRequest) -> MolecularSurfaceArtifact {
   let atom_groups = surface_atom_groups(scene, request).into_iter().collect::<Vec<_>>();
   let domains = atom_groups
     .into_par_iter()
@@ -183,12 +185,15 @@ pub fn generate_molecular_surface(
       mesh: ses_mesh_for_atoms(atoms, request.ses),
     })
     .collect();
-  MolecularSurfaceArtifact { request, domains }
+  MolecularSurfaceArtifact {
+    source: SurfaceGeometrySource::ImplicitGrid(request),
+    domains,
+  }
 }
 
 /// Generates an owned trace of every numerical SES construction stage.
 ///
-/// Unlike [`generate_molecular_surface`], this diagnostic entry point retains
+/// Unlike [`generate_implicit_surface`], this diagnostic entry point retains
 /// two dense scalar grids and several intermediate meshes per domain. It is
 /// intended for algorithm visualization and validation rather than routine
 /// molecular rendering.

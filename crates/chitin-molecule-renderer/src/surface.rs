@@ -34,7 +34,7 @@ mod tests {
   use super::*;
   use chitin_bio::{
     structure::{PdbParser, StructureScene},
-    surface::{MolecularSurfaceRequest, generate_molecular_surface},
+    surface::{MolecularSurfaceRequest, generate_implicit_surface},
   };
 
   #[test]
@@ -44,7 +44,7 @@ mod tests {
       .unwrap_or_else(|error| panic!("surface fixture should parse: {error}"));
     let scene = StructureScene::from_first_model(&parsed.structure)
       .unwrap_or_else(|error| panic!("surface fixture should produce a scene: {error}"));
-    let surface = generate_molecular_surface(&scene, MolecularSurfaceRequest::default());
+    let surface = generate_implicit_surface(&scene, MolecularSurfaceRequest::default());
 
     let (vertices, _) = surface_mesh_vertices(Some(&surface), [0.2, 0.4, 0.6]);
 

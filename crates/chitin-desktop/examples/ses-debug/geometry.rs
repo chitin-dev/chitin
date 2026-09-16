@@ -3,8 +3,8 @@
 use chitin_bio::{
   structure::StructureScene,
   surface::{
-    MolecularSurfaceArtifact, MolecularSurfaceRequest, ScalarFieldGrid, SurfaceDomainArtifact, SurfaceMesh,
-    SurfacePartition,
+    MolecularSurfaceArtifact, MolecularSurfaceRequest, ScalarFieldGrid, SurfaceDomainArtifact, SurfaceGeometrySource,
+    SurfaceMesh, SurfacePartition,
   },
 };
 
@@ -16,10 +16,10 @@ const GRID_LINE_HALF_WIDTH: f32 = 0.06;
 /// Wraps one diagnostic mesh in the production surface artifact type.
 pub(super) fn single_surface(mesh: SurfaceMesh) -> MolecularSurfaceArtifact {
   MolecularSurfaceArtifact {
-    request: MolecularSurfaceRequest {
+    source: SurfaceGeometrySource::ImplicitGrid(MolecularSurfaceRequest {
       partition: SurfacePartition::Unified,
       ..MolecularSurfaceRequest::default()
-    },
+    }),
     domains: vec![SurfaceDomainArtifact { chain_id: None, mesh }],
   }
 }

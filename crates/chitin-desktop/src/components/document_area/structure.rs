@@ -4,7 +4,7 @@ use std::{cell::Cell, path::Path, rc::Rc, sync::Arc};
 
 use chitin_bio::{
   structure::{MmcifParser, PdbParser, StructureScene},
-  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_molecular_surface},
+  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_implicit_surface},
 };
 use chitin_molecule_renderer::{
   AtomStyle, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle,
@@ -181,7 +181,7 @@ pub(crate) fn build_structure_view_from_scene(
       let result = async_cx
         .background_executor()
         .spawn(async move {
-          let surface = generate_molecular_surface(&scene, MolecularSurfaceRequest::default());
+          let surface = generate_implicit_surface(&scene, MolecularSurfaceRequest::default());
           if molecular_surface_has_geometry(&surface) {
             Ok(surface)
           } else {
@@ -281,7 +281,7 @@ mod tests {
   #[test]
   fn completed_surface_should_remain_cached_when_hidden() {
     let structure = single_atom_scene();
-    let surface = generate_molecular_surface(&structure, MolecularSurfaceRequest::default());
+    let surface = generate_implicit_surface(&structure, MolecularSurfaceRequest::default());
     let mut scene = StructureMoleculeScene::new(structure, DEFAULT_STRUCTURE_REPRESENTATION);
 
     assert!(!scene.set_molecular_surface(surface));
@@ -291,7 +291,7 @@ mod tests {
   #[test]
   fn surface_without_domains_should_not_be_renderable() {
     let surface = MolecularSurfaceArtifact {
-      request: MolecularSurfaceRequest::default(),
+      source: chitin_bio::surface::SurfaceGeometrySource::ImplicitGrid(MolecularSurfaceRequest::default()),
       domains: Vec::new(),
     };
 
