@@ -12,7 +12,10 @@ use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
 use chitin_command::{ApplicationCommand, ChitinCommand, CommandInvocationKind};
 use chitin_databases::providers::rcsb::{PdbId, RcsbBatchDownloadRequest};
 use chitin_ui::{
-  composite::quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
+  composite::{
+    quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
+    toast::{Toast, ToastVariant},
+  },
   primitive::{
     button::ButtonEvent,
     input::{
@@ -264,6 +267,24 @@ impl ChitinApp {
                   let TaskOutput::PersistedArtifact(artifact) = output;
                   this.open_project_document_with_window(OpenedProjectDocument::new(&artifact.path), window, cx);
                 }
+                this.show_toast(
+                  Toast::new("RCSB download complete")
+                    .description(format!("Downloaded {} structure file(s).", snapshot.outputs.len()))
+                    .variant(ToastVariant::Success),
+                  cx,
+                );
+              } else if snapshot.state == TaskState::Failed {
+                this.show_toast(
+                  Toast::new("RCSB download failed")
+                    .description(
+                      snapshot
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "The download task failed.".to_string()),
+                    )
+                    .variant(ToastVariant::Error),
+                  cx,
+                );
               }
             }
           });
