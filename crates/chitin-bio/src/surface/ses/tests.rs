@@ -23,7 +23,7 @@ fn default_mesh(scene: &StructureScene) -> SurfaceMesh {
 /// Counts edges that do not have exactly two incident triangles.
 fn invalid_edge_count(mesh: &SurfaceMesh) -> usize {
   let mut edge_use_counts = HashMap::new();
-  for triangle in mesh.indices.chunks_exact(3) {
+  for triangle in mesh.indices.as_chunks::<3>().0 {
     for [first, second] in [
       [triangle[0], triangle[1]],
       [triangle[1], triangle[2]],
@@ -62,7 +62,9 @@ fn ses_mesh_should_not_contain_grid_scale_spikes() {
   let mesh = default_mesh(&one_atom_scene());
   let longest_edge = mesh
     .indices
-    .chunks_exact(3)
+    .as_chunks::<3>()
+    .0
+    .iter()
     .flat_map(|triangle| {
       [
         [triangle[0], triangle[1]],
@@ -129,7 +131,9 @@ fn ses_mesh_winding_should_agree_with_vertex_normals() {
   let mesh = default_mesh(&one_atom_scene());
   let inconsistent_triangle_count = mesh
     .indices
-    .chunks_exact(3)
+    .as_chunks::<3>()
+    .0
+    .iter()
     .filter(|triangle| {
       let [a, b, c] = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
       let face_normal = (vertex_position(&mesh.vertices[b]) - vertex_position(&mesh.vertices[a]))

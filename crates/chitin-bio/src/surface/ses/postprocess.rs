@@ -95,7 +95,7 @@ impl MeshNeighbors {
 fn triangle_adjacency(indices: &[u32]) -> Vec<TriangleAdjacency> {
   let triangle_count = indices.len() / 3;
   let mut edge_records = Vec::with_capacity(triangle_count.saturating_mul(3));
-  for (triangle_index, triangle) in indices.chunks_exact(3).enumerate() {
+  for (triangle_index, triangle) in indices.as_chunks::<3>().0.iter().enumerate() {
     edge_records.extend([
       EdgeRecord::new(triangle[0], triangle[1], triangle_index),
       EdgeRecord::new(triangle[1], triangle[2], triangle_index),
@@ -192,7 +192,7 @@ pub(super) fn orient_inner_surface(
     }
   }
 
-  for (triangle_index, triangle) in mesh.indices.chunks_exact_mut(3).enumerate() {
+  for (triangle_index, triangle) in mesh.indices.as_chunks_mut::<3>().0.iter_mut().enumerate() {
     if flips[triangle_index].unwrap_or(false) {
       triangle.swap(1, 2);
     }
@@ -239,7 +239,7 @@ pub(super) fn smooth_mesh(mesh: &mut SurfaceMesh, iterations: usize) {
 fn mesh_neighbors(mesh: &SurfaceMesh) -> MeshNeighbors {
   let vertex_count = mesh.vertices.len();
   let mut degrees = vec![0_usize; vertex_count];
-  for triangle in mesh.indices.chunks_exact(3) {
+  for triangle in mesh.indices.as_chunks::<3>().0 {
     let [a, b, c] = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
     degrees[a] += 2;
     degrees[b] += 2;
@@ -253,7 +253,7 @@ fn mesh_neighbors(mesh: &SurfaceMesh) -> MeshNeighbors {
   }
   let mut entries = vec![0_usize; offsets.last().copied().unwrap_or(0)];
   degrees.fill(0);
-  for triangle in mesh.indices.chunks_exact(3) {
+  for triangle in mesh.indices.as_chunks::<3>().0 {
     let [a, b, c] = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
     for (vertex, adjacent) in [(a, [b, c]), (b, [a, c]), (c, [a, b])] {
       for neighbor in adjacent {
@@ -321,7 +321,7 @@ fn laplacian_pass(vertices: &mut [[f32; 6]], neighbors: &MeshNeighbors, factor: 
 /// Rebuilds smooth vertex normals from the current oriented mesh geometry.
 pub(super) fn recompute_surface_normals(mesh: &mut SurfaceMesh) {
   let mut normals = vec![glam::Vec3::ZERO; mesh.vertices.len()];
-  for triangle in mesh.indices.chunks_exact(3) {
+  for triangle in mesh.indices.as_chunks::<3>().0 {
     let [a, b, c] = [triangle[0] as usize, triangle[1] as usize, triangle[2] as usize];
     let face_normal = (vertex_position(&mesh.vertices[b]) - vertex_position(&mesh.vertices[a]))
       .cross(vertex_position(&mesh.vertices[c]) - vertex_position(&mesh.vertices[a]));
