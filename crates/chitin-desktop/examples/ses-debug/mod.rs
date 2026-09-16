@@ -252,7 +252,7 @@ impl SesDebugScene {
 /// Counts open or non-manifold edges in one diagnostic surface mesh.
 fn invalid_edge_count(mesh: &SurfaceMesh) -> usize {
   let mut uses = HashMap::new();
-  for triangle in mesh.indices.chunks_exact(3) {
+  for triangle in mesh.indices.as_chunks::<3>().0 {
     for [first, second] in [
       [triangle[0], triangle[1]],
       [triangle[1], triangle[2]],
@@ -1157,7 +1157,7 @@ mod tests {
     let mesh = grid_mesh(&example_grid());
 
     assert!(!mesh.indices.is_empty());
-    assert!(mesh.indices.chunks_exact(3).all(|triangle| {
+    assert!(mesh.indices.as_chunks::<3>().0.iter().all(|triangle| {
       let a = glam::Vec3::from_slice(&mesh.vertices[triangle[0] as usize][0..3]);
       let b = glam::Vec3::from_slice(&mesh.vertices[triangle[1] as usize][0..3]);
       let c = glam::Vec3::from_slice(&mesh.vertices[triangle[2] as usize][0..3]);
