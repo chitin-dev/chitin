@@ -10,7 +10,8 @@ use chitin_molecule_renderer::{
   AtomStyle, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle,
   RepresentationLayers,
 };
-use gpui::{App, AppContext, AsyncApp, Window};
+use chitin_ui::composite::toast::{Toast, ToastVariant, ToastViewport};
+use gpui::{App, AppContext, AsyncApp, Entity, Window};
 
 use crate::components::{
   document_area::state::WgpuDocumentView,
@@ -125,8 +126,20 @@ impl WgpuPanelScene for StructureMoleculeScene {
 /// This function must run on the GPUI event thread because surface and entity
 /// creation require `Window` and `App`. File reading and parsing should happen
 /// before this function is called.
+///
+/// # Parameters
+///
+/// * `scene` is the parsed structure scene shared with the renderer and surface task.
+/// * `toast_viewport` receives surface lifecycle notifications without re-entering root app state.
+/// * `window` creates the WGPU surface and identifies the window updated on completion.
+/// * `cx` creates the panel entity and schedules background surface generation.
+///
+/// # Returns
+///
+/// A molecular document view whose surface representation is generated lazily.
 pub(crate) fn build_structure_view_from_scene(
   scene: Arc<StructureScene>,
+  toast_viewport: Entity<ToastViewport>,
   window: &mut Window,
   cx: &mut App,
 ) -> WgpuDocumentView {
@@ -140,6 +153,7 @@ pub(crate) fn build_structure_view_from_scene(
   });
   let controlled_panel = panel.clone();
   let surface_calculation_started = Rc::new(Cell::new(false));
+  let window_handle = window.window_handle();
   WgpuDocumentView::with_representation_layers(panel, DEFAULT_STRUCTURE_REPRESENTATION, move |representation, cx| {
     controlled_panel.update(cx, |panel, cx| {
       if panel.set_representation_layers(representation) {
@@ -150,21 +164,71 @@ pub(crate) fn build_structure_view_from_scene(
       return;
     }
 
+    let info_toast = toast_viewport.update(cx, |viewport, cx| {
+      viewport.push(
+        Toast::new("Generating molecular surface")
+          .description("Computing the solvent-excluded surface in the background.")
+          .variant(ToastVariant::Info)
+          .duration(None),
+        cx,
+      )
+    });
     let scene = Arc::clone(&calculation_scene);
     let panel = controlled_panel.downgrade();
+    let toast_viewport = toast_viewport.clone();
+    let calculation_started = Rc::clone(&surface_calculation_started);
     cx.spawn(async move |async_cx: &mut AsyncApp| {
-      let surface = async_cx
+      let result = async_cx
         .background_executor()
-        .spawn(async move { generate_molecular_surface(&scene, MolecularSurfaceRequest::default()) })
+        .spawn(async move {
+          let surface = generate_molecular_surface(&scene, MolecularSurfaceRequest::default());
+          if molecular_surface_has_geometry(&surface) {
+            Ok(surface)
+          } else {
+            Err("The calculation produced no renderable surface geometry.".to_string())
+          }
+        })
         .await;
-      let _ = panel.update(async_cx, |panel, cx| {
-        if panel.set_molecular_surface(surface) {
-          cx.notify();
+      let _ = async_cx.update_window(window_handle, |_, _, cx| {
+        toast_viewport.update(cx, |viewport, cx| {
+          viewport.dismiss(info_toast, cx);
+          match &result {
+            Ok(_) => {
+              viewport.push(
+                Toast::new("Molecular surface ready")
+                  .description("Surface generation completed successfully.")
+                  .variant(ToastVariant::Success),
+                cx,
+              );
+            }
+            Err(error) => {
+              calculation_started.set(false);
+              log::error!("molecular surface generation failed: {error}");
+              viewport.push(
+                Toast::new("Molecular surface generation failed")
+                  .description(error.clone())
+                  .variant(ToastVariant::Error),
+                cx,
+              );
+            }
+          }
+        });
+        if let Ok(surface) = result {
+          let _ = panel.update(cx, |panel, cx| {
+            if panel.set_molecular_surface(surface) {
+              cx.notify();
+            }
+          });
         }
       });
     })
     .detach();
   })
+}
+
+/// Reports whether a generated artifact contains triangles the renderer can draw.
+fn molecular_surface_has_geometry(surface: &MolecularSurfaceArtifact) -> bool {
+  surface.domains.iter().any(|domain| !domain.mesh.indices.is_empty())
 }
 
 /// Loads a local PDB or mmCIF file and extracts its first renderable model.
@@ -222,5 +286,15 @@ mod tests {
 
     assert!(!scene.set_molecular_surface(surface));
     assert!(scene.surface.is_some());
+  }
+
+  #[test]
+  fn surface_without_domains_should_not_be_renderable() {
+    let surface = MolecularSurfaceArtifact {
+      request: MolecularSurfaceRequest::default(),
+      domains: Vec::new(),
+    };
+
+    assert!(!molecular_surface_has_geometry(&surface));
   }
 }

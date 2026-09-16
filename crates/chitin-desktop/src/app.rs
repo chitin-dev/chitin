@@ -419,7 +419,7 @@ impl ChitinApp {
   }
 
   /// Returns the lazily created window-level notification viewport.
-  fn toast_viewport(&mut self, cx: &mut Context<Self>) -> Entity<ToastViewport> {
+  pub(crate) fn toast_viewport(&mut self, cx: &mut Context<Self>) -> Entity<ToastViewport> {
     self
       .toast_viewport
       .get_or_insert_with(|| cx.new(|_| ToastViewport::new()))

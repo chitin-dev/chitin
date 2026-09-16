@@ -3,10 +3,11 @@
 use std::sync::Arc;
 
 use chitin_molecule_renderer::RepresentationLayers;
-use chitin_ui::composite::panel::{
-  PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
+use chitin_ui::composite::{
+  panel::{PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId},
+  toast::ToastViewport,
 };
-use gpui::{App, AppContext, AsyncApp, Context, Pixels, WeakEntity, Window};
+use gpui::{App, AppContext, AsyncApp, Context, Entity, Pixels, WeakEntity, Window};
 
 use crate::{
   app::ChitinApp,
@@ -97,9 +98,10 @@ impl ChitinApp {
     document: &OpenedProjectDocument,
     scene: Arc<chitin_bio::structure::StructureScene>,
     window: &mut Window,
-    cx: &mut App,
+    cx: &mut Context<Self>,
   ) {
-    let content = structure_document_content(document, scene, window, cx);
+    let toast_viewport = self.toast_viewport(cx);
+    let content = structure_document_content(document, scene, toast_viewport, window, cx);
     let focused_panel_id = self.document_panels.focused_panel_id;
     let opened = self
       .document_panels
@@ -319,15 +321,29 @@ impl ChitinApp {
 }
 
 /// Creates one surface-backed panel payload while sharing parsed scene data with future splits.
+///
+/// # Parameters
+///
+/// * `document` supplies the tab title and source path.
+/// * `scene` is shared by the initial view and future split-panel clones.
+/// * `toast_viewport` receives asynchronous surface-generation notifications.
+/// * `window` creates the GPUI-owned WGPU surface.
+/// * `cx` creates view entities and callbacks.
+///
+/// # Returns
+///
+/// Molecular document content ready to insert into a panel tab.
 fn structure_document_content(
   document: &OpenedProjectDocument,
   scene: Arc<chitin_bio::structure::StructureScene>,
+  toast_viewport: Entity<ToastViewport>,
   window: &mut Window,
   cx: &mut App,
 ) -> DocumentPanelContent {
-  let document_view = build_structure_view_from_scene(Arc::clone(&scene), window, cx);
-  let clone_view =
-    WgpuDocumentViewFactory::new(move |window, cx| build_structure_view_from_scene(Arc::clone(&scene), window, cx));
+  let document_view = build_structure_view_from_scene(Arc::clone(&scene), toast_viewport.clone(), window, cx);
+  let clone_view = WgpuDocumentViewFactory::new(move |window, cx| {
+    build_structure_view_from_scene(Arc::clone(&scene), toast_viewport.clone(), window, cx)
+  });
   DocumentPanelContent::wgpu_interactive(
     Some(document.path.clone()),
     document.title.clone(),
