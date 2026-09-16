@@ -11,7 +11,7 @@ use std::{
   path::{Path, PathBuf},
   rc::Rc,
   sync::Arc,
-  time::Duration,
+  time::{Duration, Instant},
 };
 
 use chitin_bio::{
@@ -30,6 +30,8 @@ use gpui::{
   MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, Timer, WeakEntity, Window, WindowBounds, WindowOptions,
   div, prelude::*, px, rgb, size,
 };
+use rayon::ThreadPoolBuilder;
+use tokio::sync::oneshot;
 
 use self::{
   geometry::{grid_mesh, probe_center_stage_mesh, probe_surface_stage_mesh, scene_fit_transform, single_surface},
@@ -37,6 +39,8 @@ use self::{
 };
 
 const STAGE_COUNT: usize = 9;
+/// Fraction of logical CPUs reserved for the expensive diagnostic trace.
+const TRACE_WORKER_DIVISOR: usize = 2;
 /// Logical-pixel width of the scalar-slice position control.
 const SLICE_SLIDER_WIDTH: f32 = 220.0;
 /// Delay between automatic scalar-slice updates.
@@ -52,6 +56,9 @@ struct SesDebugOptions {
   path: PathBuf,
   ses: SesParameters,
 }
+
+/// Result transferred from the dedicated trace coordinator to the GPUI thread.
+type SesTraceResult = Result<(Arc<StructureScene>, Arc<SesDomainTrace>), String>;
 
 /// Renderable checkpoints in the simplified SES diagnostic pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -368,6 +375,97 @@ struct SesDebugView {
   probe_center_count: usize,
   /// Effective scalar-grid resolution after the SES point-budget adjustment.
   grid_diagnostics: GridDiagnostics,
+}
+
+/// Root view shown while the diagnostic trace is computed off the UI thread.
+#[derive(Default)]
+struct SesDebugRoot {
+  /// Interactive visualizer installed after trace generation succeeds.
+  content: Option<Entity<SesDebugView>>,
+  /// User-visible failure reported by the trace worker.
+  error: Option<String>,
+}
+
+impl SesDebugRoot {
+  /// Installs the completed trace and creates its WGPU-backed visualizer.
+  ///
+  /// # Parameters
+  ///
+  /// * `scene` is the parsed structure shared with the molecule renderer.
+  /// * `trace` contains the retained SES construction stages.
+  /// * `parameters` describe the grid budget used to generate the trace.
+  /// * `window` provides the WGPU surface owned by the example window.
+  /// * `cx` creates the child entities and schedules the first repaint.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after replacing the loading view.
+  fn install(
+    &mut self,
+    scene: Arc<StructureScene>,
+    trace: Arc<SesDomainTrace>,
+    parameters: SesParameters,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    let slice_z_bounds = [trace.sas_field.bounds_min[2], trace.sas_field.bounds_max()[2]];
+    let probe_center_count = trace.probe_centers.len();
+    let grid_diagnostics = GridDiagnostics::from_grid(&trace.sas_field, parameters);
+    log::info!("SES scalar grid: {}", grid_diagnostics.label());
+    let state = Rc::new(RefCell::new(DebugState {
+      stage: Stage::Atoms,
+      revision: 1,
+      slice_fraction: 0.5,
+      slice_playing: false,
+      slice_playback_direction: 1.0,
+      playback_generation: 0,
+    }));
+    let panel_scene = SesDebugScene::new(Arc::clone(&scene), Arc::clone(&trace), Rc::clone(&state));
+    let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
+    let panel = cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, panel_scene));
+    self.content = Some(cx.new(|_| SesDebugView {
+      panel,
+      state,
+      slider_bounds: None,
+      slider_dragging: false,
+      slice_z_bounds,
+      probe_center_count,
+      grid_diagnostics,
+    }));
+    self.error = None;
+    cx.notify();
+  }
+
+  /// Displays a trace-generation failure instead of the loading message.
+  fn fail(&mut self, error: String, cx: &mut Context<Self>) {
+    self.error = Some(error);
+    cx.notify();
+  }
+}
+
+impl Render for SesDebugRoot {
+  /// Renders the loading, error, or completed diagnostic view.
+  fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    if let Some(content) = self.content.as_ref() {
+      return div().size_full().child(content.clone());
+    }
+
+    let (message, color) = match self.error.as_ref() {
+      Some(error) => (format!("Failed to generate SES trace: {error}"), rgb(0xffb4c4)),
+      None => (
+        "Computing SES trace… Large structures take longer in debug builds.".to_string(),
+        rgb(0xd7e0f2),
+      ),
+    };
+    div()
+      .flex()
+      .size_full()
+      .items_center()
+      .justify_center()
+      .bg(rgb(0x0b0e14))
+      .text_color(color)
+      .child(message)
+  }
 }
 
 /// Compact description of the scalar lattice used by the traced SES domain.
@@ -818,6 +916,67 @@ fn parse_options(arguments: impl IntoIterator<Item = OsString>) -> Result<SesDeb
   })
 }
 
+/// Returns the responsive-by-default worker count used by the debug trace.
+fn trace_worker_count() -> usize {
+  std::thread::available_parallelism().map_or(1, |parallelism| (parallelism.get() / TRACE_WORKER_DIVISOR).max(1))
+}
+
+/// Starts SES tracing on a dedicated coordinator and bounded Rayon pool.
+///
+/// # Parameters
+///
+/// * `scene` is the parsed structure whose unified SES stages are retained.
+/// * `parameters` control probe geometry and the scalar-grid computation budget.
+///
+/// # Returns
+///
+/// A receiver that resolves to the shared scene and its first traced domain, or
+/// a readable error if the worker, pool, or trace cannot be created.
+fn spawn_trace_worker(
+  scene: Arc<StructureScene>,
+  parameters: SesParameters,
+) -> Result<oneshot::Receiver<SesTraceResult>, String> {
+  let worker_count = trace_worker_count();
+  let (sender, receiver) = oneshot::channel();
+  std::thread::Builder::new()
+    .name("ses-debug-trace".to_string())
+    .spawn(move || {
+      let started_at = Instant::now();
+      log::info!(
+        "starting SES trace: atoms={}, max_grid_points={}, workers={worker_count}",
+        scene.atoms.len(),
+        parameters.max_grid_points(),
+      );
+      let result = ThreadPoolBuilder::new()
+        .num_threads(worker_count)
+        .thread_name(|index| format!("ses-debug-rayon-{index}"))
+        .build()
+        .map_err(|error| format!("failed to create SES trace worker pool: {error}"))
+        .and_then(|pool| {
+          let trace = pool.install(|| {
+            trace_molecular_surface(
+              &scene,
+              MolecularSurfaceRequest {
+                partition: SurfacePartition::Unified,
+                ses: parameters,
+                ..MolecularSurfaceRequest::default()
+              },
+            )
+          });
+          let domain = trace
+            .domains
+            .into_iter()
+            .next()
+            .ok_or_else(|| "structure contains no eligible surface atoms".to_string())?;
+          Ok((scene, Arc::new(domain)))
+        });
+      log::info!("SES trace worker finished after {:.2?}", started_at.elapsed());
+      let _ = sender.send(result);
+    })
+    .map_err(|error| format!("failed to start SES trace worker: {error}"))?;
+  Ok(receiver)
+}
+
 /// Starts the stand-alone SES diagnostic window.
 pub(super) fn run() {
   env_logger::init();
@@ -835,38 +994,8 @@ pub(super) fn run() {
       return;
     }
   };
-  // A scalar slice can visualize one regular grid at a time, so this diagnostic
-  // explicitly requests a unified domain even though production surfaces are
-  // partitioned by chain by default. The trace is computed once; slider movement
-  // subsequently changes only one GPU uniform.
-  let trace = trace_molecular_surface(
-    &scene,
-    MolecularSurfaceRequest {
-      partition: SurfacePartition::Unified,
-      ses: options.ses,
-      ..MolecularSurfaceRequest::default()
-    },
-  );
-  let Some(trace) = trace.domains.into_iter().next() else {
-    eprintln!("failed to trace SES: structure contains no eligible surface atoms");
-    return;
-  };
-  let trace = Arc::new(trace);
+  let parameters = options.ses;
   Application::new().run(move |cx: &mut App| {
-    let slice_z_bounds = [trace.sas_field.bounds_min[2], trace.sas_field.bounds_max()[2]];
-    let probe_center_count = trace.probe_centers.len();
-    let grid_diagnostics = GridDiagnostics::from_grid(&trace.sas_field, options.ses);
-    log::info!("SES scalar grid: {}", grid_diagnostics.label(),);
-    let state = Rc::new(RefCell::new(DebugState {
-      stage: Stage::Atoms,
-      revision: 1,
-      slice_fraction: 0.5,
-      slice_playing: false,
-      slice_playback_direction: 1.0,
-      playback_generation: 0,
-    }));
-    let panel_state = Rc::clone(&state);
-    let panel_scene = SesDebugScene::new(Arc::clone(&scene), Arc::clone(&trace), panel_state);
     let result = cx.open_window(
       WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
@@ -878,17 +1007,29 @@ pub(super) fn run() {
       },
       |window, cx| {
         window.activate_window();
-        let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
-        let panel = cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, panel_scene));
-        cx.new(|_| SesDebugView {
-          panel,
-          state,
-          slider_bounds: None,
-          slider_dragging: false,
-          slice_z_bounds,
-          probe_center_count,
-          grid_diagnostics,
-        })
+        let root = cx.new(|_| SesDebugRoot::default());
+        let window_handle = window.window_handle();
+        match spawn_trace_worker(Arc::clone(&scene), parameters) {
+          Ok(receiver) => {
+            let root = root.downgrade();
+            cx.spawn(async move |async_cx: &mut AsyncApp| {
+              let result = receiver
+                .await
+                .unwrap_or_else(|error| Err(format!("SES trace worker stopped unexpectedly: {error}")));
+              let _ = async_cx.update_window(window_handle, |_, window, cx| {
+                let _ = root.update(cx, |root, cx| match result {
+                  Ok((scene, trace)) => root.install(scene, trace, parameters, window, cx),
+                  Err(error) => root.fail(error, cx),
+                });
+              });
+            })
+            .detach();
+          }
+          Err(error) => {
+            root.update(cx, |root, cx| root.fail(error, cx));
+          }
+        }
+        root
       },
     );
     if let Err(error) = result {
