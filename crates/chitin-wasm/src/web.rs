@@ -165,6 +165,10 @@ impl MoleculeViewer {
   pub fn load_structure(&mut self, bytes: &[u8], format: &str) -> Result<String, JsValue> {
     let scene = parse_scene(bytes, format).map_err(js_error)?;
     let summary = format!("{} atoms · {} bonds", scene.atoms.len(), scene.bonds.len());
+    // A surface artifact contains coordinates from one specific scene and must
+    // never survive replacement of that scene. Representation-only rebuilds
+    // still retain the cache through `rebuild_renderer`.
+    self.molecular_surface = None;
     self.scene = Some(scene);
     self.rebuild_renderer();
     self.camera.reset();
