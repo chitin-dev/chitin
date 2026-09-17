@@ -561,6 +561,10 @@ fn spawn_trace_worker(
           let meshes = build_debug_meshes(&domain, &scene, parameters.tessellation)?;
           Ok((scene, Arc::new(MsmsDebugTrace::new(&domain, meshes, parameters))))
         });
+      if let Err(error) = &result {
+        eprintln!("MSMS trace failed: {error}");
+        log::error!("MSMS trace failed: {error}");
+      }
       log::info!("MSMS trace worker finished after {:.2?}", started_at.elapsed());
       let _ = sender.send(result);
     })

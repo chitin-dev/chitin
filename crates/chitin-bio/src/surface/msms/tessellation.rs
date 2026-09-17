@@ -4,7 +4,7 @@
 //! resolution affects only rendering and exported display geometry.
 
 use std::{
-  collections::{BTreeMap, BTreeSet},
+  collections::{BTreeMap, BTreeSet, HashMap},
   f64::consts::{PI, TAU},
 };
 
@@ -117,6 +117,12 @@ pub enum MsmsTessellationError {
     /// Source atom index carrying the contact patch.
     atom_index: usize,
   },
+  /// Reentrant-mesh refinement failed to satisfy the requested edge length.
+  #[error("reentrant patch {face_index} did not converge during interior refinement")]
+  ReentrantRefinementDidNotConverge {
+    /// Source reduced-surface face index.
+    face_index: usize,
+  },
 }
 
 /// Tessellates one exact atom-contact patch into renderer-neutral geometry.
@@ -176,10 +182,10 @@ pub fn tessellate_contact_patch(
 /// Tessellates every resolved patch in one analytical MSMS domain.
 ///
 /// Contact, toroidal, and reentrant meshes are appended without changing their
-/// analytical coordinates. Coincident boundary samples remain duplicated until
-/// the later welding stage, but they use the same subdivision contract and
-/// therefore occupy identical positions. Radial torus singularities are split
-/// into their retained triangular faces before their meshes are appended.
+/// analytical coordinates. Patch families use the same boundary subdivision
+/// contract, then round-off-scale coincident vertices are welded before the
+/// mesh is returned. Radial torus singularities are split into their retained
+/// triangular faces before their meshes are appended.
 ///
 /// # Parameters
 ///
@@ -232,6 +238,7 @@ pub fn tessellate_msms_patch_domain(
     &mut combined,
     tessellate_resolved_reentrant_patches(domain, parameters)?,
   )?;
+  weld_coincident_vertices(&mut combined)?;
   Ok(combined)
 }
 
@@ -353,6 +360,109 @@ fn append_mesh(destination: &mut SurfaceMesh, mut source: SurfaceMesh) -> Result
   destination.vertices.append(&mut source.vertices);
   destination.indices.append(&mut source.indices);
   Ok(())
+}
+
+/// Welds numerically coincident patch vertices into a watertight display mesh.
+///
+/// Analytical patch families evaluate shared curves independently. Their
+/// coordinates are mathematically identical but can differ by a few `f32`
+/// units after separate parameterizations and clipping. A tight spatial hash
+/// merges only round-off-scale neighbors, remaps triangle indices, removes
+/// collapsed triangles, and averages their smooth surface normals.
+///
+/// # Parameters
+///
+/// * `mesh` is the combined contact, toroidal, and reentrant mesh to update.
+///
+/// # Returns
+///
+/// `Ok(())` after welding, or an error when a vertex is non-finite or the
+/// compacted mesh exceeds its index representation.
+fn weld_coincident_vertices(mesh: &mut SurfaceMesh) -> Result<(), MsmsTessellationError> {
+  const WELD_TOLERANCE: f32 = 1.0e-4;
+  const WELD_TOLERANCE_SQUARED: f32 = WELD_TOLERANCE * WELD_TOLERANCE;
+
+  let source_vertices = std::mem::take(&mut mesh.vertices);
+  let source_indices = std::mem::take(&mut mesh.indices);
+  let mut cells = HashMap::<[i64; 3], Vec<u32>>::new();
+  let mut remap = Vec::with_capacity(source_vertices.len());
+  let mut normal_sums = Vec::<Vec3>::new();
+
+  for vertex in source_vertices {
+    if vertex.iter().any(|component| !component.is_finite()) {
+      return Err(MsmsTessellationError::InvalidDisplayVertex);
+    }
+    let position = Vec3::from_slice(&vertex[..3]);
+    let normal = Vec3::from_slice(&vertex[3..]);
+    let cell = quantized_vertex_cell(position, WELD_TOLERANCE);
+    let mut representative = None;
+    'neighbors: for x_offset in -1..=1 {
+      for y_offset in -1..=1 {
+        for z_offset in -1..=1 {
+          let neighbor = [cell[0] + x_offset, cell[1] + y_offset, cell[2] + z_offset];
+          let Some(candidates) = cells.get(&neighbor) else {
+            continue;
+          };
+          for &candidate in candidates {
+            let candidate_position = Vec3::from_slice(&mesh.vertices[candidate as usize][..3]);
+            if position.distance_squared(candidate_position) <= WELD_TOLERANCE_SQUARED {
+              representative = Some(candidate);
+              break 'neighbors;
+            }
+          }
+        }
+      }
+    }
+
+    let index = if let Some(index) = representative {
+      normal_sums[index as usize] += normal;
+      index
+    } else {
+      let index = u32::try_from(mesh.vertices.len()).map_err(|_| MsmsTessellationError::MeshTooLarge)?;
+      mesh.vertices.push(vertex);
+      normal_sums.push(normal);
+      cells.entry(cell).or_default().push(index);
+      index
+    };
+    remap.push(index);
+  }
+
+  for (vertex, normal_sum) in mesh.vertices.iter_mut().zip(normal_sums) {
+    let normal = normal_sum.normalize_or_zero();
+    if normal.length_squared() <= f32::EPSILON {
+      return Err(MsmsTessellationError::InvalidDisplayVertex);
+    }
+    vertex[3..].copy_from_slice(&normal.to_array());
+  }
+  for &[first, second, third] in source_indices.as_chunks::<3>().0 {
+    let mut triangle = [remap[first as usize], remap[second as usize], remap[third as usize]];
+    if triangle[0] == triangle[1] || triangle[1] == triangle[2] || triangle[2] == triangle[0] {
+      continue;
+    }
+    let positions = triangle.map(|index| Vec3::from_slice(&mesh.vertices[index as usize][..3]));
+    let geometric_normal = (positions[1] - positions[0]).cross(positions[2] - positions[0]);
+    if geometric_normal.length_squared() <= 1.0e-12 {
+      continue;
+    }
+    let desired_normal = triangle
+      .map(|index| Vec3::from_slice(&mesh.vertices[index as usize][3..]))
+      .into_iter()
+      .sum::<Vec3>();
+    if geometric_normal.dot(desired_normal) < 0.0 {
+      triangle.swap(1, 2);
+    }
+    mesh.indices.extend(triangle);
+  }
+  Ok(())
+}
+
+/// Maps one finite position to its spatial-welding hash cell.
+fn quantized_vertex_cell(position: Vec3, tolerance: f32) -> [i64; 3] {
+  [
+    (position.x / tolerance).floor() as i64,
+    (position.y / tolerance).floor() as i64,
+    (position.z / tolerance).floor() as i64,
+  ]
 }
 
 /// Removes one reentrant display mesh region eaten by other fixed probes.
@@ -567,7 +677,9 @@ pub fn tessellate_reentrant_patch(
       face_index: patch.face_index,
     });
   }
-  tessellate_reentrant_fan(patch, center_direction, &boundary)
+  let mut mesh = tessellate_reentrant_fan(patch, center_direction, &boundary)?;
+  refine_reentrant_mesh(&mut mesh, patch, parameters.max_edge_length)?;
+  Ok(mesh)
 }
 
 /// Tessellates one regular toroidal patch into renderer-neutral triangles.
@@ -759,30 +871,123 @@ fn tessellate_bounded_contact_patch(
 }
 
 /// Tessellates projected contact boundaries while preserving nested holes.
+///
+/// All loops share one affine normalization so Lyon receives scale-stable
+/// coordinates while retaining the relative placement of outer boundaries and
+/// holes. Generated vertices are restored to the original stereographic chart
+/// in double precision before spherical refinement.
+///
+/// # Parameters
+///
+/// * `atom_index` identifies the source atom for structured errors.
+/// * `projected_loops` contains outer boundaries and nested holes in one
+///   stereographic chart.
+///
+/// # Returns
+///
+/// A planar indexed mesh in the original chart coordinates, or an error when
+/// the compound polygon is degenerate or cannot be tessellated.
 fn tessellate_projected_contact_loops(
   atom_index: usize,
   projected_loops: &[Vec<[f64; 2]>],
-) -> Result<VertexBuffers<[f32; 2], u32>, MsmsTessellationError> {
+) -> Result<VertexBuffers<[f64; 2], u32>, MsmsTessellationError> {
+  let normalization = ProjectedContactNormalization::from_loops(atom_index, projected_loops)?;
   let mut path_builder = Path::builder();
   for projected in projected_loops {
     if projected.len() < 3 {
       return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
     }
-    path_builder.begin(point(projected[0][0] as f32, projected[0][1] as f32));
+    let first = normalization.normalize(projected[0]);
+    path_builder.begin(point(first[0], first[1]));
     for point_2d in &projected[1..] {
-      path_builder.line_to(point(point_2d[0] as f32, point_2d[1] as f32));
+      let normalized = normalization.normalize(*point_2d);
+      path_builder.line_to(point(normalized[0], normalized[1]));
     }
     path_builder.close();
   }
-  let mut planar = VertexBuffers::<[f32; 2], u32>::new();
+  let mut planar = VertexBuffers::<[f64; 2], u32>::new();
   FillTessellator::new()
     .tessellate_path(
       &path_builder.build(),
-      &FillOptions::default().with_fill_rule(FillRule::EvenOdd),
-      &mut BuffersBuilder::new(&mut planar, |vertex: FillVertex<'_>| vertex.position().to_array()),
+      &FillOptions::default()
+        .with_fill_rule(FillRule::EvenOdd)
+        .with_tolerance(ProjectedContactNormalization::TESSELLATION_TOLERANCE),
+      &mut BuffersBuilder::new(&mut planar, |vertex: FillVertex<'_>| {
+        normalization.denormalize(vertex.position().to_array())
+      }),
     )
     .map_err(|_| MsmsTessellationError::InvalidContactPatch { atom_index })?;
   Ok(planar)
+}
+
+/// Affine normalization used to give Lyon scale-independent input.
+///
+/// Stereographic coordinates have no fixed numerical scale: a valid patch may
+/// occupy either a tiny region or a very large region depending on its chosen
+/// projection pole. Lyon's absolute flattening tolerance is intended for
+/// display coordinates, so raw projected input can cause a small polygon to be
+/// accepted while producing no triangles. Centering and scaling the complete
+/// compound polygon keeps the tessellator in a predictable coordinate range.
+#[derive(Clone, Copy, Debug)]
+struct ProjectedContactNormalization {
+  center: [f64; 2],
+  scale: f64,
+}
+
+impl ProjectedContactNormalization {
+  /// Lyon operates on straight boundary segments here, so this tolerance only
+  /// governs its numerical merging and intersection machinery.
+  const TESSELLATION_TOLERANCE: f32 = 1.0e-5;
+
+  /// Builds one normalization shared by every outer loop and nested hole.
+  ///
+  /// # Parameters
+  ///
+  /// * `atom_index` identifies the source atom for structured errors.
+  /// * `projected_loops` contains every boundary participating in the compound
+  ///   contact polygon.
+  ///
+  /// # Returns
+  ///
+  /// A finite normalization with nonzero scale, or an invalid-contact error
+  /// when the projected geometry is non-finite or degenerate.
+  fn from_loops(atom_index: usize, projected_loops: &[Vec<[f64; 2]>]) -> Result<Self, MsmsTessellationError> {
+    let mut minimum = [f64::INFINITY; 2];
+    let mut maximum = [f64::NEG_INFINITY; 2];
+    for point in projected_loops.iter().flatten() {
+      if point.iter().any(|component| !component.is_finite()) {
+        return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
+      }
+      for axis in 0..2 {
+        minimum[axis] = minimum[axis].min(point[axis]);
+        maximum[axis] = maximum[axis].max(point[axis]);
+      }
+    }
+    let scale = (maximum[0] - minimum[0]).max(maximum[1] - minimum[1]);
+    if !scale.is_finite() || scale <= f64::EPSILON {
+      return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
+    }
+    Ok(Self {
+      center: [0.5 * (minimum[0] + maximum[0]), 0.5 * (minimum[1] + maximum[1])],
+      scale,
+    })
+  }
+
+  /// Maps one raw stereographic point into the canonical Lyon chart.
+  fn normalize(self, point: [f64; 2]) -> [f32; 2] {
+    [
+      ((point[0] - self.center[0]) / self.scale) as f32,
+      ((point[1] - self.center[1]) / self.scale) as f32,
+    ]
+  }
+
+  /// Restores one Lyon vertex to its original stereographic coordinates.
+  fn denormalize(self, point: [f32; 2]) -> [f64; 2] {
+    [
+      (point[0] as f64).mul_add(self.scale, self.center[0]),
+      (point[1] as f64).mul_add(self.scale, self.center[1]),
+    ]
+  }
 }
 
 /// Refines long interior diagonals without changing analytical boundaries.
@@ -810,7 +1015,7 @@ fn tessellate_projected_contact_loops(
 /// mesh cannot be represented safely or refinement fails to converge.
 fn refine_projected_contact_mesh(
   atom_index: usize,
-  planar: &mut VertexBuffers<[f32; 2], u32>,
+  planar: &mut VertexBuffers<[f64; 2], u32>,
   pole: DVec3,
   horizontal: DVec3,
   vertical: DVec3,
@@ -821,7 +1026,7 @@ fn refine_projected_contact_mesh(
   const EDGE_LENGTH_TOLERANCE: f64 = 1.0 + 1.0e-6;
 
   for _ in 0..MAX_REFINEMENT_PASSES {
-    let edge_uses = contact_edge_use_counts(&planar.indices);
+    let edge_uses = mesh_edge_use_counts(&planar.indices);
     let mut edges_to_split = BTreeSet::new();
     for (&edge, &uses) in &edge_uses {
       // One-sided edges lie on an analytical contact boundary shared with a
@@ -839,17 +1044,17 @@ fn refine_projected_contact_mesh(
     }
 
     let midpoint_indices = insert_contact_edge_midpoints(planar, &edges_to_split)?;
-    planar.indices = refine_contact_triangles(&planar.indices, &midpoint_indices)?;
+    planar.indices = refine_triangles(&planar.indices, &midpoint_indices)?;
   }
 
   Err(MsmsTessellationError::ContactRefinementDidNotConverge { atom_index })
 }
 
-/// Counts how many contact triangles use each undirected edge.
-fn contact_edge_use_counts(indices: &[u32]) -> BTreeMap<(u32, u32), usize> {
+/// Counts how many triangles use each undirected edge.
+fn mesh_edge_use_counts(indices: &[u32]) -> BTreeMap<(u32, u32), usize> {
   let mut uses = BTreeMap::new();
   for &[a, b, c] in indices.as_chunks::<3>().0 {
-    for edge in [contact_edge_key(a, b), contact_edge_key(b, c), contact_edge_key(c, a)] {
+    for edge in [mesh_edge_key(a, b), mesh_edge_key(b, c), mesh_edge_key(c, a)] {
       *uses.entry(edge).or_default() += 1;
     }
   }
@@ -858,7 +1063,7 @@ fn contact_edge_use_counts(indices: &[u32]) -> BTreeMap<(u32, u32), usize> {
 
 /// Returns the unit-sphere endpoints represented by one projected edge.
 fn contact_edge_directions(
-  planar: &VertexBuffers<[f32; 2], u32>,
+  planar: &VertexBuffers<[f64; 2], u32>,
   edge: (u32, u32),
   pole: DVec3,
   horizontal: DVec3,
@@ -882,7 +1087,7 @@ fn contact_edge_directions(
 
 /// Inserts one deterministic projected midpoint for every selected edge.
 fn insert_contact_edge_midpoints(
-  planar: &mut VertexBuffers<[f32; 2], u32>,
+  planar: &mut VertexBuffers<[f64; 2], u32>,
   edges: &BTreeSet<(u32, u32)>,
 ) -> Result<BTreeMap<(u32, u32), u32>, MsmsTessellationError> {
   let mut midpoint_indices = BTreeMap::new();
@@ -909,36 +1114,36 @@ fn insert_contact_edge_midpoints(
 }
 
 /// Conformingly subdivides triangles whose shared edges received midpoints.
-fn refine_contact_triangles(
+fn refine_triangles(
   indices: &[u32],
   midpoint_indices: &BTreeMap<(u32, u32), u32>,
 ) -> Result<Vec<u32>, MsmsTessellationError> {
   let mut refined = Vec::with_capacity(indices.len().saturating_mul(2));
   for &[a, b, c] in indices.as_chunks::<3>().0 {
     let midpoints = [
-      midpoint_indices.get(&contact_edge_key(a, b)).copied(),
-      midpoint_indices.get(&contact_edge_key(b, c)).copied(),
-      midpoint_indices.get(&contact_edge_key(c, a)).copied(),
+      midpoint_indices.get(&mesh_edge_key(a, b)).copied(),
+      midpoint_indices.get(&mesh_edge_key(b, c)).copied(),
+      midpoint_indices.get(&mesh_edge_key(c, a)).copied(),
     ];
     let mask = u8::from(midpoints[0].is_some())
       | (u8::from(midpoints[1].is_some()) << 1)
       | (u8::from(midpoints[2].is_some()) << 2);
     match (mask, midpoints) {
-      (0, _) => append_contact_triangles(&mut refined, &[[a, b, c]]),
-      (1, [Some(ab), _, _]) => append_contact_triangles(&mut refined, &[[a, ab, c], [ab, b, c]]),
-      (2, [_, Some(bc), _]) => append_contact_triangles(&mut refined, &[[b, bc, a], [bc, c, a]]),
-      (4, [_, _, Some(ca)]) => append_contact_triangles(&mut refined, &[[c, ca, b], [ca, a, b]]),
+      (0, _) => append_triangles(&mut refined, &[[a, b, c]]),
+      (1, [Some(ab), _, _]) => append_triangles(&mut refined, &[[a, ab, c], [ab, b, c]]),
+      (2, [_, Some(bc), _]) => append_triangles(&mut refined, &[[b, bc, a], [bc, c, a]]),
+      (4, [_, _, Some(ca)]) => append_triangles(&mut refined, &[[c, ca, b], [ca, a, b]]),
       (3, [Some(ab), Some(bc), _]) => {
-        append_contact_triangles(&mut refined, &[[a, ab, c], [ab, bc, c], [ab, b, bc]]);
+        append_triangles(&mut refined, &[[a, ab, c], [ab, bc, c], [ab, b, bc]]);
       }
       (6, [_, Some(bc), Some(ca)]) => {
-        append_contact_triangles(&mut refined, &[[b, bc, a], [bc, ca, a], [bc, c, ca]]);
+        append_triangles(&mut refined, &[[b, bc, a], [bc, ca, a], [bc, c, ca]]);
       }
       (5, [Some(ab), _, Some(ca)]) => {
-        append_contact_triangles(&mut refined, &[[c, ca, b], [ca, ab, b], [ca, a, ab]]);
+        append_triangles(&mut refined, &[[c, ca, b], [ca, ab, b], [ca, a, ab]]);
       }
       (7, [Some(ab), Some(bc), Some(ca)]) => {
-        append_contact_triangles(&mut refined, &[[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]);
+        append_triangles(&mut refined, &[[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]);
       }
       _ => return Err(MsmsTessellationError::InvalidDisplayVertex),
     }
@@ -946,13 +1151,13 @@ fn refine_contact_triangles(
   Ok(refined)
 }
 
-/// Appends oriented contact triangles to a flat index buffer.
-fn append_contact_triangles(indices: &mut Vec<u32>, triangles: &[[u32; 3]]) {
+/// Appends oriented triangles to a flat index buffer.
+fn append_triangles(indices: &mut Vec<u32>, triangles: &[[u32; 3]]) {
   indices.extend(triangles.iter().flatten().copied());
 }
 
 /// Canonicalizes an undirected mesh edge for deterministic lookup.
-const fn contact_edge_key(start: u32, end: u32) -> (u32, u32) {
+const fn mesh_edge_key(start: u32, end: u32) -> (u32, u32) {
   if start < end { (start, end) } else { (end, start) }
 }
 
@@ -1025,13 +1230,13 @@ fn stereographic_basis(atom_index: usize, pole: DVec3) -> Result<(DVec3, DVec3),
 
 /// Maps one planar stereographic point back onto the atom unit sphere.
 fn inverse_stereographic_project(
-  point_2d: [f32; 2],
+  point_2d: [f64; 2],
   pole: DVec3,
   horizontal: DVec3,
   vertical: DVec3,
 ) -> Result<DVec3, MsmsTessellationError> {
-  let x = point_2d[0] as f64;
-  let y = point_2d[1] as f64;
+  let x = point_2d[0];
+  let y = point_2d[1];
   let radius_squared = x.mul_add(x, y * y);
   let denominator = radius_squared + 1.0;
   let direction = ((radius_squared - 1.0) / denominator) * pole + (2.0 / denominator) * (x * horizontal + y * vertical);
@@ -1151,6 +1356,101 @@ fn tessellate_reentrant_fan(
     mesh.indices.extend(triangle);
   }
   Ok(mesh)
+}
+
+/// Refines long reentrant fan edges while preserving analytical boundaries.
+///
+/// Boundary arcs already share their subdivision contract with neighboring
+/// toroidal patches and must remain untouched. Internal fan edges, however,
+/// can span most of the probe sphere and form visibly planar sheets. This
+/// routine repeatedly splits only shared edges and projects each shared
+/// midpoint back onto the analytical probe sphere.
+///
+/// # Parameters
+///
+/// * `mesh` is the initial center-fan tessellation to refine in place.
+/// * `patch` supplies the probe sphere and source face identity.
+/// * `max_edge_length` bounds every interior chord in ångströms.
+///
+/// # Returns
+///
+/// `Ok(())` when all internal edges satisfy the bound, or an error when a
+/// midpoint is undefined, the index range is exceeded, or refinement does not
+/// converge.
+fn refine_reentrant_mesh(
+  mesh: &mut SurfaceMesh,
+  patch: &ReentrantPatch,
+  max_edge_length: f64,
+) -> Result<(), MsmsTessellationError> {
+  const MAX_REFINEMENT_PASSES: usize = 32;
+  const EDGE_LENGTH_TOLERANCE: f64 = 1.0 + 1.0e-6;
+
+  for _ in 0..MAX_REFINEMENT_PASSES {
+    let edge_uses = mesh_edge_use_counts(&mesh.indices);
+    let mut edges_to_split = BTreeSet::new();
+    for (&edge, &uses) in &edge_uses {
+      // A one-sided edge belongs to a reentrant–toroidal analytical boundary.
+      if uses < 2 {
+        continue;
+      }
+      let start = mesh
+        .vertices
+        .get(edge.0 as usize)
+        .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+      let end = mesh
+        .vertices
+        .get(edge.1 as usize)
+        .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+      let length = Vec3::from_slice(&start[..3]).distance(Vec3::from_slice(&end[..3])) as f64;
+      if length > max_edge_length * EDGE_LENGTH_TOLERANCE {
+        edges_to_split.insert(edge);
+      }
+    }
+    if edges_to_split.is_empty() {
+      return Ok(());
+    }
+
+    let midpoint_indices = insert_reentrant_edge_midpoints(mesh, patch, &edges_to_split)?;
+    mesh.indices = refine_triangles(&mesh.indices, &midpoint_indices)?;
+  }
+
+  Err(MsmsTessellationError::ReentrantRefinementDidNotConverge {
+    face_index: patch.face_index,
+  })
+}
+
+/// Inserts one shared spherical midpoint for every selected reentrant edge.
+fn insert_reentrant_edge_midpoints(
+  mesh: &mut SurfaceMesh,
+  patch: &ReentrantPatch,
+  edges: &BTreeSet<(u32, u32)>,
+) -> Result<BTreeMap<(u32, u32), u32>, MsmsTessellationError> {
+  let center = DVec3::from_array(patch.probe_center);
+  let mut midpoint_indices = BTreeMap::new();
+  for &edge in edges {
+    let start = mesh
+      .vertices
+      .get(edge.0 as usize)
+      .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+    let end = mesh
+      .vertices
+      .get(edge.1 as usize)
+      .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+    let start_direction = (DVec3::new(start[0] as f64, start[1] as f64, start[2] as f64) - center).normalize_or_zero();
+    let end_direction = (DVec3::new(end[0] as f64, end[1] as f64, end[2] as f64) - center).normalize_or_zero();
+    let midpoint_direction = (start_direction + end_direction).normalize_or_zero();
+    if !midpoint_direction.is_finite() || midpoint_direction.length_squared() <= f64::EPSILON {
+      return Err(MsmsTessellationError::InvalidReentrantPatch {
+        face_index: patch.face_index,
+      });
+    }
+    let midpoint_index = u32::try_from(mesh.vertices.len()).map_err(|_| MsmsTessellationError::MeshTooLarge)?;
+    mesh
+      .vertices
+      .push(reentrant_vertex(center, patch.probe_radius, midpoint_direction)?);
+    midpoint_indices.insert(edge, midpoint_index);
+  }
+  Ok(midpoint_indices)
 }
 
 /// Converts one probe-relative direction into a reentrant display vertex.
@@ -1394,10 +1694,26 @@ mod tests {
       let centroid = triangle
         .iter()
         .map(|index| mesh.vertices[*index as usize])
-        .fold([0.0_f32; 2], |sum, point| [sum[0] + point[0], sum[1] + point[1]])
+        .fold([0.0_f64; 2], |sum, point| [sum[0] + point[0], sum[1] + point[1]])
         .map(|component| component / 3.0);
       centroid[0].abs() >= 1.0 || centroid[1].abs() >= 1.0
     }));
+  }
+
+  #[test]
+  fn small_projected_contact_patch_should_survive_scale_normalization() {
+    // This is the valid atom-127 contact triangle from 1Y7Q. Its complete
+    // projected extent is smaller than Lyon's default absolute tolerance.
+    let boundary = vec![
+      [-1.882_734_310_366_298_8, -0.100_714_723_050_975_09],
+      [-1.883_959_983_151_179_7, -0.074_341_917_884_194_17],
+      [-1.855_686_055_337_787_9, -0.106_516_549_641_048_95],
+    ];
+
+    let mesh = tessellate_projected_contact_loops(127, &[boundary])
+      .unwrap_or_else(|error| panic!("the small valid contact patch should tessellate: {error}"));
+
+    assert_eq!(mesh.indices.len(), 3);
   }
 
   #[test]
@@ -1413,7 +1729,7 @@ mod tests {
     let pole = DVec3::Z;
     let (horizontal, vertical) = stereographic_basis(0, pole)
       .unwrap_or_else(|error| panic!("a unit projection pole should define a chart: {error}"));
-    let original_boundary = contact_edge_use_counts(&planar.indices)
+    let original_boundary = mesh_edge_use_counts(&planar.indices)
       .into_iter()
       .filter_map(|(edge, uses)| (uses == 1).then_some(edge))
       .collect::<BTreeSet<_>>();
@@ -1421,7 +1737,7 @@ mod tests {
     refine_projected_contact_mesh(0, &mut planar, pole, horizontal, vertical, 1.7, 0.35)
       .unwrap_or_else(|error| panic!("the circular interior should refine conformingly: {error}"));
 
-    let refined_edge_uses = contact_edge_use_counts(&planar.indices);
+    let refined_edge_uses = mesh_edge_use_counts(&planar.indices);
     assert!(
       original_boundary
         .iter()
@@ -1527,6 +1843,29 @@ mod tests {
   }
 
   #[test]
+  fn coincident_patch_boundaries_should_weld_into_one_shared_edge() {
+    let normal = [0.0, 0.0, 1.0];
+    let mut mesh = SurfaceMesh {
+      vertices: vec![
+        [0.0, 0.0, 0.0, normal[0], normal[1], normal[2]],
+        [1.0, 0.0, 0.0, normal[0], normal[1], normal[2]],
+        [0.0, 1.0, 0.0, normal[0], normal[1], normal[2]],
+        [1.0 + 5.0e-5, 0.0, 0.0, normal[0], normal[1], normal[2]],
+        [1.0, 1.0, 0.0, normal[0], normal[1], normal[2]],
+        [0.0, 1.0 + 5.0e-5, 0.0, normal[0], normal[1], normal[2]],
+      ],
+      indices: vec![0, 1, 2, 3, 4, 5],
+    };
+
+    weld_coincident_vertices(&mut mesh)
+      .unwrap_or_else(|error| panic!("round-off-scale boundary differences should weld: {error}"));
+
+    let edge_uses = mesh_edge_use_counts(&mesh.indices);
+    assert_eq!(mesh.vertices.len(), 4);
+    assert_eq!(edge_uses.values().filter(|&&uses| uses == 2).count(), 1);
+  }
+
+  #[test]
   fn reentrant_triangle_should_produce_probe_sphere_vertices() {
     let patch = reentrant_patch();
     let mesh = tessellate_reentrant_patch(&patch, MsmsTessellationParameters::default())
@@ -1535,6 +1874,19 @@ mod tests {
     assert!(mesh.vertices.iter().all(|vertex| {
       let position = Vec3::from_slice(&vertex[..3]);
       (position.length() - patch.probe_radius as f32).abs() < 1.0e-6
+    }));
+  }
+
+  #[test]
+  fn reentrant_triangle_should_bound_every_display_edge() {
+    let parameters = MsmsTessellationParameters::default();
+    let mesh = tessellate_reentrant_patch(&reentrant_patch(), parameters)
+      .unwrap_or_else(|error| panic!("reentrant triangle should refine: {error}"));
+
+    assert!(mesh_edge_use_counts(&mesh.indices).keys().all(|&(start, end)| {
+      let start = Vec3::from_slice(&mesh.vertices[start as usize][..3]);
+      let end = Vec3::from_slice(&mesh.vertices[end as usize][..3]);
+      start.distance(end) <= parameters.max_edge_length() as f32 * 1.000_01
     }));
   }
 

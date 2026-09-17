@@ -84,7 +84,7 @@ impl Default for MsmsParameters {
 }
 
 /// Request selecting atoms, domains, and probe geometry for MSMS construction.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MsmsRequest {
   /// Atoms eligible to participate in analytical surface construction.
   pub atom_scope: SurfaceAtomScope,
@@ -92,6 +92,20 @@ pub struct MsmsRequest {
   pub partition: SurfacePartition,
   /// Validated rolling-probe parameters.
   pub parameters: MsmsParameters,
+}
+
+impl Default for MsmsRequest {
+  fn default() -> Self {
+    Self {
+      atom_scope: SurfaceAtomScope::default(),
+      // A molecular surface is defined by solvent accessibility against the
+      // complete selected assembly. Per-chain domains remain an explicit
+      // visualization/analysis option because they ignore inter-chain
+      // occlusion and may overlap at biological interfaces.
+      partition: SurfacePartition::Unified,
+      parameters: MsmsParameters::default(),
+    }
+  }
 }
 
 /// Accessible probe faces discovered for one independently calculated domain.
@@ -650,6 +664,11 @@ mod tests {
   use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
   use super::*;
+
+  #[test]
+  fn default_request_should_compute_one_assembly_surface() {
+    assert_eq!(MsmsRequest::default().partition, SurfacePartition::Unified);
+  }
 
   #[test]
   fn isolated_atom_contact_patch_should_integrate_exact_sas_and_ses() {
