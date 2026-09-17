@@ -1,7 +1,7 @@
 //! Analytical patch geometry derived from reduced-surface topology.
 
 use std::{
-  collections::BTreeMap,
+  collections::{BTreeMap, BTreeSet},
   f64::consts::{PI, TAU},
 };
 
@@ -9,6 +9,7 @@ use glam::DVec3;
 use thiserror::Error;
 
 use super::{
+  ContactBoundaryArc, ContactBoundaryArcUse, ContactBoundaryLoop, ContactPatchGeometry, ContactPatchTopology,
   MsmsParameters, ReducedSurfaceEdge, ReducedSurfaceFace, ReentrantPatch, ToroidalPatchGeometry, ToroidalPatchTopology,
   geometry::MsmsAtom,
 };
@@ -50,6 +51,434 @@ pub enum MsmsPatchConstructionError {
     /// Index of the invalid edge.
     edge_index: usize,
   },
+  /// An edge contact curve is inconsistent with its supporting atom sphere.
+  #[error("reduced-surface edge {edge_index} has invalid contact geometry for atom {atom_index}")]
+  InvalidContactGeometry {
+    /// Index of the source reduced-surface edge.
+    edge_index: usize,
+    /// Source atom carrying the invalid contact curve.
+    atom_index: usize,
+  },
+  /// An open contact arc lacks one of its incident probe faces.
+  #[error("contact arc from edge {edge_index} does not have two incident faces")]
+  MissingContactIncidence {
+    /// Index of the source reduced-surface edge.
+    edge_index: usize,
+  },
+  /// A face does not have exactly two contact arcs around one atom.
+  #[error("atom {atom_index} has contact-arc degree {degree} at face {face_index}, expected 2")]
+  InvalidContactFaceDegree {
+    /// Source atom whose boundary is invalid.
+    atom_index: usize,
+    /// Reduced-surface face used as the loop vertex.
+    face_index: usize,
+    /// Number of incident contact arcs found at the face.
+    degree: usize,
+  },
+  /// Contact arcs could not be traversed into a closed loop.
+  #[error("atom {atom_index} has an open or branching contact boundary")]
+  OpenContactBoundary {
+    /// Source atom whose boundary did not close.
+    atom_index: usize,
+  },
+  /// Oriented contact loops produced an invalid exposed solid angle.
+  #[error("atom {atom_index} has an invalid contact-patch solid angle")]
+  InvalidContactSolidAngle {
+    /// Source atom whose area could not be integrated.
+    atom_index: usize,
+  },
+}
+
+/// Builds exact atom-sphere contact arcs and assembles them into closed loops.
+///
+/// Every reduced-surface edge induces one contact curve on each supporting
+/// atom. Open curves meet at their incident tangent-probe faces; complete free
+/// circles are already closed loops. Atoms without any curves become complete
+/// spherical patches unless their expanded sphere is contained by another
+/// atom in the domain.
+///
+/// # Parameters
+///
+/// * `atoms` contains the analytical atoms in the topology domain.
+/// * `edges` contains accessible reduced-surface arcs with resolved face incidence.
+/// * `parameters` supplies the rolling-probe radius.
+///
+/// # Returns
+///
+/// Deterministically ordered exposed atom patches, or a structured error when
+/// contact curves do not form a two-manifold boundary.
+///
+/// # Examples
+///
+/// ```
+/// use chitin_bio::surface::msms::{
+///   ContactPatchTopology,
+///   MsmsParameters,
+///   build_contact_patch_geometry,
+///   geometry::MsmsAtom,
+/// };
+/// use glam::DVec3;
+///
+/// let atoms = vec![MsmsAtom {
+///   atom_index: 0,
+///   center: DVec3::ZERO,
+///   radius: 1.7,
+/// }];
+/// let patches = build_contact_patch_geometry(&atoms, &[], MsmsParameters::default())?;
+/// assert_eq!(patches[0].topology, ContactPatchTopology::FullSphere);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn build_contact_patch_geometry(
+  atoms: &[MsmsAtom],
+  edges: &[ReducedSurfaceEdge],
+  parameters: MsmsParameters,
+) -> Result<Vec<ContactPatchGeometry>, MsmsPatchConstructionError> {
+  let atom_lookup = atom_lookup(atoms)?;
+  let mut patches = Vec::new();
+  for atom in atoms {
+    let mut boundary_arcs = Vec::new();
+    for (edge_index, edge) in edges.iter().enumerate() {
+      if edge.atom_indices.contains(&atom.atom_index) {
+        boundary_arcs.push(contact_boundary_arc(
+          edge_index,
+          edge,
+          atom,
+          &atom_lookup,
+          parameters.probe_radius(),
+        )?);
+      }
+    }
+
+    if boundary_arcs.is_empty() {
+      if !expanded_atom_is_contained(atom, atoms, parameters.probe_radius())
+        && !expanded_atom_surface_has_occluder(atom, atoms, parameters.probe_radius())
+      {
+        patches.push(ContactPatchGeometry {
+          atom_index: atom.atom_index,
+          atom_center: atom.center.to_array(),
+          atom_radius: atom.radius,
+          probe_radius: parameters.probe_radius(),
+          boundary_arcs,
+          boundary_loops: Vec::new(),
+          topology: ContactPatchTopology::FullSphere,
+          solid_angle: 4.0 * PI,
+        });
+      }
+      continue;
+    }
+
+    let boundary_loops = assemble_contact_loops(atom.atom_index, &boundary_arcs)?;
+    let solid_angle = contact_solid_angle(atom.atom_index, &boundary_arcs, &boundary_loops)?;
+    patches.push(ContactPatchGeometry {
+      atom_index: atom.atom_index,
+      atom_center: atom.center.to_array(),
+      atom_radius: atom.radius,
+      probe_radius: parameters.probe_radius(),
+      boundary_arcs,
+      boundary_loops,
+      topology: ContactPatchTopology::Bounded,
+      solid_angle,
+    });
+  }
+  Ok(patches)
+}
+
+/// Projects one probe-center arc onto a supporting atom sphere.
+fn contact_boundary_arc(
+  edge_index: usize,
+  edge: &ReducedSurfaceEdge,
+  atom: &MsmsAtom,
+  atom_lookup: &BTreeMap<usize, &MsmsAtom>,
+  probe_radius: f64,
+) -> Result<ContactBoundaryArc, MsmsPatchConstructionError> {
+  validate_toroidal_frame(edge_index, edge)?;
+  let center = DVec3::from_array(edge.probe_circle_center);
+  let axis = DVec3::from_array(edge.probe_circle_axis);
+  let center_offset = center - atom.center;
+  let axial_offset = center_offset.dot(axis);
+  let off_axis = center_offset - axial_offset * axis;
+  let expanded_radius = atom.radius + probe_radius;
+  let direction_axis_offset = axial_offset / expanded_radius;
+  let direction_circle_radius = edge.probe_circle_radius / expanded_radius;
+  let scale = atom.center.abs().max(center.abs()).max(DVec3::ONE).max_element();
+  let linear_tolerance = 4096.0 * f64::EPSILON * scale;
+  let unit_tolerance = 4096.0 * f64::EPSILON;
+  if !atom.center.is_finite()
+    || !atom.radius.is_finite()
+    || atom.radius <= 0.0
+    || off_axis.length() > linear_tolerance
+    || (direction_axis_offset.mul_add(direction_axis_offset, direction_circle_radius.powi(2)) - 1.0).abs()
+      > unit_tolerance
+  {
+    return Err(MsmsPatchConstructionError::InvalidContactGeometry {
+      edge_index,
+      atom_index: atom.atom_index,
+    });
+  }
+  let other_atom_index = edge
+    .atom_indices
+    .iter()
+    .find(|atom_index| **atom_index != atom.atom_index)
+    .copied()
+    .ok_or(MsmsPatchConstructionError::InvalidContactGeometry {
+      edge_index,
+      atom_index: atom.atom_index,
+    })?;
+  let other_atom = atom_lookup
+    .get(&other_atom_index)
+    .ok_or(MsmsPatchConstructionError::MissingEdgeAtom {
+      edge_index,
+      atom_index: other_atom_index,
+    })?;
+  let occluded_direction = (other_atom.center - atom.center).normalize_or_zero();
+  if occluded_direction.length_squared() <= f64::EPSILON {
+    return Err(MsmsPatchConstructionError::InvalidContactGeometry {
+      edge_index,
+      atom_index: atom.atom_index,
+    });
+  }
+  let midpoint_angle = edge.start_angle + 0.5 * edge.sweep_angle;
+  let basis = DVec3::from_array(edge.probe_circle_basis);
+  let perpendicular_basis = axis.cross(basis);
+  let midpoint_radial = midpoint_angle.cos() * basis + midpoint_angle.sin() * perpendicular_basis;
+  let midpoint_tangent = -midpoint_angle.sin() * basis + midpoint_angle.cos() * perpendicular_basis;
+  let midpoint_direction = direction_axis_offset * axis + direction_circle_radius * midpoint_radial;
+  let probe_center = atom.center + expanded_radius * midpoint_direction;
+  let exposed_gradient = probe_center - other_atom.center;
+  let exposed_side = midpoint_direction.cross(midpoint_tangent).dot(exposed_gradient);
+  if exposed_side.abs() <= linear_tolerance {
+    return Err(MsmsPatchConstructionError::InvalidContactGeometry {
+      edge_index,
+      atom_index: atom.atom_index,
+    });
+  }
+  Ok(ContactBoundaryArc {
+    edge_index,
+    atom_index: atom.atom_index,
+    atom_center: atom.center.to_array(),
+    atom_radius: atom.radius,
+    axis: edge.probe_circle_axis,
+    basis: edge.probe_circle_basis,
+    direction_axis_offset,
+    direction_circle_radius,
+    start_angle: edge.start_angle,
+    sweep_angle: edge.sweep_angle,
+    face_indices: edge.face_indices,
+    occluded_direction: occluded_direction.to_array(),
+    exposed_on_left_when_forward: exposed_side > 0.0,
+  })
+}
+
+/// Tests whether any neighboring expanded sphere covers part of this surface.
+fn expanded_atom_surface_has_occluder(atom: &MsmsAtom, atoms: &[MsmsAtom], probe_radius: f64) -> bool {
+  let radius = atom.radius + probe_radius;
+  atoms.iter().any(|other| {
+    if other.atom_index == atom.atom_index {
+      return false;
+    }
+    let other_radius = other.radius + probe_radius;
+    let distance = atom.center.distance(other.center);
+    let scale = distance.max(radius).max(other_radius).max(1.0);
+    let tolerance = 4096.0 * f64::EPSILON * scale;
+    // A sphere strictly inside this atom cannot reach its surface. Any proper
+    // lens intersection hides a finite cap; when no accessible intersection
+    // arc survives, that cap belongs to a collectively buried atom.
+    distance + other_radius > radius + tolerance && distance < radius + other_radius - tolerance
+  })
+}
+
+/// Tests whether another expanded atom completely hides one expanded sphere.
+fn expanded_atom_is_contained(atom: &MsmsAtom, atoms: &[MsmsAtom], probe_radius: f64) -> bool {
+  let radius = atom.radius + probe_radius;
+  atoms.iter().any(|other| {
+    if other.atom_index == atom.atom_index {
+      return false;
+    }
+    let other_radius = other.radius + probe_radius;
+    let distance = atom.center.distance(other.center);
+    let scale = distance.max(radius).max(other_radius).max(1.0);
+    let tolerance = 4096.0 * f64::EPSILON * scale;
+    if distance + radius < other_radius - tolerance {
+      return true;
+    }
+    distance <= tolerance && (radius - other_radius).abs() <= tolerance && atom.atom_index > other.atom_index
+  })
+}
+
+/// Connects atom-sphere contact arcs through their incident probe faces.
+fn assemble_contact_loops(
+  atom_index: usize,
+  arcs: &[ContactBoundaryArc],
+) -> Result<Vec<ContactBoundaryLoop>, MsmsPatchConstructionError> {
+  let mut loops = Vec::new();
+  let mut adjacency = BTreeMap::<usize, Vec<(usize, bool)>>::new();
+  let mut unused = BTreeSet::new();
+  for (arc_index, arc) in arcs.iter().enumerate() {
+    match arc.face_indices {
+      [None, None] => loops.push(ContactBoundaryLoop {
+        arcs: vec![ContactBoundaryArcUse {
+          arc_index,
+          reversed: !arc.exposed_on_left_when_forward,
+        }],
+      }),
+      [Some(start), Some(end)] => {
+        adjacency.entry(start).or_default().push((arc_index, false));
+        adjacency.entry(end).or_default().push((arc_index, true));
+        unused.insert(arc_index);
+      }
+      _ => {
+        return Err(MsmsPatchConstructionError::MissingContactIncidence {
+          edge_index: arc.edge_index,
+        });
+      }
+    }
+  }
+  for (&face_index, incident) in &adjacency {
+    if incident.len() != 2 {
+      return Err(MsmsPatchConstructionError::InvalidContactFaceDegree {
+        atom_index,
+        face_index,
+        degree: incident.len(),
+      });
+    }
+  }
+
+  while let Some(first_arc_index) = unused.pop_first() {
+    let first_arc = &arcs[first_arc_index];
+    let [Some(start_face), Some(mut current_face)] = first_arc.face_indices else {
+      return Err(MsmsPatchConstructionError::OpenContactBoundary { atom_index });
+    };
+    let mut directed_arcs = vec![ContactBoundaryArcUse {
+      arc_index: first_arc_index,
+      reversed: false,
+    }];
+    while current_face != start_face {
+      let Some((next_arc_index, arrives_at_end)) = adjacency
+        .get(&current_face)
+        .and_then(|incident| incident.iter().find(|(arc_index, _)| unused.contains(arc_index)))
+        .copied()
+      else {
+        return Err(MsmsPatchConstructionError::OpenContactBoundary { atom_index });
+      };
+      unused.remove(&next_arc_index);
+      directed_arcs.push(ContactBoundaryArcUse {
+        arc_index: next_arc_index,
+        reversed: arrives_at_end,
+      });
+      let next_faces = arcs[next_arc_index].face_indices;
+      current_face = if arrives_at_end { next_faces[0] } else { next_faces[1] }
+        .ok_or(MsmsPatchConstructionError::OpenContactBoundary { atom_index })?;
+    }
+    let mut boundary_loop = ContactBoundaryLoop { arcs: directed_arcs };
+    orient_contact_loop(atom_index, &mut boundary_loop, arcs)?;
+    loops.push(boundary_loop);
+  }
+  Ok(loops)
+}
+
+/// Reverses a loop when its current traversal keeps the occluded side on the left.
+fn orient_contact_loop(
+  atom_index: usize,
+  boundary_loop: &mut ContactBoundaryLoop,
+  arcs: &[ContactBoundaryArc],
+) -> Result<(), MsmsPatchConstructionError> {
+  let first_use = boundary_loop
+    .arcs
+    .first()
+    .ok_or(MsmsPatchConstructionError::OpenContactBoundary { atom_index })?;
+  let first_arc = &arcs[first_use.arc_index];
+  let exposed_on_left = first_arc.exposed_on_left_when_forward != first_use.reversed;
+  if !exposed_on_left {
+    boundary_loop.arcs.reverse();
+    for arc_use in &mut boundary_loop.arcs {
+      arc_use.reversed = !arc_use.reversed;
+    }
+  }
+  Ok(())
+}
+
+/// Integrates exposed unit-sphere area from oriented small-circle loops.
+fn contact_solid_angle(
+  atom_index: usize,
+  arcs: &[ContactBoundaryArc],
+  loops: &[ContactBoundaryLoop],
+) -> Result<f64, MsmsPatchConstructionError> {
+  let mut solid_angle = 0.0;
+  for boundary_loop in loops {
+    solid_angle += contact_loop_solid_angle(atom_index, arcs, boundary_loop)?;
+  }
+  let tolerance = 8192.0 * f64::EPSILON * 4.0 * PI;
+  if !solid_angle.is_finite() || solid_angle <= tolerance || solid_angle > 4.0 * PI + tolerance {
+    return Err(MsmsPatchConstructionError::InvalidContactSolidAngle { atom_index });
+  }
+  Ok(solid_angle.min(4.0 * PI))
+}
+
+/// Applies Gauss-Bonnet to one exposed-side-oriented contact loop.
+fn contact_loop_solid_angle(
+  atom_index: usize,
+  arcs: &[ContactBoundaryArc],
+  boundary_loop: &ContactBoundaryLoop,
+) -> Result<f64, MsmsPatchConstructionError> {
+  if boundary_loop.arcs.is_empty() {
+    return Err(MsmsPatchConstructionError::OpenContactBoundary { atom_index });
+  }
+  let geodesic_curvature = boundary_loop
+    .arcs
+    .iter()
+    .map(|arc_use| {
+      let arc = &arcs[arc_use.arc_index];
+      let signed_sweep = if arc_use.reversed {
+        -arc.sweep_angle
+      } else {
+        arc.sweep_angle
+      };
+      arc.direction_axis_offset * signed_sweep
+    })
+    .sum::<f64>();
+  let mut turning_angle = 0.0;
+  for index in 0..boundary_loop.arcs.len() {
+    let incoming = boundary_loop.arcs[index];
+    let outgoing = boundary_loop.arcs[(index + 1) % boundary_loop.arcs.len()];
+    let (incoming_direction, incoming_tangent) = contact_arc_endpoint(&arcs[incoming.arc_index], incoming, false);
+    let (outgoing_direction, outgoing_tangent) = contact_arc_endpoint(&arcs[outgoing.arc_index], outgoing, true);
+    if incoming_direction.distance(outgoing_direction) > 1.0e-9 {
+      return Err(MsmsPatchConstructionError::OpenContactBoundary { atom_index });
+    }
+    let vertex_direction = (incoming_direction + outgoing_direction).normalize_or_zero();
+    if vertex_direction.length_squared() <= f64::EPSILON {
+      return Err(MsmsPatchConstructionError::InvalidContactSolidAngle { atom_index });
+    }
+    turning_angle += vertex_direction
+      .dot(incoming_tangent.cross(outgoing_tangent))
+      .atan2(incoming_tangent.dot(outgoing_tangent));
+  }
+  let area = (TAU - turning_angle - geodesic_curvature).rem_euclid(4.0 * PI);
+  if !area.is_finite() {
+    return Err(MsmsPatchConstructionError::InvalidContactSolidAngle { atom_index });
+  }
+  Ok(area)
+}
+
+/// Evaluates the direction and traversal tangent at one directed arc endpoint.
+fn contact_arc_endpoint(arc: &ContactBoundaryArc, arc_use: ContactBoundaryArcUse, at_start: bool) -> (DVec3, DVec3) {
+  let stored_start = at_start != arc_use.reversed;
+  let angle_offset = if stored_start { 0.0 } else { arc.sweep_angle };
+  let axis = DVec3::from_array(arc.axis);
+  let basis = DVec3::from_array(arc.basis);
+  let perpendicular_basis = axis.cross(basis);
+  let angle = arc.start_angle + angle_offset;
+  let radial = angle.cos() * basis + angle.sin() * perpendicular_basis;
+  let forward_tangent = -angle.sin() * basis + angle.cos() * perpendicular_basis;
+  let tangent = if arc_use.reversed {
+    -forward_tangent
+  } else {
+    forward_tangent
+  };
+  (
+    arc.direction_axis_offset * axis + arc.direction_circle_radius * radial,
+    tangent,
+  )
 }
 
 /// Builds untrimmed toroidal geometry from accessible rolling-probe arcs.
@@ -417,6 +846,24 @@ mod tests {
       .unwrap_or_else(|| panic!("intersecting pair should produce one toroidal patch"))
   }
 
+  fn synthetic_contact_arc(edge_index: usize, faces: [usize; 2]) -> ContactBoundaryArc {
+    ContactBoundaryArc {
+      edge_index,
+      atom_index: 10,
+      atom_center: [0.0; 3],
+      atom_radius: 1.0,
+      axis: [1.0, 0.0, 0.0],
+      basis: [0.0, 1.0, 0.0],
+      direction_axis_offset: 0.0,
+      direction_circle_radius: 1.0,
+      start_angle: 0.0,
+      sweep_angle: PI,
+      face_indices: [Some(faces[0]), Some(faces[1])],
+      occluded_direction: [1.0, 0.0, 0.0],
+      exposed_on_left_when_forward: true,
+    }
+  }
+
   #[test]
   fn mirrored_probe_faces_should_produce_equal_reentrant_areas() {
     let atoms = equilateral_atoms();
@@ -491,5 +938,110 @@ mod tests {
     let normal = DVec3::from_array(patch.outward_normal(0.37, 0.41 * patch.polar_sweep));
 
     assert!((normal.length() - 1.0).abs() < 1.0e-12);
+  }
+
+  #[test]
+  fn isolated_atom_should_produce_a_full_contact_sphere() {
+    let atoms = vec![MsmsAtom {
+      atom_index: 10,
+      center: DVec3::ZERO,
+      radius: 1.7,
+    }];
+    let patches = build_contact_patch_geometry(&atoms, &[], MsmsParameters::default())
+      .unwrap_or_else(|error| panic!("isolated atom should produce a contact patch: {error}"));
+
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].topology, ContactPatchTopology::FullSphere);
+    assert!(patches[0].boundary_arcs.is_empty());
+    assert!((patches[0].solid_angle - 4.0 * PI).abs() < 1.0e-12);
+  }
+
+  #[test]
+  fn contained_atom_should_not_produce_a_contact_patch() {
+    let atoms = vec![
+      MsmsAtom {
+        atom_index: 10,
+        center: DVec3::ZERO,
+        radius: 2.0,
+      },
+      MsmsAtom {
+        atom_index: 20,
+        center: DVec3::ZERO,
+        radius: 1.0,
+      },
+    ];
+    let patches = build_contact_patch_geometry(&atoms, &[], MsmsParameters::default())
+      .unwrap_or_else(|error| panic!("contained atom filtering should succeed: {error}"));
+
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].atom_index, 10);
+  }
+
+  #[test]
+  fn proper_expanded_sphere_intersection_should_occlude_surface_area() {
+    let atoms = equal_pair(2.0);
+
+    assert!(expanded_atom_surface_has_occluder(&atoms[0], &atoms, 1.0));
+    assert!(expanded_atom_surface_has_occluder(&atoms[1], &atoms, 1.0));
+  }
+
+  #[test]
+  fn nested_smaller_sphere_should_not_occlude_outer_surface() {
+    let atoms = vec![
+      MsmsAtom {
+        atom_index: 10,
+        center: DVec3::ZERO,
+        radius: 2.0,
+      },
+      MsmsAtom {
+        atom_index: 20,
+        center: DVec3::ZERO,
+        radius: 1.0,
+      },
+    ];
+
+    assert!(!expanded_atom_surface_has_occluder(&atoms[0], &atoms, 1.0));
+  }
+
+  #[test]
+  fn free_probe_circle_should_bound_both_atom_contact_patches() {
+    let atoms = equal_pair(2.0);
+    let parameters =
+      MsmsParameters::new(1.0).unwrap_or_else(|error| panic!("unit probe radius should be valid: {error}"));
+    let edges = build_accessible_probe_edges(&atoms, parameters)
+      .unwrap_or_else(|error| panic!("intersecting pair should produce a free edge: {error}"));
+    let patches = build_contact_patch_geometry(&atoms, &edges, parameters)
+      .unwrap_or_else(|error| panic!("free edge should produce atom contact boundaries: {error}"));
+
+    assert_eq!(patches.len(), 2);
+    assert!(patches.iter().all(|patch| {
+      patch.topology == ContactPatchTopology::Bounded
+        && patch.boundary_arcs.len() == 1
+        && patch.boundary_loops.len() == 1
+        && patch.boundary_loops[0].arcs.len() == 1
+    }));
+    assert!(patches.iter().flat_map(|patch| &patch.boundary_arcs).all(|arc| {
+      let direction = DVec3::from_array(arc.direction(0.37));
+      let position = DVec3::from_array(arc.position(0.37));
+      (direction.length() - 1.0).abs() < 1.0e-12
+        && (position.distance(DVec3::from_array(arc.atom_center)) - arc.atom_radius).abs() < 1.0e-12
+    }));
+    assert!(
+      patches
+        .iter()
+        .all(|patch| (patch.solid_angle - 3.0 * PI).abs() < 1.0e-12)
+    );
+  }
+
+  #[test]
+  fn incident_contact_arcs_should_form_a_closed_loop() {
+    let arcs = [synthetic_contact_arc(0, [1, 2]), synthetic_contact_arc(1, [2, 1])];
+    let loops =
+      assemble_contact_loops(10, &arcs).unwrap_or_else(|error| panic!("degree-two contact arcs should close: {error}"));
+
+    assert_eq!(loops.len(), 1);
+    assert_eq!(loops[0].arcs.len(), 2);
+    assert!(!loops[0].arcs[0].reversed);
+    assert!(!loops[0].arcs[1].reversed);
   }
 }

@@ -166,8 +166,8 @@ pub enum SurfaceGeometrySource {
   Msms {
     /// Rolling solvent-probe radius in ångströms.
     probe_radius: f64,
-    /// Requested tessellation vertices per square ångström.
-    vertex_density: f64,
+    /// Requested upper bound for display-mesh edge lengths in ångströms.
+    max_edge_length: f64,
   },
 }
 

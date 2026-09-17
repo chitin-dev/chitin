@@ -10,23 +10,26 @@ use thiserror::Error;
 
 use crate::structure::StructureScene;
 use crate::surface::atoms::{SurfaceAtom, surface_atom_groups};
+use crate::surface::{MolecularSurfaceArtifact, SurfaceDomainArtifact, SurfaceGeometrySource};
 
 use super::{
-  MsmsParameters, MsmsPatchConstructionError, MsmsProbeFaceDomain, MsmsProbeTopologyComponent, MsmsProbeTopologyDomain,
-  MsmsRequest, MsmsRollingPatchDomain, ProbeArcEndpoint, ReducedSurfaceEdge, ReducedSurfaceFace,
+  MsmsParameters, MsmsPatchConstructionError, MsmsPatchGeometryDomain, MsmsProbeFaceDomain, MsmsProbeTopologyComponent,
+  MsmsProbeTopologyDomain, MsmsRequest, MsmsTessellationError, MsmsTessellationParameters, ProbeArcEndpoint,
+  ReducedSurfaceEdge, ReducedSurfaceFace,
   arcs::{ProbeArcError, accessible_probe_arcs},
   geometry::{MsmsAtom, TangentProbeError, tangent_probe_faces},
   neighbors::{ExpandedSphereNeighborGraph, NeighborGraphError},
-  patches::{build_reentrant_patches, build_toroidal_patch_geometry},
+  patches::{build_contact_patch_geometry, build_reentrant_patches, build_toroidal_patch_geometry},
+  tessellation::tessellate_msms_patch_domain,
 };
 
-/// Builds rolling toroidal and reentrant patch geometry for every selected domain.
+/// Builds contact, toroidal, and reentrant patch geometry for every selected domain.
 ///
 /// This structure-level entry point shares atom preparation and one neighbor
 /// graph with reduced-surface construction, then derives renderable analytical
-/// geometry from its edges and faces. It deliberately excludes contact patches
-/// and does not trim singular tori, so callers must not present the result as a
-/// complete MSMS molecular surface.
+/// geometry from its vertices, edges, and faces. Contact boundaries and solid
+/// angles are exact. Singular tori remain untrimmed, so callers must not
+/// present the result as a complete MSMS surface.
 ///
 /// # Parameters
 ///
@@ -35,7 +38,7 @@ use super::{
 ///
 /// # Returns
 ///
-/// Deterministically ordered rolling-patch domains, or
+/// Deterministically ordered patch-geometry domains, or
 /// [`MsmsConstructionError`] when topology or patch geometry is invalid.
 ///
 /// # Examples
@@ -43,7 +46,7 @@ use super::{
 /// ```
 /// use chitin_bio::{
 ///   structure::{PdbParser, StructureScene},
-///   surface::msms::{MsmsRequest, build_msms_rolling_patch_geometry},
+///   surface::msms::{MsmsRequest, build_msms_patch_geometry},
 /// };
 ///
 /// let parsed = PdbParser::new().parse_bytes(
@@ -52,34 +55,97 @@ use super::{
 /// END\n",
 /// )?;
 /// let scene = StructureScene::from_first_model(&parsed.structure)?;
-/// let domains = build_msms_rolling_patch_geometry(&scene, MsmsRequest::default())?;
+/// let domains = build_msms_patch_geometry(&scene, MsmsRequest::default())?;
 /// assert_eq!(domains.len(), 1);
 /// assert_eq!(domains[0].toroidal_patches.len(), 1);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
-pub fn build_msms_rolling_patch_geometry(
+pub fn build_msms_patch_geometry(
   scene: &StructureScene,
   request: MsmsRequest,
-) -> Result<Vec<MsmsRollingPatchDomain>, MsmsConstructionError> {
+) -> Result<Vec<MsmsPatchGeometryDomain>, MsmsConstructionError> {
   surface_atom_groups(scene, request.atom_scope, request.partition)
     .into_iter()
     .map(|(chain_id, atoms)| {
       let analytical_atoms = atoms.iter().map(msms_atom).collect::<Vec<_>>();
       let topology = build_probe_topology(&analytical_atoms, request.parameters)?;
+      let contact_patches = build_contact_patch_geometry(&analytical_atoms, &topology.edges, request.parameters)?;
       let toroidal_patches = build_toroidal_patch_geometry(&analytical_atoms, &topology.edges, request.parameters)?;
       let reentrant_patches = build_reentrant_patches(&analytical_atoms, &topology.faces, request.parameters)?;
-      Ok(MsmsRollingPatchDomain {
+      Ok(MsmsPatchGeometryDomain {
         topology: MsmsProbeTopologyDomain {
           chain_id,
           edges: topology.edges,
           faces: topology.faces,
           components: topology.components,
         },
+        contact_patches,
         toroidal_patches,
         reentrant_patches,
       })
     })
     .collect()
+}
+
+/// Generates a renderer-neutral surface from fully resolved analytical patches.
+///
+/// Construction and display tessellation remain separate: exact patch areas do
+/// not depend on `tessellation`. The function deliberately fails if a domain
+/// contains an untrimmed singular torus, preventing a partial mesh from being
+/// displayed as a complete molecular surface.
+///
+/// # Parameters
+///
+/// * `scene` supplies source atom identities, coordinates, and classifications.
+/// * `request` selects atoms, domain partitioning, and probe radius.
+/// * `tessellation` controls display edge length without changing scientific area.
+///
+/// # Returns
+///
+/// A complete renderer-neutral artifact, or [`MsmsSurfaceGenerationError`]
+/// when analytical construction or tessellation cannot be completed safely.
+///
+/// # Examples
+///
+/// ```
+/// use chitin_bio::{
+///   structure::{PdbParser, StructureScene},
+///   surface::msms::{MsmsRequest, MsmsTessellationParameters, generate_msms_surface},
+/// };
+///
+/// let parsed = PdbParser::new().parse_bytes(
+///   b"ATOM      1  C   GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \n\
+/// END\n",
+/// )?;
+/// let scene = StructureScene::from_first_model(&parsed.structure)?;
+/// let artifact = generate_msms_surface(
+///   &scene,
+///   MsmsRequest::default(),
+///   MsmsTessellationParameters::default(),
+/// )?;
+/// assert!(!artifact.domains[0].mesh.indices.is_empty());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn generate_msms_surface(
+  scene: &StructureScene,
+  request: MsmsRequest,
+  tessellation: MsmsTessellationParameters,
+) -> Result<MolecularSurfaceArtifact, MsmsSurfaceGenerationError> {
+  let domains = build_msms_patch_geometry(scene, request)?
+    .into_iter()
+    .map(|domain| {
+      let chain_id = domain.topology.chain_id;
+      let mesh = tessellate_msms_patch_domain(&domain, tessellation)?;
+      Ok(SurfaceDomainArtifact { chain_id, mesh })
+    })
+    .collect::<Result<Vec<_>, MsmsTessellationError>>()?;
+  Ok(MolecularSurfaceArtifact {
+    source: SurfaceGeometrySource::Msms {
+      probe_radius: request.parameters.probe_radius(),
+      max_edge_length: tessellation.max_edge_length(),
+    },
+    domains,
+  })
 }
 
 /// Builds accessible probe arcs and faces for every selected structure domain.
@@ -267,6 +333,17 @@ pub enum MsmsConstructionError {
     /// Number of geometrically coincident face candidates.
     match_count: usize,
   },
+}
+
+/// Failure produced while constructing a renderable analytical MSMS surface.
+#[derive(Clone, Copy, Debug, Error, PartialEq)]
+pub enum MsmsSurfaceGenerationError {
+  /// Analytical reduced-surface or patch construction failed.
+  #[error(transparent)]
+  Construction(#[from] MsmsConstructionError),
+  /// A patch could not yet be converted into valid display geometry.
+  #[error(transparent)]
+  Tessellation(#[from] MsmsTessellationError),
 }
 
 /// Resolves each finite probe arc endpoint to its tangent-probe face.
@@ -568,6 +645,7 @@ mod tests {
   use glam::DVec3;
 
   use super::*;
+  use crate::structure::{PdbParser, StructureScene};
 
   fn equilateral_atoms() -> Vec<MsmsAtom> {
     vec![
@@ -662,6 +740,31 @@ mod tests {
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].atom_indices, [10, 20]);
     assert_eq!(edges[0].face_indices, [None, None]);
+  }
+
+  #[test]
+  fn non_singular_structure_should_generate_renderable_artifact() {
+    let parsed = PdbParser::new()
+      .parse_bytes(
+        b"ATOM      1  C   GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \n\
+ATOM      2  CA  GLY A   1       2.000   0.000   0.000  1.00 10.00           C  \n\
+END\n",
+      )
+      .unwrap_or_else(|error| panic!("two-atom PDB should parse: {error}"));
+    let scene = StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("two-atom structure should produce a scene: {error}"));
+    let artifact = generate_msms_surface(&scene, MsmsRequest::default(), MsmsTessellationParameters::default())
+      .unwrap_or_else(|error| panic!("regular two-atom surface should tessellate: {error}"));
+
+    assert_eq!(artifact.domains.len(), 1);
+    assert!(!artifact.domains[0].mesh.indices.is_empty());
+    assert_eq!(
+      artifact.source,
+      SurfaceGeometrySource::Msms {
+        probe_radius: MsmsParameters::default().probe_radius(),
+        max_edge_length: MsmsTessellationParameters::default().max_edge_length(),
+      }
+    );
   }
 
   #[test]

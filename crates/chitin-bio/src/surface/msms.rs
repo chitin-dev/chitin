@@ -18,12 +18,15 @@ pub mod patches;
 pub mod tessellation;
 
 pub use construction::{
-  MsmsConstructionError, build_accessible_probe_edges, build_accessible_probe_faces, build_msms_probe_faces,
-  build_msms_probe_topology, build_msms_rolling_patch_geometry,
+  MsmsConstructionError, MsmsSurfaceGenerationError, build_accessible_probe_edges, build_accessible_probe_faces,
+  build_msms_patch_geometry, build_msms_probe_faces, build_msms_probe_topology, generate_msms_surface,
 };
-pub use patches::{MsmsPatchConstructionError, build_reentrant_patches, build_toroidal_patch_geometry};
+pub use patches::{
+  MsmsPatchConstructionError, build_contact_patch_geometry, build_reentrant_patches, build_toroidal_patch_geometry,
+};
 pub use tessellation::{
-  MsmsTessellationError, MsmsTessellationParameters, tessellate_reentrant_patch, tessellate_regular_toroidal_patch,
+  MsmsTessellationError, MsmsTessellationParameters, tessellate_contact_patch, tessellate_msms_patch_domain,
+  tessellate_reentrant_patch, tessellate_regular_toroidal_patch,
 };
 
 use thiserror::Error;
@@ -110,19 +113,72 @@ pub struct MsmsProbeTopologyDomain {
   pub components: Vec<MsmsProbeTopologyComponent>,
 }
 
-/// Rolling-probe patch geometry for one independently calculated domain.
+/// Analytical patch geometry for one independently calculated domain.
 ///
-/// This intermediate intentionally contains only toroidal and reentrant
-/// patches. It is not a complete molecular surface until atom-contact patches
-/// and singularity trimming have been assembled.
+/// This intermediate contains exact contact boundaries plus untrimmed
+/// toroidal and reentrant patches. Contact areas are exact, but this is not a
+/// complete molecular surface until singular patches have been trimmed.
 #[derive(Clone, Debug, PartialEq)]
-pub struct MsmsRollingPatchDomain {
+pub struct MsmsPatchGeometryDomain {
   /// Accessible reduced-surface topology underlying the patch geometry.
   pub topology: MsmsProbeTopologyDomain,
+  /// Atom-sphere contact patches and their closed analytical boundaries.
+  pub contact_patches: Vec<ContactPatchGeometry>,
   /// Untrimmed toroidal geometry generated from topology edges.
   pub toroidal_patches: Vec<ToroidalPatchGeometry>,
   /// Reentrant spherical triangles generated from topology faces.
   pub reentrant_patches: Vec<ReentrantPatch>,
+}
+
+impl MsmsPatchGeometryDomain {
+  /// Summarizes resolved areas and unresolved singular topology.
+  pub fn area_summary(&self) -> MsmsPatchAreaSummary {
+    let contact_sas = self.contact_patches.iter().map(ContactPatchGeometry::sas_area).sum();
+    let contact_ses = self.contact_patches.iter().map(ContactPatchGeometry::ses_area).sum();
+    let regular_toroidal_ses = self
+      .toroidal_patches
+      .iter()
+      .filter_map(ToroidalPatchGeometry::regular_area)
+      .sum();
+    let singular_torus_count = self
+      .toroidal_patches
+      .iter()
+      .filter(|patch| patch.topology == ToroidalPatchTopology::SelfIntersecting)
+      .count();
+    let untrimmed_reentrant_ses = self.reentrant_patches.iter().map(|patch| patch.area()).sum();
+    MsmsPatchAreaSummary {
+      contact_sas,
+      contact_ses,
+      regular_toroidal_ses,
+      untrimmed_reentrant_ses,
+      singular_torus_count,
+    }
+  }
+}
+
+/// Analytical area accounting before singular patches are trimmed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MsmsPatchAreaSummary {
+  /// Solvent-accessible area contributed by exposed expanded atom spheres.
+  pub contact_sas: f64,
+  /// Solvent-excluded area contributed by atom-contact patches.
+  pub contact_ses: f64,
+  /// Solvent-excluded area from regular toroidal patches only.
+  pub regular_toroidal_ses: f64,
+  /// Reentrant area before singular probe intersections are removed.
+  pub untrimmed_reentrant_ses: f64,
+  /// Number of toroidal patches still requiring singularity trimming.
+  pub singular_torus_count: usize,
+}
+
+impl MsmsPatchAreaSummary {
+  /// Returns complete SAS/SES totals when no singular patch remains.
+  pub fn resolved_areas(self) -> Option<MsmsSurfaceAreas> {
+    (self.singular_torus_count == 0).then_some(MsmsSurfaceAreas {
+      sas: self.contact_sas,
+      ses: self.contact_ses + self.regular_toroidal_ses + self.untrimmed_reentrant_ses,
+    })
+  }
 }
 
 /// One connected component of accessible probe arcs and tangent-probe faces.
@@ -239,6 +295,117 @@ pub struct ReentrantPatch {
   pub contact_directions: [[f64; 3]; 3],
   /// Non-negative solid angle of the spherical triangle in steradians.
   pub solid_angle: f64,
+}
+
+/// One atom-sphere contact curve induced by a reduced-surface edge.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContactBoundaryArc {
+  /// Index of the source reduced-surface edge.
+  pub edge_index: usize,
+  /// Source atom carrying this contact curve.
+  pub atom_index: usize,
+  /// Atom center in ångströms.
+  pub atom_center: [f64; 3],
+  /// Van der Waals radius of the atom in ångströms.
+  pub atom_radius: f64,
+  /// Unit atom-pair axis shared with the probe-center circle.
+  pub axis: [f64; 3],
+  /// Unit vector defining zero azimuth around the axis.
+  pub basis: [f64; 3],
+  /// Constant axial coordinate on the atom's unit sphere.
+  pub direction_axis_offset: f64,
+  /// Radius of the contact circle on the atom's unit sphere.
+  pub direction_circle_radius: f64,
+  /// Starting azimuth inherited from the reduced-surface edge.
+  pub start_angle: f64,
+  /// Positive azimuth sweep inherited from the reduced-surface edge.
+  pub sweep_angle: f64,
+  /// Incident reduced-surface faces at the start and end of the arc.
+  pub face_indices: [Option<usize>; 2],
+  /// Unit direction from this atom toward the neighboring occluding atom.
+  ///
+  /// This point lies on the non-exposed side of the boundary and supplies a
+  /// stable stereographic projection pole for display tessellation.
+  pub occluded_direction: [f64; 3],
+  /// Whether increasing azimuth keeps the exposed region on the left.
+  pub exposed_on_left_when_forward: bool,
+}
+
+impl ContactBoundaryArc {
+  /// Evaluates the outward atom-sphere direction at an azimuth offset.
+  pub fn direction(&self, angle_offset: f64) -> [f64; 3] {
+    let axis = glam::DVec3::from_array(self.axis);
+    let basis = glam::DVec3::from_array(self.basis);
+    let perpendicular_basis = axis.cross(basis);
+    let angle = self.start_angle + angle_offset;
+    let radial = angle.cos() * basis + angle.sin() * perpendicular_basis;
+    (self.direction_axis_offset * axis + self.direction_circle_radius * radial).to_array()
+  }
+
+  /// Evaluates one atom-sphere contact position in ångströms.
+  pub fn position(&self, angle_offset: f64) -> [f64; 3] {
+    let center = glam::DVec3::from_array(self.atom_center);
+    (center + self.atom_radius * glam::DVec3::from_array(self.direction(angle_offset))).to_array()
+  }
+}
+
+/// Directed use of a contact arc inside one closed boundary loop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ContactBoundaryArcUse {
+  /// Index into [`ContactPatchGeometry::boundary_arcs`].
+  pub arc_index: usize,
+  /// Whether the loop traverses the stored arc from end to start.
+  pub reversed: bool,
+}
+
+/// One closed boundary loop on an atom sphere.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContactBoundaryLoop {
+  /// Directed contact arcs in traversal order.
+  pub arcs: Vec<ContactBoundaryArcUse>,
+}
+
+/// Topological form of one exposed atom-contact patch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContactPatchTopology {
+  /// The complete atom sphere is exposed and has no boundary.
+  FullSphere,
+  /// One or more closed contact loops bound the exposed region.
+  Bounded,
+}
+
+/// Analytical boundary geometry of one exposed atom-contact patch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContactPatchGeometry {
+  /// Source atom index in the structure scene.
+  pub atom_index: usize,
+  /// Atom center in ångströms.
+  pub atom_center: [f64; 3],
+  /// Van der Waals radius in ångströms.
+  pub atom_radius: f64,
+  /// Rolling solvent-probe radius in ångströms.
+  pub probe_radius: f64,
+  /// Contact curves owned by this atom patch.
+  pub boundary_arcs: Vec<ContactBoundaryArc>,
+  /// Closed loops assembled from [`Self::boundary_arcs`].
+  pub boundary_loops: Vec<ContactBoundaryLoop>,
+  /// Whether this is a complete sphere or a bounded spherical region.
+  pub topology: ContactPatchTopology,
+  /// Exact exposed solid angle in steradians.
+  pub solid_angle: f64,
+}
+
+impl ContactPatchGeometry {
+  /// Returns the exact atom-contact SES area in square ångströms.
+  pub fn ses_area(&self) -> f64 {
+    self.atom_radius * self.atom_radius * self.solid_angle
+  }
+
+  /// Returns the corresponding expanded-sphere SAS area in square ångströms.
+  pub fn sas_area(&self) -> f64 {
+    let accessible_radius = self.atom_radius + self.probe_radius;
+    accessible_radius * accessible_radius * self.solid_angle
+  }
 }
 
 impl ReentrantPatch {
@@ -478,5 +645,34 @@ mod tests {
     let expected = FRAC_PI_2 * (3.0 * FRAC_PI_2 + 1.0);
 
     assert!((patch.area() - expected).abs() < 1.0e-12);
+  }
+
+  #[test]
+  fn unresolved_singular_patch_should_withhold_complete_area_totals() {
+    let summary = MsmsPatchAreaSummary {
+      contact_sas: 10.0,
+      contact_ses: 5.0,
+      regular_toroidal_ses: 2.0,
+      untrimmed_reentrant_ses: 3.0,
+      singular_torus_count: 1,
+    };
+
+    assert_eq!(summary.resolved_areas(), None);
+  }
+
+  #[test]
+  fn regular_patch_summary_should_resolve_complete_area_totals() {
+    let summary = MsmsPatchAreaSummary {
+      contact_sas: 10.0,
+      contact_ses: 5.0,
+      regular_toroidal_ses: 2.0,
+      untrimmed_reentrant_ses: 3.0,
+      singular_torus_count: 0,
+    };
+
+    assert_eq!(
+      summary.resolved_areas(),
+      Some(MsmsSurfaceAreas { sas: 10.0, ses: 10.0 })
+    );
   }
 }

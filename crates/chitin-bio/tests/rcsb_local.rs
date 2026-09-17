@@ -9,6 +9,9 @@
 use std::path::{Path, PathBuf};
 
 use chitin_bio::structure::{BondSource, MmcifParser, PdbParser, Structure, StructureParseResult, StructureScene};
+use chitin_bio::surface::msms::{
+  MsmsRequest, MsmsTessellationParameters, build_msms_patch_geometry, tessellate_contact_patch,
+};
 
 /// Structure-file format associated with one local fixture directory.
 #[derive(Clone, Copy)]
@@ -200,4 +203,90 @@ fn local_pdb_and_mmcif_fixtures_should_have_matching_ids() {
     .collect::<Vec<_>>();
 
   assert_eq!(pdb_ids, mmcif_ids, "PDB and mmCIF fixture IDs should be paired");
+}
+
+#[test]
+fn local_small_structure_should_construct_msms_patch_geometry() {
+  let root = fixture_root();
+  if skip_without_fixture_root(&root) {
+    return;
+  }
+  let path = root.join("mmcif/1CRN.cif");
+  if !path.is_file() {
+    eprintln!("skipping local MSMS topology test; {} is absent", path.display());
+    return;
+  }
+  let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{} should be readable: {error}", path.display()));
+  let parsed = MmcifParser::new()
+    .parse_bytes(&bytes)
+    .unwrap_or_else(|error| panic!("{} should parse: {error}", path.display()));
+  let scene = StructureScene::from_first_model(&parsed.structure)
+    .unwrap_or_else(|error| panic!("{} should produce a render scene: {error}", path.display()));
+  let domains = build_msms_patch_geometry(&scene, MsmsRequest::default())
+    .unwrap_or_else(|error| panic!("{} should construct MSMS patch geometry: {error}", path.display()));
+
+  let contact_count = domains.iter().map(|domain| domain.contact_patches.len()).sum::<usize>();
+  let full_contact_count = domains
+    .iter()
+    .flat_map(|domain| &domain.contact_patches)
+    .filter(|patch| patch.boundary_loops.is_empty())
+    .count();
+  let maximum_contact_loops = domains
+    .iter()
+    .flat_map(|domain| &domain.contact_patches)
+    .map(|patch| patch.boundary_loops.len())
+    .max()
+    .unwrap_or(0);
+  let toroidal_count = domains
+    .iter()
+    .map(|domain| domain.toroidal_patches.len())
+    .sum::<usize>();
+  let reentrant_count = domains
+    .iter()
+    .map(|domain| domain.reentrant_patches.len())
+    .sum::<usize>();
+  let contact_sas = domains
+    .iter()
+    .map(|domain| domain.area_summary().contact_sas)
+    .sum::<f64>();
+  let contact_ses = domains
+    .iter()
+    .map(|domain| domain.area_summary().contact_ses)
+    .sum::<f64>();
+  let regular_toroidal_ses = domains
+    .iter()
+    .map(|domain| domain.area_summary().regular_toroidal_ses)
+    .sum::<f64>();
+  let untrimmed_reentrant_ses = domains
+    .iter()
+    .map(|domain| domain.area_summary().untrimmed_reentrant_ses)
+    .sum::<f64>();
+  let singular_torus_count = domains
+    .iter()
+    .map(|domain| domain.area_summary().singular_torus_count)
+    .sum::<usize>();
+  let contact_mesh_vertices = domains
+    .iter()
+    .flat_map(|domain| &domain.contact_patches)
+    .map(|patch| {
+      tessellate_contact_patch(patch, MsmsTessellationParameters::default())
+        .unwrap_or_else(|error| {
+          panic!(
+            "{} contact patch {} should tessellate: {error}",
+            path.display(),
+            patch.atom_index
+          )
+        })
+        .vertices
+        .len()
+    })
+    .sum::<usize>();
+  println!(
+    "RCSB 1CRN MSMS geometry: {contact_count} contact patches ({full_contact_count} full, max {maximum_contact_loops} loops, {contact_mesh_vertices} display vertices), {toroidal_count} toroidal patches ({singular_torus_count} singular), {reentrant_count} reentrant patches; contact SAS {contact_sas:.3} A^2, contact SES {contact_ses:.3} A^2, regular toroidal SES {regular_toroidal_ses:.3} A^2, untrimmed reentrant SES {untrimmed_reentrant_ses:.3} A^2"
+  );
+  assert!(contact_count > 0);
+  assert!(toroidal_count > 0);
+  assert!(reentrant_count > 0);
+  assert!(contact_sas.is_finite() && contact_sas > 0.0);
+  assert!(contact_ses.is_finite() && contact_ses > 0.0);
 }
