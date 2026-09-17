@@ -508,10 +508,13 @@ impl ToroidalPatchGeometry {
     if self.topology != ToroidalPatchTopology::Regular {
       return None;
     }
-    let polar_end = self.polar_start + self.polar_sweep;
-    let meridian_integral =
-      self.major_radius * self.polar_sweep + self.probe_radius * (polar_end.sin() - self.polar_start.sin());
-    Some((self.probe_radius * self.azimuth_sweep * meridian_integral).abs())
+    Some(integrate_regular_toroidal_area(
+      self.major_radius,
+      self.probe_radius,
+      self.azimuth_sweep,
+      self.polar_start,
+      self.polar_sweep,
+    ))
   }
 
   /// Splits a radial singularity into regular end patches for display.
@@ -620,18 +623,49 @@ pub struct ToroidalPatch {
   pub azimuth_sweep: f64,
   /// Starting probe-circle parameter in radians.
   pub polar_start: f64,
-  /// Ending probe-circle parameter in radians.
-  pub polar_end: f64,
+  /// Positive probe-circle sweep in radians.
+  ///
+  /// Storing the sweep rather than a normalized endpoint makes intervals that
+  /// cross the $2\pi$ seam unambiguous. A complete meridian uses $2\pi$.
+  pub polar_sweep: f64,
 }
 
 impl ToroidalPatch {
   /// Integrates the standard torus area element over the trimmed parameter range.
   pub fn area(self) -> f64 {
-    let polar_sweep = self.polar_end - self.polar_start;
-    let meridian_integral =
-      self.major_radius * polar_sweep + self.probe_radius * (self.polar_end.sin() - self.polar_start.sin());
-    (self.probe_radius * self.azimuth_sweep * meridian_integral).abs()
+    integrate_regular_toroidal_area(
+      self.major_radius,
+      self.probe_radius,
+      self.azimuth_sweep,
+      self.polar_start,
+      self.polar_sweep,
+    )
   }
+}
+
+/// Integrates a non-singular rectangular patch in standard torus parameters.
+///
+/// # Parameters
+///
+/// * `major_radius` is the distance from the torus axis to the probe center.
+/// * `probe_radius` is the radius of the rolling probe.
+/// * `azimuth_sweep` is the signed angular extent about the torus axis.
+/// * `polar_start` is the starting meridian angle.
+/// * `polar_sweep` is the positive, unwrapped meridian extent.
+///
+/// # Returns
+///
+/// The unsigned surface area of the parameter rectangle.
+fn integrate_regular_toroidal_area(
+  major_radius: f64,
+  probe_radius: f64,
+  azimuth_sweep: f64,
+  polar_start: f64,
+  polar_sweep: f64,
+) -> f64 {
+  let polar_end = polar_start + polar_sweep;
+  let meridian_integral = major_radius * polar_sweep + probe_radius * (polar_end.sin() - polar_start.sin());
+  (probe_radius * azimuth_sweep * meridian_integral).abs()
 }
 
 /// Complete analytical MSMS result before optional display tessellation.
@@ -696,7 +730,7 @@ mod tests {
       probe_radius: 1.5,
       azimuth_sweep: TAU,
       polar_start: 0.0,
-      polar_end: TAU,
+      polar_sweep: TAU,
     };
 
     assert!((patch.area() - 4.0 * PI * PI * 3.0 * 1.5).abs() < 1.0e-12);
@@ -709,9 +743,23 @@ mod tests {
       probe_radius: 1.0,
       azimuth_sweep: FRAC_PI_2,
       polar_start: 0.0,
-      polar_end: FRAC_PI_2,
+      polar_sweep: FRAC_PI_2,
     };
     let expected = FRAC_PI_2 * (3.0 * FRAC_PI_2 + 1.0);
+
+    assert!((patch.area() - expected).abs() < 1.0e-12);
+  }
+
+  #[test]
+  fn toroidal_patch_should_integrate_forward_across_polar_seam() {
+    let patch = ToroidalPatch {
+      major_radius: 3.0,
+      probe_radius: 1.0,
+      azimuth_sweep: FRAC_PI_2,
+      polar_start: 3.0 * FRAC_PI_2,
+      polar_sweep: PI,
+    };
+    let expected = FRAC_PI_2 * (3.0 * PI + 2.0);
 
     assert!((patch.area() - expected).abs() < 1.0e-12);
   }
