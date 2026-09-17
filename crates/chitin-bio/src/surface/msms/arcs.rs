@@ -95,6 +95,7 @@ pub fn accessible_probe_arcs(
         probe_circle_radius: circle.radius,
         start_angle: start,
         sweep_angle: end - start,
+        face_indices: [None, None],
       })
       .collect(),
   )

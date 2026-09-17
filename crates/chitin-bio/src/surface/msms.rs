@@ -14,11 +14,13 @@ pub mod arcs;
 mod construction;
 pub mod geometry;
 pub mod neighbors;
+pub mod patches;
 
 pub use construction::{
   MsmsConstructionError, build_accessible_probe_edges, build_accessible_probe_faces, build_msms_probe_faces,
   build_msms_probe_topology,
 };
+pub use patches::{MsmsPatchConstructionError, build_reentrant_patches};
 
 use thiserror::Error;
 
@@ -100,6 +102,19 @@ pub struct MsmsProbeTopologyDomain {
   pub edges: Vec<ReducedSurfaceEdge>,
   /// Accessible, consistently oriented tangent-probe faces.
   pub faces: Vec<ReducedSurfaceFace>,
+  /// Connected components induced by shared reduced-surface atoms.
+  pub components: Vec<MsmsProbeTopologyComponent>,
+}
+
+/// One connected component of accessible probe arcs and tangent-probe faces.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MsmsProbeTopologyComponent {
+  /// Source atom indices participating in the component.
+  pub atom_indices: Vec<usize>,
+  /// Indices into the containing domain's `edges` collection.
+  pub edge_indices: Vec<usize>,
+  /// Indices into the containing domain's `faces` collection.
+  pub face_indices: Vec<usize>,
 }
 
 /// Invalid physical parameter supplied to analytical surface construction.
@@ -154,6 +169,20 @@ pub struct ReducedSurfaceEdge {
   pub start_angle: f64,
   /// Positive angular sweep in radians; a full free edge uses $2\pi$.
   pub sweep_angle: f64,
+  /// Incident face at the start and end of the arc, respectively.
+  ///
+  /// A complete free circle has no endpoints and therefore stores
+  /// `[None, None]`.
+  pub face_indices: [Option<usize>; 2],
+}
+
+/// Endpoint of an open reduced-surface probe arc.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProbeArcEndpoint {
+  /// Endpoint at `start_angle`.
+  Start,
+  /// Endpoint at `start_angle + sweep_angle`.
+  End,
 }
 
 /// One fixed rolling-probe position supported by three atoms.
@@ -171,9 +200,33 @@ pub enum MsmsPatch {
   /// Convex spherical patch lying on an atom.
   Contact(ContactPatch),
   /// Concave spherical patch lying on a fixed probe sphere.
-  Reentrant(SphericalPatch),
+  Reentrant(ReentrantPatch),
   /// Saddle patch swept while a probe rolls around an atom pair.
   Toroidal(ToroidalPatch),
+}
+
+/// Concave spherical triangle supported by one fixed rolling probe.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReentrantPatch {
+  /// Index of the source reduced-surface face.
+  pub face_index: usize,
+  /// Fixed probe center in ångströms.
+  pub probe_center: [f64; 3],
+  /// Rolling-probe radius in ångströms.
+  pub probe_radius: f64,
+  /// Unit directions from the probe center toward the three contact points.
+  ///
+  /// Their order follows the oriented reduced-surface face.
+  pub contact_directions: [[f64; 3]; 3],
+  /// Non-negative solid angle of the spherical triangle in steradians.
+  pub solid_angle: f64,
+}
+
+impl ReentrantPatch {
+  /// Returns the analytical reentrant area in square ångströms.
+  pub fn area(self) -> f64 {
+    self.probe_radius * self.probe_radius * self.solid_angle
+  }
 }
 
 impl MsmsPatch {
@@ -220,22 +273,6 @@ impl ContactPatch {
   pub fn sas_area(self) -> f64 {
     let accessible_radius = self.atom_radius + self.probe_radius;
     accessible_radius * accessible_radius * self.solid_angle
-  }
-}
-
-/// A trimmed spherical patch represented by its signed solid angle.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct SphericalPatch {
-  /// Radius of the supporting atom or probe sphere in ångströms.
-  pub radius: f64,
-  /// Non-negative solid angle retained after analytical trimming, in steradians.
-  pub solid_angle: f64,
-}
-
-impl SphericalPatch {
-  /// Returns the analytical spherical-patch area in square ångströms.
-  pub fn area(self) -> f64 {
-    self.radius * self.radius * self.solid_angle
   }
 }
 
@@ -294,16 +331,6 @@ mod tests {
   use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
   use super::*;
-
-  #[test]
-  fn full_spherical_patch_should_have_sphere_area() {
-    let patch = SphericalPatch {
-      radius: 2.0,
-      solid_angle: 4.0 * PI,
-    };
-
-    assert!((patch.area() - 16.0 * PI).abs() < 1.0e-12);
-  }
 
   #[test]
   fn isolated_atom_contact_patch_should_integrate_exact_sas_and_ses() {
