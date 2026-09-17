@@ -15,7 +15,7 @@ use super::{
 };
 
 /// Failure produced while converting reduced-surface topology into patches.
-#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Error, PartialEq)]
 pub enum MsmsPatchConstructionError {
   /// A face references a source atom absent from its analytical domain.
   #[error("reduced-surface face {face_index} references missing source atom {atom_index}")]
@@ -82,10 +82,12 @@ pub enum MsmsPatchConstructionError {
     atom_index: usize,
   },
   /// Oriented contact loops produced an invalid exposed solid angle.
-  #[error("atom {atom_index} has an invalid contact-patch solid angle")]
+  #[error("atom {atom_index} has invalid contact-patch solid angle {solid_angle} sr")]
   InvalidContactSolidAngle {
     /// Source atom whose area could not be integrated.
     atom_index: usize,
+    /// Invalid integrated solid angle in steradians.
+    solid_angle: f64,
   },
 }
 
@@ -407,11 +409,23 @@ fn contact_solid_angle(
   for boundary_loop in loops {
     solid_angle += contact_loop_solid_angle(atom_index, arcs, boundary_loop)?;
   }
+  solid_angle = normalize_bounded_solid_angle(solid_angle);
   let tolerance = 8192.0 * f64::EPSILON * 4.0 * PI;
-  if !solid_angle.is_finite() || solid_angle <= tolerance || solid_angle > 4.0 * PI + tolerance {
-    return Err(MsmsPatchConstructionError::InvalidContactSolidAngle { atom_index });
+  if !solid_angle.is_finite() || solid_angle <= tolerance {
+    return Err(MsmsPatchConstructionError::InvalidContactSolidAngle {
+      atom_index,
+      solid_angle,
+    });
   }
-  Ok(solid_angle.min(4.0 * PI))
+  Ok(solid_angle)
+}
+
+/// Removes complete-sphere winding accumulated across nested boundary loops.
+fn normalize_bounded_solid_angle(solid_angle: f64) -> f64 {
+  // Each independently integrated loop determines its left-hand spherical
+  // region only modulo one complete sphere. Normalize only after all oriented
+  // boundaries contribute so inner loops subtract holes from the same patch.
+  solid_angle.rem_euclid(4.0 * PI)
 }
 
 /// Applies Gauss-Bonnet to one exposed-side-oriented contact loop.
@@ -447,7 +461,10 @@ fn contact_loop_solid_angle(
     }
     let vertex_direction = (incoming_direction + outgoing_direction).normalize_or_zero();
     if vertex_direction.length_squared() <= f64::EPSILON {
-      return Err(MsmsPatchConstructionError::InvalidContactSolidAngle { atom_index });
+      return Err(MsmsPatchConstructionError::InvalidContactSolidAngle {
+        atom_index,
+        solid_angle: f64::NAN,
+      });
     }
     turning_angle += vertex_direction
       .dot(incoming_tangent.cross(outgoing_tangent))
@@ -455,7 +472,10 @@ fn contact_loop_solid_angle(
   }
   let area = (TAU - turning_angle - geodesic_curvature).rem_euclid(4.0 * PI);
   if !area.is_finite() {
-    return Err(MsmsPatchConstructionError::InvalidContactSolidAngle { atom_index });
+    return Err(MsmsPatchConstructionError::InvalidContactSolidAngle {
+      atom_index,
+      solid_angle: area,
+    });
   }
   Ok(area)
 }
@@ -1043,5 +1063,10 @@ mod tests {
     assert_eq!(loops[0].arcs.len(), 2);
     assert!(!loops[0].arcs[0].reversed);
     assert!(!loops[0].arcs[1].reversed);
+  }
+
+  #[test]
+  fn nested_contact_loops_should_remove_complete_sphere_winding() {
+    assert!((normalize_bounded_solid_angle(5.0 * PI) - PI).abs() < 1.0e-12);
   }
 }

@@ -3,8 +3,16 @@
 //! Scientific areas remain properties of the analytical patches. Mesh
 //! resolution affects only rendering and exported display geometry.
 
-use std::f64::consts::{PI, TAU};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  f64::consts::{PI, TAU},
+};
 
+use lyon::{
+  math::point,
+  path::{FillRule, Path},
+  tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
+};
 use thiserror::Error;
 
 use glam::{DVec3, Vec3};
@@ -79,6 +87,12 @@ pub enum MsmsTessellationError {
     /// Source reduced-surface edge index.
     edge_index: usize,
   },
+  /// Radial singularity splitting produced no retained toric face.
+  #[error("toroidal patch {edge_index} has no valid radial-singularity interval")]
+  InvalidRadialSingularity {
+    /// Source reduced-surface edge index.
+    edge_index: usize,
+  },
   /// The requested tessellation cannot be represented with `u32` indices.
   #[error("MSMS patch tessellation exceeds the u32 mesh-index limit")]
   MeshTooLarge,
@@ -94,6 +108,12 @@ pub enum MsmsTessellationError {
   /// Contact boundaries cannot define a stable display polygon.
   #[error("contact patch on atom {atom_index} has invalid spherical geometry")]
   InvalidContactPatch {
+    /// Source atom index carrying the contact patch.
+    atom_index: usize,
+  },
+  /// Contact-mesh refinement failed to satisfy the requested edge length.
+  #[error("contact patch on atom {atom_index} did not converge during interior refinement")]
+  ContactRefinementDidNotConverge {
     /// Source atom index carrying the contact patch.
     atom_index: usize,
   },
@@ -158,8 +178,8 @@ pub fn tessellate_contact_patch(
 /// Contact, toroidal, and reentrant meshes are appended without changing their
 /// analytical coordinates. Coincident boundary samples remain duplicated until
 /// the later welding stage, but they use the same subdivision contract and
-/// therefore occupy identical positions. A singular torus stops the entire
-/// operation so an incomplete surface cannot be mistaken for a valid result.
+/// therefore occupy identical positions. Radial torus singularities are split
+/// into their retained triangular faces before their meshes are appended.
 ///
 /// # Parameters
 ///
@@ -206,12 +226,117 @@ pub fn tessellate_msms_patch_domain(
     append_mesh(&mut combined, tessellate_contact_patch(patch, parameters)?)?;
   }
   for patch in &domain.toroidal_patches {
-    append_mesh(&mut combined, tessellate_regular_toroidal_patch(patch, parameters)?)?;
+    append_mesh(&mut combined, tessellate_toroidal_patch(patch, parameters)?)?;
   }
+  append_mesh(
+    &mut combined,
+    tessellate_resolved_reentrant_patches(domain, parameters)?,
+  )?;
+  Ok(combined)
+}
+
+/// Tessellates and clips all reentrant patches in one analytical domain.
+///
+/// Every fixed-probe spherical triangle is first tessellated independently.
+/// The resulting mesh is then clipped against the radical half-planes of all
+/// other intersecting probe spheres. Keeping this stage separate allows a
+/// renderer or diagnostic tool to color the resolved reentrant family without
+/// reconstructing contact or toroidal geometry.
+///
+/// # Parameters
+///
+/// * `domain` contains the fixed-probe patches and their shared topology.
+/// * `parameters` controls display resolution without changing analytical area.
+///
+/// # Returns
+///
+/// One combined reentrant mesh after non-radial singularity clipping, or
+/// [`MsmsTessellationError`] if patch tessellation, clipping, or index rebasing
+/// fails.
+///
+/// # Examples
+///
+/// ```
+/// use chitin_bio::{
+///   structure::{PdbParser, StructureScene},
+///   surface::msms::{
+///     MsmsRequest,
+///     MsmsTessellationParameters,
+///     build_msms_patch_geometry,
+///     tessellate_resolved_reentrant_patches,
+///   },
+/// };
+///
+/// let parsed = PdbParser::new().parse_bytes(
+///   b"ATOM      1  C   GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \n\
+/// END\n",
+/// )?;
+/// let scene = StructureScene::from_first_model(&parsed.structure)?;
+/// let domains = build_msms_patch_geometry(&scene, MsmsRequest::default())?;
+/// let mesh = tessellate_resolved_reentrant_patches(
+///   &domains[0],
+///   MsmsTessellationParameters::default(),
+/// )?;
+/// assert!(mesh.indices.is_empty());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn tessellate_resolved_reentrant_patches(
+  domain: &MsmsPatchGeometryDomain,
+  parameters: MsmsTessellationParameters,
+) -> Result<SurfaceMesh, MsmsTessellationError> {
+  let mut combined = SurfaceMesh::default();
   for patch in &domain.reentrant_patches {
-    append_mesh(&mut combined, tessellate_reentrant_patch(patch, parameters)?)?;
+    let mut mesh = tessellate_reentrant_patch(patch, parameters)?;
+    let occluding_probes = domain
+      .reentrant_patches
+      .iter()
+      .filter(|other| other.face_index != patch.face_index)
+      .map(|other| (DVec3::from_array(other.probe_center), other.probe_radius))
+      .collect::<Vec<_>>();
+    clip_reentrant_mesh_outside_probes(&mut mesh, DVec3::from_array(patch.probe_center), &occluding_probes)?;
+    append_mesh(&mut combined, mesh)?;
   }
   Ok(combined)
+}
+
+/// Tessellates a regular or radially singular toroidal patch for display.
+///
+/// A singular spindle patch is first split at every zero of its torus Jacobian.
+/// Only non-negative radial intervals are retained, producing the triangular
+/// toric faces described by the analytical reduced-surface model. This resolves
+/// radial self-intersection only; non-radial probe-probe clipping remains a
+/// separate topology stage.
+///
+/// # Parameters
+///
+/// * `patch` contains the analytical torus frame and retained angular ranges.
+/// * `parameters` controls display resolution without affecting analytical area.
+///
+/// # Returns
+///
+/// The combined retained toric mesh, or [`MsmsTessellationError`] if splitting
+/// produces no valid face or the result exceeds the display index limit.
+pub fn tessellate_toroidal_patch(
+  patch: &ToroidalPatchGeometry,
+  parameters: MsmsTessellationParameters,
+) -> Result<SurfaceMesh, MsmsTessellationError> {
+  if patch.topology == ToroidalPatchTopology::Regular {
+    return tessellate_regular_toroidal_patch(patch, parameters);
+  }
+  let retained = patch.split_radial_singularity();
+  if retained.is_empty() {
+    return Err(MsmsTessellationError::InvalidRadialSingularity {
+      edge_index: patch.edge_index,
+    });
+  }
+  let mut mesh = SurfaceMesh::default();
+  for regular_patch in retained {
+    append_mesh(
+      &mut mesh,
+      tessellate_regular_toroidal_patch(&regular_patch, parameters)?,
+    )?;
+  }
+  Ok(mesh)
 }
 
 /// Appends one indexed mesh while preserving valid global indices.
@@ -228,6 +353,138 @@ fn append_mesh(destination: &mut SurfaceMesh, mut source: SurfaceMesh) -> Result
   destination.vertices.append(&mut source.vertices);
   destination.indices.append(&mut source.indices);
   Ok(())
+}
+
+/// Removes one reentrant display mesh region eaten by other fixed probes.
+fn clip_reentrant_mesh_outside_probes(
+  mesh: &mut SurfaceMesh,
+  source_center: DVec3,
+  probes: &[(DVec3, f64)],
+) -> Result<(), MsmsTessellationError> {
+  if mesh.indices.is_empty() || probes.is_empty() {
+    return Ok(());
+  }
+  let nearby_probes = probes
+    .iter()
+    .copied()
+    .filter(|(center, radius)| sphere_intersects_mesh_bounds(mesh, *center, *radius))
+    .collect::<Vec<_>>();
+  if nearby_probes.is_empty() {
+    return Ok(());
+  }
+  let original_vertices = std::mem::take(&mut mesh.vertices);
+  let original_indices = std::mem::take(&mut mesh.indices);
+  for triangle in original_indices.as_chunks::<3>().0 {
+    let mut polygon = triangle
+      .iter()
+      .map(|index| original_vertices[*index as usize])
+      .collect::<Vec<_>>();
+    for &(center, _) in &nearby_probes {
+      polygon = clip_polygon_outside_probe_plane(&polygon, source_center, center)?;
+      if polygon.len() < 3 {
+        break;
+      }
+    }
+    if polygon.len() < 3 {
+      continue;
+    }
+    let base_index = u32::try_from(mesh.vertices.len()).map_err(|_| MsmsTessellationError::MeshTooLarge)?;
+    if polygon.len() > (u32::MAX - base_index) as usize {
+      return Err(MsmsTessellationError::MeshTooLarge);
+    }
+    let polygon_len = polygon.len();
+    mesh.vertices.extend(polygon);
+    for offset in 1..polygon_len - 1 {
+      mesh
+        .indices
+        .extend([base_index, base_index + offset as u32, base_index + offset as u32 + 1]);
+    }
+  }
+  Ok(())
+}
+
+/// Tests an occluding sphere against one mesh axis-aligned bounding box.
+fn sphere_intersects_mesh_bounds(mesh: &SurfaceMesh, center: DVec3, radius: f64) -> bool {
+  let mut minimum = DVec3::splat(f64::INFINITY);
+  let mut maximum = DVec3::splat(f64::NEG_INFINITY);
+  for vertex in &mesh.vertices {
+    let position = DVec3::new(vertex[0] as f64, vertex[1] as f64, vertex[2] as f64);
+    minimum = minimum.min(position);
+    maximum = maximum.max(position);
+  }
+  let closest = center.clamp(minimum, maximum);
+  center.distance_squared(closest) <= radius * radius
+}
+
+/// Clips a reentrant polygon by the radical plane of two equal-radius probes.
+fn clip_polygon_outside_probe_plane(
+  polygon: &[[f32; 6]],
+  source_center: DVec3,
+  occluding_center: DVec3,
+) -> Result<Vec<[f32; 6]>, MsmsTessellationError> {
+  if polygon.is_empty() {
+    return Ok(Vec::new());
+  }
+  let mut clipped = Vec::with_capacity(polygon.len() + 2);
+  let plane_normal = source_center - occluding_center;
+  let plane_offset = 0.5 * (source_center.length_squared() - occluding_center.length_squared());
+  let mut previous = polygon[polygon.len() - 1];
+  let mut previous_distance = vertex_plane_distance(previous, plane_normal, plane_offset);
+  for &current in polygon {
+    let current_distance = vertex_plane_distance(current, plane_normal, plane_offset);
+    match (previous_distance >= -1.0e-10, current_distance >= -1.0e-10) {
+      (true, true) => clipped.push(current),
+      (true, false) => clipped.push(plane_edge_intersection(
+        previous,
+        current,
+        previous_distance,
+        current_distance,
+      )?),
+      (false, true) => {
+        clipped.push(plane_edge_intersection(
+          previous,
+          current,
+          previous_distance,
+          current_distance,
+        )?);
+        clipped.push(current);
+      }
+      (false, false) => {}
+    }
+    previous = current;
+    previous_distance = current_distance;
+  }
+  Ok(clipped)
+}
+
+/// Returns one display vertex's signed radical-plane distance.
+fn vertex_plane_distance(vertex: [f32; 6], plane_normal: DVec3, plane_offset: f64) -> f64 {
+  let position = DVec3::new(vertex[0] as f64, vertex[1] as f64, vertex[2] as f64);
+  position.dot(plane_normal) - plane_offset
+}
+
+/// Intersects a display edge with one probe radical plane.
+fn plane_edge_intersection(
+  start: [f32; 6],
+  end: [f32; 6],
+  start_distance: f64,
+  end_distance: f64,
+) -> Result<[f32; 6], MsmsTessellationError> {
+  let denominator = start_distance - end_distance;
+  if denominator.abs() <= f64::EPSILON {
+    return Err(MsmsTessellationError::InvalidDisplayVertex);
+  }
+  let fraction = (start_distance / denominator).clamp(0.0, 1.0);
+  let mut vertex = [0.0; 6];
+  for component in 0..6 {
+    vertex[component] = start[component] + (end[component] - start[component]) * fraction as f32;
+  }
+  let normal = Vec3::from_slice(&vertex[3..]).normalize_or_zero();
+  if normal.length_squared() <= f32::EPSILON {
+    return Err(MsmsTessellationError::InvalidDisplayVertex);
+  }
+  vertex[3..].copy_from_slice(&normal.to_array());
+  Ok(vertex)
 }
 
 /// Tessellates one reentrant spherical triangle into renderer-neutral geometry.
@@ -437,13 +694,29 @@ fn tessellate_full_contact_sphere(
   Ok(mesh)
 }
 
-/// Triangulates every disconnected exposed loop through a bounded chart.
+/// Triangulates all exposed loops and holes through one bounded chart.
 fn tessellate_bounded_contact_patch(
   patch: &ContactPatchGeometry,
   parameters: MsmsTessellationParameters,
 ) -> Result<SurfaceMesh, MsmsTessellationError> {
   let center = DVec3::from_array(patch.atom_center);
-  let mut mesh = SurfaceMesh::default();
+  let first_arc_use = patch
+    .boundary_loops
+    .first()
+    .and_then(|boundary_loop| boundary_loop.arcs.first())
+    .ok_or(MsmsTessellationError::InvalidContactPatch {
+      atom_index: patch.atom_index,
+    })?;
+  let first_arc =
+    patch
+      .boundary_arcs
+      .get(first_arc_use.arc_index)
+      .ok_or(MsmsTessellationError::InvalidContactPatch {
+        atom_index: patch.atom_index,
+      })?;
+  let pole = DVec3::from_array(first_arc.occluded_direction).normalize_or_zero();
+  let (horizontal, vertical) = stereographic_basis(patch.atom_index, pole)?;
+  let mut projected_loops = Vec::with_capacity(patch.boundary_loops.len());
   for boundary_loop in &patch.boundary_loops {
     let directions = sample_contact_loop(patch, &boundary_loop.arcs, parameters)?;
     if directions.len() < 3 {
@@ -451,22 +724,236 @@ fn tessellate_bounded_contact_patch(
         atom_index: patch.atom_index,
       });
     }
-    let first_arc = &patch.boundary_arcs[boundary_loop.arcs[0].arc_index];
-    let pole = DVec3::from_array(first_arc.occluded_direction).normalize_or_zero();
-    let projected = stereographic_project_loop(patch.atom_index, &directions, pole)?;
-    let triangles = ear_clip_polygon(patch.atom_index, &projected)?;
-    let base_index = u32::try_from(mesh.vertices.len()).map_err(|_| MsmsTessellationError::MeshTooLarge)?;
-    for direction in directions {
-      mesh
-        .vertices
-        .push(contact_vertex(center, patch.atom_radius, direction)?);
-    }
-    for triangle in triangles {
-      let triangle = triangle.map(|index| base_index + index as u32);
-      push_outward_triangle(&mut mesh, triangle);
-    }
+    let projected = stereographic_project_loop(patch.atom_index, &directions, pole, horizontal, vertical)?;
+    projected_loops.push(projected);
+  }
+  let mut planar = tessellate_projected_contact_loops(patch.atom_index, &projected_loops)?;
+  refine_projected_contact_mesh(
+    patch.atom_index,
+    &mut planar,
+    pole,
+    horizontal,
+    vertical,
+    patch.atom_radius,
+    parameters.max_edge_length,
+  )?;
+  let mut mesh = SurfaceMesh {
+    vertices: Vec::with_capacity(planar.vertices.len()),
+    indices: Vec::with_capacity(planar.indices.len()),
+  };
+  for point_2d in planar.vertices {
+    let direction = inverse_stereographic_project(point_2d, pole, horizontal, vertical)?;
+    mesh
+      .vertices
+      .push(contact_vertex(center, patch.atom_radius, direction)?);
+  }
+  for triangle in planar.indices.as_chunks::<3>().0 {
+    push_outward_triangle(&mut mesh, *triangle);
+  }
+  if mesh.indices.is_empty() {
+    return Err(MsmsTessellationError::InvalidContactPatch {
+      atom_index: patch.atom_index,
+    });
   }
   Ok(mesh)
+}
+
+/// Tessellates projected contact boundaries while preserving nested holes.
+fn tessellate_projected_contact_loops(
+  atom_index: usize,
+  projected_loops: &[Vec<[f64; 2]>],
+) -> Result<VertexBuffers<[f32; 2], u32>, MsmsTessellationError> {
+  let mut path_builder = Path::builder();
+  for projected in projected_loops {
+    if projected.len() < 3 {
+      return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
+    }
+    path_builder.begin(point(projected[0][0] as f32, projected[0][1] as f32));
+    for point_2d in &projected[1..] {
+      path_builder.line_to(point(point_2d[0] as f32, point_2d[1] as f32));
+    }
+    path_builder.close();
+  }
+  let mut planar = VertexBuffers::<[f32; 2], u32>::new();
+  FillTessellator::new()
+    .tessellate_path(
+      &path_builder.build(),
+      &FillOptions::default().with_fill_rule(FillRule::EvenOdd),
+      &mut BuffersBuilder::new(&mut planar, |vertex: FillVertex<'_>| vertex.position().to_array()),
+    )
+    .map_err(|_| MsmsTessellationError::InvalidContactPatch { atom_index })?;
+  Ok(planar)
+}
+
+/// Refines long interior diagonals without changing analytical boundaries.
+///
+/// Lyon triangulates the projected contact polygon but does not constrain the
+/// length of diagonals inside it. A large spherical contact region can
+/// therefore contain a few almost atom-wide planar triangles even though its
+/// boundary arcs were sampled densely. Each pass identifies shared mesh edges
+/// (and therefore excludes one-sided boundary edges), inserts one shared
+/// midpoint per long edge, and conformingly retriangulates both incident
+/// triangles. Midpoints remain in the stereographic chart until the final mesh
+/// is lifted onto the atom sphere.
+///
+/// # Parameters
+///
+/// * `atom_index` identifies the source atom for structured errors.
+/// * `planar` is the projected contact mesh to refine in place.
+/// * `pole`, `horizontal`, and `vertical` define the stereographic chart.
+/// * `atom_radius` converts unit-sphere chords to ångströms.
+/// * `max_edge_length` is the requested upper bound for interior mesh edges.
+///
+/// # Returns
+///
+/// `Ok(())` when every shared edge satisfies the bound, or an error when the
+/// mesh cannot be represented safely or refinement fails to converge.
+fn refine_projected_contact_mesh(
+  atom_index: usize,
+  planar: &mut VertexBuffers<[f32; 2], u32>,
+  pole: DVec3,
+  horizontal: DVec3,
+  vertical: DVec3,
+  atom_radius: f64,
+  max_edge_length: f64,
+) -> Result<(), MsmsTessellationError> {
+  const MAX_REFINEMENT_PASSES: usize = 32;
+  const EDGE_LENGTH_TOLERANCE: f64 = 1.0 + 1.0e-6;
+
+  for _ in 0..MAX_REFINEMENT_PASSES {
+    let edge_uses = contact_edge_use_counts(&planar.indices);
+    let mut edges_to_split = BTreeSet::new();
+    for (&edge, &uses) in &edge_uses {
+      // One-sided edges lie on an analytical contact boundary shared with a
+      // toroidal patch. Splitting them here would create a surface seam.
+      if uses < 2 {
+        continue;
+      }
+      let [start, end] = contact_edge_directions(planar, edge, pole, horizontal, vertical)?;
+      if atom_radius * start.distance(end) > max_edge_length * EDGE_LENGTH_TOLERANCE {
+        edges_to_split.insert(edge);
+      }
+    }
+    if edges_to_split.is_empty() {
+      return Ok(());
+    }
+
+    let midpoint_indices = insert_contact_edge_midpoints(planar, &edges_to_split)?;
+    planar.indices = refine_contact_triangles(&planar.indices, &midpoint_indices)?;
+  }
+
+  Err(MsmsTessellationError::ContactRefinementDidNotConverge { atom_index })
+}
+
+/// Counts how many contact triangles use each undirected edge.
+fn contact_edge_use_counts(indices: &[u32]) -> BTreeMap<(u32, u32), usize> {
+  let mut uses = BTreeMap::new();
+  for &[a, b, c] in indices.as_chunks::<3>().0 {
+    for edge in [contact_edge_key(a, b), contact_edge_key(b, c), contact_edge_key(c, a)] {
+      *uses.entry(edge).or_default() += 1;
+    }
+  }
+  uses
+}
+
+/// Returns the unit-sphere endpoints represented by one projected edge.
+fn contact_edge_directions(
+  planar: &VertexBuffers<[f32; 2], u32>,
+  edge: (u32, u32),
+  pole: DVec3,
+  horizontal: DVec3,
+  vertical: DVec3,
+) -> Result<[DVec3; 2], MsmsTessellationError> {
+  let start = planar
+    .vertices
+    .get(edge.0 as usize)
+    .copied()
+    .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+  let end = planar
+    .vertices
+    .get(edge.1 as usize)
+    .copied()
+    .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+  Ok([
+    inverse_stereographic_project(start, pole, horizontal, vertical)?,
+    inverse_stereographic_project(end, pole, horizontal, vertical)?,
+  ])
+}
+
+/// Inserts one deterministic projected midpoint for every selected edge.
+fn insert_contact_edge_midpoints(
+  planar: &mut VertexBuffers<[f32; 2], u32>,
+  edges: &BTreeSet<(u32, u32)>,
+) -> Result<BTreeMap<(u32, u32), u32>, MsmsTessellationError> {
+  let mut midpoint_indices = BTreeMap::new();
+  for &edge in edges {
+    let start = planar
+      .vertices
+      .get(edge.0 as usize)
+      .copied()
+      .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+    let end = planar
+      .vertices
+      .get(edge.1 as usize)
+      .copied()
+      .ok_or(MsmsTessellationError::InvalidDisplayVertex)?;
+    let midpoint = [0.5 * (start[0] + end[0]), 0.5 * (start[1] + end[1])];
+    if midpoint.iter().any(|component| !component.is_finite()) {
+      return Err(MsmsTessellationError::InvalidDisplayVertex);
+    }
+    let midpoint_index = u32::try_from(planar.vertices.len()).map_err(|_| MsmsTessellationError::MeshTooLarge)?;
+    planar.vertices.push(midpoint);
+    midpoint_indices.insert(edge, midpoint_index);
+  }
+  Ok(midpoint_indices)
+}
+
+/// Conformingly subdivides triangles whose shared edges received midpoints.
+fn refine_contact_triangles(
+  indices: &[u32],
+  midpoint_indices: &BTreeMap<(u32, u32), u32>,
+) -> Result<Vec<u32>, MsmsTessellationError> {
+  let mut refined = Vec::with_capacity(indices.len().saturating_mul(2));
+  for &[a, b, c] in indices.as_chunks::<3>().0 {
+    let midpoints = [
+      midpoint_indices.get(&contact_edge_key(a, b)).copied(),
+      midpoint_indices.get(&contact_edge_key(b, c)).copied(),
+      midpoint_indices.get(&contact_edge_key(c, a)).copied(),
+    ];
+    let mask = u8::from(midpoints[0].is_some())
+      | (u8::from(midpoints[1].is_some()) << 1)
+      | (u8::from(midpoints[2].is_some()) << 2);
+    match (mask, midpoints) {
+      (0, _) => append_contact_triangles(&mut refined, &[[a, b, c]]),
+      (1, [Some(ab), _, _]) => append_contact_triangles(&mut refined, &[[a, ab, c], [ab, b, c]]),
+      (2, [_, Some(bc), _]) => append_contact_triangles(&mut refined, &[[b, bc, a], [bc, c, a]]),
+      (4, [_, _, Some(ca)]) => append_contact_triangles(&mut refined, &[[c, ca, b], [ca, a, b]]),
+      (3, [Some(ab), Some(bc), _]) => {
+        append_contact_triangles(&mut refined, &[[a, ab, c], [ab, bc, c], [ab, b, bc]]);
+      }
+      (6, [_, Some(bc), Some(ca)]) => {
+        append_contact_triangles(&mut refined, &[[b, bc, a], [bc, ca, a], [bc, c, ca]]);
+      }
+      (5, [Some(ab), _, Some(ca)]) => {
+        append_contact_triangles(&mut refined, &[[c, ca, b], [ca, ab, b], [ca, a, ab]]);
+      }
+      (7, [Some(ab), Some(bc), Some(ca)]) => {
+        append_contact_triangles(&mut refined, &[[a, ab, ca], [ab, b, bc], [ca, bc, c], [ab, bc, ca]]);
+      }
+      _ => return Err(MsmsTessellationError::InvalidDisplayVertex),
+    }
+  }
+  Ok(refined)
+}
+
+/// Appends oriented contact triangles to a flat index buffer.
+fn append_contact_triangles(indices: &mut Vec<u32>, triangles: &[[u32; 3]]) {
+  indices.extend(triangles.iter().flatten().copied());
+}
+
+/// Canonicalizes an undirected mesh edge for deterministic lookup.
+const fn contact_edge_key(start: u32, end: u32) -> (u32, u32) {
+  if start < end { (start, end) } else { (end, start) }
 }
 
 /// Samples one oriented analytical contact loop without duplicating corners.
@@ -504,13 +991,9 @@ fn stereographic_project_loop(
   atom_index: usize,
   directions: &[DVec3],
   pole: DVec3,
+  horizontal: DVec3,
+  vertical: DVec3,
 ) -> Result<Vec<[f64; 2]>, MsmsTessellationError> {
-  if !pole.is_finite() || pole.length_squared() <= f64::EPSILON {
-    return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
-  }
-  let reference = if pole.z.abs() < 0.9 { DVec3::Z } else { DVec3::Y };
-  let horizontal = pole.cross(reference).normalize_or_zero();
-  let vertical = pole.cross(horizontal).normalize_or_zero();
   let mut projected = Vec::with_capacity(directions.len());
   for &direction in directions {
     let denominator = 1.0 - pole.dot(direction);
@@ -529,69 +1012,33 @@ fn stereographic_project_loop(
   Ok(projected)
 }
 
-/// Ear-clips one simple projected polygon into local vertex indices.
-fn ear_clip_polygon(atom_index: usize, polygon: &[[f64; 2]]) -> Result<Vec<[usize; 3]>, MsmsTessellationError> {
-  if polygon.len() < 3 {
+/// Builds an orthonormal plane basis for stereographic projection.
+fn stereographic_basis(atom_index: usize, pole: DVec3) -> Result<(DVec3, DVec3), MsmsTessellationError> {
+  if !pole.is_finite() || pole.length_squared() <= f64::EPSILON {
     return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
   }
-  let signed_area = polygon
-    .iter()
-    .enumerate()
-    .map(|(index, point)| {
-      let next = polygon[(index + 1) % polygon.len()];
-      point[0] * next[1] - next[0] * point[1]
-    })
-    .sum::<f64>();
-  if !signed_area.is_finite() || signed_area.abs() <= 1.0e-14 {
-    return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
-  }
-  let mut remaining = if signed_area > 0.0 {
-    (0..polygon.len()).collect::<Vec<_>>()
-  } else {
-    (0..polygon.len()).rev().collect::<Vec<_>>()
-  };
-  let mut triangles = Vec::with_capacity(polygon.len() - 2);
-  while remaining.len() > 3 {
-    let mut clipped = false;
-    for cursor in 0..remaining.len() {
-      let previous = remaining[(cursor + remaining.len() - 1) % remaining.len()];
-      let current = remaining[cursor];
-      let next = remaining[(cursor + 1) % remaining.len()];
-      if orient_2d(polygon[previous], polygon[current], polygon[next]) <= 1.0e-14 {
-        continue;
-      }
-      let contains_vertex = remaining.iter().copied().any(|candidate| {
-        candidate != previous
-          && candidate != current
-          && candidate != next
-          && point_in_triangle(polygon[candidate], polygon[previous], polygon[current], polygon[next])
-      });
-      if contains_vertex {
-        continue;
-      }
-      triangles.push([previous, current, next]);
-      remaining.remove(cursor);
-      clipped = true;
-      break;
-    }
-    if !clipped {
-      return Err(MsmsTessellationError::InvalidContactPatch { atom_index });
-    }
-  }
-  triangles.push([remaining[0], remaining[1], remaining[2]]);
-  Ok(triangles)
+  let reference = if pole.z.abs() < 0.9 { DVec3::Z } else { DVec3::Y };
+  let horizontal = pole.cross(reference).normalize_or_zero();
+  let vertical = pole.cross(horizontal).normalize_or_zero();
+  Ok((horizontal, vertical))
 }
 
-/// Returns the signed twice-area of an oriented 2-D triangle.
-fn orient_2d(first: [f64; 2], second: [f64; 2], third: [f64; 2]) -> f64 {
-  (second[0] - first[0]) * (third[1] - first[1]) - (second[1] - first[1]) * (third[0] - first[0])
-}
-
-/// Tests whether a point lies inside or on a counter-clockwise triangle.
-fn point_in_triangle(point: [f64; 2], first: [f64; 2], second: [f64; 2], third: [f64; 2]) -> bool {
-  orient_2d(first, second, point) >= -1.0e-14
-    && orient_2d(second, third, point) >= -1.0e-14
-    && orient_2d(third, first, point) >= -1.0e-14
+/// Maps one planar stereographic point back onto the atom unit sphere.
+fn inverse_stereographic_project(
+  point_2d: [f32; 2],
+  pole: DVec3,
+  horizontal: DVec3,
+  vertical: DVec3,
+) -> Result<DVec3, MsmsTessellationError> {
+  let x = point_2d[0] as f64;
+  let y = point_2d[1] as f64;
+  let radius_squared = x.mul_add(x, y * y);
+  let denominator = radius_squared + 1.0;
+  let direction = ((radius_squared - 1.0) / denominator) * pole + (2.0 / denominator) * (x * horizontal + y * vertical);
+  if !direction.is_finite() || direction.length_squared() <= f64::EPSILON {
+    return Err(MsmsTessellationError::InvalidDisplayVertex);
+  }
+  Ok(direction.normalize())
 }
 
 /// Converts one atom-relative direction into a contact display vertex.
@@ -788,7 +1235,45 @@ fn tessellate_toroidal_grid(
         .extend([indices[0], indices[1], indices[2], indices[0], indices[2], indices[3]].map(|index| index as u32));
     }
   }
+  collapse_singular_torus_rows(&mut mesh, patch, row_width, row_count);
   Ok(mesh)
+}
+
+/// Collapses Jacobian-zero parameter rows into single singular vertices.
+fn collapse_singular_torus_rows(
+  mesh: &mut SurfaceMesh,
+  patch: &ToroidalPatchGeometry,
+  row_width: usize,
+  row_count: usize,
+) {
+  let polar_end = patch.polar_start + patch.polar_sweep;
+  let scale = patch.major_radius.max(patch.probe_radius).max(1.0);
+  let tolerance = 4096.0 * f64::EPSILON * scale;
+  let collapse_start = (patch.major_radius + patch.probe_radius * patch.polar_start.cos()).abs() <= tolerance;
+  let collapse_end = (patch.major_radius + patch.probe_radius * polar_end.cos()).abs() <= tolerance;
+  if !collapse_start && !collapse_end {
+    return;
+  }
+  let end_column = row_width - 1;
+  for index in &mut mesh.indices {
+    let local = *index as usize;
+    let column = local % row_width;
+    if collapse_start && column == 0 {
+      *index = 0;
+    } else if collapse_end && column == end_column {
+      *index = end_column as u32;
+    }
+  }
+  mesh.indices = mesh
+    .indices
+    .as_chunks::<3>()
+    .0
+    .iter()
+    .copied()
+    .filter(|triangle| triangle[0] != triangle[1] && triangle[1] != triangle[2] && triangle[2] != triangle[0])
+    .flatten()
+    .collect();
+  debug_assert_eq!(mesh.vertices.len(), row_width * row_count);
 }
 
 #[cfg(test)]
@@ -895,6 +1380,64 @@ mod tests {
   }
 
   #[test]
+  fn nested_contact_boundaries_should_leave_the_inner_region_empty() {
+    let loops = vec![
+      vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]],
+      vec![[-1.0, -1.0], [-1.0, 1.0], [1.0, 1.0], [1.0, -1.0]],
+    ];
+
+    let mesh = tessellate_projected_contact_loops(0, &loops)
+      .unwrap_or_else(|error| panic!("nested contact boundaries should tessellate: {error}"));
+
+    assert!(!mesh.indices.is_empty());
+    assert!(mesh.indices.as_chunks::<3>().0.iter().all(|triangle| {
+      let centroid = triangle
+        .iter()
+        .map(|index| mesh.vertices[*index as usize])
+        .fold([0.0_f32; 2], |sum, point| [sum[0] + point[0], sum[1] + point[1]])
+        .map(|component| component / 3.0);
+      centroid[0].abs() >= 1.0 || centroid[1].abs() >= 1.0
+    }));
+  }
+
+  #[test]
+  fn contact_refinement_should_bound_shared_spherical_edges() {
+    let boundary = (0..64)
+      .map(|index| {
+        let angle = TAU * index as f64 / 64.0;
+        [0.8 * angle.cos(), 0.8 * angle.sin()]
+      })
+      .collect::<Vec<_>>();
+    let mut planar = tessellate_projected_contact_loops(0, &[boundary])
+      .unwrap_or_else(|error| panic!("the circular boundary should tessellate: {error}"));
+    let pole = DVec3::Z;
+    let (horizontal, vertical) = stereographic_basis(0, pole)
+      .unwrap_or_else(|error| panic!("a unit projection pole should define a chart: {error}"));
+    let original_boundary = contact_edge_use_counts(&planar.indices)
+      .into_iter()
+      .filter_map(|(edge, uses)| (uses == 1).then_some(edge))
+      .collect::<BTreeSet<_>>();
+
+    refine_projected_contact_mesh(0, &mut planar, pole, horizontal, vertical, 1.7, 0.35)
+      .unwrap_or_else(|error| panic!("the circular interior should refine conformingly: {error}"));
+
+    let refined_edge_uses = contact_edge_use_counts(&planar.indices);
+    assert!(
+      original_boundary
+        .iter()
+        .all(|edge| refined_edge_uses.get(edge) == Some(&1))
+    );
+    assert!(refined_edge_uses.iter().all(|(&edge, &uses)| {
+      if uses < 2 {
+        return true;
+      }
+      let directions = contact_edge_directions(&planar, edge, pole, horizontal, vertical)
+        .unwrap_or_else(|error| panic!("refined edge should map to the sphere: {error}"));
+      1.7 * directions[0].distance(directions[1]) <= 0.35 * (1.0 + 1.0e-6)
+    }));
+  }
+
+  #[test]
   fn regular_torus_should_produce_finite_indexed_geometry() {
     let mesh = tessellate_regular_toroidal_patch(&regular_patch(), MsmsTessellationParameters::default())
       .unwrap_or_else(|error| panic!("regular torus should tessellate: {error}"));
@@ -903,6 +1446,13 @@ mod tests {
     assert!(!mesh.indices.is_empty());
     assert!(mesh.indices.iter().all(|index| (*index as usize) < mesh.vertices.len()));
     assert!(mesh.vertices.iter().flatten().all(|component| component.is_finite()));
+    assert!(mesh.indices.as_chunks::<3>().0.iter().all(|triangle| {
+      let positions = triangle.map(|index| Vec3::from_slice(&mesh.vertices[index as usize][..3]));
+      (positions[1] - positions[0])
+        .cross(positions[2] - positions[0])
+        .length_squared()
+        > 1.0e-12
+    }));
   }
 
   #[test]
@@ -932,6 +1482,48 @@ mod tests {
       tessellate_regular_toroidal_patch(&patch, MsmsTessellationParameters::default()),
       Err(MsmsTessellationError::UntrimmedSingularTorus { edge_index: 0 })
     );
+  }
+
+  #[test]
+  fn radial_singularity_should_split_into_renderable_toric_faces() {
+    let mut patch = regular_patch();
+    patch.major_radius = 0.5;
+    patch.probe_radius = 1.0;
+    patch.polar_start = 0.0;
+    patch.polar_sweep = TAU;
+    patch.topology = ToroidalPatchTopology::SelfIntersecting;
+
+    let mesh = tessellate_toroidal_patch(&patch, MsmsTessellationParameters::default())
+      .unwrap_or_else(|error| panic!("radial singularity should split before tessellation: {error}"));
+
+    assert!(!mesh.indices.is_empty());
+    assert!(mesh.indices.iter().all(|index| (*index as usize) < mesh.vertices.len()));
+    assert!(mesh.vertices.iter().flatten().all(|component| component.is_finite()));
+    assert!(mesh.indices.as_chunks::<3>().0.iter().all(|triangle| {
+      let positions = triangle.map(|index| Vec3::from_slice(&mesh.vertices[index as usize][..3]));
+      (positions[1] - positions[0])
+        .cross(positions[2] - positions[0])
+        .length_squared()
+        > 1.0e-12
+    }));
+  }
+
+  #[test]
+  fn overlapping_fixed_probe_should_clip_reentrant_display_mesh() {
+    let mut mesh = SurfaceMesh {
+      vertices: vec![
+        [1.0, 0.0, 0.0, -1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0, -1.0, 0.0],
+      ],
+      indices: vec![0, 1, 2],
+    };
+
+    clip_reentrant_mesh_outside_probes(&mut mesh, DVec3::ZERO, &[(DVec3::X, 1.0)])
+      .unwrap_or_else(|error| panic!("overlapping fixed probe should clip display triangles: {error}"));
+
+    assert_eq!(mesh.indices.len(), 6);
+    assert!(mesh.vertices.iter().all(|vertex| vertex[0] <= 0.500_001));
   }
 
   #[test]

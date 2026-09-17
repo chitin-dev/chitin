@@ -26,8 +26,11 @@ pub use patches::{
 };
 pub use tessellation::{
   MsmsTessellationError, MsmsTessellationParameters, tessellate_contact_patch, tessellate_msms_patch_domain,
-  tessellate_reentrant_patch, tessellate_regular_toroidal_patch,
+  tessellate_reentrant_patch, tessellate_regular_toroidal_patch, tessellate_resolved_reentrant_patches,
+  tessellate_toroidal_patch,
 };
+
+use std::f64::consts::PI;
 
 use thiserror::Error;
 
@@ -495,6 +498,53 @@ impl ToroidalPatchGeometry {
     let meridian_integral =
       self.major_radius * self.polar_sweep + self.probe_radius * (polar_end.sin() - self.polar_start.sin());
     Some((self.probe_radius * self.azimuth_sweep * meridian_integral).abs())
+  }
+
+  /// Splits a radial singularity into regular end patches for display.
+  ///
+  /// A spindle torus is singular where
+  /// `major_radius + probe_radius * cos(polar) = 0`. The physically retained
+  /// toric face consists of parameter intervals on which this factor is
+  /// non-negative. Every root collapses an entire azimuth row to one singular
+  /// point, so the resulting grids represent the triangular toric faces used
+  /// by the reduced-surface construction.
+  pub fn split_radial_singularity(&self) -> Vec<Self> {
+    if self.topology == ToroidalPatchTopology::Regular {
+      return vec![self.clone()];
+    }
+    let ratio = (-self.major_radius / self.probe_radius).clamp(-1.0, 1.0);
+    let principal_root = ratio.acos();
+    let interval_start = self.polar_start;
+    let interval_end = self.polar_start + self.polar_sweep;
+    let mut boundaries = vec![interval_start, interval_end];
+    let first_period = ((interval_start - principal_root) / (2.0 * PI)).floor() as i64 - 1;
+    let last_period = ((interval_end + principal_root) / (2.0 * PI)).ceil() as i64 + 1;
+    for period in first_period..=last_period {
+      let offset = period as f64 * 2.0 * PI;
+      for root in [principal_root + offset, -principal_root + offset] {
+        if root > interval_start + 1.0e-12 && root < interval_end - 1.0e-12 {
+          boundaries.push(root);
+        }
+      }
+    }
+    boundaries.sort_by(f64::total_cmp);
+    boundaries.dedup_by(|left, right| (*left - *right).abs() <= 1.0e-12);
+    boundaries
+      .windows(2)
+      .filter_map(|interval| {
+        let start = interval[0];
+        let end = interval[1];
+        let midpoint = 0.5 * (start + end);
+        let radial_factor = self.major_radius + self.probe_radius * midpoint.cos();
+        (radial_factor >= -1.0e-12).then(|| {
+          let mut patch = self.clone();
+          patch.polar_start = start;
+          patch.polar_sweep = end - start;
+          patch.topology = ToroidalPatchTopology::Regular;
+          patch
+        })
+      })
+      .collect()
   }
 }
 
