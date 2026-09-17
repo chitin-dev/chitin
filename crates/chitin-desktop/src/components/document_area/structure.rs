@@ -61,6 +61,7 @@ impl WgpuPanelScene for StructureMoleculeScene {
         MoleculeRenderInput {
           scene: &self.scene,
           surface: self.surface.as_ref(),
+          surface_fragments: &[],
         },
         self.representation,
         &BallAndStickStyle::default(),
@@ -103,6 +104,7 @@ impl WgpuPanelScene for StructureMoleculeScene {
         MoleculeRenderInput {
           scene: &self.scene,
           surface: self.surface.as_ref(),
+          surface_fragments: &[],
         },
         representation,
         &BallAndStickStyle::default(),
