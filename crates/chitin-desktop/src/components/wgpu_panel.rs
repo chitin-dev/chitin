@@ -66,6 +66,11 @@ pub trait WgpuPanelScene {
   fn set_molecular_surface(&mut self, _surface: MolecularSurfaceArtifact) -> bool {
     false
   }
+
+  /// Removes molecular-surface geometry when the hosted scene supports it.
+  fn clear_molecular_surface(&mut self) -> bool {
+    false
+  }
 }
 
 /// Default scene used when no specialized renderer is supplied.
@@ -178,6 +183,11 @@ impl ChitinWgpuDocumentPanel {
   /// Installs a background-computed molecular surface when supported.
   pub fn set_molecular_surface(&mut self, surface: MolecularSurfaceArtifact) -> bool {
     self.scene.set_molecular_surface(surface)
+  }
+
+  /// Removes the currently installed molecular surface when supported.
+  pub fn clear_molecular_surface(&mut self) -> bool {
+    self.scene.clear_molecular_surface()
   }
 
   /// Renders one frame into the surface back buffer when available.

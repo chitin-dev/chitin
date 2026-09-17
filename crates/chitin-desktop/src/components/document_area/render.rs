@@ -2,6 +2,7 @@
 
 use std::{rc::Rc, time::Instant};
 
+use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_command::PanelTabCommand;
 use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers, SurfaceStyle};
 use chitin_ui::{
@@ -47,6 +48,12 @@ const SPHERE_ICON_PATH: &str = "icons/atom-sphere.svg";
 const CARTOON_ICON_PATH: &str = "icons/atom-cartoon.svg";
 /// Asset path for the disabled representation icon.
 const REPRESENTATION_NONE_ICON_PATH: &str = "icons/representation-none.svg";
+/// Asset path for the solid molecular-surface style icon.
+const SURFACE_SOLID_ICON_PATH: &str = "icons/surface-solid.svg";
+/// Asset path for the sampled implicit scalar-field backend icon.
+const IMPLICIT_SURFACE_ICON_PATH: &str = "icons/surface-implicit.svg";
+/// Asset path for the analytical MSMS backend icon.
+const MSMS_SURFACE_ICON_PATH: &str = "icons/surface-msms.svg";
 /// Asset path for document tab close buttons.
 const TAB_CLOSE_ICON_PATH: &str = "icons/tab-close.svg";
 /// Size used by tab strip action icons.
@@ -54,15 +61,24 @@ const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
 /// Size used by close tab button icons.
 const TAB_CLOSE_ICON_SIZE: Pixels = px(12.0);
 /// Width of the molecular document options menu.
-const DOCUMENT_OPTIONS_MENU_WIDTH: Pixels = px(220.0);
+const DOCUMENT_OPTIONS_MENU_WIDTH: Pixels = px(240.0);
+
+/// Molecular rendering choices displayed by one document options popover.
+#[derive(Clone, Copy)]
+struct MolecularDocumentOptions {
+  /// Representation layers selected for the molecular scene.
+  representation: RepresentationLayers,
+  /// Algorithm selected for molecular-surface generation.
+  surface_backend: MolecularSurfaceBackend,
+}
 
 /// Deferred molecular document menu rendered above the clipped tab strip.
 #[derive(IntoElement)]
 struct DocumentOptionsMenu {
   /// Panel whose active molecular view receives menu changes.
   panel_id: PanelId,
-  /// Representation layers selected when this menu is rendered.
-  representation_layers: RepresentationLayers,
+  /// Molecular rendering choices selected when this menu is rendered.
+  options: MolecularDocumentOptions,
   /// Semantic colors for the menu surface and rows.
   theme: UIThemes,
   /// Weak root app entity used by dismissal and selection callbacks.
@@ -84,6 +100,8 @@ pub(crate) struct DocumentOptionsControls {
   polymer: Entity<SelectInputState>,
   /// Single-selection state for surface-layer styles.
   surface: Entity<SelectInputState>,
+  /// Single-selection state for molecular-surface generation algorithms.
+  surface_backend: Entity<SelectInputState>,
 }
 
 /// Declarative data used to build one representation-layer selector.
@@ -104,11 +122,6 @@ impl SelectOptionSpec {
       label,
       icon: Some(icon),
     }
-  }
-
-  /// Creates a representation option without a leading icon.
-  const fn without_icon(id: &'static str, label: &'static str) -> Self {
-    Self { id, label, icon: None }
   }
 }
 
@@ -160,15 +173,28 @@ impl DocumentOptionsControls {
       cx,
       [
         SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
-        SelectOptionSpec::without_icon("solid", "Solid"),
+        SelectOptionSpec::new("solid", "Solid", SURFACE_SOLID_ICON_PATH),
       ],
       "none",
+    );
+    let surface_backend = new_representation_select(
+      cx,
+      [
+        SelectOptionSpec::new(
+          "implicit-scalar-field",
+          "Implicit scalar field",
+          IMPLICIT_SURFACE_ICON_PATH,
+        ),
+        SelectOptionSpec::new("msms", "MSMS", MSMS_SURFACE_ICON_PATH),
+      ],
+      "implicit-scalar-field",
     );
     Self {
       more: cx.new(ButtonState::new),
       atom,
       polymer,
       surface,
+      surface_backend,
     }
   }
 
@@ -253,6 +279,25 @@ impl DocumentOptionsControls {
       };
       app.select_document_representation_layers(panel_id, representation, cx);
       cx.notify();
+    });
+    subscription.detach();
+
+    let subscription: Subscription = cx.subscribe_in(&self.surface_backend, window, move |app, _, event, _, cx| {
+      let SelectInputEvent::SelectionChange { selected_id } = event else {
+        return;
+      };
+      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+        return;
+      };
+      let backend = match selected_id.as_deref() {
+        Some("implicit-scalar-field") => MolecularSurfaceBackend::ImplicitScalarField,
+        Some("msms") => MolecularSurfaceBackend::Msms,
+        _ => return,
+      };
+      if app.select_document_surface_backend(panel_id, backend, cx) {
+        app.dismiss_document_options_menu();
+        cx.notify();
+      }
     });
     subscription.detach();
   }
@@ -367,14 +412,20 @@ fn render_opened_document_panels(
   let actions_app = app.clone();
   let panel_state = document_panels.clone();
   let render_tab_strip_actions = Rc::new(move |panel_id| {
-    let representation_layers = panel_state.active_representation_layers(panel_id);
+    let document_options = panel_state
+      .active_representation_layers(panel_id)
+      .zip(panel_state.active_surface_backend(panel_id))
+      .map(|(representation, surface_backend)| MolecularDocumentOptions {
+        representation,
+        surface_backend,
+      });
     let options_menu_open = panel_state.options_menu_panel_id == Some(panel_id);
     let options_menu_anchor = options_menu_open.then_some(panel_state.options_menu_anchor).flatten();
     render_panel_tab_strip_actions(
       panel_id,
       theme,
       actions_app.clone(),
-      representation_layers,
+      document_options,
       options_menu_open,
       options_menu_anchor,
       controls.clone(),
@@ -471,7 +522,7 @@ fn render_panel_tab_strip_actions(
   panel_id: PanelId,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
-  representation_layers: Option<RepresentationLayers>,
+  document_options: Option<MolecularDocumentOptions>,
   options_menu_open: bool,
   options_menu_anchor: Option<gpui::Bounds<Pixels>>,
   controls: DocumentOptionsControls,
@@ -484,10 +535,10 @@ fn render_panel_tab_strip_actions(
     .border_l_1()
     .border_color(theme.border.primary)
     .bg(theme.background.primary);
-  if let Some(representation_layers) = representation_layers {
+  if let Some(document_options) = document_options {
     actions = actions.child(render_document_options_button(
       panel_id,
-      representation_layers,
+      document_options,
       options_menu_open,
       theme,
       app.clone(),
@@ -519,7 +570,7 @@ fn render_panel_tab_strip_actions(
 /// options remain focusable after the panel is redrawn.
 fn render_document_options_button(
   panel_id: PanelId,
-  representation_layers: RepresentationLayers,
+  document_options: MolecularDocumentOptions,
   open: bool,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
@@ -563,7 +614,7 @@ fn render_document_options_button(
     .when(open && options_menu_anchor.is_some(), |anchor| {
       anchor.child(render_document_options_menu(
         panel_id,
-        representation_layers,
+        document_options,
         theme,
         app,
         options_menu_anchor,
@@ -579,7 +630,7 @@ fn render_document_options_button(
 /// overlay layer.
 fn render_document_options_menu(
   panel_id: PanelId,
-  representation_layers: RepresentationLayers,
+  options: MolecularDocumentOptions,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
   options_menu_anchor: Option<gpui::Bounds<Pixels>>,
@@ -587,7 +638,7 @@ fn render_document_options_menu(
 ) -> DocumentOptionsMenu {
   DocumentOptionsMenu {
     panel_id,
-    representation_layers,
+    options,
     theme,
     app,
     options_menu_anchor,
@@ -597,7 +648,12 @@ fn render_document_options_menu(
 
 impl RenderOnce for DocumentOptionsMenu {
   fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-    sync_representation_selectors(&self.controls, self.representation_layers, cx);
+    sync_document_option_selectors(
+      &self.controls,
+      self.options.representation,
+      self.options.surface_backend,
+      cx,
+    );
     let popover = build_document_options_popover(
       self.panel_id,
       self.theme,
@@ -650,7 +706,19 @@ fn build_document_options_popover(
       controls.surface,
       representation_content([
         SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
-        SelectOptionSpec::without_icon("solid", "Solid"),
+        SelectOptionSpec::new("solid", "Solid", SURFACE_SOLID_ICON_PATH),
+      ]),
+    ))
+    .group(GroupedSelectGroup::new(
+      "Surface backend",
+      controls.surface_backend,
+      representation_content([
+        SelectOptionSpec::new(
+          "implicit-scalar-field",
+          "Implicit scalar field",
+          IMPLICIT_SURFACE_ICON_PATH,
+        ),
+        SelectOptionSpec::new("msms", "MSMS", MSMS_SURFACE_ICON_PATH),
       ]),
     ));
 
@@ -677,7 +745,7 @@ fn build_document_options_popover(
         bounds.origin.x + bounds.size.width,
         bounds.origin.y + bounds.size.height,
       ))
-      .offset(point(px(-220.0), px(0.0)));
+      .offset(point(px(-240.0), px(0.0)));
   } else {
     popover = popover.placement(PopoverPlacement::Below);
   }
@@ -698,10 +766,11 @@ fn representation_content<const N: usize>(specs: [SelectOptionSpec; N]) -> Selec
     .group(group)
 }
 
-/// Synchronizes all three selector states with the active representation.
-fn sync_representation_selectors(
+/// Synchronizes representation and surface-backend selectors with the active view.
+fn sync_document_option_selectors(
   controls: &DocumentOptionsControls,
   representation: RepresentationLayers,
+  surface_backend: MolecularSurfaceBackend,
   cx: &mut App,
 ) {
   let atom_id = match representation.atom_style() {
@@ -720,10 +789,15 @@ fn sync_representation_selectors(
   } else {
     "none"
   };
+  let surface_backend_id = match surface_backend {
+    MolecularSurfaceBackend::ImplicitScalarField => "implicit-scalar-field",
+    MolecularSurfaceBackend::Msms => "msms",
+  };
   for (state, id) in [
     (&controls.atom, atom_id),
     (&controls.polymer, polymer_id),
     (&controls.surface, surface_id),
+    (&controls.surface_backend, surface_backend_id),
   ] {
     state.update(cx, |state, cx| {
       state.select(id, cx);

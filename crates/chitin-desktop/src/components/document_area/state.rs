@@ -6,6 +6,7 @@ use std::{
   rc::Rc,
 };
 
+use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_molecule_renderer::RepresentationLayers;
 use chitin_ui::{
   composite::panel::{
@@ -18,6 +19,8 @@ use gpui::{AnyView, App, Bounds, Pixels, Window};
 
 /// Callback that applies molecule representation layers to one WGPU document view.
 type RepresentationLayersChangeHandler = dyn Fn(RepresentationLayers, &mut App);
+/// Callback that rebuilds a molecular surface with a newly selected algorithm.
+type SurfaceBackendChangeHandler = dyn Fn(MolecularSurfaceBackend, &mut App);
 
 /// Result produced when a WGPU document factory creates a fresh view.
 pub struct WgpuDocumentView {
@@ -25,6 +28,8 @@ pub struct WgpuDocumentView {
   view: AnyView,
   /// Optional molecule-specific representation controller.
   representation_layers: Option<WgpuRepresentationLayersControl>,
+  /// Optional molecule-specific surface backend controller.
+  surface_backend: Option<WgpuSurfaceBackendControl>,
 }
 
 /// Mutable representation-layer state and its view update callback.
@@ -34,6 +39,15 @@ pub(crate) struct WgpuRepresentationLayersControl {
   representation: RepresentationLayers,
   /// Callback that invalidates the scene renderer after a selection change.
   on_change: Rc<RepresentationLayersChangeHandler>,
+}
+
+/// Mutable molecular-surface backend state and its view update callback.
+#[derive(Clone)]
+pub(crate) struct WgpuSurfaceBackendControl {
+  /// Algorithm currently selected for this independent panel view.
+  backend: MolecularSurfaceBackend,
+  /// Callback that invalidates and rebuilds surface geometry after a change.
+  on_change: Rc<SurfaceBackendChangeHandler>,
 }
 
 type FreshWgpuSurfaceCallback = Rc<dyn Fn(&Path, &mut Window, &mut App) -> WgpuDocumentView>;
@@ -79,6 +93,8 @@ pub(crate) enum DocumentPanelContent {
     view: AnyView,
     /// Molecule representation state when this view supports molecular rendering.
     representation_layers: Option<WgpuRepresentationLayersControl>,
+    /// Surface algorithm state when this view supports molecular rendering.
+    surface_backend: Option<WgpuSurfaceBackendControl>,
     /// Callback that creates an independent view for split-panel clones.
     clone_view: WgpuDocumentViewFactory,
   },
@@ -144,6 +160,7 @@ impl WgpuDocumentView {
     Self {
       view: view.into(),
       representation_layers: None,
+      surface_backend: None,
     }
   }
 
@@ -159,7 +176,30 @@ impl WgpuDocumentView {
         representation,
         on_change: Rc::new(on_change),
       }),
+      surface_backend: None,
     }
+  }
+
+  /// Adds independently mutable molecular-surface backend selection.
+  ///
+  /// # Parameters
+  ///
+  /// * `backend` is the algorithm initially selected by the document view.
+  /// * `on_change` rebuilds surface geometry after the user selects another backend.
+  ///
+  /// # Returns
+  ///
+  /// This document view with its surface backend controller installed.
+  pub fn with_surface_backend(
+    mut self,
+    backend: MolecularSurfaceBackend,
+    on_change: impl Fn(MolecularSurfaceBackend, &mut App) + 'static,
+  ) -> Self {
+    self.surface_backend = Some(WgpuSurfaceBackendControl {
+      backend,
+      on_change: Rc::new(on_change),
+    });
+    self
   }
 
   /// Applies a copied representation to a newly created independent view.
@@ -169,6 +209,16 @@ impl WgpuDocumentView {
     };
     if let Some(on_change) = control.select(representation) {
       on_change(representation, cx);
+    }
+  }
+
+  /// Applies a copied surface backend to a newly created independent view.
+  fn select_surface_backend(&mut self, backend: MolecularSurfaceBackend, cx: &mut App) {
+    let Some(control) = self.surface_backend.as_mut() else {
+      return;
+    };
+    if let Some(on_change) = control.select(backend) {
+      on_change(backend, cx);
     }
   }
 }
@@ -203,6 +253,34 @@ impl WgpuRepresentationLayersControl {
       return None;
     }
     self.representation = representation;
+    Some(Rc::clone(&self.on_change))
+  }
+}
+
+impl fmt::Debug for WgpuSurfaceBackendControl {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter
+      .debug_struct("WgpuSurfaceBackendControl")
+      .field("backend", &self.backend)
+      .finish_non_exhaustive()
+  }
+}
+
+impl PartialEq for WgpuSurfaceBackendControl {
+  fn eq(&self, other: &Self) -> bool {
+    self.backend == other.backend && Rc::ptr_eq(&self.on_change, &other.on_change)
+  }
+}
+
+impl Eq for WgpuSurfaceBackendControl {}
+
+impl WgpuSurfaceBackendControl {
+  /// Selects a new surface backend and returns the callback that applies it.
+  fn select(&mut self, backend: MolecularSurfaceBackend) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    if self.backend == backend {
+      return None;
+    }
+    self.backend = backend;
     Some(Rc::clone(&self.on_change))
   }
 }
@@ -309,6 +387,7 @@ impl DocumentPanelContent {
       title: title.into(),
       view: document_view.view,
       representation_layers: document_view.representation_layers,
+      surface_backend: document_view.surface_backend,
       clone_view,
     }
   }
@@ -361,6 +440,17 @@ impl DocumentPanelContent {
     }
   }
 
+  /// Returns the selected molecular-surface backend for molecular content.
+  fn surface_backend(&self) -> Option<MolecularSurfaceBackend> {
+    match self {
+      Self::WgpuInteractive {
+        surface_backend: Some(control),
+        ..
+      } => Some(control.backend),
+      Self::ProjectDocument(_) | Self::WgpuInteractive { .. } => None,
+    }
+  }
+
   /// Updates molecular selection state and returns its scene callback.
   fn select_representation_layers(
     &mut self,
@@ -374,6 +464,18 @@ impl DocumentPanelContent {
       return None;
     };
     control.select(representation)
+  }
+
+  /// Updates surface backend state and returns its scene callback.
+  fn select_surface_backend(&mut self, backend: MolecularSurfaceBackend) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    let Self::WgpuInteractive {
+      surface_backend: Some(control),
+      ..
+    } = self
+    else {
+      return None;
+    };
+    control.select(backend)
   }
 
   /// Creates an independent payload for a split panel.
@@ -393,6 +495,7 @@ impl DocumentPanelContent {
         path,
         title,
         representation_layers,
+        surface_backend,
         clone_view,
         ..
       } => {
@@ -400,6 +503,9 @@ impl DocumentPanelContent {
           Some(path) => clone_view.build_for_document(path, window, cx),
           None => clone_view.build(window, cx),
         };
+        if let Some(control) = surface_backend {
+          document_view.select_surface_backend(control.backend, cx);
+        }
         if let Some(control) = representation_layers {
           document_view.select_representation_layers(control.representation, cx);
         }
@@ -408,6 +514,7 @@ impl DocumentPanelContent {
           title: title.clone(),
           view: document_view.view,
           representation_layers: document_view.representation_layers,
+          surface_backend: document_view.surface_backend,
           clone_view: clone_view.clone(),
         }
       }
@@ -655,6 +762,11 @@ impl DocumentPanelState {
     self.active_tab_payload(panel_id)?.representation_layers()
   }
 
+  /// Returns the active molecular-surface backend in one panel.
+  pub(crate) fn active_surface_backend(&self, panel_id: PanelId) -> Option<MolecularSurfaceBackend> {
+    self.active_tab_payload(panel_id)?.surface_backend()
+  }
+
   /// Changes the active molecular representation layers and returns its view callback.
   pub(crate) fn select_representation_layers(
     &mut self,
@@ -669,6 +781,22 @@ impl DocumentPanelState {
       .find(|tab| tab.id == active_tab_id)
       .map(|tab| &mut tab.payload)?;
     content.select_representation_layers(representation)
+  }
+
+  /// Changes the active molecular-surface backend and returns its view callback.
+  pub(crate) fn select_surface_backend(
+    &mut self,
+    panel_id: PanelId,
+    backend: MolecularSurfaceBackend,
+  ) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    let leaf = self.tree.leaf_mut(panel_id)?;
+    let active_tab_id = leaf.active_tab?;
+    let content = leaf
+      .tabs
+      .iter_mut()
+      .find(|tab| tab.id == active_tab_id)
+      .map(|tab| &mut tab.payload)?;
+    content.select_surface_backend(backend)
   }
 
   /// Toggles the options menu for a molecular document panel.

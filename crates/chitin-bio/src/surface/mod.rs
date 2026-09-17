@@ -12,6 +12,16 @@ pub mod implicit;
 mod mesh;
 pub mod msms;
 
+/// Algorithm used to construct renderer-neutral molecular-surface geometry.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MolecularSurfaceBackend {
+  /// Sample a regular implicit scalar field and extract its zero isosurface.
+  #[default]
+  ImplicitScalarField,
+  /// Tessellate analytical contact, toroidal, and reentrant MSMS patches.
+  Msms,
+}
+
 pub use atoms::{SurfaceAtomScope, SurfacePartition};
 pub use implicit::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,

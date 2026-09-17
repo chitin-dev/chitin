@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_molecule_renderer::RepresentationLayers;
 use chitin_ui::composite::{
   panel::{PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId},
@@ -180,6 +181,30 @@ impl ChitinApp {
     };
     self.document_panels.dismiss_options_menu();
     on_change(representation, cx);
+    true
+  }
+
+  /// Applies a surface-generation backend to the active molecular document.
+  ///
+  /// # Parameters
+  ///
+  /// * `panel_id` identifies the panel whose active molecular document changes.
+  /// * `backend` is the newly selected surface-generation algorithm.
+  /// * `cx` invokes the document view callback and schedules UI updates.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the active document accepted a changed backend.
+  pub(crate) fn select_document_surface_backend(
+    &mut self,
+    panel_id: PanelId,
+    backend: MolecularSurfaceBackend,
+    cx: &mut Context<Self>,
+  ) -> bool {
+    let Some(on_change) = self.document_panels.select_surface_backend(panel_id, backend) else {
+      return false;
+    };
+    on_change(backend, cx);
     true
   }
 
