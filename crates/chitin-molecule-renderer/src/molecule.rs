@@ -13,7 +13,7 @@ use chitin_wgpu::{DepthTarget, GpuHandle, RenderTargetSize};
 use crate::{
   cartoon::{CARTOON_HALF_WIDTH, cartoon_mesh},
   representation::{AtomStyle, PolymerStyle, RepresentationLayers},
-  surface::surface_mesh_vertices,
+  surface::{SurfaceFragment, surface_fragment_vertices, surface_mesh_vertices},
 };
 
 /// WGSL shader shared by the atom and bond pipelines.
@@ -322,17 +322,31 @@ pub struct MoleculeRenderInput<'a> {
   pub scene: &'a StructureScene,
   /// Scientific molecular-surface artifact to draw when its layer is enabled.
   pub surface: Option<&'a MolecularSurfaceArtifact>,
+  /// Independently colored artifacts used instead of `surface` when non-empty.
+  pub surface_fragments: &'a [SurfaceFragment<'a>],
 }
 
 impl<'a> MoleculeRenderInput<'a> {
   /// Creates render input without molecular-surface geometry.
   pub const fn new(scene: &'a StructureScene) -> Self {
-    Self { scene, surface: None }
+    Self {
+      scene,
+      surface: None,
+      surface_fragments: &[],
+    }
   }
 
   /// Attaches precomputed molecular-surface geometry.
   pub const fn with_surface(mut self, surface: &'a MolecularSurfaceArtifact) -> Self {
     self.surface = Some(surface);
+    self.surface_fragments = &[];
+    self
+  }
+
+  /// Attaches independently colored surface fragments.
+  pub const fn with_surface_fragments(mut self, fragments: &'a [SurfaceFragment<'a>]) -> Self {
+    self.surface = None;
+    self.surface_fragments = fragments;
     self
   }
 }
@@ -503,7 +517,11 @@ impl MoleculeRenderer {
     layers: RepresentationLayers,
     style: &BallAndStickStyle,
   ) -> Self {
-    let MoleculeRenderInput { scene, surface } = input;
+    let MoleculeRenderInput {
+      scene,
+      surface,
+      surface_fragments,
+    } = input;
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
       label: Some("chitin_molecule_shader"),
       source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -581,6 +599,7 @@ impl MoleculeRenderer {
       None => Default::default(),
     };
     let (surface_vertices, surface_indices) = match layers.surface_style() {
+      Some(_) if !surface_fragments.is_empty() => surface_fragment_vertices(surface_fragments),
       Some(_) => surface_mesh_vertices(surface, style.palette.carbon.color),
       None => Default::default(),
     };
@@ -722,7 +741,7 @@ impl MoleculeRenderer {
       surface_index_buffer,
       surface_index_count,
       surface_mesh_index_count: surface_index_count,
-      surface_geometry_ready: layers.surface_style().is_some() && surface.is_some(),
+      surface_geometry_ready: layers.surface_style().is_some() && (surface.is_some() || !surface_fragments.is_empty()),
       uniform_buffer,
       bind_group,
       fit_transform,
@@ -755,7 +774,11 @@ impl MoleculeRenderer {
       return;
     }
 
-    let MoleculeRenderInput { scene, surface } = input;
+    let MoleculeRenderInput {
+      scene,
+      surface,
+      surface_fragments,
+    } = input;
     if self.layers.atom_style() != layers.atom_style() || self.layers.polymer_style() != layers.polymer_style() {
       self.replace_atom_and_bond_buffers(scene, layers, style);
     }
@@ -769,11 +792,12 @@ impl MoleculeRenderer {
       0
     };
 
-    if layers.surface_style().is_some()
-      && !self.surface_geometry_ready
-      && let Some(surface) = surface
-    {
-      self.replace_surface_buffers(surface, style);
+    if layers.surface_style().is_some() && !self.surface_geometry_ready {
+      if !surface_fragments.is_empty() {
+        self.replace_surface_fragment_buffers(surface_fragments);
+      } else if let Some(surface) = surface {
+        self.replace_surface_buffers(surface, style);
+      }
     }
     self.surface_index_count = if layers.surface_style().is_some() {
       self.surface_mesh_index_count
@@ -871,6 +895,17 @@ impl MoleculeRenderer {
   /// Packs and uploads a computed surface while retaining all pipeline state.
   fn replace_surface_buffers(&mut self, surface: &MolecularSurfaceArtifact, style: &BallAndStickStyle) {
     let (vertices, indices) = surface_mesh_vertices(Some(surface), style.palette.carbon.color);
+    self.replace_packed_surface_buffers(vertices, indices);
+  }
+
+  /// Packs and uploads independently colored surface fragments.
+  fn replace_surface_fragment_buffers(&mut self, fragments: &[SurfaceFragment<'_>]) {
+    let (vertices, indices) = surface_fragment_vertices(fragments);
+    self.replace_packed_surface_buffers(vertices, indices);
+  }
+
+  /// Uploads already packed surface vertices and indices.
+  fn replace_packed_surface_buffers(&mut self, vertices: Vec<[f32; 9]>, indices: Vec<u32>) {
     self.surface_mesh_index_count = indices.len() as u32;
     let vertices = if vertices.is_empty() { vec![[0.0; 9]] } else { vertices };
     let indices = if indices.is_empty() { vec![0_u32] } else { indices };

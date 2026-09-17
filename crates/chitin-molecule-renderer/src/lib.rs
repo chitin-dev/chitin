@@ -21,3 +21,4 @@ pub use molecule::{
   MoleculeRenderInput, MoleculeRenderer,
 };
 pub use representation::{AtomStyle, PolymerStyle, RepresentationLayer, RepresentationLayers, SurfaceStyle};
+pub use surface::SurfaceFragment;

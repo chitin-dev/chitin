@@ -2,6 +2,15 @@
 
 use chitin_bio::surface::MolecularSurfaceArtifact;
 
+/// One independently colored molecular-surface artifact.
+#[derive(Clone, Copy)]
+pub struct SurfaceFragment<'a> {
+  /// Renderer-neutral scientific geometry.
+  pub surface: &'a MolecularSurfaceArtifact,
+  /// Linear RGB color applied while packing GPU vertices.
+  pub color: [f32; 3],
+}
+
 /// Packs all computed surface domains into the renderer's interleaved vertex layout.
 pub(crate) fn surface_mesh_vertices(
   surface: Option<&MolecularSurfaceArtifact>,
@@ -29,6 +38,44 @@ pub(crate) fn surface_mesh_vertices(
   (vertices, indices)
 }
 
+/// Packs independently colored artifacts into one depth-consistent surface mesh.
+pub(crate) fn surface_fragment_vertices(fragments: &[SurfaceFragment<'_>]) -> (Vec<[f32; 9]>, Vec<u32>) {
+  let vertex_count = fragments
+    .iter()
+    .flat_map(|fragment| &fragment.surface.domains)
+    .map(|domain| domain.mesh.vertices.len())
+    .sum();
+  let index_count = fragments
+    .iter()
+    .flat_map(|fragment| &fragment.surface.domains)
+    .map(|domain| domain.mesh.indices.len())
+    .sum();
+  let mut vertices = Vec::with_capacity(vertex_count);
+  let mut indices = Vec::with_capacity(index_count);
+
+  for fragment in fragments {
+    for domain in &fragment.surface.domains {
+      let vertex_offset = vertices.len() as u32;
+      vertices.extend(domain.mesh.vertices.iter().map(|vertex| {
+        [
+          vertex[0],
+          vertex[1],
+          vertex[2],
+          vertex[3],
+          vertex[4],
+          vertex[5],
+          fragment.color[0],
+          fragment.color[1],
+          fragment.color[2],
+        ]
+      }));
+      indices.extend(domain.mesh.indices.iter().map(|index| index + vertex_offset));
+    }
+  }
+
+  (vertices, indices)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -49,5 +96,43 @@ mod tests {
     let (vertices, _) = surface_mesh_vertices(Some(&surface), [0.2, 0.4, 0.6]);
 
     assert!(vertices.iter().all(|vertex| vertex[6..9] == [0.2, 0.4, 0.6]));
+  }
+
+  #[test]
+  fn fragment_packing_should_preserve_independent_colors() {
+    let parsed = PdbParser::new()
+      .parse_bytes(b"ATOM      1  C   GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \nEND\n")
+      .unwrap_or_else(|error| panic!("surface fixture should parse: {error}"));
+    let scene = StructureScene::from_first_model(&parsed.structure)
+      .unwrap_or_else(|error| panic!("surface fixture should produce a scene: {error}"));
+    let surface = generate_implicit_surface(&scene, MolecularSurfaceRequest::default());
+    let fragments = [
+      SurfaceFragment {
+        surface: &surface,
+        color: [1.0, 0.0, 0.0],
+      },
+      SurfaceFragment {
+        surface: &surface,
+        color: [0.0, 1.0, 0.0],
+      },
+    ];
+
+    let (vertices, _) = surface_fragment_vertices(&fragments);
+    let fragment_vertex_count = surface
+      .domains
+      .iter()
+      .map(|domain| domain.mesh.vertices.len())
+      .sum::<usize>();
+
+    assert!(
+      vertices[..fragment_vertex_count]
+        .iter()
+        .all(|vertex| vertex[6..9] == [1.0, 0.0, 0.0])
+    );
+    assert!(
+      vertices[fragment_vertex_count..]
+        .iter()
+        .all(|vertex| vertex[6..9] == [0.0, 1.0, 0.0])
+    );
   }
 }
