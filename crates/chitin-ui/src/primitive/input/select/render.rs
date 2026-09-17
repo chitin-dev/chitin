@@ -193,11 +193,23 @@ impl RenderOnce for Select {
     let focused = focus_handle.is_focused(window);
     self.state.update(cx, |state, cx| state.sync_focus(focused, cx));
 
-    let (selected_id, selected_label, highlighted_index, open, disabled, popup_scroll_handle, trigger_bounds) = {
+    let (
+      selected_id,
+      selected_label,
+      selected_icon,
+      highlighted_index,
+      open,
+      disabled,
+      popup_scroll_handle,
+      trigger_bounds,
+    ) = {
       let state = self.state.read(cx);
       (
         state.selected_id().map(SharedString::from),
         state.selected_option().map(|option| SharedString::from(option.label())),
+        state
+          .selected_option()
+          .and_then(|option| option.icon_path().map(SharedString::from)),
         state.highlighted_index(),
         state.is_open(),
         state.is_disabled(),
@@ -275,6 +287,7 @@ impl RenderOnce for Select {
               .child(render_value(
                 value,
                 selected_label,
+                selected_icon,
                 colors.foreground,
                 self.theme.text.disabled,
               ))
@@ -570,6 +583,8 @@ pub struct SelectItem {
   id: SharedString,
   /// Text shown in the popup row and trigger after selection.
   label: SharedString,
+  /// Optional asset-relative path for a leading item icon.
+  icon: Option<SharedString>,
   /// Whether this row remains visible but cannot be selected.
   disabled: bool,
 }
@@ -580,6 +595,7 @@ impl SelectItem {
     Self {
       id: id.into(),
       label: label.into(),
+      icon: None,
       disabled: false,
     }
   }
@@ -590,9 +606,19 @@ impl SelectItem {
     self
   }
 
+  /// Adds an optional leading icon asset path.
+  pub fn icon(mut self, path: impl Into<SharedString>) -> Self {
+    self.icon = Some(path.into());
+    self
+  }
+
   /// Converts this rendered item into state-owned option data.
   fn option(&self) -> SelectOption {
-    SelectOption::new(self.id.clone(), self.label.clone()).disabled(self.disabled)
+    let option = SelectOption::new(self.id.clone(), self.label.clone()).disabled(self.disabled);
+    match &self.icon {
+      Some(path) => option.icon(path.clone()),
+      None => option,
+    }
   }
 }
 
@@ -622,15 +648,22 @@ impl SelectSeparator {
 fn render_value(
   value: SelectValue,
   selected_label: Option<SharedString>,
+  selected_icon: Option<SharedString>,
   foreground: gpui::Rgba,
   placeholder: gpui::Rgba,
 ) -> Div {
   let selected = selected_label.is_some();
-  div()
+  let mut value_element = div()
+    .flex()
+    .items_center()
+    .gap_2()
     .min_w_0()
     .flex_1()
-    .text_color(if selected { foreground } else { placeholder })
-    .child(selected_label.unwrap_or(value.placeholder))
+    .text_color(if selected { foreground } else { placeholder });
+  if let Some(path) = selected_icon {
+    value_element = value_element.child(Icon::new(path).size(px(14.0)).color(foreground));
+  }
+  value_element.child(selected_label.unwrap_or(value.placeholder))
 }
 
 /// Renders one popup content tree at its selected positioning mode.
@@ -786,6 +819,14 @@ fn render_item(
 ) -> Div {
   let disabled = item.disabled;
   let selection_state = state.clone();
+  let mut leading = div().flex().items_center().gap_2();
+  if let Some(path) = item.icon {
+    leading = leading.child(Icon::new(path).size(px(14.0)).color(if disabled {
+      theme.text.disabled
+    } else {
+      theme.text.primary
+    }));
+  }
   let item = div()
     .flex()
     .items_center()
@@ -818,7 +859,7 @@ fn render_item(
         }
       })
     })
-    .child(item.label)
+    .child(leading.child(item.label))
     .when(selected, |style| {
       style.child(Icon::new("icons/check.svg").size(px(14.0)).color(if disabled {
         theme.text.disabled

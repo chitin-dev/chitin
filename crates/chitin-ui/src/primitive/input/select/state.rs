@@ -14,6 +14,8 @@ pub struct SelectOption {
   id: SharedString,
   /// Visible label rendered for the option.
   label: SharedString,
+  /// Optional asset-relative path for a leading option icon.
+  icon: Option<SharedString>,
   /// Whether keyboard and pointer selection skip this option.
   disabled: bool,
 }
@@ -33,6 +35,7 @@ impl SelectOption {
     Self {
       id: id.into(),
       label: label.into(),
+      icon: None,
       disabled: false,
     }
   }
@@ -40,6 +43,12 @@ impl SelectOption {
   /// Sets whether the option can be highlighted or selected.
   pub fn disabled(mut self, disabled: bool) -> Self {
     self.disabled = disabled;
+    self
+  }
+
+  /// Adds an optional leading icon asset path.
+  pub fn icon(mut self, path: impl Into<SharedString>) -> Self {
+    self.icon = Some(path.into());
     self
   }
 
@@ -51,6 +60,11 @@ impl SelectOption {
   /// Returns the visible option text.
   pub fn label(&self) -> &str {
     &self.label
+  }
+
+  /// Returns the optional leading icon path.
+  pub fn icon_path(&self) -> Option<&str> {
+    self.icon.as_deref()
   }
 
   /// Reports whether the option is unavailable for selection.

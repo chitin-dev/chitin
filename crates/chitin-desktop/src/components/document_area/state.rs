@@ -6,6 +6,8 @@ use std::{
   rc::Rc,
 };
 
+use chitin_bio::surface::MolecularSurfaceBackend;
+use chitin_molecule_renderer::RepresentationLayers;
 use chitin_ui::{
   composite::panel::{
     PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag, PanelTabDragState,
@@ -13,27 +15,39 @@ use chitin_ui::{
   },
   primitive::resize::ResizeGesture,
 };
-use chitin_wgpu::AtomRepresentation;
 use gpui::{AnyView, App, Bounds, Pixels, Window};
 
-/// Callback that applies an atom representation to one WGPU document view.
-type AtomRepresentationChangeHandler = dyn Fn(AtomRepresentation, &mut App);
+/// Callback that applies molecule representation layers to one WGPU document view.
+type RepresentationLayersChangeHandler = dyn Fn(RepresentationLayers, &mut App);
+/// Callback that rebuilds a molecular surface with a newly selected algorithm.
+type SurfaceBackendChangeHandler = dyn Fn(MolecularSurfaceBackend, &mut App);
 
 /// Result produced when a WGPU document factory creates a fresh view.
 pub struct WgpuDocumentView {
   /// Type-erased GPUI view rendered inside the panel body.
   view: AnyView,
   /// Optional molecule-specific representation controller.
-  atom_representation: Option<WgpuAtomRepresentationControl>,
+  representation_layers: Option<WgpuRepresentationLayersControl>,
+  /// Optional molecule-specific surface backend controller.
+  surface_backend: Option<WgpuSurfaceBackendControl>,
 }
 
-/// Mutable atom-representation state and its view update callback.
+/// Mutable representation-layer state and its view update callback.
 #[derive(Clone)]
-pub(crate) struct WgpuAtomRepresentationControl {
-  /// Representation currently selected for this independent panel view.
-  representation: AtomRepresentation,
+pub(crate) struct WgpuRepresentationLayersControl {
+  /// Layers currently selected for this independent panel view.
+  representation: RepresentationLayers,
   /// Callback that invalidates the scene renderer after a selection change.
-  on_change: Rc<AtomRepresentationChangeHandler>,
+  on_change: Rc<RepresentationLayersChangeHandler>,
+}
+
+/// Mutable molecular-surface backend state and its view update callback.
+#[derive(Clone)]
+pub(crate) struct WgpuSurfaceBackendControl {
+  /// Algorithm currently selected for this independent panel view.
+  backend: MolecularSurfaceBackend,
+  /// Callback that invalidates and rebuilds surface geometry after a change.
+  on_change: Rc<SurfaceBackendChangeHandler>,
 }
 
 type FreshWgpuSurfaceCallback = Rc<dyn Fn(&Path, &mut Window, &mut App) -> WgpuDocumentView>;
@@ -77,8 +91,10 @@ pub(crate) enum DocumentPanelContent {
     title: String,
     /// GPUI entity that owns the WGPU surface and interaction state.
     view: AnyView,
-    /// Molecule representation state when this view supports atom rendering.
-    atom_representation: Option<WgpuAtomRepresentationControl>,
+    /// Molecule representation state when this view supports molecular rendering.
+    representation_layers: Option<WgpuRepresentationLayersControl>,
+    /// Surface algorithm state when this view supports molecular rendering.
+    surface_backend: Option<WgpuSurfaceBackendControl>,
     /// Callback that creates an independent view for split-panel clones.
     clone_view: WgpuDocumentViewFactory,
   },
@@ -143,32 +159,66 @@ impl WgpuDocumentView {
   pub fn new(view: impl Into<AnyView>) -> Self {
     Self {
       view: view.into(),
-      atom_representation: None,
+      representation_layers: None,
+      surface_backend: None,
     }
   }
 
   /// Creates a molecular WGPU view with an independently mutable representation.
-  pub fn with_atom_representation(
+  pub fn with_representation_layers(
     view: impl Into<AnyView>,
-    representation: AtomRepresentation,
-    on_change: impl Fn(AtomRepresentation, &mut App) + 'static,
+    representation: RepresentationLayers,
+    on_change: impl Fn(RepresentationLayers, &mut App) + 'static,
   ) -> Self {
     Self {
       view: view.into(),
-      atom_representation: Some(WgpuAtomRepresentationControl {
+      representation_layers: Some(WgpuRepresentationLayersControl {
         representation,
         on_change: Rc::new(on_change),
       }),
+      surface_backend: None,
     }
   }
 
+  /// Adds independently mutable molecular-surface backend selection.
+  ///
+  /// # Parameters
+  ///
+  /// * `backend` is the algorithm initially selected by the document view.
+  /// * `on_change` rebuilds surface geometry after the user selects another backend.
+  ///
+  /// # Returns
+  ///
+  /// This document view with its surface backend controller installed.
+  pub fn with_surface_backend(
+    mut self,
+    backend: MolecularSurfaceBackend,
+    on_change: impl Fn(MolecularSurfaceBackend, &mut App) + 'static,
+  ) -> Self {
+    self.surface_backend = Some(WgpuSurfaceBackendControl {
+      backend,
+      on_change: Rc::new(on_change),
+    });
+    self
+  }
+
   /// Applies a copied representation to a newly created independent view.
-  fn select_atom_representation(&mut self, representation: AtomRepresentation, cx: &mut App) {
-    let Some(control) = self.atom_representation.as_mut() else {
+  fn select_representation_layers(&mut self, representation: RepresentationLayers, cx: &mut App) {
+    let Some(control) = self.representation_layers.as_mut() else {
       return;
     };
     if let Some(on_change) = control.select(representation) {
       on_change(representation, cx);
+    }
+  }
+
+  /// Applies a copied surface backend to a newly created independent view.
+  fn select_surface_backend(&mut self, backend: MolecularSurfaceBackend, cx: &mut App) {
+    let Some(control) = self.surface_backend.as_mut() else {
+      return;
+    };
+    if let Some(on_change) = control.select(backend) {
+      on_change(backend, cx);
     }
   }
 }
@@ -179,30 +229,58 @@ impl From<AnyView> for WgpuDocumentView {
   }
 }
 
-impl fmt::Debug for WgpuAtomRepresentationControl {
+impl fmt::Debug for WgpuRepresentationLayersControl {
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     formatter
-      .debug_struct("WgpuAtomRepresentationControl")
+      .debug_struct("WgpuRepresentationLayersControl")
       .field("representation", &self.representation)
       .finish_non_exhaustive()
   }
 }
 
-impl PartialEq for WgpuAtomRepresentationControl {
+impl PartialEq for WgpuRepresentationLayersControl {
   fn eq(&self, other: &Self) -> bool {
     self.representation == other.representation && Rc::ptr_eq(&self.on_change, &other.on_change)
   }
 }
 
-impl Eq for WgpuAtomRepresentationControl {}
+impl Eq for WgpuRepresentationLayersControl {}
 
-impl WgpuAtomRepresentationControl {
+impl WgpuRepresentationLayersControl {
   /// Selects a new representation and returns the callback that applies it.
-  fn select(&mut self, representation: AtomRepresentation) -> Option<Rc<AtomRepresentationChangeHandler>> {
+  fn select(&mut self, representation: RepresentationLayers) -> Option<Rc<RepresentationLayersChangeHandler>> {
     if self.representation == representation {
       return None;
     }
     self.representation = representation;
+    Some(Rc::clone(&self.on_change))
+  }
+}
+
+impl fmt::Debug for WgpuSurfaceBackendControl {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter
+      .debug_struct("WgpuSurfaceBackendControl")
+      .field("backend", &self.backend)
+      .finish_non_exhaustive()
+  }
+}
+
+impl PartialEq for WgpuSurfaceBackendControl {
+  fn eq(&self, other: &Self) -> bool {
+    self.backend == other.backend && Rc::ptr_eq(&self.on_change, &other.on_change)
+  }
+}
+
+impl Eq for WgpuSurfaceBackendControl {}
+
+impl WgpuSurfaceBackendControl {
+  /// Selects a new surface backend and returns the callback that applies it.
+  fn select(&mut self, backend: MolecularSurfaceBackend) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    if self.backend == backend {
+      return None;
+    }
+    self.backend = backend;
     Some(Rc::clone(&self.on_change))
   }
 }
@@ -308,7 +386,8 @@ impl DocumentPanelContent {
       path,
       title: title.into(),
       view: document_view.view,
-      atom_representation: document_view.atom_representation,
+      representation_layers: document_view.representation_layers,
+      surface_backend: document_view.surface_backend,
       clone_view,
     }
   }
@@ -350,30 +429,53 @@ impl DocumentPanelContent {
     }
   }
 
-  /// Returns the selected atom representation for molecular content.
-  fn atom_representation(&self) -> Option<AtomRepresentation> {
+  /// Returns the selected representation layers for molecular content.
+  fn representation_layers(&self) -> Option<RepresentationLayers> {
     match self {
       Self::WgpuInteractive {
-        atom_representation: Some(control),
+        representation_layers: Some(control),
         ..
       } => Some(control.representation),
       Self::ProjectDocument(_) | Self::WgpuInteractive { .. } => None,
     }
   }
 
+  /// Returns the selected molecular-surface backend for molecular content.
+  fn surface_backend(&self) -> Option<MolecularSurfaceBackend> {
+    match self {
+      Self::WgpuInteractive {
+        surface_backend: Some(control),
+        ..
+      } => Some(control.backend),
+      Self::ProjectDocument(_) | Self::WgpuInteractive { .. } => None,
+    }
+  }
+
   /// Updates molecular selection state and returns its scene callback.
-  fn select_atom_representation(
+  fn select_representation_layers(
     &mut self,
-    representation: AtomRepresentation,
-  ) -> Option<Rc<AtomRepresentationChangeHandler>> {
+    representation: RepresentationLayers,
+  ) -> Option<Rc<RepresentationLayersChangeHandler>> {
     let Self::WgpuInteractive {
-      atom_representation: Some(control),
+      representation_layers: Some(control),
       ..
     } = self
     else {
       return None;
     };
     control.select(representation)
+  }
+
+  /// Updates surface backend state and returns its scene callback.
+  fn select_surface_backend(&mut self, backend: MolecularSurfaceBackend) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    let Self::WgpuInteractive {
+      surface_backend: Some(control),
+      ..
+    } = self
+    else {
+      return None;
+    };
+    control.select(backend)
   }
 
   /// Creates an independent payload for a split panel.
@@ -392,7 +494,8 @@ impl DocumentPanelContent {
       Self::WgpuInteractive {
         path,
         title,
-        atom_representation,
+        representation_layers,
+        surface_backend,
         clone_view,
         ..
       } => {
@@ -400,14 +503,18 @@ impl DocumentPanelContent {
           Some(path) => clone_view.build_for_document(path, window, cx),
           None => clone_view.build(window, cx),
         };
-        if let Some(control) = atom_representation {
-          document_view.select_atom_representation(control.representation, cx);
+        if let Some(control) = surface_backend {
+          document_view.select_surface_backend(control.backend, cx);
+        }
+        if let Some(control) = representation_layers {
+          document_view.select_representation_layers(control.representation, cx);
         }
         Self::WgpuInteractive {
           path: path.clone(),
           title: title.clone(),
           view: document_view.view,
-          atom_representation: document_view.atom_representation,
+          representation_layers: document_view.representation_layers,
+          surface_backend: document_view.surface_backend,
           clone_view: clone_view.clone(),
         }
       }
@@ -650,17 +757,22 @@ impl DocumentPanelState {
     self.tree.leaf(panel_id)?.active_tab().map(|tab| &tab.payload)
   }
 
-  /// Returns the active molecular representation in one panel.
-  pub(crate) fn active_atom_representation(&self, panel_id: PanelId) -> Option<AtomRepresentation> {
-    self.active_tab_payload(panel_id)?.atom_representation()
+  /// Returns the active molecular representation layers in one panel.
+  pub(crate) fn active_representation_layers(&self, panel_id: PanelId) -> Option<RepresentationLayers> {
+    self.active_tab_payload(panel_id)?.representation_layers()
   }
 
-  /// Changes the active molecular representation and returns its view callback.
-  pub(crate) fn select_atom_representation(
+  /// Returns the active molecular-surface backend in one panel.
+  pub(crate) fn active_surface_backend(&self, panel_id: PanelId) -> Option<MolecularSurfaceBackend> {
+    self.active_tab_payload(panel_id)?.surface_backend()
+  }
+
+  /// Changes the active molecular representation layers and returns its view callback.
+  pub(crate) fn select_representation_layers(
     &mut self,
     panel_id: PanelId,
-    representation: AtomRepresentation,
-  ) -> Option<Rc<AtomRepresentationChangeHandler>> {
+    representation: RepresentationLayers,
+  ) -> Option<Rc<RepresentationLayersChangeHandler>> {
     let leaf = self.tree.leaf_mut(panel_id)?;
     let active_tab_id = leaf.active_tab?;
     let content = leaf
@@ -668,12 +780,28 @@ impl DocumentPanelState {
       .iter_mut()
       .find(|tab| tab.id == active_tab_id)
       .map(|tab| &mut tab.payload)?;
-    content.select_atom_representation(representation)
+    content.select_representation_layers(representation)
+  }
+
+  /// Changes the active molecular-surface backend and returns its view callback.
+  pub(crate) fn select_surface_backend(
+    &mut self,
+    panel_id: PanelId,
+    backend: MolecularSurfaceBackend,
+  ) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    let leaf = self.tree.leaf_mut(panel_id)?;
+    let active_tab_id = leaf.active_tab?;
+    let content = leaf
+      .tabs
+      .iter_mut()
+      .find(|tab| tab.id == active_tab_id)
+      .map(|tab| &mut tab.payload)?;
+    content.select_surface_backend(backend)
   }
 
   /// Toggles the options menu for a molecular document panel.
   pub(crate) fn toggle_options_menu(&mut self, panel_id: PanelId) -> bool {
-    if self.active_atom_representation(panel_id).is_none() {
+    if self.active_representation_layers(panel_id).is_none() {
       return false;
     }
     let opening = self.options_menu_panel_id != Some(panel_id);
@@ -1003,10 +1131,11 @@ impl DocumentPanelState {
 #[cfg(test)]
 mod representation_tests {
   use super::*;
+  use chitin_molecule_renderer::AtomStyle;
 
-  fn stick_control() -> WgpuAtomRepresentationControl {
-    WgpuAtomRepresentationControl {
-      representation: AtomRepresentation::Stick,
+  fn stick_control() -> WgpuRepresentationLayersControl {
+    WgpuRepresentationLayersControl {
+      representation: RepresentationLayers::atom(AtomStyle::Stick),
       on_change: Rc::new(|_, _| {}),
     }
   }
@@ -1015,11 +1144,11 @@ mod representation_tests {
   fn selecting_new_representation_should_update_control_and_return_callback() {
     let mut control = stick_control();
 
-    let callback = control.select(AtomRepresentation::Sphere);
+    let callback = control.select(RepresentationLayers::atom(AtomStyle::Sphere));
 
     assert_eq!(
       (control.representation, callback.is_some()),
-      (AtomRepresentation::Sphere, true)
+      (RepresentationLayers::atom(AtomStyle::Sphere), true)
     );
   }
 
@@ -1027,7 +1156,7 @@ mod representation_tests {
   fn selecting_current_representation_should_not_return_callback() {
     let mut control = stick_control();
 
-    let callback = control.select(AtomRepresentation::Stick);
+    let callback = control.select(RepresentationLayers::atom(AtomStyle::Stick));
 
     assert!(callback.is_none());
   }

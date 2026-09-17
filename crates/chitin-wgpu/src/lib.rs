@@ -1,8 +1,8 @@
 //! Low-level experimental WGPU bridge helpers for Chitin.
 //!
-//! This crate owns framework-neutral GPU helpers, viewport math, and reusable
-//! renderers. Scientific topology and renderer-neutral scene data remain in
-//! `chitin-bio`, while GPUI surface adapters remain in `chitin-desktop`.
+//! This crate owns platform-aware GPU handles and reusable render-target
+//! resources. Molecular representations remain in `chitin-molecule-renderer`,
+//! while UI surface adapters remain in their frontend crates.
 
 /// Shared ownership handle for platform GPU resources.
 // Native GPUI code may share resources across worker/UI boundaries.
@@ -14,12 +14,5 @@ pub type GpuHandle<T> = std::sync::Arc<T>;
 pub type GpuHandle<T> = std::rc::Rc<T>;
 
 pub mod bridge;
-pub mod camera;
-pub mod molecule;
 
 pub use bridge::{ClearRenderer, DepthTarget, RenderTargetSize};
-pub use camera::{DragMode, ViewerCamera, ViewportDrag};
-pub use molecule::{
-  AtomRepresentation, BallAndStickElementStyle, BallAndStickMaterial, BallAndStickPalette, BallAndStickStyle,
-  MoleculeDebugMode, MoleculeRenderer,
-};

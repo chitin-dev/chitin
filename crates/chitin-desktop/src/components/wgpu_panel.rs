@@ -5,7 +5,9 @@ use std::{
   time::{Duration, Instant},
 };
 
-use chitin_wgpu::{AtomRepresentation, ClearRenderer, DragMode, RenderTargetSize, ViewerCamera, ViewportDrag};
+use chitin_bio::surface::MolecularSurfaceArtifact;
+use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportDrag};
+use chitin_wgpu::{ClearRenderer, RenderTargetSize};
 use gpui::{
   Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollWheelEvent,
   WgpuSurfaceHandle, Window, div, prelude::*, px, rgb, wgpu_surface,
@@ -55,8 +57,18 @@ pub trait WgpuPanelScene {
     DEFAULT_INTERACTION_HINT
   }
 
-  /// Applies an atom representation when the hosted scene is molecular.
-  fn set_atom_representation(&mut self, _representation: AtomRepresentation) -> bool {
+  /// Applies molecule representation layers when the hosted scene is molecular.
+  fn set_representation_layers(&mut self, _representation: RepresentationLayers) -> bool {
+    false
+  }
+
+  /// Installs a computed molecular surface when the hosted scene supports it.
+  fn set_molecular_surface(&mut self, _surface: MolecularSurfaceArtifact) -> bool {
+    false
+  }
+
+  /// Removes molecular-surface geometry when the hosted scene supports it.
+  fn clear_molecular_surface(&mut self) -> bool {
     false
   }
 }
@@ -164,8 +176,18 @@ impl ChitinWgpuDocumentPanel {
   }
 
   /// Changes the hosted molecular scene representation when supported.
-  pub fn set_atom_representation(&mut self, representation: AtomRepresentation) -> bool {
-    self.scene.set_atom_representation(representation)
+  pub fn set_representation_layers(&mut self, representation: RepresentationLayers) -> bool {
+    self.scene.set_representation_layers(representation)
+  }
+
+  /// Installs a background-computed molecular surface when supported.
+  pub fn set_molecular_surface(&mut self, surface: MolecularSurfaceArtifact) -> bool {
+    self.scene.set_molecular_surface(surface)
+  }
+
+  /// Removes the currently installed molecular surface when supported.
+  pub fn clear_molecular_surface(&mut self) -> bool {
+    self.scene.clear_molecular_surface()
   }
 
   /// Renders one frame into the surface back buffer when available.

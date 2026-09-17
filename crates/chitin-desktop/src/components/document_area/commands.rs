@@ -2,11 +2,13 @@
 
 use std::sync::Arc;
 
-use chitin_ui::composite::panel::{
-  PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId,
+use chitin_bio::surface::MolecularSurfaceBackend;
+use chitin_molecule_renderer::RepresentationLayers;
+use chitin_ui::composite::{
+  panel::{PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId},
+  toast::ToastViewport,
 };
-use chitin_wgpu::AtomRepresentation;
-use gpui::{App, AppContext, AsyncApp, Context, Pixels, WeakEntity, Window};
+use gpui::{App, AppContext, AsyncApp, Context, Entity, Pixels, WeakEntity, Window};
 
 use crate::{
   app::ChitinApp,
@@ -97,9 +99,10 @@ impl ChitinApp {
     document: &OpenedProjectDocument,
     scene: Arc<chitin_bio::structure::StructureScene>,
     window: &mut Window,
-    cx: &mut App,
+    cx: &mut Context<Self>,
   ) {
-    let content = structure_document_content(document, scene, window, cx);
+    let toast_viewport = self.toast_viewport(cx);
+    let content = structure_document_content(document, scene, toast_viewport, window, cx);
     let focused_panel_id = self.document_panels.focused_panel_id;
     let opened = self
       .document_panels
@@ -162,22 +165,46 @@ impl ChitinApp {
     self.document_panels.dismiss_options_menu()
   }
 
-  /// Applies an atom representation to the active molecular document.
-  pub(crate) fn select_document_atom_representation(
+  /// Applies representation layers to the active molecular document.
+  pub(crate) fn select_document_representation_layers(
     &mut self,
     panel_id: PanelId,
-    representation: AtomRepresentation,
+    representation: RepresentationLayers,
     cx: &mut Context<Self>,
   ) -> bool {
     let Some(on_change) = self
       .document_panels
-      .select_atom_representation(panel_id, representation)
+      .select_representation_layers(panel_id, representation)
     else {
       self.document_panels.dismiss_options_menu();
       return false;
     };
     self.document_panels.dismiss_options_menu();
     on_change(representation, cx);
+    true
+  }
+
+  /// Applies a surface-generation backend to the active molecular document.
+  ///
+  /// # Parameters
+  ///
+  /// * `panel_id` identifies the panel whose active molecular document changes.
+  /// * `backend` is the newly selected surface-generation algorithm.
+  /// * `cx` invokes the document view callback and schedules UI updates.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the active document accepted a changed backend.
+  pub(crate) fn select_document_surface_backend(
+    &mut self,
+    panel_id: PanelId,
+    backend: MolecularSurfaceBackend,
+    cx: &mut Context<Self>,
+  ) -> bool {
+    let Some(on_change) = self.document_panels.select_surface_backend(panel_id, backend) else {
+      return false;
+    };
+    on_change(backend, cx);
     true
   }
 
@@ -319,15 +346,29 @@ impl ChitinApp {
 }
 
 /// Creates one surface-backed panel payload while sharing parsed scene data with future splits.
+///
+/// # Parameters
+///
+/// * `document` supplies the tab title and source path.
+/// * `scene` is shared by the initial view and future split-panel clones.
+/// * `toast_viewport` receives asynchronous surface-generation notifications.
+/// * `window` creates the GPUI-owned WGPU surface.
+/// * `cx` creates view entities and callbacks.
+///
+/// # Returns
+///
+/// Molecular document content ready to insert into a panel tab.
 fn structure_document_content(
   document: &OpenedProjectDocument,
   scene: Arc<chitin_bio::structure::StructureScene>,
+  toast_viewport: Entity<ToastViewport>,
   window: &mut Window,
   cx: &mut App,
 ) -> DocumentPanelContent {
-  let document_view = build_structure_view_from_scene(Arc::clone(&scene), window, cx);
-  let clone_view =
-    WgpuDocumentViewFactory::new(move |window, cx| build_structure_view_from_scene(Arc::clone(&scene), window, cx));
+  let document_view = build_structure_view_from_scene(Arc::clone(&scene), toast_viewport.clone(), window, cx);
+  let clone_view = WgpuDocumentViewFactory::new(move |window, cx| {
+    build_structure_view_from_scene(Arc::clone(&scene), toast_viewport.clone(), window, cx)
+  });
   DocumentPanelContent::wgpu_interactive(
     Some(document.path.clone()),
     document.title.clone(),

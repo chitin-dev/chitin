@@ -9,12 +9,15 @@ use chitin_ui::{
   composite::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
     panel::{PanelSplitAxis, PanelTabDrag},
+    toast::{Toast, ToastHost, ToastId, ToastViewport},
     window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
   },
   themes::builtins,
 };
 use chitin_utils::workspace::ProjectWorkspace;
-use gpui::{Context, CursorStyle, FocusHandle, InteractiveElement, MouseButton, Render, Window, div, prelude::*};
+use gpui::{
+  Context, CursorStyle, Entity, FocusHandle, InteractiveElement, MouseButton, Render, Window, div, prelude::*,
+};
 
 use crate::{
   components::{
@@ -60,6 +63,8 @@ pub struct ChitinApp {
   pub(crate) activity_bar_controls: Option<ActivityBarControls>,
   /// Persistent semantic controls for molecular document options.
   pub(crate) document_options_controls: Option<DocumentOptionsControls>,
+  /// Window-level transient notification queue.
+  pub(crate) toast_viewport: Option<Entity<ToastViewport>>,
 }
 
 impl ChitinApp {
@@ -134,6 +139,7 @@ impl ChitinApp {
       window_bar_controls: None,
       activity_bar_controls: None,
       document_options_controls: None,
+      toast_viewport: None,
     }
   }
 
@@ -405,6 +411,20 @@ impl ChitinApp {
     self.document_options_controls = Some(controls.clone());
     controls
   }
+
+  /// Adds a transient notification to the global bottom-right viewport.
+  pub fn show_toast(&mut self, toast: Toast, cx: &mut Context<Self>) -> ToastId {
+    let viewport = self.toast_viewport(cx);
+    viewport.update(cx, |viewport, cx| viewport.push(toast, cx))
+  }
+
+  /// Returns the lazily created window-level notification viewport.
+  pub(crate) fn toast_viewport(&mut self, cx: &mut Context<Self>) -> Entity<ToastViewport> {
+    self
+      .toast_viewport
+      .get_or_insert_with(|| cx.new(|_| ToastViewport::new()))
+      .clone()
+  }
 }
 
 impl Render for ChitinApp {
@@ -433,6 +453,7 @@ impl Render for ChitinApp {
     let window_bar_controls = self.window_bar_controls(window, cx);
     let activity_bar_controls = self.activity_bar_controls(window, cx);
     let document_options_controls = self.document_options_controls(window, cx);
+    let toast_viewport = self.toast_viewport(cx);
     let command_panel_search_input = self.command_panel_search_input(window, cx);
     self.command_panel_rcsb_form(window, cx);
     let app = cx.weak_entity();
@@ -574,6 +595,7 @@ impl Render for ChitinApp {
           command_panel_search_input,
         ))
       })
+      .child(ToastHost::new(toast_viewport))
   }
 }
 

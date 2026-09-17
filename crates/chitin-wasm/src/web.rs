@@ -8,11 +8,15 @@
 
 use std::rc::Rc;
 
-use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
-use chitin_wgpu::{
-  AtomRepresentation, BallAndStickStyle, ClearRenderer, DragMode, GpuHandle, MoleculeRenderer, RenderTargetSize,
-  ViewerCamera, ViewportDrag,
+use chitin_bio::{
+  structure::{MmcifParser, PdbParser, StructureScene},
+  surface::{MolecularSurfaceArtifact, MolecularSurfaceRequest, generate_implicit_surface},
 };
+use chitin_molecule_renderer::{
+  AtomStyle, BallAndStickStyle, DragMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle, RepresentationLayers,
+  SurfaceStyle, ViewerCamera, ViewportDrag,
+};
+use chitin_wgpu::{ClearRenderer, GpuHandle, RenderTargetSize};
 use wasm_bindgen::prelude::*;
 use web_sys::OffscreenCanvas;
 use wgpu::{CurrentSurfaceTexture, SurfaceTarget};
@@ -34,6 +38,10 @@ pub async fn create_viewer(canvas: OffscreenCanvas) -> Result<MoleculeViewer, Js
   // Install readable panic messages before any asynchronous GPU operation can
   // fail; these messages are otherwise difficult to diagnose from JavaScript.
   console_error_panic_hook::set_once();
+  // Forward Rust `log` records, including cartoon frame diagnostics, to the
+  // browser console. The logger is installed once because the worker can
+  // create more than one viewer during its lifetime.
+  let _ = console_log::init_with_level(log::Level::Debug);
 
   // Browser WebGPU does not use the native display-handle backends. Restricting
   // the instance here also prevents an accidental fallback to an unavailable
@@ -102,7 +110,8 @@ pub async fn create_viewer(canvas: OffscreenCanvas) -> Result<MoleculeViewer, Js
     clear_renderer,
     renderer: None,
     scene: None,
-    representation: AtomRepresentation::BallAndStick,
+    molecular_surface: None,
+    representation: RepresentationLayers::atom(AtomStyle::BallAndStick),
     camera: ViewerCamera::default(),
     active_drag: None,
   })
@@ -129,8 +138,10 @@ pub struct MoleculeViewer {
   renderer: Option<MoleculeRenderer>,
   /// Renderer-neutral scene retained for representation changes.
   scene: Option<StructureScene>,
+  /// Scientific surface geometry computed independently of GPU resources.
+  molecular_surface: Option<MolecularSurfaceArtifact>,
   /// Representation used when rebuilding the molecule renderer.
-  representation: AtomRepresentation,
+  representation: RepresentationLayers,
   /// Camera state shared by pointer, wheel, and render operations.
   camera: ViewerCamera,
   /// Pointer gesture currently being applied to the camera.
@@ -154,17 +165,21 @@ impl MoleculeViewer {
   pub fn load_structure(&mut self, bytes: &[u8], format: &str) -> Result<String, JsValue> {
     let scene = parse_scene(bytes, format).map_err(js_error)?;
     let summary = format!("{} atoms · {} bonds", scene.atoms.len(), scene.bonds.len());
+    // A surface artifact contains coordinates from one specific scene and must
+    // never survive replacement of that scene. Representation-only rebuilds
+    // still retain the cache through `rebuild_renderer`.
+    self.molecular_surface = None;
     self.scene = Some(scene);
     self.rebuild_renderer();
     self.camera.reset();
     Ok(summary)
   }
 
-  /// Selects `stick`, `ball-and-stick`, or `sphere` atom rendering.
+  /// Applies a legacy single-name representation preset.
   ///
   /// # Parameters
   ///
-  /// * `representation` is one of `stick`, `ball-and-stick`, or `sphere`.
+  /// * `representation` is one of `stick`, `ball-and-stick`, `sphere`, or `cartoon`.
   ///
   /// # Returns
   ///
@@ -173,13 +188,54 @@ impl MoleculeViewer {
   /// mode. When no scene is loaded, the mode is used by the next load operation.
   pub fn set_representation(&mut self, representation: &str) -> Result<(), JsValue> {
     self.representation = match representation {
-      "stick" => AtomRepresentation::Stick,
-      "ball-and-stick" => AtomRepresentation::BallAndStick,
-      "sphere" => AtomRepresentation::Sphere,
+      "stick" => RepresentationLayers::atom(AtomStyle::Stick),
+      "ball-and-stick" => RepresentationLayers::atom(AtomStyle::BallAndStick),
+      "sphere" => RepresentationLayers::atom(AtomStyle::Sphere),
+      "cartoon" => RepresentationLayers::atom(AtomStyle::Stick).with_polymer(PolymerStyle::Cartoon),
       _ => return Err(js_error(format!("unsupported representation: {representation}"))),
     };
     self.rebuild_renderer();
     Ok(())
+  }
+
+  /// Changes the atom layer style without changing other representation layers.
+  ///
+  /// # Parameters
+  ///
+  /// * `style` is one of `stick`, `ball-and-stick`, or `sphere`.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` after rebuilding retained scene geometry, or a
+  /// JavaScript error when `style` is unsupported.
+  pub fn set_atom_style(&mut self, style: &str) -> Result<(), JsValue> {
+    let style = AtomStyle::from_name(style).ok_or_else(|| js_error(format!("unsupported atom style: {style}")))?;
+    self.representation = self.representation.with_atom(style);
+    self.rebuild_renderer();
+    Ok(())
+  }
+
+  /// Enables or disables the polymer Cartoon layer without changing the atom layer.
+  pub fn set_cartoon_enabled(&mut self, enabled: bool) {
+    self.representation = if enabled {
+      self.representation.with_polymer(PolymerStyle::Cartoon)
+    } else {
+      self.representation.without_polymer()
+    };
+    self.rebuild_renderer();
+  }
+
+  /// Enables or disables the solvent-excluded molecular surface layer.
+  ///
+  /// The first surface implementation uses a 1.4 Å rolling probe and keeps
+  /// the atom and polymer layers unchanged when the surface is toggled.
+  pub fn set_surface_enabled(&mut self, enabled: bool) {
+    self.representation = if enabled {
+      self.representation.with_surface(SurfaceStyle::Solid)
+    } else {
+      self.representation.without_surface()
+    };
+    self.rebuild_renderer();
   }
 
   /// Resizes the surface and size-dependent depth resources.
@@ -325,15 +381,25 @@ impl MoleculeViewer {
   fn rebuild_renderer(&mut self) {
     let Some(scene) = self.scene.as_ref() else {
       self.renderer = None;
+      self.molecular_surface = None;
       return;
     };
+    self.molecular_surface = match (self.representation.surface_style(), self.molecular_surface.take()) {
+      (Some(_), Some(surface)) => Some(surface),
+      (Some(_), None) => Some(generate_implicit_surface(scene, MolecularSurfaceRequest::default())),
+      (None, _) => None,
+    };
     let size = RenderTargetSize::new(self.config.width, self.config.height);
-    self.renderer = Some(MoleculeRenderer::new_with_representation(
+    self.renderer = Some(MoleculeRenderer::new_with_layers(
       Rc::clone(&self.device),
       Rc::clone(&self.queue),
       size,
       self.config.format,
-      scene,
+      MoleculeRenderInput {
+        scene,
+        surface: self.molecular_surface.as_ref(),
+        surface_fragments: &[],
+      },
       self.representation,
       &BallAndStickStyle::default(),
     ));
