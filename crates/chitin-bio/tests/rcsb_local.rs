@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use chitin_bio::structure::{BondSource, MmcifParser, PdbParser, Structure, StructureParseResult, StructureScene};
 use chitin_bio::surface::msms::{
   MsmsRequest, MsmsTessellationParameters, build_msms_patch_geometry, tessellate_contact_patch,
+  tessellate_msms_patch_domain,
 };
 
 /// Structure-file format associated with one local fixture directory.
@@ -281,12 +282,23 @@ fn local_small_structure_should_construct_msms_patch_geometry() {
         .len()
     })
     .sum::<usize>();
+  let domain_mesh_triangles = domains
+    .iter()
+    .map(|domain| {
+      tessellate_msms_patch_domain(domain, MsmsTessellationParameters::default())
+        .unwrap_or_else(|error| panic!("{} radial-trimmed domain should tessellate: {error}", path.display()))
+        .indices
+        .len()
+        / 3
+    })
+    .sum::<usize>();
   println!(
-    "RCSB 1CRN MSMS geometry: {contact_count} contact patches ({full_contact_count} full, max {maximum_contact_loops} loops, {contact_mesh_vertices} display vertices), {toroidal_count} toroidal patches ({singular_torus_count} singular), {reentrant_count} reentrant patches; contact SAS {contact_sas:.3} A^2, contact SES {contact_ses:.3} A^2, regular toroidal SES {regular_toroidal_ses:.3} A^2, untrimmed reentrant SES {untrimmed_reentrant_ses:.3} A^2"
+    "RCSB 1CRN MSMS geometry: {contact_count} contact patches ({full_contact_count} full, max {maximum_contact_loops} loops, {contact_mesh_vertices} display vertices), {toroidal_count} toroidal patches ({singular_torus_count} radial singular), {reentrant_count} reentrant patches, {domain_mesh_triangles} singularity-clipped display triangles; contact SAS {contact_sas:.3} A^2, contact SES {contact_ses:.3} A^2, regular toroidal SES {regular_toroidal_ses:.3} A^2, untrimmed reentrant SES {untrimmed_reentrant_ses:.3} A^2"
   );
   assert!(contact_count > 0);
   assert!(toroidal_count > 0);
   assert!(reentrant_count > 0);
   assert!(contact_sas.is_finite() && contact_sas > 0.0);
   assert!(contact_ses.is_finite() && contact_ses > 0.0);
+  assert!(domain_mesh_triangles > 0);
 }

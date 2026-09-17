@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 chitin-bio-macros = { path = "../chitin-bio-macros" }
 glam = "0.33"
+lyon = "1.0.19"
 rayon = "1.11"
 thiserror = "2.0"
 
