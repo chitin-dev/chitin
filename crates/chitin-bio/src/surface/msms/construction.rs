@@ -12,12 +12,75 @@ use crate::structure::StructureScene;
 use crate::surface::atoms::{SurfaceAtom, surface_atom_groups};
 
 use super::{
-  MsmsParameters, MsmsProbeFaceDomain, MsmsProbeTopologyComponent, MsmsProbeTopologyDomain, MsmsRequest,
-  ProbeArcEndpoint, ReducedSurfaceEdge, ReducedSurfaceFace,
+  MsmsParameters, MsmsPatchConstructionError, MsmsProbeFaceDomain, MsmsProbeTopologyComponent, MsmsProbeTopologyDomain,
+  MsmsRequest, MsmsRollingPatchDomain, ProbeArcEndpoint, ReducedSurfaceEdge, ReducedSurfaceFace,
   arcs::{ProbeArcError, accessible_probe_arcs},
   geometry::{MsmsAtom, TangentProbeError, tangent_probe_faces},
   neighbors::{ExpandedSphereNeighborGraph, NeighborGraphError},
+  patches::{build_reentrant_patches, build_toroidal_patch_geometry},
 };
+
+/// Builds rolling toroidal and reentrant patch geometry for every selected domain.
+///
+/// This structure-level entry point shares atom preparation and one neighbor
+/// graph with reduced-surface construction, then derives renderable analytical
+/// geometry from its edges and faces. It deliberately excludes contact patches
+/// and does not trim singular tori, so callers must not present the result as a
+/// complete MSMS molecular surface.
+///
+/// # Parameters
+///
+/// * `scene` supplies source atom identities, coordinates, and classifications.
+/// * `request` selects atoms, domain partitioning, and probe radius.
+///
+/// # Returns
+///
+/// Deterministically ordered rolling-patch domains, or
+/// [`MsmsConstructionError`] when topology or patch geometry is invalid.
+///
+/// # Examples
+///
+/// ```
+/// use chitin_bio::{
+///   structure::{PdbParser, StructureScene},
+///   surface::msms::{MsmsRequest, build_msms_rolling_patch_geometry},
+/// };
+///
+/// let parsed = PdbParser::new().parse_bytes(
+///   b"ATOM      1  C   GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \n\
+/// ATOM      2  CA  GLY A   1       2.000   0.000   0.000  1.00 10.00           C  \n\
+/// END\n",
+/// )?;
+/// let scene = StructureScene::from_first_model(&parsed.structure)?;
+/// let domains = build_msms_rolling_patch_geometry(&scene, MsmsRequest::default())?;
+/// assert_eq!(domains.len(), 1);
+/// assert_eq!(domains[0].toroidal_patches.len(), 1);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn build_msms_rolling_patch_geometry(
+  scene: &StructureScene,
+  request: MsmsRequest,
+) -> Result<Vec<MsmsRollingPatchDomain>, MsmsConstructionError> {
+  surface_atom_groups(scene, request.atom_scope, request.partition)
+    .into_iter()
+    .map(|(chain_id, atoms)| {
+      let analytical_atoms = atoms.iter().map(msms_atom).collect::<Vec<_>>();
+      let topology = build_probe_topology(&analytical_atoms, request.parameters)?;
+      let toroidal_patches = build_toroidal_patch_geometry(&analytical_atoms, &topology.edges, request.parameters)?;
+      let reentrant_patches = build_reentrant_patches(&analytical_atoms, &topology.faces, request.parameters)?;
+      Ok(MsmsRollingPatchDomain {
+        topology: MsmsProbeTopologyDomain {
+          chain_id,
+          edges: topology.edges,
+          faces: topology.faces,
+          components: topology.components,
+        },
+        toroidal_patches,
+        reentrant_patches,
+      })
+    })
+    .collect()
+}
 
 /// Builds accessible probe arcs and faces for every selected structure domain.
 ///
@@ -183,6 +246,9 @@ pub enum MsmsConstructionError {
     /// Underlying probe-circle geometry failure.
     source: ProbeArcError,
   },
+  /// Reduced-surface topology could not be converted into analytical patches.
+  #[error(transparent)]
+  Patch(#[from] MsmsPatchConstructionError),
   /// An open probe arc endpoint has no matching tangent-probe face.
   #[error("probe arc {edge_index} {endpoint:?} endpoint has no incident face")]
   MissingIncidentFace {

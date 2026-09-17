@@ -4,21 +4,12 @@ use thiserror::Error;
 
 use crate::structure::ChainId;
 
-use super::super::{SurfaceAtomScope, SurfacePartition};
+use super::super::{SurfaceAtomScope, SurfaceMesh, SurfacePartition};
 use super::{
   DEFAULT_SES_GRID_MEMORY_LIMIT_BYTES, DEFAULT_SES_GRID_SPACING, DEFAULT_SES_PROBE_RADIUS,
   ESTIMATED_SES_BYTES_PER_GRID_POINT, MIN_SES_GRID_MEMORY_LIMIT_BYTES, MIN_SES_MAX_GRID_POINTS,
   field::{grid_index, grid_position},
 };
-
-/// Renderer-neutral indexed triangle mesh in source-space ångström coordinates.
-#[derive(Debug, Default, Clone, PartialEq)]
-pub struct SurfaceMesh {
-  /// Interleaved source position and unit-normal rows.
-  pub vertices: Vec<[f32; 6]>,
-  /// Triangle-list indices into [`Self::vertices`].
-  pub indices: Vec<u32>,
-}
 
 /// Validated parameters for the sampled-grid SES approximation.
 #[derive(Debug, Clone, Copy, PartialEq)]

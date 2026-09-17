@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::structure::{ChainId, StructureScene};
 use rayon::prelude::*;
 
-use super::atoms::surface_atom_groups;
+use super::{SurfaceMesh, atoms::surface_atom_groups};
 
 use self::{
   contour::{contour_field, vertex_position},
@@ -29,7 +29,6 @@ pub use self::profiling::{MolecularSurfaceProfile, MolecularSurfaceTimings, prof
 pub use self::types::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
   ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceDomainArtifact, SurfaceGeometrySource,
-  SurfaceMesh,
 };
 
 /// Default water-probe radius used by molecular surfaces.

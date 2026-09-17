@@ -1,11 +1,17 @@
 //! Analytical patch geometry derived from reduced-surface topology.
 
-use std::collections::BTreeMap;
+use std::{
+  collections::BTreeMap,
+  f64::consts::{PI, TAU},
+};
 
 use glam::DVec3;
 use thiserror::Error;
 
-use super::{MsmsParameters, ReducedSurfaceFace, ReentrantPatch, geometry::MsmsAtom};
+use super::{
+  MsmsParameters, ReducedSurfaceEdge, ReducedSurfaceFace, ReentrantPatch, ToroidalPatchGeometry, ToroidalPatchTopology,
+  geometry::MsmsAtom,
+};
 
 /// Failure produced while converting reduced-surface topology into patches.
 #[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
@@ -30,6 +36,74 @@ pub enum MsmsPatchConstructionError {
     /// Index of the invalid face.
     face_index: usize,
   },
+  /// An edge references a source atom absent from its analytical domain.
+  #[error("reduced-surface edge {edge_index} references missing source atom {atom_index}")]
+  MissingEdgeAtom {
+    /// Index of the edge being converted.
+    edge_index: usize,
+    /// Missing source atom index.
+    atom_index: usize,
+  },
+  /// An edge contains a non-finite or non-orthonormal probe-circle frame.
+  #[error("reduced-surface edge {edge_index} has invalid toroidal geometry")]
+  InvalidToroidalGeometry {
+    /// Index of the invalid edge.
+    edge_index: usize,
+  },
+}
+
+/// Builds untrimmed toroidal geometry from accessible rolling-probe arcs.
+///
+/// Each edge supplies the probe-center circle and its retained azimuth range.
+/// The two supporting atoms determine the shorter probe-sphere meridian between
+/// their contact curves. Patches whose meridian crosses a zero Jacobian are
+/// classified as self-intersecting and retained for a later trimming stage;
+/// their area is deliberately unavailable before trimming.
+///
+/// # Parameters
+///
+/// * `atoms` contains the analytical atoms in the edge domain.
+/// * `edges` contains accessible, incident reduced-surface arcs.
+/// * `parameters` supplies the rolling-probe radius.
+///
+/// # Returns
+///
+/// One toroidal geometry record per edge, in edge order, or a structured error
+/// when an edge cannot be resolved to valid atom and circle geometry.
+///
+/// # Examples
+///
+/// ```
+/// use chitin_bio::surface::msms::{
+///   MsmsParameters,
+///   ToroidalPatchTopology,
+///   build_accessible_probe_edges,
+///   build_toroidal_patch_geometry,
+///   geometry::MsmsAtom,
+/// };
+/// use glam::DVec3;
+///
+/// let atoms = vec![
+///   MsmsAtom { atom_index: 0, center: DVec3::ZERO, radius: 1.0 },
+///   MsmsAtom { atom_index: 1, center: DVec3::new(2.0, 0.0, 0.0), radius: 1.0 },
+/// ];
+/// let parameters = MsmsParameters::new(1.0)?;
+/// let edges = build_accessible_probe_edges(&atoms, parameters)?;
+/// let patches = build_toroidal_patch_geometry(&atoms, &edges, parameters)?;
+/// assert_eq!(patches[0].topology, ToroidalPatchTopology::Regular);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn build_toroidal_patch_geometry(
+  atoms: &[MsmsAtom],
+  edges: &[ReducedSurfaceEdge],
+  parameters: MsmsParameters,
+) -> Result<Vec<ToroidalPatchGeometry>, MsmsPatchConstructionError> {
+  let atom_lookup = atom_lookup(atoms)?;
+  edges
+    .iter()
+    .enumerate()
+    .map(|(edge_index, edge)| toroidal_patch_geometry(edge_index, edge, &atom_lookup, parameters.probe_radius()))
+    .collect()
 }
 
 /// Builds the concave spherical patches supported by tangent-probe faces.
@@ -138,6 +212,150 @@ fn reentrant_patch(
   })
 }
 
+/// Converts one accessible pair arc into an untrimmed toroidal parameter patch.
+fn toroidal_patch_geometry(
+  edge_index: usize,
+  edge: &ReducedSurfaceEdge,
+  atom_lookup: &BTreeMap<usize, &MsmsAtom>,
+  probe_radius: f64,
+) -> Result<ToroidalPatchGeometry, MsmsPatchConstructionError> {
+  validate_toroidal_frame(edge_index, edge)?;
+  let atoms = edge
+    .atom_indices
+    .map(|atom_index| {
+      atom_lookup
+        .get(&atom_index)
+        .copied()
+        .ok_or(MsmsPatchConstructionError::MissingEdgeAtom { edge_index, atom_index })
+    })
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()?;
+  let center = DVec3::from_array(edge.probe_circle_center);
+  let axis = DVec3::from_array(edge.probe_circle_axis);
+  let polar_angles = [
+    contact_polar_angle(
+      edge_index,
+      atoms[0],
+      center,
+      axis,
+      edge.probe_circle_radius,
+      probe_radius,
+    )?,
+    contact_polar_angle(
+      edge_index,
+      atoms[1],
+      center,
+      axis,
+      edge.probe_circle_radius,
+      probe_radius,
+    )?,
+  ];
+  let (polar_start, polar_sweep) = shorter_positive_sweep(polar_angles[0], polar_angles[1]);
+  if polar_sweep <= 1024.0 * f64::EPSILON || polar_sweep > PI + 1024.0 * f64::EPSILON {
+    return Err(MsmsPatchConstructionError::InvalidToroidalGeometry { edge_index });
+  }
+  let topology = toroidal_topology(edge.probe_circle_radius, probe_radius, polar_start, polar_sweep);
+
+  Ok(ToroidalPatchGeometry {
+    edge_index,
+    atom_indices: edge.atom_indices,
+    probe_circle_center: edge.probe_circle_center,
+    probe_circle_axis: edge.probe_circle_axis,
+    probe_circle_basis: edge.probe_circle_basis,
+    major_radius: edge.probe_circle_radius,
+    probe_radius,
+    azimuth_start: edge.start_angle,
+    azimuth_sweep: edge.sweep_angle,
+    polar_start,
+    polar_sweep,
+    topology,
+  })
+}
+
+/// Validates the circle frame and parameter ranges required by a torus.
+fn validate_toroidal_frame(edge_index: usize, edge: &ReducedSurfaceEdge) -> Result<(), MsmsPatchConstructionError> {
+  let center = DVec3::from_array(edge.probe_circle_center);
+  let axis = DVec3::from_array(edge.probe_circle_axis);
+  let basis = DVec3::from_array(edge.probe_circle_basis);
+  let finite_parameters = edge.probe_circle_radius.is_finite()
+    && edge.start_angle.is_finite()
+    && edge.sweep_angle.is_finite()
+    && edge.probe_circle_radius > 0.0
+    && edge.sweep_angle > 0.0
+    && edge.sweep_angle <= TAU + 1024.0 * f64::EPSILON;
+  let frame_is_orthonormal = (axis.length_squared() - 1.0).abs() <= 4096.0 * f64::EPSILON
+    && (basis.length_squared() - 1.0).abs() <= 4096.0 * f64::EPSILON
+    && axis.dot(basis).abs() <= 4096.0 * f64::EPSILON;
+  if !center.is_finite() || !axis.is_finite() || !basis.is_finite() || !finite_parameters || !frame_is_orthonormal {
+    return Err(MsmsPatchConstructionError::InvalidToroidalGeometry { edge_index });
+  }
+  Ok(())
+}
+
+/// Finds one atom-contact meridian angle in the stored torus frame.
+fn contact_polar_angle(
+  edge_index: usize,
+  atom: &MsmsAtom,
+  circle_center: DVec3,
+  axis: DVec3,
+  major_radius: f64,
+  probe_radius: f64,
+) -> Result<f64, MsmsPatchConstructionError> {
+  let center_offset = atom.center - circle_center;
+  let axial_offset = center_offset.dot(axis);
+  let off_axis = center_offset - axial_offset * axis;
+  let expanded_radius = atom.radius + probe_radius;
+  let geometry_scale = atom.center.abs().max(circle_center.abs()).max(DVec3::ONE).max_element();
+  let tolerance = 4096.0 * f64::EPSILON * geometry_scale;
+  let tangent_distance = major_radius.hypot(axial_offset);
+  if !atom.center.is_finite()
+    || !atom.radius.is_finite()
+    || atom.radius <= 0.0
+    || off_axis.length() > tolerance
+    || (tangent_distance - expanded_radius).abs() > tolerance
+  {
+    return Err(MsmsPatchConstructionError::InvalidToroidalGeometry { edge_index });
+  }
+  Ok(axial_offset.atan2(-major_radius).rem_euclid(TAU))
+}
+
+/// Selects the minor positive circular interval between two parameters.
+fn shorter_positive_sweep(first: f64, second: f64) -> (f64, f64) {
+  let forward = (second - first).rem_euclid(TAU);
+  if forward <= PI {
+    (first, forward)
+  } else {
+    (second, TAU - forward)
+  }
+}
+
+/// Classifies whether the torus Jacobian vanishes inside a retained meridian.
+fn toroidal_topology(
+  major_radius: f64,
+  probe_radius: f64,
+  polar_start: f64,
+  polar_sweep: f64,
+) -> ToroidalPatchTopology {
+  if major_radius > probe_radius {
+    return ToroidalPatchTopology::Regular;
+  }
+  let first_root = (-major_radius / probe_radius).clamp(-1.0, 1.0).acos();
+  let second_root = TAU - first_root;
+  if circular_interval_contains(polar_start, polar_sweep, first_root)
+    || circular_interval_contains(polar_start, polar_sweep, second_root)
+  {
+    ToroidalPatchTopology::SelfIntersecting
+  } else {
+    ToroidalPatchTopology::Regular
+  }
+}
+
+/// Tests membership in one positive, at-most-half-circle angular interval.
+fn circular_interval_contains(start: f64, sweep: f64, angle: f64) -> bool {
+  let angular_tolerance = 1024.0 * f64::EPSILON * TAU;
+  (angle - start).rem_euclid(TAU) <= sweep + angular_tolerance
+}
+
 /// Evaluates the unsigned solid angle of a unit-vector spherical triangle.
 fn spherical_triangle_solid_angle(directions: [DVec3; 3]) -> f64 {
   let numerator = directions[0].dot(directions[1].cross(directions[2])).abs();
@@ -149,7 +367,7 @@ fn spherical_triangle_solid_angle(directions: [DVec3; 3]) -> f64 {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::surface::msms::geometry::tangent_probe_faces;
+  use crate::surface::msms::{build_accessible_probe_edges, geometry::tangent_probe_faces};
 
   fn equilateral_atoms() -> Vec<MsmsAtom> {
     vec![
@@ -169,6 +387,34 @@ mod tests {
         radius: 1.0,
       },
     ]
+  }
+
+  fn equal_pair(distance: f64) -> Vec<MsmsAtom> {
+    vec![
+      MsmsAtom {
+        atom_index: 10,
+        center: DVec3::ZERO,
+        radius: 1.0,
+      },
+      MsmsAtom {
+        atom_index: 20,
+        center: distance * DVec3::X,
+        radius: 1.0,
+      },
+    ]
+  }
+
+  fn toroidal_geometry_for_pair(distance: f64) -> ToroidalPatchGeometry {
+    let atoms = equal_pair(distance);
+    let parameters =
+      MsmsParameters::new(1.0).unwrap_or_else(|error| panic!("unit probe radius should be valid: {error}"));
+    let edges = build_accessible_probe_edges(&atoms, parameters)
+      .unwrap_or_else(|error| panic!("intersecting pair should produce a probe edge: {error}"));
+    build_toroidal_patch_geometry(&atoms, &edges, parameters)
+      .unwrap_or_else(|error| panic!("probe edge should produce toroidal geometry: {error}"))
+      .into_iter()
+      .next()
+      .unwrap_or_else(|| panic!("intersecting pair should produce one toroidal patch"))
   }
 
   #[test]
@@ -207,5 +453,43 @@ mod tests {
         atom_index: 30,
       })
     );
+  }
+
+  #[test]
+  fn separated_support_atoms_should_produce_a_regular_torus() {
+    let patch = toroidal_geometry_for_pair(2.0);
+
+    assert_eq!(patch.topology, ToroidalPatchTopology::Regular);
+    assert!(patch.regular_area().is_some_and(|area| area > 0.0));
+  }
+
+  #[test]
+  fn near_tangent_support_atoms_should_produce_a_singular_torus() {
+    let patch = toroidal_geometry_for_pair(3.8);
+
+    assert_eq!(patch.topology, ToroidalPatchTopology::SelfIntersecting);
+    assert_eq!(patch.regular_area(), None);
+  }
+
+  #[test]
+  fn torus_meridian_boundaries_should_lie_on_atom_contact_spheres() {
+    let atoms = equal_pair(2.0);
+    let patch = toroidal_geometry_for_pair(2.0);
+    let points = [patch.position(0.0, 0.0), patch.position(0.0, patch.polar_sweep)];
+
+    assert!(points.into_iter().all(|point| {
+      let point = DVec3::from_array(point);
+      atoms
+        .iter()
+        .any(|atom| (point.distance(atom.center) - atom.radius).abs() < 1.0e-12)
+    }));
+  }
+
+  #[test]
+  fn torus_outward_normal_should_be_unit_length() {
+    let patch = toroidal_geometry_for_pair(2.0);
+    let normal = DVec3::from_array(patch.outward_normal(0.37, 0.41 * patch.polar_sweep));
+
+    assert!((normal.length() - 1.0).abs() < 1.0e-12);
   }
 }

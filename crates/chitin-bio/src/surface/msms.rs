@@ -15,12 +15,16 @@ mod construction;
 pub mod geometry;
 pub mod neighbors;
 pub mod patches;
+pub mod tessellation;
 
 pub use construction::{
   MsmsConstructionError, build_accessible_probe_edges, build_accessible_probe_faces, build_msms_probe_faces,
-  build_msms_probe_topology,
+  build_msms_probe_topology, build_msms_rolling_patch_geometry,
 };
-pub use patches::{MsmsPatchConstructionError, build_reentrant_patches};
+pub use patches::{MsmsPatchConstructionError, build_reentrant_patches, build_toroidal_patch_geometry};
+pub use tessellation::{
+  MsmsTessellationError, MsmsTessellationParameters, tessellate_reentrant_patch, tessellate_regular_toroidal_patch,
+};
 
 use thiserror::Error;
 
@@ -104,6 +108,21 @@ pub struct MsmsProbeTopologyDomain {
   pub faces: Vec<ReducedSurfaceFace>,
   /// Connected components induced by shared reduced-surface atoms.
   pub components: Vec<MsmsProbeTopologyComponent>,
+}
+
+/// Rolling-probe patch geometry for one independently calculated domain.
+///
+/// This intermediate intentionally contains only toroidal and reentrant
+/// patches. It is not a complete molecular surface until atom-contact patches
+/// and singularity trimming have been assembled.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MsmsRollingPatchDomain {
+  /// Accessible reduced-surface topology underlying the patch geometry.
+  pub topology: MsmsProbeTopologyDomain,
+  /// Untrimmed toroidal geometry generated from topology edges.
+  pub toroidal_patches: Vec<ToroidalPatchGeometry>,
+  /// Reentrant spherical triangles generated from topology faces.
+  pub reentrant_patches: Vec<ReentrantPatch>,
 }
 
 /// One connected component of accessible probe arcs and tangent-probe faces.
@@ -226,6 +245,89 @@ impl ReentrantPatch {
   /// Returns the analytical reentrant area in square ångströms.
   pub fn area(self) -> f64 {
     self.probe_radius * self.probe_radius * self.solid_angle
+  }
+}
+
+/// Singularity classification of one untrimmed toroidal patch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToroidalPatchTopology {
+  /// The torus parameterization is regular throughout the retained interval.
+  Regular,
+  /// The retained interval crosses a self-intersection circle.
+  SelfIntersecting,
+}
+
+/// Untrimmed toroidal geometry swept by one accessible probe arc.
+///
+/// The geometry retains its complete local frame for analytical trimming and
+/// display tessellation. [`ToroidalPatchTopology::SelfIntersecting`] records a
+/// valid rolling-probe configuration that must be split before its area can be
+/// included in [`MsmsSurfaceAreas`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToroidalPatchGeometry {
+  /// Index of the source reduced-surface edge.
+  pub edge_index: usize,
+  /// Source atoms touched by the rolling probe.
+  pub atom_indices: [usize; 2],
+  /// Center of the probe-center circle in ångströms.
+  pub probe_circle_center: [f64; 3],
+  /// Unit normal of the probe-center circle.
+  pub probe_circle_axis: [f64; 3],
+  /// Unit vector defining zero azimuth in the circle plane.
+  pub probe_circle_basis: [f64; 3],
+  /// Distance from the torus axis to the rolling-probe center.
+  pub major_radius: f64,
+  /// Rolling-probe radius in ångströms.
+  pub probe_radius: f64,
+  /// Starting azimuth inherited from the reduced-surface edge.
+  pub azimuth_start: f64,
+  /// Positive azimuth swept by the rolling probe.
+  pub azimuth_sweep: f64,
+  /// Starting meridian angle at one atom-contact curve.
+  pub polar_start: f64,
+  /// Positive minor meridian sweep toward the other contact curve.
+  pub polar_sweep: f64,
+  /// Whether the retained parameter rectangle crosses a torus singularity.
+  pub topology: ToroidalPatchTopology,
+}
+
+impl ToroidalPatchGeometry {
+  /// Evaluates a point at offsets from the patch's stored parameter origins.
+  pub fn position(&self, azimuth_offset: f64, polar_offset: f64) -> [f64; 3] {
+    let axis = glam::DVec3::from_array(self.probe_circle_axis);
+    let basis = glam::DVec3::from_array(self.probe_circle_basis);
+    let perpendicular_basis = axis.cross(basis);
+    let azimuth = self.azimuth_start + azimuth_offset;
+    let polar = self.polar_start + polar_offset;
+    let radial = azimuth.cos() * basis + azimuth.sin() * perpendicular_basis;
+    let center = glam::DVec3::from_array(self.probe_circle_center);
+    let position =
+      center + (self.major_radius + self.probe_radius * polar.cos()) * radial + self.probe_radius * polar.sin() * axis;
+    position.to_array()
+  }
+
+  /// Evaluates the SES outward unit normal at one patch parameter.
+  pub fn outward_normal(&self, azimuth_offset: f64, polar_offset: f64) -> [f64; 3] {
+    let axis = glam::DVec3::from_array(self.probe_circle_axis);
+    let basis = glam::DVec3::from_array(self.probe_circle_basis);
+    let perpendicular_basis = axis.cross(basis);
+    let azimuth = self.azimuth_start + azimuth_offset;
+    let polar = self.polar_start + polar_offset;
+    let radial = azimuth.cos() * basis + azimuth.sin() * perpendicular_basis;
+    // Solvent occupies the rolling probe, so the SES normal points from the
+    // probe surface back toward its center.
+    (-(polar.cos() * radial + polar.sin() * axis)).to_array()
+  }
+
+  /// Returns the analytical area when the untrimmed patch is non-singular.
+  pub fn regular_area(&self) -> Option<f64> {
+    if self.topology != ToroidalPatchTopology::Regular {
+      return None;
+    }
+    let polar_end = self.polar_start + self.polar_sweep;
+    let meridian_integral =
+      self.major_radius * self.polar_sweep + self.probe_radius * (polar_end.sin() - self.polar_start.sin());
+    Some((self.probe_radius * self.azimuth_sweep * meridian_integral).abs())
   }
 }
 

@@ -9,13 +9,15 @@
 
 mod atoms;
 pub mod implicit;
+mod mesh;
 pub mod msms;
 
 pub use atoms::{SurfaceAtomScope, SurfacePartition};
 pub use implicit::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
   ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceDomainArtifact, SurfaceGeometrySource,
-  SurfaceMesh, generate_implicit_surface, trace_molecular_surface,
+  generate_implicit_surface, trace_molecular_surface,
 };
 #[cfg(feature = "surface-profiling")]
 pub use implicit::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};
+pub use mesh::SurfaceMesh;
