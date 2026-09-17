@@ -10,8 +10,10 @@ mod types;
 
 use std::collections::{BTreeMap, HashMap};
 
-use crate::structure::{ChainId, ElementCategory, ResidueKind, StructureScene};
+use crate::structure::{ChainId, StructureScene};
 use rayon::prelude::*;
+
+use super::atoms::surface_atom_groups;
 
 use self::{
   contour::{contour_field, vertex_position},
@@ -26,8 +28,8 @@ use self::{
 pub use self::profiling::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};
 pub use self::types::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
-  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact,
-  SurfaceGeometrySource, SurfaceMesh, SurfacePartition,
+  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceDomainArtifact, SurfaceGeometrySource,
+  SurfaceMesh,
 };
 
 /// Default water-probe radius used by molecular surfaces.
@@ -58,9 +60,9 @@ const SMOOTHING_LAMBDA: f32 = 0.28;
 /// Negative Laplacian coefficient that approximately restores volume.
 const SMOOTHING_MU: f32 = -0.29;
 
-/// Atom center and van der Waals radius used by the surface distance field.
+/// Single-precision atom geometry consumed by the sampled-grid backend.
 #[derive(Clone, Copy)]
-struct SurfaceAtom {
+struct ImplicitAtom {
   /// Cartesian atom position in ångströms.
   position: glam::Vec3,
   /// Element-dependent van der Waals radius in ångströms.
@@ -177,7 +179,7 @@ impl SesTraceRecorder {
 ///
 /// A surface artifact retaining independently calculated domain meshes.
 pub fn generate_implicit_surface(scene: &StructureScene, request: MolecularSurfaceRequest) -> MolecularSurfaceArtifact {
-  let atom_groups = surface_atom_groups(scene, request).into_iter().collect::<Vec<_>>();
+  let atom_groups = implicit_atom_groups(scene, request).into_iter().collect::<Vec<_>>();
   let domains = atom_groups
     .into_par_iter()
     .map(|(chain_id, atoms)| SurfaceDomainArtifact {
@@ -207,7 +209,7 @@ pub fn generate_implicit_surface(scene: &StructureScene, request: MolecularSurfa
 ///
 /// An ordered trace containing the real intermediates produced by the SES kernel.
 pub fn trace_molecular_surface(scene: &StructureScene, request: MolecularSurfaceRequest) -> MolecularSurfaceTrace {
-  let atom_groups = surface_atom_groups(scene, request).into_iter().collect::<Vec<_>>();
+  let atom_groups = implicit_atom_groups(scene, request).into_iter().collect::<Vec<_>>();
   let domains = atom_groups
     .into_par_iter()
     .map(|(chain_id, atoms)| {
@@ -219,42 +221,24 @@ pub fn trace_molecular_surface(scene: &StructureScene, request: MolecularSurface
   MolecularSurfaceTrace { request, domains }
 }
 
-/// Selects surface atoms and partitions them into requested calculation domains.
-///
-/// When a scene contains polymer atoms, hetero residues are omitted to match
-/// chain-oriented molecular surfaces. If no polymer exists, non-solvent hetero
-/// atoms are retained as a useful fallback for ligand-only structures.
-///
-/// # Parameters
-///
-/// * `scene` supplies atom chain membership and residue classifications.
-///
-/// # Returns
-///
-/// Deterministically ordered atom groups keyed by optional chain identifier.
-fn surface_atom_groups(
+/// Prepares shared double-precision atoms for the sampled-grid backend.
+fn implicit_atom_groups(
   scene: &StructureScene,
   request: MolecularSurfaceRequest,
-) -> BTreeMap<Option<ChainId>, Vec<SurfaceAtom>> {
-  let contains_polymer = scene.atoms.iter().any(|atom| atom.residue_kind == ResidueKind::Polymer);
-  let mut groups = BTreeMap::new();
-  for atom in scene.atoms.iter().filter(|atom| {
-    !atom.is_solvent
-      && match request.atom_scope {
-        SurfaceAtomScope::BiopolymerOrNonSolvent => !contains_polymer || atom.residue_kind == ResidueKind::Polymer,
-        SurfaceAtomScope::AllNonSolvent => true,
-      }
-  }) {
-    let domain = match request.partition {
-      SurfacePartition::Unified => None,
-      SurfacePartition::ByChain => Some(atom.chain_id),
-    };
-    groups.entry(domain).or_insert_with(Vec::new).push(SurfaceAtom {
-      position: glam::Vec3::from_array(atom.position),
-      radius: vdw_radius(atom.element),
-    });
-  }
-  groups
+) -> BTreeMap<Option<ChainId>, Vec<ImplicitAtom>> {
+  surface_atom_groups(scene, request.atom_scope, request.partition)
+    .into_iter()
+    .map(|(chain_id, atoms)| {
+      let atoms = atoms
+        .into_iter()
+        .map(|atom| ImplicitAtom {
+          position: atom.position.as_vec3(),
+          radius: atom.radius as f32,
+        })
+        .collect();
+      (chain_id, atoms)
+    })
+    .collect()
 }
 
 /// Tessellates a rolling-probe SES for one atom group.
@@ -272,7 +256,7 @@ fn surface_atom_groups(
 /// # Returns
 ///
 /// An indexed SES triangle mesh, or an empty mesh when `atoms` is empty.
-fn ses_mesh_for_atoms(atoms: Vec<SurfaceAtom>, parameters: SesParameters) -> SurfaceMesh {
+fn ses_mesh_for_atoms(atoms: Vec<ImplicitAtom>, parameters: SesParameters) -> SurfaceMesh {
   ses_kernel_for_atoms(atoms, parameters, |_| {})
 }
 
@@ -288,7 +272,7 @@ fn ses_mesh_for_atoms(atoms: Vec<SurfaceAtom>, parameters: SesParameters) -> Sur
 ///
 /// The final oriented, smoothed, and normal-recomputed SES mesh.
 fn ses_kernel_for_atoms(
-  atoms: Vec<SurfaceAtom>,
+  atoms: Vec<ImplicitAtom>,
   parameters: SesParameters,
   mut capture: impl FnMut(SesKernelStage<'_>),
 ) -> SurfaceMesh {
@@ -460,25 +444,11 @@ fn merge_close_probe_centers(mesh: &SurfaceMesh, minimum_separation: f32) -> Vec
 }
 
 /// Computes the axis-aligned bounds of the non-solvent atom centers.
-fn atom_bounds(atoms: &[SurfaceAtom]) -> (glam::Vec3, glam::Vec3) {
+fn atom_bounds(atoms: &[ImplicitAtom]) -> (glam::Vec3, glam::Vec3) {
   atoms.iter().fold(
     (glam::Vec3::splat(f32::INFINITY), glam::Vec3::splat(f32::NEG_INFINITY)),
     |(minimum, maximum), atom| (minimum.min(atom.position), maximum.max(atom.position)),
   )
-}
-
-/// Returns the van der Waals radius used for one element category.
-fn vdw_radius(element: ElementCategory) -> f32 {
-  match element {
-    ElementCategory::Hydrogen => 1.20,
-    ElementCategory::Carbon => 1.70,
-    ElementCategory::Nitrogen => 1.55,
-    ElementCategory::Oxygen => 1.52,
-    ElementCategory::Phosphorus | ElementCategory::Sulfur => 1.80,
-    ElementCategory::Halogen => 1.75,
-    ElementCategory::Metal => 1.70,
-    ElementCategory::Other => 1.50,
-  }
 }
 
 #[cfg(test)]

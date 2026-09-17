@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::structure::ChainId;
 
+use super::super::{SurfaceAtomScope, SurfacePartition};
 use super::{
   DEFAULT_SES_GRID_MEMORY_LIMIT_BYTES, DEFAULT_SES_GRID_SPACING, DEFAULT_SES_PROBE_RADIUS,
   ESTIMATED_SES_BYTES_PER_GRID_POINT, MIN_SES_GRID_MEMORY_LIMIT_BYTES, MIN_SES_MAX_GRID_POINTS,
@@ -17,26 +18,6 @@ pub struct SurfaceMesh {
   pub vertices: Vec<[f32; 6]>,
   /// Triangle-list indices into [`Self::vertices`].
   pub indices: Vec<u32>,
-}
-
-/// Atom-selection policy used before molecular-surface domains are partitioned.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum SurfaceAtomScope {
-  /// Use biopolymer atoms, falling back to non-solvent atoms for ligand-only scenes.
-  #[default]
-  BiopolymerOrNonSolvent,
-  /// Use every non-solvent atom in the scene, including ligands and cofactors.
-  AllNonSolvent,
-}
-
-/// Partition applied to selected atoms before independent surface calculations.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum SurfacePartition {
-  /// Calculate one envelope around all selected atoms.
-  Unified,
-  /// Calculate one independent surface for each chain.
-  #[default]
-  ByChain,
 }
 
 /// Validated parameters for the sampled-grid SES approximation.

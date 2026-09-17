@@ -2,11 +2,74 @@
 
 use thiserror::Error;
 
+use crate::structure::StructureScene;
+use crate::surface::atoms::{SurfaceAtom, surface_atom_groups};
+
 use super::{
-  MsmsParameters, ReducedSurfaceFace,
+  MsmsParameters, MsmsProbeFaceDomain, MsmsRequest, ReducedSurfaceFace,
   geometry::{MsmsAtom, TangentProbeError, tangent_probe_faces},
   neighbors::{ExpandedSphereNeighborGraph, NeighborGraphError},
 };
+
+/// Discovers accessible tangent-probe faces from a renderer-neutral structure scene.
+///
+/// Atom selection, solvent removal, van der Waals radii, and chain partitioning
+/// are shared with the implicit surface backend. Each resolved domain is then
+/// converted to double-precision analytical spheres and processed independently.
+/// This function intentionally stops at probe faces: free edges, isolated
+/// vertices, connected components, and analytical patches are later stages.
+///
+/// # Parameters
+///
+/// * `scene` supplies source atom identities, coordinates, and classifications.
+/// * `request` selects atoms, domain partitioning, and probe radius.
+///
+/// # Returns
+///
+/// Deterministically ordered face domains, or [`MsmsConstructionError`] when
+/// selected geometry is invalid.
+///
+/// # Examples
+///
+/// ```
+/// use chitin_bio::{
+///   structure::{PdbParser, StructureScene},
+///   surface::msms::{MsmsRequest, build_msms_probe_faces},
+/// };
+///
+/// let pdb = b"\
+/// ATOM      1  C   GLY A   1       0.000   0.000   0.000  1.00 10.00           C  \n\
+/// ATOM      2  CA  GLY A   1       2.000   0.000   0.000  1.00 10.00           C  \n\
+/// ATOM      3  CB  GLY A   1       1.000   1.732   0.000  1.00 10.00           C  \n\
+/// END\n";
+/// let parsed = PdbParser::new().parse_bytes(pdb)?;
+/// let scene = StructureScene::from_first_model(&parsed.structure)?;
+/// let domains = build_msms_probe_faces(&scene, MsmsRequest::default())?;
+/// assert_eq!(domains.len(), 1);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+pub fn build_msms_probe_faces(
+  scene: &StructureScene,
+  request: MsmsRequest,
+) -> Result<Vec<MsmsProbeFaceDomain>, MsmsConstructionError> {
+  surface_atom_groups(scene, request.atom_scope, request.partition)
+    .into_iter()
+    .map(|(chain_id, atoms)| {
+      let analytical_atoms = atoms.iter().map(msms_atom).collect::<Vec<_>>();
+      build_accessible_probe_faces(&analytical_atoms, request.parameters)
+        .map(|faces| MsmsProbeFaceDomain { chain_id, faces })
+    })
+    .collect()
+}
+
+/// Converts one shared surface atom to double-precision MSMS geometry.
+fn msms_atom(atom: &SurfaceAtom) -> MsmsAtom {
+  MsmsAtom {
+    atom_index: atom.atom_index,
+    center: atom.position,
+    radius: atom.radius,
+  }
+}
 
 /// Failure produced while constructing analytical reduced-surface topology.
 #[derive(Clone, Copy, Debug, Error, PartialEq)]

@@ -2,21 +2,19 @@
 
 use std::time::{Duration, Instant};
 
-use crate::structure::StructureScene;
-
 use super::{
-  DISTANCE_FIELD_RANGE, SMOOTHING_ITERATIONS, SurfaceAtom, atom_bounds, budgeted_grid_layout,
+  DISTANCE_FIELD_RANGE, ImplicitAtom, SMOOTHING_ITERATIONS, atom_bounds, budgeted_grid_layout,
   contour::contour_field,
   field::{atom_surface_distance, compose_inner_surface_field_in_place, probe_surface_distance, sample_field},
-  merge_close_probe_centers,
+  implicit_atom_groups, merge_close_probe_centers,
   postprocess::{orient_inner_surface, recompute_inner_surface_normals, smooth_mesh},
   spatial::{AtomGrid, PointGrid},
-  surface_atom_groups,
   types::{
     MolecularSurfaceArtifact, MolecularSurfaceRequest, SesParameters, SurfaceDomainArtifact, SurfaceGeometrySource,
     SurfaceMesh,
   },
 };
+use crate::structure::StructureScene;
 
 /// Stage timings and intermediate sizes collected by an explicit profiling run.
 #[cfg(feature = "surface-profiling")]
@@ -68,7 +66,7 @@ pub struct MolecularSurfaceProfile {
 #[cfg(feature = "surface-profiling")]
 pub fn profile_molecular_surface(scene: &StructureScene, request: MolecularSurfaceRequest) -> MolecularSurfaceProfile {
   let mut metrics = SurfaceGenerationMetrics::new();
-  let atom_groups = metrics.measure(SurfaceStage::AtomGrouping, || surface_atom_groups(scene, request));
+  let atom_groups = metrics.measure(SurfaceStage::AtomGrouping, || implicit_atom_groups(scene, request));
   let domains = atom_groups
     .into_iter()
     .map(|(chain_id, atoms)| SurfaceDomainArtifact {
@@ -155,7 +153,7 @@ impl SurfaceGenerationMetrics {
 /// Runs the CPU SES kernel while recording coarse stage diagnostics.
 #[cfg(feature = "surface-profiling")]
 fn ses_mesh_for_atoms_profiled(
-  atoms: Vec<SurfaceAtom>,
+  atoms: Vec<ImplicitAtom>,
   parameters: SesParameters,
   metrics: &mut SurfaceGenerationMetrics,
 ) -> SurfaceMesh {

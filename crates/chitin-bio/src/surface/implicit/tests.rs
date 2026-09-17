@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::structure::{PdbParser, StructureScene};
+use crate::surface::{SurfaceAtomScope, SurfacePartition};
 
 fn one_atom_scene() -> StructureScene {
   let parsed = PdbParser::new()

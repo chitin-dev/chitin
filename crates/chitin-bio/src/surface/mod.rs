@@ -7,13 +7,15 @@
 //! reduced-surface model used for SAS/SES measurements and optional analytical
 //! tessellation.
 
+mod atoms;
 pub mod implicit;
 pub mod msms;
 
+pub use atoms::{SurfaceAtomScope, SurfacePartition};
 pub use implicit::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
-  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceAtomScope, SurfaceDomainArtifact,
-  SurfaceGeometrySource, SurfaceMesh, SurfacePartition, generate_implicit_surface, trace_molecular_surface,
+  ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceDomainArtifact, SurfaceGeometrySource,
+  SurfaceMesh, generate_implicit_surface, trace_molecular_surface,
 };
 #[cfg(feature = "surface-profiling")]
 pub use implicit::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};

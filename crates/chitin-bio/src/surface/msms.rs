@@ -14,9 +14,12 @@ mod construction;
 pub mod geometry;
 pub mod neighbors;
 
-pub use construction::{MsmsConstructionError, build_accessible_probe_faces};
+pub use construction::{MsmsConstructionError, build_accessible_probe_faces, build_msms_probe_faces};
 
 use thiserror::Error;
+
+use super::{SurfaceAtomScope, SurfacePartition};
+use crate::structure::ChainId;
 
 /// Validated physical parameters shared by MSMS measurement and tessellation.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -62,6 +65,26 @@ impl Default for MsmsParameters {
   fn default() -> Self {
     Self { probe_radius: 1.4 }
   }
+}
+
+/// Request selecting atoms, domains, and probe geometry for MSMS construction.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MsmsRequest {
+  /// Atoms eligible to participate in analytical surface construction.
+  pub atom_scope: SurfaceAtomScope,
+  /// How selected atoms are split into independent analytical domains.
+  pub partition: SurfacePartition,
+  /// Validated rolling-probe parameters.
+  pub parameters: MsmsParameters,
+}
+
+/// Accessible probe faces discovered for one independently calculated domain.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MsmsProbeFaceDomain {
+  /// Chain identity for a per-chain domain, or `None` for a unified domain.
+  pub chain_id: Option<ChainId>,
+  /// Accessible, consistently oriented tangent-probe faces.
+  pub faces: Vec<ReducedSurfaceFace>,
 }
 
 /// Invalid physical parameter supplied to analytical surface construction.

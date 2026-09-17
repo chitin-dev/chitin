@@ -2,12 +2,12 @@
 
 use std::collections::HashMap;
 
-use super::{ATOM_GRID_CELL_SIZE, SurfaceAtom};
+use super::{ATOM_GRID_CELL_SIZE, ImplicitAtom};
 
 /// Spatial hash used to avoid testing every atom against every SES sample.
 pub(super) struct AtomGrid {
   /// Atom records addressed by bucket index.
-  pub(super) atoms: Vec<SurfaceAtom>,
+  pub(super) atoms: Vec<ImplicitAtom>,
   /// Mapping from spatial bucket coordinates to atom indices.
   buckets: HashMap<[i32; 3], Vec<usize>>,
   /// Largest atom radius stored in the grid.
@@ -16,7 +16,7 @@ pub(super) struct AtomGrid {
 
 impl AtomGrid {
   /// Builds a spatial hash for the supplied atom records.
-  pub(super) fn new(atoms: Vec<SurfaceAtom>) -> Self {
+  pub(super) fn new(atoms: Vec<ImplicitAtom>) -> Self {
     let max_radius = atoms.iter().map(|atom| atom.radius).fold(0.0, f32::max);
     let mut buckets = HashMap::new();
     for (index, atom) in atoms.iter().enumerate() {
@@ -42,7 +42,7 @@ impl AtomGrid {
   }
 
   /// Visits atoms in every bucket intersecting a spherical query neighborhood.
-  pub(super) fn for_each_nearby(&self, position: glam::Vec3, radius: f32, mut visit: impl FnMut(&SurfaceAtom)) {
+  pub(super) fn for_each_nearby(&self, position: glam::Vec3, radius: f32, mut visit: impl FnMut(&ImplicitAtom)) {
     let center = Self::cell(position);
     let range = (radius / ATOM_GRID_CELL_SIZE).ceil() as i32;
     for z in center[2] - range..=center[2] + range {
