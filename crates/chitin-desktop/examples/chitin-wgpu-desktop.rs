@@ -3,6 +3,7 @@
 //!
 //! Run with `cargo run --example chitin-wgpu-desktop -- . structure.pdb`.
 //! Add `--representation stick|ball-and-stick|sphere|cartoon` to choose the molecular view.
+//! Add `--surface-backend implicit|msms` to enable and compare a solid surface.
 //!
 //! This example validates the integration path where GPUI owns the app shell,
 //! document tabs, splits, and side panels while WGPU renders an interactive
@@ -24,11 +25,11 @@ use chitin_desktop::{
   keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
-use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers};
+use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers, SurfaceStyle};
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
-use molecule::ExampleMoleculeScene;
+use molecule::{ExampleMoleculeScene, ExampleSurfaceBackend};
 
 /// Parsed command-line arguments for the WGPU molecule example.
 struct ExampleArguments {
@@ -38,17 +39,30 @@ struct ExampleArguments {
   structure_path: PathBuf,
   /// Molecular representation layers selected by the example arguments.
   representation: RepresentationLayers,
+  /// Molecular-surface algorithm selected for the example.
+  surface_backend: ExampleSurfaceBackend,
 }
 
 /// Parses positional paths and the atom representation option.
 fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
   let mut positional = Vec::new();
   let mut representation = RepresentationLayers::default();
+  let mut surface_backend = ExampleSurfaceBackend::default();
+  let mut surface_requested = false;
   let mut arguments = std::env::args_os().skip(1);
 
   while let Some(argument) = arguments.next() {
     let argument = argument.to_string_lossy();
-    if argument == "--representation" {
+    if argument == "--surface-backend" {
+      let Some(value) = arguments.next() else {
+        return Err("--surface-backend requires implicit or msms".to_string());
+      };
+      surface_backend = parse_surface_backend(&value.to_string_lossy())?;
+      surface_requested = true;
+    } else if let Some(value) = argument.strip_prefix("--surface-backend=") {
+      surface_backend = parse_surface_backend(value)?;
+      surface_requested = true;
+    } else if argument == "--representation" {
       let Some(value) = arguments.next() else {
         return Err("--representation requires stick, ball-and-stick, sphere, or cartoon".to_string());
       };
@@ -75,12 +89,25 @@ fn parse_example_arguments() -> std::result::Result<ExampleArguments, String> {
     .get(1)
     .cloned()
     .ok_or_else(|| "missing STRUCTURE_PATH; pass a .pdb, .ent, .cif, or .mmcif file".to_string())?;
+  if surface_requested {
+    representation = representation.with_surface(SurfaceStyle::Solid);
+  }
 
   Ok(ExampleArguments {
     project_path: positional.first().cloned(),
     structure_path,
     representation,
+    surface_backend,
   })
+}
+
+/// Parses the surface backend selected by the integration example.
+fn parse_surface_backend(name: &str) -> std::result::Result<ExampleSurfaceBackend, String> {
+  match name {
+    "implicit" | "grid" => Ok(ExampleSurfaceBackend::Implicit),
+    "msms" | "analytical" => Ok(ExampleSurfaceBackend::Msms),
+    _ => Err(format!("unknown surface backend {name:?}; expected implicit or msms")),
+  }
 }
 
 /// Parses one legacy command-line name into a representation-layer preset.
@@ -145,6 +172,7 @@ fn main() {
     project_path,
     structure_path,
     representation,
+    surface_backend,
   } = match parse_example_arguments() {
     Ok(arguments) => arguments,
     Err(error) => {
@@ -182,9 +210,14 @@ fn main() {
 
           let factory_scene = Arc::clone(&scene);
           let factory_representation = representation;
+          let factory_surface_backend = surface_backend;
           let wgpu_panel_factory = WgpuDocumentViewFactory::new(move |window, cx| {
             let surface = window.create_wgpu_surface(960, 540, wgpu::TextureFormat::Rgba8UnormSrgb);
-            let panel_scene = ExampleMoleculeScene::new(Arc::clone(&factory_scene), factory_representation);
+            let panel_scene = ExampleMoleculeScene::new(
+              Arc::clone(&factory_scene),
+              factory_representation,
+              factory_surface_backend,
+            );
             let panel = cx.new(|_| ChitinWgpuDocumentPanel::new_with_scene(surface, panel_scene));
             let controlled_panel = panel.clone();
             WgpuDocumentView::with_representation_layers(panel, factory_representation, move |representation, cx| {
