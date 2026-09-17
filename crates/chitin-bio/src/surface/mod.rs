@@ -9,7 +9,6 @@
 
 pub mod implicit;
 pub mod msms;
-mod ses;
 
 pub use implicit::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
