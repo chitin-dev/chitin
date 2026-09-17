@@ -10,11 +10,15 @@
 //! spacing, marching-tetrahedra topology, or mesh smoothing from changing
 //! reported scientific areas.
 
+pub mod arcs;
 mod construction;
 pub mod geometry;
 pub mod neighbors;
 
-pub use construction::{MsmsConstructionError, build_accessible_probe_faces, build_msms_probe_faces};
+pub use construction::{
+  MsmsConstructionError, build_accessible_probe_edges, build_accessible_probe_faces, build_msms_probe_faces,
+  build_msms_probe_topology,
+};
 
 use thiserror::Error;
 
@@ -87,6 +91,17 @@ pub struct MsmsProbeFaceDomain {
   pub faces: Vec<ReducedSurfaceFace>,
 }
 
+/// Accessible atom-pair arcs and tangent-probe faces for one calculation domain.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MsmsProbeTopologyDomain {
+  /// Chain identity for a per-chain domain, or `None` for a unified domain.
+  pub chain_id: Option<ChainId>,
+  /// Accessible rolling-probe arcs, including complete free circles.
+  pub edges: Vec<ReducedSurfaceEdge>,
+  /// Accessible, consistently oriented tangent-probe faces.
+  pub faces: Vec<ReducedSurfaceFace>,
+}
+
 /// Invalid physical parameter supplied to analytical surface construction.
 #[derive(Clone, Copy, Debug, Error, PartialEq)]
 pub enum MsmsParameterError {
@@ -123,10 +138,22 @@ pub struct ReducedSurfaceVertex {
 }
 
 /// One probe-accessible atom pair in a reduced surface.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReducedSurfaceEdge {
   /// Source atom indices ordered deterministically.
   pub atom_indices: [usize; 2],
+  /// Center of the probe-center intersection circle in ångströms.
+  pub probe_circle_center: [f64; 3],
+  /// Unit atom-pair axis normal to the probe-center circle.
+  pub probe_circle_axis: [f64; 3],
+  /// Deterministic unit vector defining zero angle in the circle plane.
+  pub probe_circle_basis: [f64; 3],
+  /// Radius of the probe-center circle in ångströms.
+  pub probe_circle_radius: f64,
+  /// Counter-clockwise arc start angle in radians.
+  pub start_angle: f64,
+  /// Positive angular sweep in radians; a full free edge uses $2\pi$.
+  pub sweep_angle: f64,
 }
 
 /// One fixed rolling-probe position supported by three atoms.
