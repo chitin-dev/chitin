@@ -755,7 +755,7 @@ fn slice_slider(
       .on_mouse_down(MouseButton::Left, cx.listener(SesDebugView::on_slider_mouse_down))
       .child(
         div()
-    .id("implicit-ses-debug-slice-slider")
+          .id("implicit-ses-debug-slice-slider")
           .relative()
           .w(px(SLICE_SLIDER_WIDTH))
           .h(px(6.0))
