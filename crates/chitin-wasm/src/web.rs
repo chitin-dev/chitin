@@ -398,6 +398,7 @@ impl MoleculeViewer {
       MoleculeRenderInput {
         scene,
         surface: self.molecular_surface.as_ref(),
+        surface_fragments: &[],
       },
       self.representation,
       &BallAndStickStyle::default(),

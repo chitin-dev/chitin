@@ -55,6 +55,9 @@ browser-dev:
 wgpu-example path="." *args:
   cargo run --example chitin-wgpu-desktop -- "{{path}}" {{args}}
 
+msms-debug path="structure.cif" *args:
+  cargo run --release --example msms-debug -- "{{path}}" {{args}}
+
 showcase:
   cargo run -p chitin-ui --example primitive-showcase
 
