@@ -706,6 +706,7 @@ dependencies = [
  "chitin-databases",
  "criterion",
  "glam",
+ "lyon",
  "rayon",
  "serde",
  "serde_yaml",
