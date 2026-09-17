@@ -48,7 +48,7 @@ const SLICE_PLAYBACK_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 /// Fraction of the Z range traversed by one automatic update.
 const SLICE_PLAYBACK_STEP: f32 = 16.0 / 6_000.0;
 /// Usage shown when the example receives invalid command-line arguments.
-const USAGE: &str = "usage: ses-debug [STRUCTURE] [--max-grid-points POINTS]";
+const USAGE: &str = "usage: implicit-ses-debug [STRUCTURE] [--max-grid-points POINTS]";
 
 /// Validated inputs used to construct one SES diagnostic run.
 #[derive(Debug, PartialEq)]
@@ -312,6 +312,7 @@ impl WgpuPanelScene for SesDebugScene {
         MoleculeRenderInput {
           scene: &self.scene,
           surface,
+          surface_fragments: &[],
         },
         layers,
         &BallAndStickStyle::default(),
@@ -709,7 +710,7 @@ impl Render for SesDebugView {
           .bg(rgb(0x151b27))
           .text_xs()
           .text_color(rgb(0xd7e0f2))
-          .child(button("ses-debug-previous", "◀", previous, -1))
+          .child(button("implicit-ses-debug-previous", "◀", previous, -1))
           .child(format!("{} / {} · {stage_description}", stage.index() + 1, STAGE_COUNT))
           .when(stage.has_slice(), |controls| {
             controls
@@ -724,7 +725,7 @@ impl Render for SesDebugView {
                 cx,
               ))
           })
-          .child(button("ses-debug-next", "▶", next, 1)),
+          .child(button("implicit-ses-debug-next", "▶", next, 1)),
       )
   }
 }
@@ -754,7 +755,7 @@ fn slice_slider(
       .on_mouse_down(MouseButton::Left, cx.listener(SesDebugView::on_slider_mouse_down))
       .child(
         div()
-          .id("ses-debug-slice-slider")
+    .id("implicit-ses-debug-slice-slider")
           .relative()
           .w(px(SLICE_SLIDER_WIDTH))
           .h(px(6.0))
@@ -792,7 +793,7 @@ fn button(id: &'static str, label: &'static str, entity: Entity<SesDebugView>, d
 /// Creates the play/pause control for scalar-slice animation.
 fn playback_button(label: &'static str, entity: Entity<SesDebugView>) -> impl IntoElement {
   div()
-    .id("ses-debug-slice-playback")
+    .id("implicit-ses-debug-slice-playback")
     .px_2()
     .py_1()
     .rounded_sm()
@@ -939,7 +940,7 @@ fn spawn_trace_worker(
   let worker_count = trace_worker_count();
   let (sender, receiver) = oneshot::channel();
   std::thread::Builder::new()
-    .name("ses-debug-trace".to_string())
+    .name("implicit-ses-debug-trace".to_string())
     .spawn(move || {
       let started_at = Instant::now();
       log::info!(
@@ -949,7 +950,7 @@ fn spawn_trace_worker(
       );
       let result = ThreadPoolBuilder::new()
         .num_threads(worker_count)
-        .thread_name(|index| format!("ses-debug-rayon-{index}"))
+        .thread_name(|index| format!("implicit-ses-debug-rayon-{index}"))
         .build()
         .map_err(|error| format!("failed to create SES trace worker pool: {error}"))
         .and_then(|pool| {

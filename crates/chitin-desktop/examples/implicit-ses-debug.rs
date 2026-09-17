@@ -5,7 +5,7 @@
 //! production bio and desktop modules expose only reusable scientific and UI
 //! APIs.
 
-#[path = "ses-debug/mod.rs"]
+#[path = "implicit-ses-debug/mod.rs"]
 mod ses_debug;
 
 fn main() {
