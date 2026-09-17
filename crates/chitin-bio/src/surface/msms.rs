@@ -10,7 +10,11 @@
 //! spacing, marching-tetrahedra topology, or mesh smoothing from changing
 //! reported scientific areas.
 
+mod construction;
 pub mod geometry;
+pub mod neighbors;
+
+pub use construction::{MsmsConstructionError, build_accessible_probe_faces};
 
 use thiserror::Error;
 
