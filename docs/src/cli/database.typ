@@ -1,9 +1,30 @@
-# Downloading RCSB structures
+#import "/book.typ": book-page
+#show: book-page
 
-The `chitin` command-line tool can download structures from the RCSB Protein
-Data Bank in PDB or PDBx/mmCIF format.
+= 1 Database commands
+<database-commands>
 
-## Basic usage
+The `db` command is the entry point for Chitin workflows that communicate with
+external biological databases. `databases` is also accepted as a more
+descriptive alias:
+
+```bash
+chitin db --help
+chitin databases --help
+```
+
+This page is the home for database-related command documentation. The first
+workflow is downloading structures from the RCSB Protein Data Bank; additional
+providers and database operations can be documented here as they are added.
+
+== 1.1 RCSB structure download
+<rcsb-structure-download>
+
+The *RCSB* (Research Collaboratory for Structural Bioinformatics) workflow
+downloads structures in PDB or PDBx/mmCIF format.
+
+=== 1.1.1 Basic usage
+<basic-usage>
 
 ```bash
 chitin db rcsb download --id 4hhb --format pdb
@@ -23,7 +44,6 @@ Downloads are processed sequentially. Each completed file is kept if a later
 identifier fails.
 
 `--format` accepts:
-
 - `pdb` for the legacy PDB text format;
 - `mmcif` for the PDBx/mmCIF format.
 
@@ -39,7 +59,8 @@ chitin db rcsb download --id 4hhb
 chitin databases rcsb download --id 4hhb --format mmcif
 ```
 
-## Output location
+=== 1.1.2 Output location
+<output-location>
 
 Without `--output`, files are saved under the user home directory:
 
@@ -50,7 +71,8 @@ Without `--output`, files are saved under the user home directory:
 
 The directory is created automatically when it does not exist.
 
-### Explicit file path
+=== 1.1.3 Explicit file path
+<explicit-file-path>
 
 When `--output` names a file, the file is written exactly at that path:
 
@@ -63,7 +85,8 @@ chitin db rcsb download \
 
 The parent directory is created automatically.
 
-### Existing directory
+=== 1.1.4 Existing directory
+<existing-directory>
 
 When `--output` points to an existing directory, Chitin generates the filename
 from the PDB identifier and format:
@@ -100,7 +123,8 @@ chitin db rcsb download --id 4hhb --output ./structures/hemoglobin
 
 This writes to `./structures/hemoglobin`.
 
-## Progress display
+=== 1.1.5 Progress display
+<progress-display>
 
 The CLI starts with an indeterminate activity indicator while the response size
 is unknown. Once RCSB provides a total response size, the indicator changes to a
@@ -115,7 +139,8 @@ and final path:
 ✓ Saved to /home/user/.chitin/download/pdb/4HHB.pdb
 ```
 
-## Errors
+=== 1.1.6 Errors
+<rcsb-errors>
 
 Invalid identifiers fail before a network request:
 

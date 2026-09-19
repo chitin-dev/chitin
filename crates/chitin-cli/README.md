@@ -53,5 +53,5 @@ chitin completions powershell
 ```
 
 See the
-[Chitin CLI documentation](https://github.com/chitin-dev/chitin/blob/main/docs/src/cli/rcsb-download.md)
+[Chitin CLI documentation](https://github.com/chitin-dev/chitin/blob/main/docs/src/cli/database.typ)
 for output-path and shell-installation details.

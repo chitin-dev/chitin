@@ -1,6 +1,6 @@
 # Chitin developer and CI command shortcuts.
 #
-# Keep recipes as thin wrappers around Cargo and mdBook commands. CI should use
+# Keep recipes as thin wrappers around Cargo and documentation commands. CI should use
 # the same recipes as local development so that the two paths cannot drift.
 
 default:
@@ -65,10 +65,10 @@ cli *args:
   cargo run -p chitin -- {{args}}
 
 docs-build:
-  mdbook build docs
+  shiroa build --mode dyn-paged docs
 
 docs-serve:
-  mdbook serve docs
+  shiroa serve --mode dyn-paged docs
 
 build-desktop-release:
   cargo build -p chitin-desktop --release --locked
