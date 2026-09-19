@@ -1,0 +1,2 @@
+# Tell GitHub Linguist to classify Typst documentation as Typst source.
+*.typ linguist-language=Typst
