@@ -65,7 +65,7 @@ cli *args:
   cargo run -p chitin -- {{args}}
 
 docs-build:
-  shiroa build --mode dyn-paged docs
+  shiroa build --mode dyn-paged --path-to-root /chitin/ docs
 
 docs-serve:
   shiroa serve --mode dyn-paged docs
