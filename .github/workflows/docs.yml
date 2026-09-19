@@ -1,4 +1,4 @@
-name: Deploy mdBook documentation
+name: Deploy Shiroa documentation
 
 on:
   push:
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build mdBook
+    name: Build Shiroa book
     runs-on: ubuntu-latest
 
     steps:
@@ -32,22 +32,17 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@just
 
-      - name: Install mdBook
-        uses: peaceiris/actions-mdbook@v2
-        with:
-          mdbook-version: latest
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install mdbook-katex
-        run: cargo install mdbook-katex --locked
+      - name: Install Shiroa
+        run: cargo install shiroa --version 0.4.0 --locked
 
-      - name: Cache mdBook output
+      - name: Cache Shiroa output
         uses: actions/cache@v4
         with:
-          path: docs/book
-          key: mdbook-${{ runner.os }}-${{ hashFiles('docs/src/**', 'docs/book.toml') }}
+          path: docs/dist
+          key: shiroa-${{ runner.os }}-${{ hashFiles('docs/**', '!docs/dist/**') }}
 
       - name: Build documentation
         run: just docs-build
@@ -56,7 +51,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/book
+          path: docs/dist
 
   deploy:
     name: Deploy to GitHub Pages

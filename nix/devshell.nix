@@ -6,8 +6,6 @@ pkgs.mkShell {
     clippy
     git
     just
-    mdbook
-    mdbook-katex
     nodejs
     pnpm
     pkg-config

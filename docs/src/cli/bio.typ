@@ -1,9 +1,17 @@
-# Inspecting and validating structures
+#import "/book.typ": book-page
+#show: book-page
 
-The `chitin structure` commands read local PDB and PDBx/mmCIF files through
-the same public readers used by the rest of the project.
+= 1 Bio commands
+<bio-commands>
 
-## Inspect
+== 1.1 Inspecting and validating crystal structures
+<inspecting-and-validating-structures>
+
+The `chitin structure` commands read local PDB and PDBx/mmCIF files through the
+same public readers used by the rest of the project.
+
+=== 1.1.1 Inspect
+<structure-inspect>
 
 ```bash
 chitin structure inspect ./4hhb.cif
@@ -38,7 +46,8 @@ For scripts, use JSON. JSON output never contains ANSI color sequences:
 chitin structure inspect ./4hhb.cif --output json
 ```
 
-## Validate
+=== 1.1.2 Validate
+<structure-validate>
 
 `validate` parses the file and checks the shared structure-table invariants:
 

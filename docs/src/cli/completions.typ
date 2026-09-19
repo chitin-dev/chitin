@@ -1,15 +1,24 @@
-# Shell completion
+#import "/book.typ": book-page
+#show: book-page
+
+= 1 Shell completion
+<shell-completion>
+
+Chitin's shell completion is generated from the CLI definition at runtime by
+the #link("https://crates.io/crates/clap_complete")[`clap_complete`] crate. The
+`chitin` command is defined with #link("https://crates.io/crates/clap")[`clap`],
+and the completion generator receives that same command schema, so subcommands,
+options, and value choices stay aligned with the CLI instead of being maintained
+as separate shell-specific files.
 
 Generate a completion script for the shell you use:
 
 ```bash
-chitin completions bash
-chitin completions zsh
-chitin completions fish
-chitin completions powershell
+chitin completions [bash|zsh|fish|powershell]
 ```
 
-## Zsh
+== 1.1 Zsh
+<zsh>
 
 ```bash
 mkdir -p ~/.zfunc
@@ -26,8 +35,8 @@ compinit
 
 Restart the shell or run `source ~/.zshrc`.
 
-## Bash
-
+== 1.2 Bash
+<bash>
 Install the generated completion in the user-level Bash completion directory:
 
 ```bash
@@ -52,8 +61,8 @@ fi
 On systems where Bash completion is already configured, opening a new shell is
 enough.
 
-## Fish
-
+== 1.3 Fish
+<fish>
 Fish loads completion files from `~/.config/fish/completions`:
 
 ```fish
@@ -67,8 +76,8 @@ Start a new Fish shell, or reload the current one with:
 source ~/.config/fish/completions/chitin.fish
 ```
 
-## PowerShell
-
+== 1.4 PowerShell
+<powershell>
 Save the completion script next to the active PowerShell profile. This works
 with Windows PowerShell 5.1, PowerShell 7 on Windows, and PowerShell 7 on
 Unix-like systems:
@@ -97,6 +106,3 @@ If PowerShell blocks local scripts, allow scripts for the current user once:
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
-
-Completion covers the command hierarchy, options, and the `pdb`/`mmcif` format
-values. It does not query RCSB for dynamic PDB identifier suggestions.
