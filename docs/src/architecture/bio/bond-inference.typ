@@ -48,7 +48,7 @@ visualization without pretending to solve complete chemical perception.
 
 The inference configuration and result types are
 #link(source-root + "/chemistry/bond_inference.rs")[`BondInferenceConfig`] and
-[`InferredBond`](/home/ashgrey/Github/chitin/crates/chitin-bio/src/chemistry/bond_inference.rs).
+#link(source-root + "/chemistry/bond_inference.rs")[`InferredBond`]
 
 == 1.3 Spatial locality
 <locality>
