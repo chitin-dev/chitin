@@ -66,16 +66,22 @@ The documentation uses Shiroa 0.4.0 and selects its theme in
 `docs/config.typ`. Theme-specific CSS belongs in separate values in
 `docs/templates/page.typ`; do not use Starlight selectors for mdBook pages.
 
-Run the relevant build after edits:
+Run the repository recipe after edits so local verification uses the same
+GitHub Pages path prefix as deployment:
 
 ```bash
-shiroa build --mode dyn-paged docs
+just docs-build
 ```
+
+The recipe currently expands to
+`shiroa build --mode dyn-paged --path-to-root /chitin/ docs`. Do not omit
+`--path-to-root /chitin/` when invoking Shiroa directly, because root-relative
+chapter and asset URLs must remain under the repository's Pages path.
 
 For static HTML validation, use:
 
 ```bash
-shiroa build --mode static-html docs
+shiroa build --mode static-html --path-to-root /chitin/ docs
 ```
 
 Also run `git diff --check`. Treat Typst syntax errors as failures. Treat the
