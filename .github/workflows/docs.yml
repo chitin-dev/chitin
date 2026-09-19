@@ -36,7 +36,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Shiroa
-        run: cargo install shiroa --version 0.4.0 --locked
+        run: cargo install --git https://github.com/Myriad-Dreamin/shiroa --locked shiroa
 
       - name: Cache Shiroa output
         uses: actions/cache@v4
