@@ -1,6 +1,6 @@
 //! Desktop-owned command-panel state and focus management.
 
-use chitin_command::{ChitinCommand, CommandRegistry};
+use chitin_command::{CommandId, CommandRegistry};
 use chitin_ui::{composite::quickpick::QuickPickState, primitive::input::text::TextInputState};
 use gpui::{AppContext, Context, Entity, FocusHandle, KeyDownEvent, ScrollStrategy, UniformListScrollHandle, Window};
 
@@ -12,7 +12,7 @@ pub(crate) enum CommandPanelMode {
   /// Search mode listing matching commands.
   Search,
   /// Form mode for one command, identified without duplicating its descriptor.
-  Form(ChitinCommand),
+  Form(CommandId),
 }
 
 /// Result of handling one command-panel key event.
@@ -23,7 +23,7 @@ pub(crate) enum CommandPanelEvent {
   /// The panel should close and restore its prior focus target.
   Close,
   /// A command should be invoked from the current search result.
-  Invoke(ChitinCommand),
+  Invoke(CommandId),
 }
 
 /// State and focus owner for the desktop command panel.
@@ -215,17 +215,20 @@ impl CommandPanelController {
   ///
   /// # Parameters
   ///
-  /// * `command` identifies the command that owns the form metadata.
+  /// * `id` identifies the command that owns the form metadata.
   ///
   /// # Returns
   ///
   /// `true` when the command is registered and the panel entered form mode.
-  pub(crate) fn open_form(&mut self, command: ChitinCommand) -> bool {
-    if self.registry.descriptor_for(&command).is_none() {
+  pub(crate) fn open_form(&mut self, id: CommandId) -> bool {
+    let Some(descriptor) = self.registry.descriptor_for(id) else {
+      return false;
+    };
+    if !descriptor.requires_arguments {
       return false;
     }
 
-    self.mode = CommandPanelMode::Form(command);
+    self.mode = CommandPanelMode::Form(id);
     self.rcsb_focus_pending = true;
     self.quickpick.reset();
     true
@@ -319,7 +322,7 @@ impl CommandPanelController {
       .registry
       .search(self.quickpick.query())
       .get(self.quickpick.selected_index())
-      .map(|result| CommandPanelEvent::Invoke(result.descriptor.command.clone()))
+      .map(|result| CommandPanelEvent::Invoke(result.descriptor.id))
       .unwrap_or(CommandPanelEvent::StateChanged)
   }
 }
@@ -364,10 +367,10 @@ mod tests {
   #[test]
   fn open_form_should_store_only_command_identity() {
     let mut controller = CommandPanelController::new();
-    let command = ChitinCommand::from(chitin_command::DatabaseCommand::DownloadRcsbStructure);
+    let id = CommandId::DatabaseDownloadRcsbStructure;
 
-    assert!(controller.open_form(command.clone()));
-    assert_eq!(controller.mode, CommandPanelMode::Form(command));
+    assert!(controller.open_form(id));
+    assert_eq!(controller.mode, CommandPanelMode::Form(id));
   }
 
   #[test]

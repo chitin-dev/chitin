@@ -7,22 +7,23 @@ pub enum ApplicationCommand {
 
 impl ApplicationCommand {
   /// Returns the stable command identifier.
-  pub fn id(&self) -> &'static str {
+  pub fn id(&self) -> crate::CommandId {
     match self {
-      Self::ToggleCommandPanel => "application.toggle_command_panel",
+      Self::ToggleCommandPanel => crate::CommandId::ApplicationToggleCommandPanel,
     }
   }
 }
 
-/// Returns the application command descriptors.
-pub fn command_descriptors() -> Vec<crate::CommandDescriptor> {
-  vec![crate::CommandDescriptor {
-    id: ApplicationCommand::ToggleCommandPanel.id(),
-    title: "Toggle Command Panel",
+/// Returns the application command registrations.
+pub fn command_registrations() -> Vec<crate::CommandRegistration> {
+  vec![crate::CommandRegistration {
+    descriptor: crate::CommandDescriptor {
+      id: ApplicationCommand::ToggleCommandPanel.id(),
+      title: "Toggle Command Panel",
+      requires_arguments: false,
+    },
     category: crate::CommandCategory::Application,
     keywords: &["quick pick", "palette", "commands"],
     shortcut: Some("Ctrl/Cmd+Shift+P"),
-    invocation: crate::CommandInvocationKind::Immediate,
-    command: ApplicationCommand::ToggleCommandPanel.into(),
   }]
 }

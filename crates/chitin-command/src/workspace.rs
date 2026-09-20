@@ -21,21 +21,21 @@ pub enum WorkspaceCommand {
 
 impl WorkspaceCommand {
   /// Returns the stable command identifier.
-  pub fn id(&self) -> &'static str {
+  pub fn id(&self) -> crate::CommandId {
     match self {
-      Self::FocusPrevious => "workspace.focus_previous_entry",
-      Self::FocusNext => "workspace.focus_next_entry",
-      Self::ActivateFocused => "workspace.activate_focused_entry",
-      Self::FocusFirst => "workspace.focus_first_entry",
-      Self::FocusLast => "workspace.focus_last_entry",
-      Self::ToggleWorkspace => "workspace.toggle_workspace",
+      Self::FocusPrevious => crate::CommandId::WorkspaceFocusPrevious,
+      Self::FocusNext => crate::CommandId::WorkspaceFocusNext,
+      Self::ActivateFocused => crate::CommandId::WorkspaceActivateFocused,
+      Self::FocusFirst => crate::CommandId::WorkspaceFocusFirst,
+      Self::FocusLast => crate::CommandId::WorkspaceFocusLast,
+      Self::ToggleWorkspace => crate::CommandId::WorkspaceToggle,
       Self::PanelTab(command) => command.id(),
     }
   }
 }
 
-/// Returns the project-workspace command descriptors.
-pub fn command_descriptors() -> Vec<crate::CommandDescriptor> {
+/// Returns the project-workspace command registrations.
+pub fn command_registrations() -> Vec<crate::CommandRegistration> {
   [
     (
       WorkspaceCommand::ToggleWorkspace,
@@ -75,14 +75,15 @@ pub fn command_descriptors() -> Vec<crate::CommandDescriptor> {
     ),
   ]
   .into_iter()
-  .map(|(command, title, keywords, shortcut)| crate::CommandDescriptor {
-    id: command.id(),
-    title,
+  .map(|(command, title, keywords, shortcut)| crate::CommandRegistration {
+    descriptor: crate::CommandDescriptor {
+      id: command.id(),
+      title,
+      requires_arguments: false,
+    },
     category: crate::CommandCategory::Workspace,
     keywords,
     shortcut,
-    invocation: crate::CommandInvocationKind::Immediate,
-    command: command.into(),
   })
   .collect()
 }

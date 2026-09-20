@@ -37,10 +37,12 @@ impl ChitinApp {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) {
-    if matches!(command, ChitinCommand::Workspace(WorkspaceCommand::ActivateFocused)) {
-      self.activate_focused_project_tree_entry_with_window(window, cx);
-    } else {
-      self.dispatch_command(command, cx);
+    match command {
+      ChitinCommand::Workspace(WorkspaceCommand::ActivateFocused) => {
+        self.activate_focused_project_tree_entry_with_window(window, cx);
+      }
+      ChitinCommand::Database(command) => self.dispatch_database_command(command, window, cx),
+      command => self.dispatch_command(command, cx),
     }
   }
 
@@ -59,7 +61,9 @@ impl ChitinApp {
 
     match command {
       ChitinCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
-      ChitinCommand::Database(command) => self.dispatch_database_command(command, cx),
+      ChitinCommand::Database(command) => {
+        log::warn!("Command {} requires a window execution context", command.id());
+      }
       ChitinCommand::Application(command) => self.dispatch_application_command(command, cx),
       ChitinCommand::Structure(command) => self.dispatch_structure_command(command),
     }
@@ -91,19 +95,20 @@ impl ChitinApp {
   /// # Parameters
   ///
   /// * `command` identifies the database workflow to start.
-  /// * `cx` is the GPUI context notified when the form is opened.
+  /// * `window` identifies the window that receives completed documents.
+  /// * `cx` submits the background task and updates desktop state.
   ///
   /// # Returns
   ///
-  /// This function returns `()` after opening the corresponding form.
-  pub(crate) fn dispatch_database_command(&mut self, command: DatabaseCommand, cx: &mut Context<Self>) {
+  /// This function returns `()` after routing the executable database command.
+  pub(crate) fn dispatch_database_command(
+    &mut self,
+    command: DatabaseCommand,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
     match command {
-      DatabaseCommand::DownloadRcsbStructure => {
-        let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure);
-        if self.command_panel.open_form(command) {
-          cx.notify();
-        }
-      }
+      DatabaseCommand::DownloadRcsbStructure(arguments) => self.execute_rcsb_download(arguments, window, cx),
     }
   }
 

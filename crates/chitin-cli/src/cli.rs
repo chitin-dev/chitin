@@ -2,8 +2,11 @@
 
 use std::path::PathBuf;
 
-use chitin_command::{ChitinCommand, DatabaseCommand, StructureCommand};
-use chitin_databases::providers::rcsb::StructureFormat;
+use chitin_command::{
+  ChitinCommand, CommandOutputFormat, DatabaseCommand, RcsbDownloadArguments, StructureCommand,
+  StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
+};
+use chitin_databases::providers::rcsb::{PdbId, StructureFormat};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 
@@ -136,6 +139,25 @@ impl FormatArg {
   }
 }
 
+impl From<OutputArg> for CommandOutputFormat {
+  fn from(output: OutputArg) -> Self {
+    match output {
+      OutputArg::Text => Self::Text,
+      OutputArg::Json => Self::Json,
+    }
+  }
+}
+
+impl StructureInputArgs {
+  /// Converts parsed CLI input into frontend-independent command arguments.
+  fn into_command_arguments(self) -> StructureInputArguments {
+    StructureInputArguments {
+      input: self.input,
+      format: self.format.map(FormatArg::structure_format),
+    }
+  }
+}
+
 /// Dispatches a parsed CLI workflow.
 ///
 /// # Parameters
@@ -163,26 +185,18 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<(), CliError> {
 
 /// Dispatches a structure command through the shared command bus.
 async fn dispatch_structure_command(command: StructureSubcommand) -> Result<(), CliError> {
-  match command {
-    StructureSubcommand::Inspect(args) => {
-      crate::structure::dispatch(
-        ChitinCommand::from(StructureCommand::Inspect),
-        args.input,
-        Some(args.output),
-        args.verbose,
-      )
-      .await
-    }
-    StructureSubcommand::Validate(args) => {
-      crate::structure::dispatch(
-        ChitinCommand::from(StructureCommand::Validate),
-        args.input,
-        Some(args.output),
-        false,
-      )
-      .await
-    }
-  }
+  let command = match command {
+    StructureSubcommand::Inspect(args) => StructureCommand::Inspect(StructureInspectArguments {
+      input: args.input.into_command_arguments(),
+      output: args.output.into(),
+      verbose: args.verbose,
+    }),
+    StructureSubcommand::Validate(args) => StructureCommand::Validate(StructureValidateArguments {
+      input: args.input.into_command_arguments(),
+      output: args.output.into(),
+    }),
+  };
+  dispatch_command(command.into()).await
 }
 
 /// Dispatches a database command to its provider-specific workflow.
@@ -220,8 +234,12 @@ async fn dispatch_database_command(command: DatabaseSubcommand) -> Result<(), Cl
 async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> {
   match command {
     RcsbSubcommand::Download { id, format, output } => {
-      let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure);
-      dispatch_command(command, id, format.structure_format(), output).await
+      let command = DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+        ids: PdbId::parse_many(&id)?,
+        format: format.structure_format(),
+        output,
+      });
+      dispatch_command(command.into()).await
     }
   }
 }
@@ -231,10 +249,6 @@ async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> 
 /// # Parameters
 ///
 /// * `command` identifies the typed command to dispatch.
-/// * `raw_id` contains one or more comma-separated PDB identifiers.
-/// * `format` selects the structure file format.
-/// * `output` optionally overrides the generated output path.
-///
 /// # Returns
 ///
 /// Returns `Ok(())` after the command completes successfully.
@@ -243,14 +257,10 @@ async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> 
 ///
 /// Returns [`CliError`] when the command is unsupported or the RCSB download
 /// fails.
-async fn dispatch_command(
-  command: ChitinCommand,
-  raw_id: String,
-  format: StructureFormat,
-  output: Option<PathBuf>,
-) -> Result<(), CliError> {
+async fn dispatch_command(command: ChitinCommand) -> Result<(), CliError> {
   match command {
-    ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure) => download_rcsb(raw_id, format, output).await,
-    other => Err(CliError::UnsupportedCommand(other.id())),
+    ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(arguments)) => download_rcsb(arguments).await,
+    command @ ChitinCommand::Structure(_) => crate::structure::dispatch(command).await,
+    other => Err(CliError::UnsupportedCommand(other.id().as_str())),
   }
 }

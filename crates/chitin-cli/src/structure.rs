@@ -7,45 +7,42 @@ use std::{
 };
 
 use chitin_bio::structure::{MmcifParser, PdbParser, Structure, StructureParseResult};
-use chitin_command::{ChitinCommand, StructureCommand};
+use chitin_command::{ChitinCommand, CommandOutputFormat, StructureCommand, StructureInputArguments};
 use chitin_databases::providers::rcsb::StructureFormat;
 use console::Style;
 use serde_json::{Value, json};
 
-use crate::{
-  cli::{FormatArg, OutputArg, StructureInputArgs},
-  error::CliError,
-};
+use crate::error::CliError;
 
 /// Executes a structure inspection or validation command.
-pub(crate) async fn dispatch(
-  command: ChitinCommand,
-  input: StructureInputArgs,
-  output: Option<OutputArg>,
-  verbose: bool,
-) -> Result<(), CliError> {
-  let (format, bytes) = read_input(&input.input, input.format)?;
-  let parsed = parse_structure(format, &input.input, &bytes)?;
+pub(crate) async fn dispatch(command: ChitinCommand) -> Result<(), CliError> {
   match command {
-    ChitinCommand::Structure(StructureCommand::Inspect) => print_inspection(
-      &input.input,
-      format,
-      bytes.len(),
-      &parsed,
-      output.unwrap_or(OutputArg::Text),
-      verbose,
-    ),
-    ChitinCommand::Structure(StructureCommand::Validate) => {
-      validate_structure(&input.input, format, &parsed, output.unwrap_or(OutputArg::Text))
+    ChitinCommand::Structure(StructureCommand::Inspect(arguments)) => {
+      let (format, bytes) = read_input(&arguments.input)?;
+      let parsed = parse_structure(format, &arguments.input.input, &bytes)?;
+      print_inspection(
+        &arguments.input.input,
+        format,
+        bytes.len(),
+        &parsed,
+        arguments.output,
+        arguments.verbose,
+      )
     }
-    other => Err(CliError::UnsupportedCommand(other.id())),
+    ChitinCommand::Structure(StructureCommand::Validate(arguments)) => {
+      let (format, bytes) = read_input(&arguments.input)?;
+      let parsed = parse_structure(format, &arguments.input.input, &bytes)?;
+      validate_structure(&arguments.input.input, format, &parsed, arguments.output)
+    }
+    other => Err(CliError::UnsupportedCommand(other.id().as_str())),
   }
 }
 
 /// Reads a local file or stdin and resolves its structure format.
-fn read_input(path: &Path, requested: Option<FormatArg>) -> Result<(StructureFormat, Vec<u8>), CliError> {
-  let format = requested
-    .map(FormatArg::structure_format)
+fn read_input(input: &StructureInputArguments) -> Result<(StructureFormat, Vec<u8>), CliError> {
+  let path = &input.input;
+  let format = input
+    .format
     .or_else(|| detect_format(path))
     .ok_or_else(|| CliError::StructureFormat(path.to_owned()))?;
   let mut bytes = Vec::new();
@@ -87,12 +84,12 @@ fn print_inspection(
   format: StructureFormat,
   byte_count: usize,
   parsed: &StructureParseResult,
-  output: OutputArg,
+  output: CommandOutputFormat,
   verbose: bool,
 ) -> Result<(), CliError> {
   match output {
-    OutputArg::Text => print_text_summary(path, format, byte_count, parsed, verbose),
-    OutputArg::Json => print_json_summary(path, format, byte_count, parsed, verbose),
+    CommandOutputFormat::Text => print_text_summary(path, format, byte_count, parsed, verbose),
+    CommandOutputFormat::Json => print_json_summary(path, format, byte_count, parsed, verbose),
   }
 }
 
@@ -101,7 +98,7 @@ fn validate_structure(
   path: &Path,
   format: StructureFormat,
   parsed: &StructureParseResult,
-  output: OutputArg,
+  output: CommandOutputFormat,
 ) -> Result<(), CliError> {
   let validation = parsed
     .structure
@@ -109,7 +106,7 @@ fn validate_structure(
     .map_err(|error| error.to_string())
     .and_then(|()| validate_content(&parsed.structure));
   match output {
-    OutputArg::Text => {
+    CommandOutputFormat::Text => {
       if let Err(message) = validation {
         let error = Style::new().red().bold();
         eprintln!("{} {}", error.apply_to("✗ Invalid structure:"), message);
@@ -126,7 +123,7 @@ fn validate_structure(
         format.label()
       );
     }
-    OutputArg::Json => {
+    CommandOutputFormat::Json => {
       let valid = validation.is_ok();
       let value = json!({
         "path": path.display().to_string(),

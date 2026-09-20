@@ -1,18 +1,17 @@
 //! RCSB download execution and terminal progress reporting.
 
 use std::{
-  path::PathBuf,
   sync::{Arc, Mutex},
   time::Duration,
 };
 
 use chitin_databases::{
   Client, ClientConfig,
-  providers::rcsb::{
-    PdbId, RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, RcsbDownloadError, RcsbError, StructureFormat,
-  },
+  providers::rcsb::{RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, RcsbDownloadError, RcsbError},
 };
 use indicatif::{ProgressBar, ProgressStyle};
+
+use chitin_command::RcsbDownloadArguments;
 
 use crate::{error::CliError, output::resolve_output_path};
 
@@ -20,21 +19,13 @@ use crate::{error::CliError, output::resolve_output_path};
 ///
 /// # Parameters
 ///
-/// * `raw_id` is the user-provided comma-separated list of four-character PDB
-///   identifiers such as 4HHB,1YTH.
-/// * `format` selects PDB or mmCIF content.
-/// * `output` is an optional file or directory override.
+/// * `arguments` contains validated identifiers, format, and output override.
 ///
 /// # Returns
 ///
 /// `Ok(())` after the artifact has been written and reported to the terminal.
-pub(crate) async fn download_rcsb(
-  raw_ids: String,
-  format: StructureFormat,
-  output: Option<PathBuf>,
-) -> Result<(), CliError> {
-  // we use `,` as the splitter of different PDB IDs.
-  let ids = PdbId::parse_many(&raw_ids)?;
+pub(crate) async fn download_rcsb(arguments: RcsbDownloadArguments) -> Result<(), CliError> {
+  let RcsbDownloadArguments { ids, format, output } = arguments;
   let multiple = ids.len() > 1;
   let client = Client::new(ClientConfig::default())
     .map_err(|error| CliError::Rcsb(RcsbDownloadError::Provider(RcsbError::Transport(error))))?;

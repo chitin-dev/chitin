@@ -727,6 +727,9 @@ dependencies = [
 [[package]]
 name = "chitin-command"
 version = "0.1.0"
+dependencies = [
+ "chitin-databases",
+]
 
 [[package]]
 name = "chitin-databases"
