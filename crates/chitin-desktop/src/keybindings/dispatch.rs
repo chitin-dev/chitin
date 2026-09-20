@@ -87,6 +87,7 @@ impl ChitinApp {
   pub(crate) fn dispatch_application_command(&mut self, command: ApplicationCommand, cx: &mut Context<Self>) {
     match command {
       ApplicationCommand::ToggleCommandPanel => self.toggle_command_panel(cx),
+      ApplicationCommand::ToggleTerminal => self.toggle_terminal(cx),
     }
   }
 

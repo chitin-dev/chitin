@@ -324,9 +324,7 @@ impl BuiltinShell {
   /// Returns [`BuiltinShellError::Busy`] while another command is active, or a
   /// parse error when the command line is invalid.
   pub fn submit(&self, input: impl Into<String>) -> Result<ShellSubmission, BuiltinShellError> {
-    let input = input.into();
-    let command = parse_command_line(&input)?;
-    self.submit_typed(input, command, ShellInvocationSource::Interactive)
+    self.submit_line(input, ShellInvocationSource::Interactive)
   }
 
   /// Submits a command line attributed to a specific invocation source.
@@ -345,7 +343,13 @@ impl BuiltinShell {
     source: ShellInvocationSource,
   ) -> Result<ShellSubmission, BuiltinShellError> {
     let input = input.into();
-    let command = parse_command_line(&input)?;
+    let command = match parse_command_line(&input) {
+      Ok(command) => command,
+      Err(error) => {
+        self.remember_rejected_input(input.clone())?;
+        return Err(error.into());
+      }
+    };
     self.submit_typed(input, command, source)
   }
 
@@ -668,6 +672,15 @@ impl BuiltinShell {
   fn lock_state(&self) -> Result<MutexGuard<'_, ShellState>, BuiltinShellError> {
     self.state.lock().map_err(|_| BuiltinShellError::StateUnavailable)
   }
+
+  /// Retains a rejected interactive line for conventional shell history.
+  fn remember_rejected_input(&self, input: String) -> Result<(), BuiltinShellError> {
+    let mut state = self.lock_state()?;
+    state.history.push(input);
+    state.history_cursor = None;
+    state.navigation_draft.clear();
+    Ok(())
+  }
 }
 
 /// Classifies whether a command is portable or needs its host frontend.
@@ -743,6 +756,19 @@ mod tests {
     assert_eq!(oldest.as_deref(), Some("tab.close"));
     assert_eq!(forward.as_deref(), Some("workspace.toggle_workspace"));
     assert_eq!(draft.as_deref(), Some("structure inspect draft.pdb"));
+    Ok(())
+  }
+
+  #[test]
+  fn rejected_input_should_remain_in_history() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+
+    assert!(
+      shell
+        .submit_line("not-a-command", ShellInvocationSource::Interactive)
+        .is_err()
+    );
+    assert_eq!(shell.previous_history("")?, Some("not-a-command".to_owned()));
     Ok(())
   }
 

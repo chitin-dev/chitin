@@ -3,6 +3,9 @@
 /// Vertical activity-bar composition.
 pub mod activity_bar;
 
+/// Structured command terminal assembled from terminal and input primitives.
+pub mod command_terminal;
+
 /// Independently single-selectable groups composed from select primitives.
 pub mod grouped_select;
 

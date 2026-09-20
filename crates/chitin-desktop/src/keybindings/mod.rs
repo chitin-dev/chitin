@@ -5,7 +5,7 @@ mod dispatch;
 mod tab;
 mod workspace;
 
-pub(crate) use application::ToggleCommandPanel;
+pub(crate) use application::{COMMAND_TERMINAL_KEY_CONTEXT, ToggleCommandPanel, ToggleTerminal, WORKBENCH_KEY_CONTEXT};
 pub(crate) use tab::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT};
 pub(crate) use workspace::{
   ActivateFocusedEntry, FocusFirstEntry, FocusLastEntry, FocusNextEntry, FocusPreviousEntry, PROJECT_TREE_KEY_CONTEXT,

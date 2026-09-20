@@ -46,6 +46,8 @@ pub enum CommandId {
   DatabaseDownloadRcsbStructure,
   /// Show or hide the command panel.
   ApplicationToggleCommandPanel,
+  /// Show or hide the built-in terminal panel.
+  ApplicationToggleTerminal,
   /// Inspect a local structure file.
   StructureInspect,
   /// Validate a local structure file.
@@ -67,6 +69,7 @@ impl CommandId {
       Self::PanelTabClose => "tab.close",
       Self::DatabaseDownloadRcsbStructure => "database.rcsb.download_structure",
       Self::ApplicationToggleCommandPanel => "application.toggle_command_panel",
+      Self::ApplicationToggleTerminal => "application.toggle_terminal",
       Self::StructureInspect => "structure.inspect",
       Self::StructureValidate => "structure.validate",
     }
@@ -85,6 +88,7 @@ impl CommandId {
       Self::PanelTabFocusNext => Some(PanelTabCommand::FocusNext.into()),
       Self::PanelTabClose => Some(PanelTabCommand::Close.into()),
       Self::ApplicationToggleCommandPanel => Some(ApplicationCommand::ToggleCommandPanel.into()),
+      Self::ApplicationToggleTerminal => Some(ApplicationCommand::ToggleTerminal.into()),
       Self::DatabaseDownloadRcsbStructure | Self::StructureInspect | Self::StructureValidate => None,
     }
   }

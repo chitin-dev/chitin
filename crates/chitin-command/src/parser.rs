@@ -374,6 +374,7 @@ fn parse_argumentless_command(stable_id: &str, trailing: &[String]) -> Result<Ch
     "tab.focus_next" => CommandId::PanelTabFocusNext,
     "tab.close" => CommandId::PanelTabClose,
     "application.toggle_command_panel" => CommandId::ApplicationToggleCommandPanel,
+    "application.toggle_terminal" => CommandId::ApplicationToggleTerminal,
     _ => {
       return Err(CommandParseError::UnknownCommand {
         command: stable_id.to_owned(),
