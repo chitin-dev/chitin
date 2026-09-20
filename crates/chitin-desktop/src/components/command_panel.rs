@@ -1,16 +1,16 @@
 //! Desktop command panel rendering and input handling.
 
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
 mod controller;
 mod form;
 
 pub(crate) use controller::CommandPanelController;
 use controller::{CommandPanelEvent, CommandPanelMode};
-use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
+use form::rcsb::{RcsbDownloadState, RcsbFormPanel};
 
-use chitin_command::{CommandId, DatabaseCommand, RcsbDownloadArguments};
-use chitin_databases::providers::rcsb::{PdbId, RcsbBatchDownloadRequest};
+use chitin_command::{CommandExecutionContext, CommandId, DatabaseCommand, RcsbDownloadArguments};
+use chitin_databases::providers::rcsb::PdbId;
 use chitin_ui::{
   composite::{
     quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
@@ -33,7 +33,7 @@ use gpui::{
 use crate::{
   app::ChitinApp,
   components::document_area::state::OpenedProjectDocument,
-  tasks::{TaskOutput, TaskState, rcsb::submit_downloads},
+  tasks::{TaskOutput, TaskState, rcsb::submit_download},
 };
 
 /// Callback invoked when a rendered command row is selected.
@@ -253,36 +253,18 @@ impl ChitinApp {
       form.download.update(cx, |state, cx| state.fail(error, cx));
       return;
     };
-    let RcsbDownloadArguments { ids, format, output } = arguments;
-    let multiple = ids.len() > 1;
-    let mut unique_ids = BTreeSet::new();
-    let requests = ids
-      .into_iter()
-      .filter(|pdb_id| unique_ids.insert(pdb_id.clone()))
-      .map(|pdb_id| RcsbBatchDownloadRequest {
-        destination: output
-          .as_ref()
-          .map(|path| {
-            if path.is_dir() || multiple {
-              path.join(format.filename(&pdb_id))
-            } else {
-              path.clone()
-            }
-          })
-          .unwrap_or_else(|| download_path(&workspace_root, &pdb_id, format)),
-        id: pdb_id,
-        format,
-      })
-      .collect::<Vec<_>>();
-    let total_items = requests.len();
-    let mut task = match submit_downloads(&self.tasks, requests) {
-      Ok(task) => task,
-      Err(error) => {
-        log::error!("failed to submit RCSB download task: {error}");
-        form.download.update(cx, |state, cx| state.fail(error.to_string(), cx));
-        return;
-      }
-    };
+    let execution_context = CommandExecutionContext::new(&workspace_root)
+      .with_workspace_root(&workspace_root)
+      .with_default_download_root(workspace_root.join(".chitin").join("download"));
+    let (mut task, total_items) =
+      match submit_download(&self.tasks, self.command_executor.clone(), arguments, execution_context) {
+        Ok(submission) => submission,
+        Err(error) => {
+          log::error!("failed to submit RCSB download task: {error}");
+          form.download.update(cx, |state, cx| state.fail(error.to_string(), cx));
+          return;
+        }
+      };
     log::info!(
       "RCSB batch download task submitted: id={}, items={total_items}",
       task.id()

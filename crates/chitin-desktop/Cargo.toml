@@ -7,6 +7,7 @@ repository.workspace = true
 
 [dependencies]
 chitin-command = { path = "../chitin-command" }
+chitin-command-runtime = { path = "../chitin-command-runtime" }
 chitin-bio = { path = "../chitin-bio" }
 log = "0.4.33"
 env_logger = "0.10"

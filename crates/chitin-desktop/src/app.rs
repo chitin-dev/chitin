@@ -5,6 +5,8 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
+use chitin_command_runtime::CommandExecutor;
+use chitin_databases::ClientConfig;
 use chitin_ui::{
   composite::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
@@ -55,6 +57,8 @@ pub struct ChitinApp {
   pub(crate) command_panel: CommandPanelController,
   /// Application-wide executor and registry for background work.
   pub(crate) tasks: BackgroundTaskCenter,
+  /// Shared executor for frontend-independent typed commands.
+  pub(crate) command_executor: CommandExecutor,
   /// Structure paths currently being read and parsed off the UI thread.
   pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
   /// Primitive button state for platform window actions.
@@ -135,6 +139,7 @@ impl ChitinApp {
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
       tasks: BackgroundTaskCenter::new(),
+      command_executor: CommandExecutor::new(ClientConfig::default()),
       pending_structure_loads: BTreeSet::new(),
       window_bar_controls: None,
       activity_bar_controls: None,

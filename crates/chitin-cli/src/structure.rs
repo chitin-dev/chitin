@@ -1,174 +1,80 @@
-//! Local PDB and mmCIF inspection workflows.
+//! Terminal rendering for local structure command outcomes.
 
-use std::{
-  fs::File,
-  io::{self, Read},
-  path::Path,
-};
+use std::path::Path;
 
-use chitin_bio::structure::{MmcifParser, PdbParser, Structure, StructureParseResult};
-use chitin_command::{ChitinCommand, CommandOutputFormat, StructureCommand, StructureInputArguments};
+use chitin_bio::structure::{Structure, StructureParseResult};
+use chitin_command::CommandOutputFormat;
+use chitin_command_runtime::{CommandOutcome, StructureInspection, StructureValidation};
 use chitin_databases::providers::rcsb::StructureFormat;
 use console::Style;
 use serde_json::{Value, json};
 
 use crate::error::CliError;
 
-/// Executes a structure inspection or validation command.
-pub(crate) async fn dispatch(command: ChitinCommand) -> Result<(), CliError> {
-  match command {
-    ChitinCommand::Structure(StructureCommand::Inspect(arguments)) => {
-      let (format, bytes) = read_input(&arguments.input)?;
-      let parsed = parse_structure(format, &arguments.input.input, &bytes)?;
-      print_inspection(
-        &arguments.input.input,
-        format,
-        bytes.len(),
-        &parsed,
-        arguments.output,
-        arguments.verbose,
-      )
-    }
-    ChitinCommand::Structure(StructureCommand::Validate(arguments)) => {
-      let (format, bytes) = read_input(&arguments.input)?;
-      let parsed = parse_structure(format, &arguments.input.input, &bytes)?;
-      validate_structure(&arguments.input.input, format, &parsed, arguments.output)
-    }
-    other => Err(CliError::UnsupportedCommand(other.id().as_str())),
+/// Renders a portable command outcome for the CLI frontend.
+pub(crate) fn render_outcome(outcome: CommandOutcome) -> Result<(), CliError> {
+  match outcome {
+    CommandOutcome::DatabaseDownload { .. } => Ok(()),
+    CommandOutcome::StructureInspection(inspection) => print_inspection(&inspection),
+    CommandOutcome::StructureValidation(validation) => print_validation(&validation),
   }
-}
-
-/// Reads a local file or stdin and resolves its structure format.
-fn read_input(input: &StructureInputArguments) -> Result<(StructureFormat, Vec<u8>), CliError> {
-  let path = &input.input;
-  let format = input
-    .format
-    .or_else(|| detect_format(path))
-    .ok_or_else(|| CliError::StructureFormat(path.to_owned()))?;
-  let mut bytes = Vec::new();
-  if path == Path::new("-") {
-    io::stdin()
-      .read_to_end(&mut bytes)
-      .map_err(|source| CliError::StructureRead {
-        path: path.to_owned(),
-        source,
-      })?;
-  } else {
-    File::open(path)
-      .and_then(|mut file| file.read_to_end(&mut bytes))
-      .map_err(|source| CliError::StructureRead {
-        path: path.to_owned(),
-        source,
-      })?;
-  }
-  Ok((format, bytes))
-}
-
-/// Parses bytes with the reader selected by the resolved format.
-fn parse_structure(format: StructureFormat, path: &Path, bytes: &[u8]) -> Result<StructureParseResult, CliError> {
-  let result = match format {
-    StructureFormat::Pdb => PdbParser::new().parse_bytes(bytes).map_err(|source| source.to_string()),
-    StructureFormat::Mmcif => MmcifParser::new()
-      .parse_bytes(bytes)
-      .map_err(|source| source.to_string()),
-  };
-  result.map_err(|message| CliError::StructureParse {
-    path: path.to_owned(),
-    message,
-  })
 }
 
 /// Prints a structure summary in text or JSON form.
-fn print_inspection(
-  path: &Path,
-  format: StructureFormat,
-  byte_count: usize,
-  parsed: &StructureParseResult,
-  output: CommandOutputFormat,
-  verbose: bool,
-) -> Result<(), CliError> {
-  match output {
-    CommandOutputFormat::Text => print_text_summary(path, format, byte_count, parsed, verbose),
-    CommandOutputFormat::Json => print_json_summary(path, format, byte_count, parsed, verbose),
+fn print_inspection(inspection: &StructureInspection) -> Result<(), CliError> {
+  match inspection.output {
+    CommandOutputFormat::Text => print_text_summary(
+      &inspection.path,
+      inspection.format,
+      inspection.byte_count,
+      &inspection.parsed,
+      inspection.verbose,
+    ),
+    CommandOutputFormat::Json => print_json_summary(
+      &inspection.path,
+      inspection.format,
+      inspection.byte_count,
+      &inspection.parsed,
+      inspection.verbose,
+    ),
   }
 }
 
 /// Verifies structure invariants and reports the result.
-fn validate_structure(
-  path: &Path,
-  format: StructureFormat,
-  parsed: &StructureParseResult,
-  output: CommandOutputFormat,
-) -> Result<(), CliError> {
-  let validation = parsed
-    .structure
-    .validate_invariants()
-    .map_err(|error| error.to_string())
-    .and_then(|()| validate_content(&parsed.structure));
-  match output {
+fn print_validation(validation: &StructureValidation) -> Result<(), CliError> {
+  match validation.output {
     CommandOutputFormat::Text => {
-      if let Err(message) = validation {
+      if let Some(message) = validation.error.as_ref() {
         let error = Style::new().red().bold();
         eprintln!("{} {}", error.apply_to("✗ Invalid structure:"), message);
         return Err(CliError::StructureValidation {
-          path: path.to_owned(),
-          message,
+          path: validation.path.clone(),
+          message: message.clone(),
         });
       }
       let success = Style::new().green().bold();
       println!(
         "{} {} ({})",
         success.apply_to("✓ Valid structure:"),
-        path.display(),
-        format.label()
+        validation.path.display(),
+        validation.format.label()
       );
     }
     CommandOutputFormat::Json => {
-      let valid = validation.is_ok();
       let value = json!({
-        "path": path.display().to_string(),
-        "format": format.id(),
-        "valid": valid,
-        "error": validation.err(),
+        "path": validation.path.display().to_string(),
+        "format": validation.format.id(),
+        "valid": validation.is_valid(),
+        "error": validation.error,
       });
       println!("{}", serde_json::to_string_pretty(&value)?);
       if let Some(message) = value.get("error").and_then(Value::as_str) {
         return Err(CliError::StructureValidation {
-          path: path.to_owned(),
+          path: validation.path.clone(),
           message: message.to_owned(),
         });
       }
     }
-  }
-  Ok(())
-}
-
-/// Verifies that the parsed value contains an actual coordinate-bearing
-/// structure rather than only metadata or ignored records.
-///
-/// # Parameters
-///
-/// * `structure` is the parsed, index-validated structure snapshot.
-///
-/// # Returns
-///
-/// `Ok(())` when at least one atom and one finite coordinate are present;
-/// otherwise returns the reason the input cannot be considered a valid
-/// molecular structure.
-fn validate_content(structure: &Structure) -> Result<(), String> {
-  if structure.atoms().is_empty() {
-    return Err("no atom records were found".to_owned());
-  }
-  if structure.models().is_empty() {
-    return Err("no coordinate models were found".to_owned());
-  }
-  if !structure
-    .coordinates()
-    .iter()
-    .flat_map(|coordinates| coordinates.positions.iter())
-    .any(|position| position.iter().all(|coordinate| coordinate.is_finite()))
-  {
-    return Err("no finite atom coordinates were found".to_owned());
   }
   Ok(())
 }
@@ -312,14 +218,4 @@ fn summary_value(
     value[name.to_ascii_lowercase().replace(' ', "_")] = json!(count);
   }
   value
-}
-
-/// Infers a structure format from a supported filename extension.
-fn detect_format(path: &Path) -> Option<StructureFormat> {
-  let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-  match extension.as_str() {
-    "pdb" | "ent" => Some(StructureFormat::Pdb),
-    "cif" | "mmcif" => Some(StructureFormat::Mmcif),
-    _ => None,
-  }
 }

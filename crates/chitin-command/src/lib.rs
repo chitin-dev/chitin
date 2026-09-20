@@ -2,6 +2,7 @@
 
 mod application;
 mod database;
+mod execution;
 mod panel_tab;
 mod parser;
 mod structure;
@@ -9,6 +10,10 @@ mod workspace;
 
 pub use application::ApplicationCommand;
 pub use database::{DatabaseCommand, RcsbDownloadArguments};
+pub use execution::{
+  CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandMessage, CommandMessageLevel,
+  CommandProgress,
+};
 pub use panel_tab::PanelTabCommand;
 pub use parser::{CommandParseError, parse_command_line};
 pub use structure::{

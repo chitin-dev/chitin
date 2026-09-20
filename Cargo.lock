@@ -688,6 +688,7 @@ version = "0.1.0"
 dependencies = [
  "chitin-bio",
  "chitin-command",
+ "chitin-command-runtime",
  "chitin-databases",
  "clap",
  "clap_complete",
@@ -733,6 +734,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin-command-runtime"
+version = "0.1.0"
+dependencies = [
+ "chitin-bio",
+ "chitin-command",
+ "chitin-databases",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "chitin-databases"
 version = "0.1.0"
 dependencies = [
@@ -758,6 +770,7 @@ dependencies = [
  "bytemuck",
  "chitin-bio",
  "chitin-command",
+ "chitin-command-runtime",
  "chitin-databases",
  "chitin-molecule-renderer",
  "chitin-ui",

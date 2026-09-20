@@ -1,85 +1,110 @@
-//! RCSB database adapter for the application task center.
-
-use std::collections::BTreeSet;
-
-use chitin_databases::{
-  Client, ClientConfig,
-  providers::rcsb::{RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, RcsbDownloadError, RcsbError},
-};
+//! RCSB command adapter for the application task center.
 
 use super::{
   BackgroundTaskCenter, TaskCenterError, TaskContext, TaskFailure, TaskHandle, TaskKind, TaskOutput, TaskProgress,
   TaskTarget,
 };
+use chitin_command::{
+  ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionEvent, DatabaseCommand,
+  RcsbDownloadArguments,
+};
+use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome, resolve_rcsb_download_paths};
 
-/// Submits a batch of RCSB downloads, coalescing repeated destination paths.
-pub(crate) fn submit_downloads(
+/// Failure while preparing or submitting a database command task.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum SubmitRcsbCommandError {
+  /// Portable command preparation failed before task submission.
+  #[error(transparent)]
+  Execution(#[from] CommandExecutionError),
+  /// The desktop task center rejected the prepared task.
+  #[error(transparent)]
+  TaskCenter(#[from] TaskCenterError),
+}
+
+/// Submits a typed RCSB download through the shared command executor.
+///
+/// # Parameters
+///
+/// * `center` schedules and tracks the asynchronous desktop task.
+/// * `executor` is the application-wide portable command executor.
+/// * `arguments` contains validated download inputs.
+/// * `execution_context` supplies workspace paths and cancellation defaults.
+///
+/// # Returns
+///
+/// The task subscription and number of unique output artifacts.
+pub(crate) fn submit_download(
   center: &BackgroundTaskCenter,
-  mut requests: Vec<RcsbBatchDownloadRequest>,
-) -> Result<TaskHandle, TaskCenterError> {
-  let mut destinations = BTreeSet::new();
-  requests.retain(|request| destinations.insert(request.destination.clone()));
-  let targets = requests
-    .iter()
-    .map(|request| TaskTarget::File(request.destination.clone()))
-    .collect();
-  center.submit(
+  executor: CommandExecutor,
+  arguments: RcsbDownloadArguments,
+  execution_context: CommandExecutionContext,
+) -> Result<(TaskHandle, usize), SubmitRcsbCommandError> {
+  let paths = resolve_rcsb_download_paths(&arguments, &execution_context)?;
+  let total_items = paths.len();
+  let targets = paths.into_iter().map(TaskTarget::File).collect();
+  let handle = center.submit(
     TaskKind::DatabaseDownload {
       provider: "RCSB".to_string(),
     },
     targets,
-    move |context| run_downloads(context, requests),
-  )
+    move |context| run_download(context, executor, arguments, execution_context),
+  )?;
+  Ok((handle, total_items))
 }
 
-/// Runs the provider batch inside the task center's shared Tokio runtime.
-async fn run_downloads(context: TaskContext, requests: Vec<RcsbBatchDownloadRequest>) -> Result<(), TaskFailure> {
-  context.log(format!("downloading {} RCSB structure artifacts", requests.len()));
-  let client = Client::new(ClientConfig::default())
-    .map_err(|error| TaskFailure::new(RcsbDownloadError::Provider(RcsbError::Transport(error)).to_string()))?;
+/// Runs the portable executor inside the desktop task center.
+///
+/// # Parameters
+///
+/// * `context` reports observable state to the desktop task center.
+/// * `executor` executes the typed command without GPUI dependencies.
+/// * `arguments` contains the validated download request.
+/// * `execution_context` supplies workspace paths and cancellation defaults.
+///
+/// # Returns
+///
+/// `Ok(())` after all artifacts are persisted and reported.
+async fn run_download(
+  context: TaskContext,
+  executor: CommandExecutor,
+  arguments: RcsbDownloadArguments,
+  execution_context: CommandExecutionContext,
+) -> Result<(), TaskFailure> {
   let event_context = context.clone();
-  client
-    .rcsb()
-    .download_structures_to_paths_with_cancellation(
-      &requests,
-      move |event| report_download_event(&event_context, event),
-      context.cancellation_token(),
-    )
+  let events = CommandEventSink::new(move |event| report_command_event(&event_context, event));
+  let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure(arguments));
+  let execution_context = execution_context.with_cancellation(context.cancellation_token());
+  let outcome = executor
+    .execute(command, execution_context, events)
     .await
     .map_err(|error| TaskFailure::new(error.to_string()))?;
+  if !matches!(outcome, CommandOutcome::DatabaseDownload { .. }) {
+    return Err(TaskFailure::new("RCSB task produced an unexpected command outcome"));
+  }
   Ok(())
 }
 
-/// Translates provider-specific progress into task-center events.
-fn report_download_event(context: &TaskContext, event: RcsbBatchDownloadEvent) {
+/// Projects command events into the existing desktop task-center protocol.
+///
+/// # Parameters
+///
+/// * `context` receives translated progress, logs, and outputs.
+/// * `event` is the frontend-independent command event to translate.
+///
+/// # Returns
+///
+/// This function returns after synchronously updating the task snapshot.
+fn report_command_event(context: &TaskContext, event: CommandExecutionEvent) {
   match event {
-    RcsbBatchDownloadEvent::Started { index, total, id } => {
-      context.report_progress(TaskProgress {
-        completed: 0,
-        total: None,
-        stage_index: index,
-        stage_count: total,
-        stage_label: Some(id.to_string()),
-      });
-    }
-    RcsbBatchDownloadEvent::Progress {
-      index,
-      total,
-      id,
-      received,
-      total_bytes,
-    } => {
-      context.report_progress(TaskProgress {
-        completed: received,
-        total: total_bytes,
-        stage_index: index,
-        stage_count: total,
-        stage_label: Some(id.to_string()),
-      });
-    }
-    RcsbBatchDownloadEvent::Completed { id, artifact, .. } => {
-      context.log(format!("persisted RCSB structure {id} to {}", artifact.path.display()));
-      context.output(TaskOutput::PersistedArtifact(artifact));
-    }
+    CommandExecutionEvent::Progress(progress) => context.report_progress(TaskProgress {
+      completed: progress.completed,
+      total: progress.total,
+      stage_index: progress.stage_index,
+      stage_count: progress.stage_count,
+      stage_label: progress.stage_label,
+    }),
+    CommandExecutionEvent::Message(message) => context.log(message.text),
+    CommandExecutionEvent::Artifact(artifact) => context.output(TaskOutput::PersistedArtifact(artifact)),
+    CommandExecutionEvent::Started { .. } | CommandExecutionEvent::Completed { .. } => {}
   }
 }

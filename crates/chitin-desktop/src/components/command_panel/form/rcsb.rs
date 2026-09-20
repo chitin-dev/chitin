@@ -1,8 +1,6 @@
 //! RCSB structure-download form rendered inside the command panel.
 
-use std::path::{Path, PathBuf};
-
-use chitin_databases::providers::rcsb::{PdbId, StructureFormat};
+use chitin_databases::providers::rcsb::StructureFormat;
 
 use chitin_ui::{
   primitive::{
@@ -23,18 +21,6 @@ use gpui::{
 };
 
 use crate::tasks::{TaskSnapshot, TaskState};
-
-/// Builds the final workspace download path for an RCSB structure.
-pub(crate) fn download_path(workspace_root: &Path, pdb_id: &PdbId, format: StructureFormat) -> PathBuf {
-  workspace_root
-    .join(".chitin")
-    .join("download")
-    .join(match format {
-      StructureFormat::Pdb => "pdb",
-      StructureFormat::Mmcif => "mmcif",
-    })
-    .join(format.filename(pdb_id))
-}
 
 /// Persistent primitive state for the RCSB download form.
 #[derive(Clone)]
@@ -398,31 +384,7 @@ impl RcsbFormPanel {
 
 #[cfg(test)]
 mod tests {
-  use std::path::Path;
-
-  use chitin_databases::providers::rcsb::PdbId;
-
-  use super::{RcsbDownloadState, StructureFormat, download_path, download_progress_label};
-
-  #[test]
-  fn pdb_download_path_should_use_pdb_directory_and_extension() -> Result<(), Box<dyn std::error::Error>> {
-    let id = PdbId::new("1yth")?;
-
-    let path = download_path(Path::new("/workspace"), &id, StructureFormat::Pdb);
-
-    assert_eq!(path, Path::new("/workspace/.chitin/download/pdb/1YTH.pdb"));
-    Ok(())
-  }
-
-  #[test]
-  fn mmcif_download_path_should_use_mmcif_directory_and_cif_extension() -> Result<(), Box<dyn std::error::Error>> {
-    let id = PdbId::new("1yth")?;
-
-    let path = download_path(Path::new("/workspace"), &id, StructureFormat::Mmcif);
-
-    assert_eq!(path, Path::new("/workspace/.chitin/download/mmcif/1YTH.cif"));
-    Ok(())
-  }
+  use super::{RcsbDownloadState, download_progress_label};
 
   #[test]
   fn cancelled_download_should_render_cancelled_label() {

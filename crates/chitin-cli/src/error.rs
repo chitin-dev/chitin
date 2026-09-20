@@ -1,6 +1,6 @@
 //! Errors produced while parsing and executing CLI workflows.
 
-use chitin_databases::providers::rcsb::{PdbIdError, PdbIdListError, RcsbDownloadError};
+use chitin_databases::providers::rcsb::PdbIdListError;
 use std::path::PathBuf;
 
 /// Error returned by the Chitin CLI command handlers.
@@ -9,30 +9,18 @@ pub(crate) enum CliError {
   /// A comma-separated identifier list contains an invalid element.
   #[error("{0}")]
   InvalidPdbIdList(#[from] PdbIdListError),
-  /// The supplied PDB identifier failed provider validation.
-  #[error("invalid PDB ID: {0}")]
-  InvalidPdbId(#[from] PdbIdError),
-  /// The RCSB provider or local persistence step failed.
-  #[error("RCSB download failed: {0}")]
-  Rcsb(#[from] RcsbDownloadError),
+  /// A portable typed command could not be executed.
+  #[error(transparent)]
+  CommandExecution(#[from] chitin_command_runtime::CommandExecutionError),
   /// No platform home directory variable was available.
   #[error("could not determine the home directory; set HOME or USERPROFILE")]
   HomeDirectory,
-  /// Multiple downloads were given one explicit file path.
-  #[error("--output must be a directory when downloading multiple PDB IDs: {0}")]
-  MultipleOutputFile(std::path::PathBuf),
-  /// A command was not implemented by this CLI entry point.
-  #[error("unsupported CLI command: {0}")]
-  UnsupportedCommand(&'static str),
-  /// The structure input could not be read.
-  #[error("failed to read structure `{path}`: {source}")]
-  StructureRead { path: PathBuf, source: std::io::Error },
-  /// The structure format could not be determined from the input.
-  #[error("could not determine structure format for `{0}`; use --format pdb or --format mmcif")]
-  StructureFormat(PathBuf),
-  /// The structure parser rejected the input.
-  #[error("failed to parse structure `{path}`: {message}")]
-  StructureParse { path: PathBuf, message: String },
+  /// The process working directory could not be read.
+  #[error("could not determine the current working directory: {0}")]
+  WorkingDirectory(std::io::Error),
+  /// Standard input could not be read for a structure command.
+  #[error("failed to read structure data from standard input: {0}")]
+  StandardInput(std::io::Error),
   /// The parsed structure violated a model invariant.
   #[error("structure validation failed for `{path}`: {message}")]
   StructureValidation { path: PathBuf, message: String },

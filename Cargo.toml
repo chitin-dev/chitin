@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/chitin-command",
+  "crates/chitin-command-runtime",
   "crates/chitin-cli",
   "crates/chitin-bio",
   "crates/chitin-bio-macros",

@@ -1,90 +1,87 @@
-//! RCSB download execution and terminal progress reporting.
+//! Terminal presentation for portable command execution events.
 
 use std::{
   sync::{Arc, Mutex},
   time::Duration,
 };
 
-use chitin_databases::{
-  Client, ClientConfig,
-  providers::rcsb::{RcsbBatchDownloadEvent, RcsbBatchDownloadRequest, RcsbDownloadError, RcsbError},
-};
+use chitin_command::{CommandEventSink, CommandExecutionEvent, CommandMessageLevel, CommandProgress};
 use indicatif::{ProgressBar, ProgressStyle};
 
-use chitin_command::RcsbDownloadArguments;
+/// Mutable terminal progress retained across command event callbacks.
+#[derive(Default)]
+struct DownloadProgressState {
+  /// Active progress bar for the current artifact.
+  bar: Option<ProgressBar>,
+  /// One-based stage currently represented by the progress bar.
+  stage_index: Option<usize>,
+}
 
-use crate::{error::CliError, output::resolve_output_path};
+/// Creates a command-event sink that renders download progress in the terminal.
+pub(crate) fn terminal_event_sink() -> CommandEventSink {
+  let state = Arc::new(Mutex::new(DownloadProgressState::default()));
+  CommandEventSink::new(move |event| {
+    let Ok(mut state) = state.lock() else {
+      return;
+    };
+    render_event(&mut state, event);
+  })
+}
 
-/// Downloads an RCSB artifact and writes it to the resolved output path.
-///
-/// # Parameters
-///
-/// * `arguments` contains validated identifiers, format, and output override.
-///
-/// # Returns
-///
-/// `Ok(())` after the artifact has been written and reported to the terminal.
-pub(crate) async fn download_rcsb(arguments: RcsbDownloadArguments) -> Result<(), CliError> {
-  let RcsbDownloadArguments { ids, format, output } = arguments;
-  let multiple = ids.len() > 1;
-  let client = Client::new(ClientConfig::default())
-    .map_err(|error| CliError::Rcsb(RcsbDownloadError::Provider(RcsbError::Transport(error))))?;
-  let requests = ids
-    .into_iter()
-    .map(|id| {
-      let destination = resolve_output_path(output.clone(), &id, format, multiple)?;
-      Ok(RcsbBatchDownloadRequest {
-        id,
-        format,
-        destination,
-      })
-    })
-    .collect::<Result<Vec<_>, CliError>>()?;
-  let progress: Arc<Mutex<Option<ProgressBar>>> = Arc::new(Mutex::new(None));
-  let callback_progress = progress.clone();
-  client
-    .rcsb()
-    .download_structures_to_paths(&requests, move |event| match event {
-      RcsbBatchDownloadEvent::Started { index, total, id } => {
-        let bar = ProgressBar::new_spinner();
-        bar.enable_steady_tick(Duration::from_millis(100));
-        if let Ok(style) = ProgressStyle::with_template("  {spinner} Downloading {bytes} ({elapsed})") {
-          bar.set_style(style);
-        }
-        eprintln!("  Downloading {index}/{total}: {id}");
-        if let Ok(mut current) = callback_progress.lock() {
-          *current = Some(bar);
-        }
+/// Projects one frontend-neutral event into terminal progress and messages.
+fn render_event(state: &mut DownloadProgressState, event: CommandExecutionEvent) {
+  match event {
+    CommandExecutionEvent::Progress(progress) => render_progress(state, progress),
+    CommandExecutionEvent::Artifact(artifact) => {
+      finish_progress_bar(state);
+      println!("  ✓ Saved to {}", artifact.path.display());
+    }
+    CommandExecutionEvent::Message(message) => match message.level {
+      CommandMessageLevel::Info => println!("  ✓ {}", message.text),
+      CommandMessageLevel::Warning => eprintln!("  ! {}", message.text),
+    },
+    CommandExecutionEvent::Completed { .. } => finish_progress_bar(state),
+    CommandExecutionEvent::Started { .. } => {}
+  }
+}
+
+/// Updates or replaces the progress bar for the active download stage.
+fn render_progress(state: &mut DownloadProgressState, progress: CommandProgress) {
+  if state.stage_index != Some(progress.stage_index) {
+    finish_progress_bar(state);
+    let bar = ProgressBar::new_spinner();
+    bar.enable_steady_tick(Duration::from_millis(100));
+    if let Ok(style) = ProgressStyle::with_template("  {spinner} Downloading {bytes} ({elapsed})") {
+      bar.set_style(style);
+    }
+    let label = progress.stage_label.as_deref().unwrap_or("structure");
+    eprintln!(
+      "  Downloading {}/{}: {label}",
+      progress.stage_index, progress.stage_count
+    );
+    state.stage_index = Some(progress.stage_index);
+    state.bar = Some(bar);
+  }
+
+  let Some(bar) = state.bar.as_ref() else {
+    return;
+  };
+  if let Some(total) = progress.total {
+    if bar.length().is_none() {
+      if let Ok(style) =
+        ProgressStyle::with_template("  Downloading [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+      {
+        bar.set_style(style.progress_chars("##-"));
       }
-      RcsbBatchDownloadEvent::Progress {
-        received, total_bytes, ..
-      } => {
-        if let Ok(current) = callback_progress.lock()
-          && let Some(bar) = current.as_ref()
-        {
-          if let Some(total_bytes) = total_bytes {
-            if bar.length().is_none() {
-              if let Ok(style) =
-                ProgressStyle::with_template("  Downloading [{bar:32.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-              {
-                bar.set_style(style.progress_chars("##-"));
-              }
-              bar.set_length(total_bytes);
-            }
-          }
-          bar.set_position(received);
-        }
-      }
-      RcsbBatchDownloadEvent::Completed { id, path, .. } => {
-        if let Ok(mut current) = callback_progress.lock()
-          && let Some(bar) = current.take()
-        {
-          bar.finish_and_clear();
-        }
-        println!("  ✓ Downloaded {id} ({})", format.label());
-        println!("  ✓ Saved to {}", path.display());
-      }
-    })
-    .await
-    .map_err(CliError::Rcsb)
+      bar.set_length(total);
+    }
+  }
+  bar.set_position(progress.completed);
+}
+
+/// Clears the current progress bar after an artifact or command completes.
+fn finish_progress_bar(state: &mut DownloadProgressState) {
+  if let Some(bar) = state.bar.take() {
+    bar.finish_and_clear();
+  }
 }

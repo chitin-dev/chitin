@@ -4,7 +4,6 @@
 mod cli;
 mod download;
 mod error;
-mod output;
 mod structure;
 
 use std::process::ExitCode;

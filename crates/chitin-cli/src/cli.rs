@@ -1,16 +1,20 @@
 //! Command-line schema and command-bus routing.
 
-use std::path::PathBuf;
+use std::{io::Read, path::PathBuf};
 
 use chitin_command::{
-  ChitinCommand, CommandOutputFormat, DatabaseCommand, RcsbDownloadArguments, StructureCommand,
-  StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
+  ChitinCommand, CommandExecutionContext, CommandOutputFormat, DatabaseCommand, RcsbDownloadArguments,
+  StructureCommand, StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };
-use chitin_databases::providers::rcsb::{PdbId, StructureFormat};
+use chitin_command_runtime::CommandExecutor;
+use chitin_databases::{
+  ClientConfig,
+  providers::rcsb::{PdbId, StructureFormat},
+};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 
-use crate::{download::download_rcsb, error::CliError};
+use crate::{download::terminal_event_sink, error::CliError};
 
 /// Root command parsed by the `chitin` binary.
 #[derive(Debug, Parser)]
@@ -258,9 +262,61 @@ async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> 
 /// Returns [`CliError`] when the command is unsupported or the RCSB download
 /// fails.
 async fn dispatch_command(command: ChitinCommand) -> Result<(), CliError> {
-  match command {
-    ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(arguments)) => download_rcsb(arguments).await,
-    command @ ChitinCommand::Structure(_) => crate::structure::dispatch(command).await,
-    other => Err(CliError::UnsupportedCommand(other.id().as_str())),
+  let context = execution_context(&command)?;
+  let executor = CommandExecutor::new(ClientConfig::default());
+  let outcome = executor.execute(command, context, terminal_event_sink()).await?;
+  crate::structure::render_outcome(outcome)
+}
+
+/// Builds frontend-neutral execution context from the current process state.
+///
+/// # Parameters
+///
+/// * `command` identifies which optional process resources are required.
+///
+/// # Returns
+///
+/// Working-directory, download-root, and standard-input data for the executor.
+fn execution_context(command: &ChitinCommand) -> Result<CommandExecutionContext, CliError> {
+  let working_directory = std::env::current_dir().map_err(CliError::WorkingDirectory)?;
+  let mut context = CommandExecutionContext::new(working_directory);
+  if requires_default_download_root(command) {
+    context = context.with_default_download_root(home_directory()?.join(".chitin").join("download"));
   }
+  if requires_standard_input(command) {
+    let mut bytes = Vec::new();
+    std::io::stdin()
+      .read_to_end(&mut bytes)
+      .map_err(CliError::StandardInput)?;
+    context = context.with_standard_input(bytes);
+  }
+  Ok(context)
+}
+
+/// Returns whether a database command needs the process default download root.
+fn requires_default_download_root(command: &ChitinCommand) -> bool {
+  matches!(
+    command,
+    ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+      output: None,
+      ..
+    }))
+  )
+}
+
+/// Returns whether a structure command reads bytes from standard input.
+fn requires_standard_input(command: &ChitinCommand) -> bool {
+  match command {
+    ChitinCommand::Structure(StructureCommand::Inspect(arguments)) => arguments.input.input.as_os_str() == "-",
+    ChitinCommand::Structure(StructureCommand::Validate(arguments)) => arguments.input.input.as_os_str() == "-",
+    _ => false,
+  }
+}
+
+/// Finds the platform home directory used by default downloads.
+fn home_directory() -> Result<PathBuf, CliError> {
+  std::env::var_os("HOME")
+    .or_else(|| std::env::var_os("USERPROFILE"))
+    .map(PathBuf::from)
+    .ok_or(CliError::HomeDirectory)
 }
