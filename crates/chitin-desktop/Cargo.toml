@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+chitin-builtin-shell = { path = "../chitin-builtin-shell" }
 chitin-command = { path = "../chitin-command" }
 chitin-command-runtime = { path = "../chitin-command-runtime" }
 chitin-bio = { path = "../chitin-bio" }

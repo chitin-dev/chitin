@@ -260,14 +260,24 @@ pub struct BuiltinShell {
 impl BuiltinShell {
   /// Creates a session rooted at the supplied working directory.
   pub fn new(working_directory: impl Into<PathBuf>) -> Self {
-    Self::with_event_sink(working_directory, ShellEventSink::silent())
+    Self::from_context(CommandExecutionContext::new(working_directory))
   }
 
   /// Creates a session that reports lifecycle changes to an event sink.
   pub fn with_event_sink(working_directory: impl Into<PathBuf>, events: ShellEventSink) -> Self {
+    Self::from_context_and_event_sink(CommandExecutionContext::new(working_directory), events)
+  }
+
+  /// Creates a session from frontend-supplied execution defaults.
+  pub fn from_context(context: CommandExecutionContext) -> Self {
+    Self::from_context_and_event_sink(context, ShellEventSink::silent())
+  }
+
+  /// Creates a configured session that reports lifecycle changes to an event sink.
+  pub fn from_context_and_event_sink(context: CommandExecutionContext, events: ShellEventSink) -> Self {
     Self {
       state: Arc::new(Mutex::new(ShellState {
-        context: CommandExecutionContext::new(working_directory),
+        context,
         next_id: 1,
         active: None,
         history: Vec::new(),
@@ -433,6 +443,33 @@ impl BuiltinShell {
     submission: ShellSubmission,
     executor: &CommandExecutor,
   ) -> Result<ShellExecutionResult, BuiltinShellError> {
+    self
+      .execute_portable_with_events(submission, executor, CommandEventSink::silent())
+      .await
+  }
+
+  /// Executes a portable submission while forwarding command events to a host.
+  ///
+  /// # Parameters
+  ///
+  /// * `submission` is the active value returned by [`BuiltinShell::submit`].
+  /// * `executor` runs database and structure commands without frontend state.
+  /// * `host_events` receives the same structured events recorded by the shell.
+  ///
+  /// # Returns
+  ///
+  /// The correlated typed outcome produced by the portable command kernel.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error when routing is invalid or command execution fails. The
+  /// shell records the terminal state before returning an execution failure.
+  pub async fn execute_portable_with_events(
+    &self,
+    submission: ShellSubmission,
+    executor: &CommandExecutor,
+    host_events: CommandEventSink,
+  ) -> Result<ShellExecutionResult, BuiltinShellError> {
     self.validate_active_submission(&submission)?;
     if submission.target != ShellCommandTarget::Portable {
       return Err(BuiltinShellError::FrontendCommand { id: submission.id });
@@ -440,7 +477,10 @@ impl BuiltinShell {
 
     let shell = self.clone();
     let id = submission.id;
-    let events = CommandEventSink::new(move |event| shell.record_command_event(id, event));
+    let events = CommandEventSink::new(move |event| {
+      shell.record_command_event(id, event.clone());
+      host_events.emit(event);
+    });
     match executor.execute(submission.command, submission.context, events).await {
       Ok(outcome) => {
         self.finish(id, ShellExecutionStatus::Succeeded, ShellTranscriptContent::Completed)?;
@@ -471,6 +511,11 @@ impl BuiltinShell {
 
   /// Marks a frontend-routed command as failed with a user-facing message.
   pub fn fail_frontend(&self, id: ShellCommandId, message: impl Into<String>) -> Result<(), BuiltinShellError> {
+    self.fail_submission(id, message)
+  }
+
+  /// Marks an active submission as failed before or during host routing.
+  pub fn fail_submission(&self, id: ShellCommandId, message: impl Into<String>) -> Result<(), BuiltinShellError> {
     self.finish(
       id,
       ShellExecutionStatus::Failed,

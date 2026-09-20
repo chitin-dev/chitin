@@ -9,6 +9,7 @@ use std::{
   sync::{Arc, Mutex},
 };
 
+use chitin_command::{CommandExecutionEvent, CommandId};
 use chitin_databases::{CancellationToken, PersistedArtifact};
 use futures_util::FutureExt;
 use tokio::{
@@ -33,6 +34,8 @@ impl std::fmt::Display for TaskId {
 pub enum TaskKind {
   /// An artifact download from an external database provider.
   DatabaseDownload { provider: String },
+  /// A portable command submitted through the built-in shell bridge.
+  BuiltinShell { command_id: CommandId },
 }
 
 /// Lifecycle state shared by all background tasks.
@@ -191,6 +194,7 @@ pub enum TaskCenterError {
 }
 
 /// Subscription returned to the UI for one submitted task.
+#[derive(Clone)]
 pub struct TaskHandle {
   /// Stable identity of the submitted task.
   id: TaskId,
@@ -283,6 +287,22 @@ impl TaskContext {
   /// Returns whether cancellation has been requested.
   pub fn is_cancelled(&self) -> bool {
     self.cancellation.is_cancelled()
+  }
+
+  /// Projects one frontend-neutral command event into task-center state.
+  pub fn report_command_event(&self, event: CommandExecutionEvent) {
+    match event {
+      CommandExecutionEvent::Progress(progress) => self.report_progress(TaskProgress {
+        completed: progress.completed,
+        total: progress.total,
+        stage_index: progress.stage_index,
+        stage_count: progress.stage_count,
+        stage_label: progress.stage_label,
+      }),
+      CommandExecutionEvent::Message(message) => self.log(message.text),
+      CommandExecutionEvent::Artifact(artifact) => self.output(TaskOutput::PersistedArtifact(artifact)),
+      CommandExecutionEvent::Started { .. } | CommandExecutionEvent::Completed { .. } => {}
+    }
   }
 }
 
@@ -417,6 +437,32 @@ impl BackgroundTaskCenter {
     Task: FnOnce(TaskContext) -> TaskFuture + Send + 'static,
     TaskFuture: Future<Output = Result<(), TaskFailure>> + Send + 'static,
   {
+    self.submit_with_cancellation(kind, targets, CancellationToken::new(), task)
+  }
+
+  /// Submits work using a cancellation token owned by an upstream protocol.
+  ///
+  /// # Parameters
+  ///
+  /// * `kind` identifies the task for global task-center presentation.
+  /// * `targets` reserve resources against overlapping active work.
+  /// * `cancellation` is shared with the upstream shell submission.
+  /// * `task` creates the asynchronous adapter from its reporting context.
+  ///
+  /// # Returns
+  ///
+  /// A handle observing the task registered with the shared cancellation token.
+  pub(crate) fn submit_with_cancellation<Task, TaskFuture>(
+    &self,
+    kind: TaskKind,
+    targets: Vec<TaskTarget>,
+    cancellation: CancellationToken,
+    task: Task,
+  ) -> Result<TaskHandle, TaskCenterError>
+  where
+    Task: FnOnce(TaskContext) -> TaskFuture + Send + 'static,
+    TaskFuture: Future<Output = Result<(), TaskFailure>> + Send + 'static,
+  {
     let runtime = match &self.executor {
       TaskExecutor::Available(runtime) => runtime,
       TaskExecutor::Unavailable(message) => {
@@ -426,7 +472,6 @@ impl BackgroundTaskCenter {
       }
     };
     let id = TaskId(self.next_id.fetch_add(1, Ordering::Relaxed));
-    let cancellation = CancellationToken::new();
     let snapshot = TaskSnapshot {
       id,
       kind,

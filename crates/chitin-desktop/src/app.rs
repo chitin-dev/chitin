@@ -22,6 +22,7 @@ use gpui::{
 };
 
 use crate::{
+  builtin_shell::{DesktopShellHost, desktop_shell_context},
   components::{
     activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
@@ -59,6 +60,8 @@ pub struct ChitinApp {
   pub(crate) tasks: BackgroundTaskCenter,
   /// Shared executor for frontend-independent typed commands.
   pub(crate) command_executor: CommandExecutor,
+  /// Shared command bridge for terminal, agent, and system invocations.
+  pub(crate) builtin_shell: DesktopShellHost,
   /// Structure paths currently being read and parsed off the UI thread.
   pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
   /// Primitive button state for platform window actions.
@@ -128,6 +131,7 @@ impl ChitinApp {
     let project_sidebar_state =
       ProjectSidebarState::with_workspace_root(workspace.as_ref().map(|workspace| workspace.tree.root.path.as_path()));
 
+    let shell_workspace_root = workspace.as_ref().map(|workspace| workspace.root.clone());
     Self {
       workspace,
       project_sidebar_state,
@@ -140,6 +144,7 @@ impl ChitinApp {
       command_panel: CommandPanelController::new(),
       tasks: BackgroundTaskCenter::new(),
       command_executor: CommandExecutor::new(ClientConfig::default()),
+      builtin_shell: DesktopShellHost::new(desktop_shell_context(shell_workspace_root)),
       pending_structure_loads: BTreeSet::new(),
       window_bar_controls: None,
       activity_bar_controls: None,

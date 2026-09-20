@@ -1,12 +1,8 @@
 //! RCSB command adapter for the application task center.
 
-use super::{
-  BackgroundTaskCenter, TaskCenterError, TaskContext, TaskFailure, TaskHandle, TaskKind, TaskOutput, TaskProgress,
-  TaskTarget,
-};
+use super::{BackgroundTaskCenter, TaskCenterError, TaskContext, TaskFailure, TaskHandle, TaskKind, TaskTarget};
 use chitin_command::{
-  ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionEvent, DatabaseCommand,
-  RcsbDownloadArguments,
+  ChitinCommand, CommandEventSink, CommandExecutionContext, DatabaseCommand, RcsbDownloadArguments,
 };
 use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome, resolve_rcsb_download_paths};
 
@@ -71,7 +67,7 @@ async fn run_download(
   execution_context: CommandExecutionContext,
 ) -> Result<(), TaskFailure> {
   let event_context = context.clone();
-  let events = CommandEventSink::new(move |event| report_command_event(&event_context, event));
+  let events = CommandEventSink::new(move |event| event_context.report_command_event(event));
   let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure(arguments));
   let execution_context = execution_context.with_cancellation(context.cancellation_token());
   let outcome = executor
@@ -82,29 +78,4 @@ async fn run_download(
     return Err(TaskFailure::new("RCSB task produced an unexpected command outcome"));
   }
   Ok(())
-}
-
-/// Projects command events into the existing desktop task-center protocol.
-///
-/// # Parameters
-///
-/// * `context` receives translated progress, logs, and outputs.
-/// * `event` is the frontend-independent command event to translate.
-///
-/// # Returns
-///
-/// This function returns after synchronously updating the task snapshot.
-fn report_command_event(context: &TaskContext, event: CommandExecutionEvent) {
-  match event {
-    CommandExecutionEvent::Progress(progress) => context.report_progress(TaskProgress {
-      completed: progress.completed,
-      total: progress.total,
-      stage_index: progress.stage_index,
-      stage_count: progress.stage_count,
-      stage_label: progress.stage_label,
-    }),
-    CommandExecutionEvent::Message(message) => context.log(message.text),
-    CommandExecutionEvent::Artifact(artifact) => context.output(TaskOutput::PersistedArtifact(artifact)),
-    CommandExecutionEvent::Started { .. } | CommandExecutionEvent::Completed { .. } => {}
-  }
 }

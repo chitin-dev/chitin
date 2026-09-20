@@ -780,6 +780,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "chitin-bio",
+ "chitin-builtin-shell",
  "chitin-command",
  "chitin-command-runtime",
  "chitin-databases",

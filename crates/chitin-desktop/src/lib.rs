@@ -5,6 +5,7 @@
 //! validate the real desktop shell without `#[path]`-based source inclusion.
 
 pub mod app;
+pub mod builtin_shell;
 pub(crate) mod components;
 pub mod keybindings;
 pub mod tasks;
