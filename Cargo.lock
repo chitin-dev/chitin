@@ -726,6 +726,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin-builtin-shell"
+version = "0.1.0"
+dependencies = [
+ "chitin-command",
+ "chitin-command-runtime",
+ "chitin-databases",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "chitin-command"
 version = "0.1.0"
 dependencies = [
