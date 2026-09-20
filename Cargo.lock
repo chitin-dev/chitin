@@ -729,6 +729,7 @@ name = "chitin-command"
 version = "0.1.0"
 dependencies = [
  "chitin-databases",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
