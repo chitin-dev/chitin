@@ -466,7 +466,7 @@ impl Render for ChitinApp {
       self.cancel_document_panel_tab_drag();
     }
 
-    let theme = builtins::light();
+    let theme = builtins::dark();
     let window_bar_controls = self.window_bar_controls(window, cx);
     let activity_bar_controls = self.activity_bar_controls(window, cx);
     let document_options_controls = self.document_options_controls(window, cx);
