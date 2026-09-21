@@ -30,17 +30,3 @@ impl DatabaseCommand {
     }
   }
 }
-
-/// Returns the database command registrations.
-pub fn command_registrations() -> Vec<crate::CommandRegistration> {
-  vec![crate::CommandRegistration {
-    descriptor: crate::CommandDescriptor {
-      id: CommandId::DatabaseDownloadRcsbStructure,
-      title: "Download RCSB Structure",
-      requires_arguments: true,
-    },
-    category: crate::CommandCategory::Database,
-    keywords: &["pdb", "rcsb", "mmcif", "structure"],
-    shortcut: None,
-  }]
-}

@@ -221,10 +221,10 @@ impl CommandPanelController {
   ///
   /// `true` when the command is registered and the panel entered form mode.
   pub(crate) fn open_form(&mut self, id: CommandId) -> bool {
-    let Some(descriptor) = self.registry.descriptor_for(id) else {
+    let Some(spec) = self.registry.spec_for(id) else {
       return false;
     };
-    if !descriptor.requires_arguments {
+    if !spec.requires_arguments {
       return false;
     }
 
@@ -322,7 +322,7 @@ impl CommandPanelController {
       .registry
       .search(self.quickpick.query())
       .get(self.quickpick.selected_index())
-      .map(|result| CommandPanelEvent::Invoke(result.descriptor.id))
+      .map(|result| CommandPanelEvent::Invoke(result.spec.id))
       .unwrap_or(CommandPanelEvent::StateChanged)
   }
 }

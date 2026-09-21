@@ -89,14 +89,14 @@ pub(crate) fn render_command_panel(
   }
 
   let results = controller.registry().search(controller.query());
-  let selected_ids = results.iter().map(|result| result.descriptor.id).collect::<Vec<_>>();
+  let selected_ids = results.iter().map(|result| result.spec.id).collect::<Vec<_>>();
   let overlay = QuickPickOverlay {
     query: controller.query().into(),
     placeholder: "Type a command".into(),
     search_input: Some(QuickPickSearchInput::new(search_input)),
     items: results
       .iter()
-      .map(|result| QuickPickItem::new(result.descriptor.title, result.shortcut))
+      .map(|result| QuickPickItem::new(result.spec.title, result.spec.shortcut))
       .collect(),
     selected_index: controller.selected_index(),
     scroll_handle: Some(controller.result_scroll_handle()),
@@ -370,11 +370,11 @@ impl ChitinApp {
   /// * `window` receives focus restoration when an immediate command closes the panel.
   /// * `cx` is used to dispatch or notify state changes.
   pub(crate) fn invoke_command_from_panel(&mut self, id: CommandId, window: &mut Window, cx: &mut Context<Self>) {
-    let Some(descriptor) = self.command_panel.registry().descriptor_for(id) else {
+    let Some(spec) = self.command_panel.registry().spec_for(id) else {
       return;
     };
 
-    if descriptor.requires_arguments {
+    if spec.requires_arguments {
       if self.command_panel.open_form(id) {
         cx.notify();
       }
