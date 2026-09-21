@@ -6,8 +6,8 @@ use std::{
 };
 
 use chitin_command::{
-  ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandId, CommandMessage,
-  CommandProgress, parse_command_line,
+  ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionDomain, CommandExecutionEvent, CommandId,
+  CommandMessage, CommandProgress, parse_command_line,
 };
 use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome};
 use chitin_databases::{CancellationToken, PersistedArtifact};
@@ -25,14 +25,8 @@ impl ShellCommandId {
   }
 }
 
-/// Executor boundary selected for a parsed command.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ShellCommandTarget {
-  /// The command can execute without a graphical frontend.
-  Portable,
-  /// The command requires application or workspace state from the host.
-  Frontend,
-}
+/// Execution boundary selected for a parsed shell command.
+pub type ShellCommandTarget = CommandExecutionDomain;
 
 /// Origin of a command invocation crossing the built-in shell bridge.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -375,7 +369,7 @@ impl BuiltinShell {
     source: ShellInvocationSource,
   ) -> Result<ShellSubmission, BuiltinShellError> {
     let input = input.into();
-    let target = command_target(&command);
+    let target = command.execution_domain();
     let cancellation = CancellationToken::new();
     let (submission, record) = {
       let mut state = self.lock_state()?;
@@ -485,7 +479,10 @@ impl BuiltinShell {
       shell.record_command_event(id, event.clone());
       host_events.emit(event);
     });
-    match executor.execute(submission.command, submission.context, events).await {
+    let ChitinCommand::Portable(command) = submission.command else {
+      return Err(BuiltinShellError::FrontendCommand { id: submission.id });
+    };
+    match executor.execute(command, submission.context, events).await {
       Ok(outcome) => {
         self.finish(id, ShellExecutionStatus::Succeeded, ShellTranscriptContent::Completed)?;
         Ok(ShellExecutionResult { id, outcome })
@@ -680,14 +677,6 @@ impl BuiltinShell {
     state.history_cursor = None;
     state.navigation_draft.clear();
     Ok(())
-  }
-}
-
-/// Classifies whether a command is portable or needs its host frontend.
-fn command_target(command: &ChitinCommand) -> ShellCommandTarget {
-  match command {
-    ChitinCommand::Database(_) | ChitinCommand::Structure(_) => ShellCommandTarget::Portable,
-    ChitinCommand::Workspace(_) | ChitinCommand::Application(_) => ShellCommandTarget::Frontend,
   }
 }
 

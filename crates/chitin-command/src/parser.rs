@@ -124,12 +124,14 @@ pub enum CommandParseError {
 /// # Examples
 ///
 /// ```
-/// use chitin_command::{ChitinCommand, DatabaseCommand, parse_command_line};
+/// use chitin_command::{ChitinCommand, DatabaseCommand, PortableCommand, parse_command_line};
 ///
 /// let command = parse_command_line("db rcsb download --id 4hhb --format pdb")?;
 /// assert!(matches!(
 ///   command,
-///   ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(_))
+///   ChitinCommand::Portable(PortableCommand::Database(
+///     DatabaseCommand::DownloadRcsbStructure(_)
+///   ))
 /// ));
 /// # Ok::<(), chitin_command::CommandParseError>(())
 /// ```
@@ -387,7 +389,8 @@ fn parse_argumentless_command(stable_id: &str, trailing: &[String]) -> Result<Ch
       value: value.clone(),
     });
   }
-  id.command_without_arguments()
+  id.frontend_command_without_arguments()
+    .map(ChitinCommand::from)
     .ok_or_else(|| CommandParseError::UnknownCommand {
       command: stable_id.to_owned(),
     })
@@ -491,6 +494,8 @@ fn parse_output_format(value: &str) -> Result<CommandOutputFormat, CommandParseE
 mod tests {
   use std::path::Path;
 
+  use crate::PortableCommand;
+
   use super::*;
 
   #[test]
@@ -499,11 +504,12 @@ mod tests {
 
     assert!(matches!(
       command,
-      ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+      ChitinCommand::Portable(PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(
+        RcsbDownloadArguments {
         ids,
         format: StructureFormat::Mmcif,
         output: Some(output),
-      })) if ids.iter().map(PdbId::as_str).collect::<Vec<_>>() == ["4HHB", "1YTH"]
+      }))) if ids.iter().map(PdbId::as_str).collect::<Vec<_>>() == ["4HHB", "1YTH"]
         && output == Path::new("saved structures")
     ));
     Ok(())
@@ -515,11 +521,11 @@ mod tests {
 
     assert!(matches!(
       command,
-      ChitinCommand::Structure(StructureCommand::Inspect(StructureInspectArguments {
+      ChitinCommand::Portable(PortableCommand::Structure(StructureCommand::Inspect(StructureInspectArguments {
         input: StructureInputArguments { input, format: Some(StructureFormat::Mmcif) },
         output: CommandOutputFormat::Json,
         verbose: true,
-      })) if input == Path::new("models/one.cif")
+      }))) if input == Path::new("models/one.cif")
     ));
     Ok(())
   }

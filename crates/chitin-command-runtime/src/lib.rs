@@ -15,7 +15,7 @@ use std::{
 
 use chitin_bio::structure::StructureParseResult;
 use chitin_command::{
-  ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandId, CommandOutputFormat,
+  CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandId, CommandOutputFormat, PortableCommand,
 };
 use chitin_databases::{Client, ClientConfig, TransportError, providers::rcsb::StructureFormat};
 
@@ -75,9 +75,6 @@ impl StructureValidation {
 /// Failure while preparing or executing a portable command.
 #[derive(Debug, thiserror::Error)]
 pub enum CommandExecutionError {
-  /// The selected command belongs to a frontend-specific domain.
-  #[error("command '{0}' requires a frontend-specific executor")]
-  UnsupportedCommand(CommandId),
   /// No default download directory was supplied for a command without output.
   #[error("command '{command_id}' requires a default download directory")]
   MissingDownloadRoot {
@@ -147,22 +144,21 @@ impl CommandExecutor {
   ///
   /// # Errors
   ///
-  /// Returns [`CommandExecutionError`] when the command is frontend-specific,
-  /// required context is missing, parsing fails, or provider execution fails.
+  /// Returns [`CommandExecutionError`] when required context is missing,
+  /// parsing fails, or provider execution fails.
   pub async fn execute(
     &self,
-    command: ChitinCommand,
+    command: PortableCommand,
     context: CommandExecutionContext,
     events: CommandEventSink,
   ) -> Result<CommandOutcome, CommandExecutionError> {
     let command_id = command.id();
     events.emit(CommandExecutionEvent::Started { command_id });
     let outcome = match command {
-      ChitinCommand::Database(command) => database::execute(self.database_client()?, command, &context, &events).await,
-      ChitinCommand::Structure(command) => structure::execute(command, &context),
-      ChitinCommand::Workspace(_) | ChitinCommand::Application(_) => {
-        Err(CommandExecutionError::UnsupportedCommand(command_id))
+      PortableCommand::Database(command) => {
+        database::execute(self.database_client()?, command, &context, &events).await
       }
+      PortableCommand::Structure(command) => structure::execute(command, &context),
     }?;
     events.emit(CommandExecutionEvent::Completed { command_id });
     Ok(outcome)

@@ -9,7 +9,7 @@ pub(crate) use controller::CommandPanelController;
 use controller::{CommandPanelEvent, CommandPanelMode};
 use form::rcsb::{RcsbDownloadState, RcsbFormPanel};
 
-use chitin_command::{CommandExecutionContext, CommandId, DatabaseCommand, RcsbDownloadArguments};
+use chitin_command::{CommandExecutionContext, CommandId, RcsbDownloadArguments};
 use chitin_databases::providers::rcsb::PdbId;
 use chitin_ui::{
   composite::{
@@ -215,13 +215,12 @@ impl ChitinApp {
       }
     };
     let format = form.selected_format(cx);
-    self.dispatch_command_with_window(
-      DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+    self.execute_rcsb_download(
+      RcsbDownloadArguments {
         ids,
         format,
         output: None,
-      })
-      .into(),
+      },
       window,
       cx,
     );
@@ -370,7 +369,7 @@ impl ChitinApp {
       return;
     }
 
-    let Some(command) = id.command_without_arguments() else {
+    let Some(command) = id.frontend_command_without_arguments() else {
       return;
     };
     self.command_panel.close(window, cx);

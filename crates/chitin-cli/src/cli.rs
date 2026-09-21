@@ -3,7 +3,7 @@
 use std::{io::Read, path::PathBuf};
 
 use chitin_command::{
-  ChitinCommand, CommandExecutionContext, CommandOutputFormat, DatabaseCommand, RcsbDownloadArguments,
+  CommandExecutionContext, CommandOutputFormat, DatabaseCommand, PortableCommand, RcsbDownloadArguments,
   StructureCommand, StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };
 use chitin_command_runtime::CommandExecutor;
@@ -261,7 +261,7 @@ async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> 
 ///
 /// Returns [`CliError`] when the command is unsupported or the RCSB download
 /// fails.
-async fn dispatch_command(command: ChitinCommand) -> Result<(), CliError> {
+async fn dispatch_command(command: PortableCommand) -> Result<(), CliError> {
   let context = execution_context(&command)?;
   let executor = CommandExecutor::new(ClientConfig::default());
   let outcome = executor.execute(command, context, terminal_event_sink()).await?;
@@ -277,7 +277,7 @@ async fn dispatch_command(command: ChitinCommand) -> Result<(), CliError> {
 /// # Returns
 ///
 /// Working-directory, download-root, and standard-input data for the executor.
-fn execution_context(command: &ChitinCommand) -> Result<CommandExecutionContext, CliError> {
+fn execution_context(command: &PortableCommand) -> Result<CommandExecutionContext, CliError> {
   let working_directory = std::env::current_dir().map_err(CliError::WorkingDirectory)?;
   let mut context = CommandExecutionContext::new(working_directory);
   if requires_default_download_root(command) {
@@ -294,10 +294,10 @@ fn execution_context(command: &ChitinCommand) -> Result<CommandExecutionContext,
 }
 
 /// Returns whether a database command needs the process default download root.
-fn requires_default_download_root(command: &ChitinCommand) -> bool {
+fn requires_default_download_root(command: &PortableCommand) -> bool {
   matches!(
     command,
-    ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+    PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
       output: None,
       ..
     }))
@@ -305,10 +305,10 @@ fn requires_default_download_root(command: &ChitinCommand) -> bool {
 }
 
 /// Returns whether a structure command reads bytes from standard input.
-fn requires_standard_input(command: &ChitinCommand) -> bool {
+fn requires_standard_input(command: &PortableCommand) -> bool {
   match command {
-    ChitinCommand::Structure(StructureCommand::Inspect(arguments)) => arguments.input.input.as_os_str() == "-",
-    ChitinCommand::Structure(StructureCommand::Validate(arguments)) => arguments.input.input.as_os_str() == "-",
+    PortableCommand::Structure(StructureCommand::Inspect(arguments)) => arguments.input.input.as_os_str() == "-",
+    PortableCommand::Structure(StructureCommand::Validate(arguments)) => arguments.input.input.as_os_str() == "-",
     _ => false,
   }
 }

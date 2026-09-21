@@ -2,7 +2,7 @@
 
 use super::{BackgroundTaskCenter, TaskCenterError, TaskContext, TaskFailure, TaskHandle, TaskKind, TaskTarget};
 use chitin_command::{
-  ChitinCommand, CommandEventSink, CommandExecutionContext, DatabaseCommand, RcsbDownloadArguments,
+  CommandEventSink, CommandExecutionContext, DatabaseCommand, PortableCommand, RcsbDownloadArguments,
 };
 use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome, resolve_rcsb_download_paths};
 
@@ -68,7 +68,7 @@ async fn run_download(
 ) -> Result<(), TaskFailure> {
   let event_context = context.clone();
   let events = CommandEventSink::new(move |event| event_context.report_command_event(event));
-  let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure(arguments));
+  let command = PortableCommand::from(DatabaseCommand::DownloadRcsbStructure(arguments));
   let execution_context = execution_context.with_cancellation(context.cancellation_token());
   let outcome = executor
     .execute(command, execution_context, events)

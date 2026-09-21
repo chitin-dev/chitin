@@ -21,6 +21,15 @@ pub use structure::{
 };
 pub use workspace::WorkspaceCommand;
 
+/// Execution boundary required by a typed command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CommandExecutionDomain {
+  /// The command can execute without application or window state.
+  Portable,
+  /// The command requires state owned by its graphical frontend.
+  Frontend,
+}
+
 /// Stable identity of a command independent of its invocation arguments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CommandId {
@@ -75,8 +84,8 @@ impl CommandId {
     }
   }
 
-  /// Builds an executable command when this identity needs no arguments.
-  pub fn command_without_arguments(self) -> Option<ChitinCommand> {
+  /// Builds a frontend command when this identity needs no arguments.
+  pub fn frontend_command_without_arguments(self) -> Option<FrontendCommand> {
     match self {
       Self::WorkspaceFocusPrevious => Some(WorkspaceCommand::FocusPrevious.into()),
       Self::WorkspaceFocusNext => Some(WorkspaceCommand::FocusNext.into()),
@@ -101,58 +110,140 @@ impl std::fmt::Display for CommandId {
   }
 }
 
+/// Commands executable without application or window state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PortableCommand {
+  /// Database-provider commands.
+  Database(DatabaseCommand),
+  /// Structure parsing and inspection commands.
+  Structure(StructureCommand),
+}
+
+impl PortableCommand {
+  /// Returns the stable identity for this command.
+  pub fn id(&self) -> CommandId {
+    match self {
+      Self::Database(command) => command.id(),
+      Self::Structure(command) => command.id(),
+    }
+  }
+}
+
+/// Commands that require state owned by a graphical frontend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FrontendCommand {
+  /// Workspace and document-panel commands.
+  Workspace(WorkspaceCommand),
+  /// Application-shell commands.
+  Application(ApplicationCommand),
+}
+
+impl FrontendCommand {
+  /// Returns the stable identity for this command.
+  pub fn id(&self) -> CommandId {
+    match self {
+      Self::Workspace(command) => command.id(),
+      Self::Application(command) => command.id(),
+    }
+  }
+}
+
 /// Top-level command hierarchy shared by desktop, terminal, and CLI inputs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChitinCommand {
-  /// Workspace and document-panel commands.
-  Workspace(WorkspaceCommand),
-  /// Database-provider commands.
-  Database(DatabaseCommand),
-  /// Application-shell commands.
-  Application(ApplicationCommand),
-  /// Structure parsing and inspection commands.
-  Structure(StructureCommand),
+  /// A command executable by the frontend-independent runtime.
+  Portable(PortableCommand),
+  /// A command requiring state owned by its host frontend.
+  Frontend(FrontendCommand),
 }
 
 impl ChitinCommand {
   /// Returns the stable identity for this command.
   pub fn id(&self) -> CommandId {
     match self {
-      Self::Workspace(command) => command.id(),
-      Self::Database(command) => command.id(),
-      Self::Application(command) => command.id(),
-      Self::Structure(command) => command.id(),
+      Self::Portable(command) => command.id(),
+      Self::Frontend(command) => command.id(),
+    }
+  }
+
+  /// Returns the execution boundary required by this command.
+  pub const fn execution_domain(&self) -> CommandExecutionDomain {
+    match self {
+      Self::Portable(_) => CommandExecutionDomain::Portable,
+      Self::Frontend(_) => CommandExecutionDomain::Frontend,
     }
   }
 }
 
-impl From<WorkspaceCommand> for ChitinCommand {
+impl From<WorkspaceCommand> for FrontendCommand {
   fn from(command: WorkspaceCommand) -> Self {
     Self::Workspace(command)
   }
 }
 
-impl From<DatabaseCommand> for ChitinCommand {
+impl From<DatabaseCommand> for PortableCommand {
   fn from(command: DatabaseCommand) -> Self {
     Self::Database(command)
   }
 }
 
-impl From<ApplicationCommand> for ChitinCommand {
+impl From<ApplicationCommand> for FrontendCommand {
   fn from(command: ApplicationCommand) -> Self {
     Self::Application(command)
   }
 }
 
-impl From<StructureCommand> for ChitinCommand {
+impl From<StructureCommand> for PortableCommand {
   fn from(command: StructureCommand) -> Self {
     Self::Structure(command)
   }
 }
 
-impl From<PanelTabCommand> for ChitinCommand {
+impl From<PanelTabCommand> for FrontendCommand {
   fn from(command: PanelTabCommand) -> Self {
     Self::Workspace(WorkspaceCommand::PanelTab(command))
+  }
+}
+
+impl From<PortableCommand> for ChitinCommand {
+  fn from(command: PortableCommand) -> Self {
+    Self::Portable(command)
+  }
+}
+
+impl From<FrontendCommand> for ChitinCommand {
+  fn from(command: FrontendCommand) -> Self {
+    Self::Frontend(command)
+  }
+}
+
+impl From<WorkspaceCommand> for ChitinCommand {
+  fn from(command: WorkspaceCommand) -> Self {
+    FrontendCommand::from(command).into()
+  }
+}
+
+impl From<DatabaseCommand> for ChitinCommand {
+  fn from(command: DatabaseCommand) -> Self {
+    PortableCommand::from(command).into()
+  }
+}
+
+impl From<ApplicationCommand> for ChitinCommand {
+  fn from(command: ApplicationCommand) -> Self {
+    FrontendCommand::from(command).into()
+  }
+}
+
+impl From<StructureCommand> for ChitinCommand {
+  fn from(command: StructureCommand) -> Self {
+    PortableCommand::from(command).into()
+  }
+}
+
+impl From<PanelTabCommand> for ChitinCommand {
+  fn from(command: PanelTabCommand) -> Self {
+    FrontendCommand::from(command).into()
   }
 }
 
@@ -353,9 +444,28 @@ mod tests {
   }
 
   #[test]
+  fn database_commands_should_use_the_portable_execution_domain() -> Result<(), Box<dyn std::error::Error>> {
+    let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+      ids: vec![PdbId::new("4hhb")?],
+      format: StructureFormat::Pdb,
+      output: None,
+    }));
+
+    assert_eq!(command.execution_domain(), CommandExecutionDomain::Portable);
+    Ok(())
+  }
+
+  #[test]
+  fn workspace_commands_should_use_the_frontend_execution_domain() {
+    let command = ChitinCommand::from(WorkspaceCommand::ToggleWorkspace);
+
+    assert_eq!(command.execution_domain(), CommandExecutionDomain::Frontend);
+  }
+
+  #[test]
   fn parameterized_command_id_should_not_create_an_incomplete_command() {
     assert_eq!(
-      CommandId::DatabaseDownloadRcsbStructure.command_without_arguments(),
+      CommandId::DatabaseDownloadRcsbStructure.frontend_command_without_arguments(),
       None
     );
   }
@@ -371,11 +481,12 @@ mod tests {
 
     assert!(matches!(
       command,
-      ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+      ChitinCommand::Portable(PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(
+        RcsbDownloadArguments {
         ids,
         format: StructureFormat::Mmcif,
         output: Some(output),
-      })) if ids == vec![id] && output == Path::new("structures")
+      }))) if ids == vec![id] && output == Path::new("structures")
     ));
     Ok(())
   }

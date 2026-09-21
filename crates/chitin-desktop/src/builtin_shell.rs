@@ -6,7 +6,7 @@ use chitin_builtin_shell::{
   BuiltinShell, BuiltinShellError, ShellCommandId, ShellCommandTarget, ShellExecutionResult, ShellInvocationSource,
   ShellSubmission,
 };
-use chitin_command::{ChitinCommand, CommandEventSink, CommandExecutionContext, DatabaseCommand};
+use chitin_command::{ChitinCommand, CommandEventSink, CommandExecutionContext, DatabaseCommand, PortableCommand};
 use chitin_command_runtime::{CommandExecutionError, CommandExecutor, resolve_rcsb_download_paths};
 use gpui::{AppContext, AsyncApp, Context, WeakEntity, Window};
 use tokio::sync::oneshot;
@@ -214,7 +214,7 @@ pub enum DesktopShellHostError {
 /// Resolves resources protected while a portable command is active.
 fn submission_targets(submission: &ShellSubmission) -> Result<Vec<TaskTarget>, CommandExecutionError> {
   match submission.command() {
-    ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure(arguments)) => {
+    ChitinCommand::Portable(PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(arguments))) => {
       resolve_rcsb_download_paths(arguments, submission.context())
         .map(|paths| paths.into_iter().map(TaskTarget::File).collect())
     }
@@ -299,7 +299,13 @@ impl ChitinApp {
     match submission.target() {
       ShellCommandTarget::Frontend => {
         let command_id = submission.id();
-        self.dispatch_command_with_window(submission.command().clone(), window, cx);
+        let ChitinCommand::Frontend(command) = submission.command() else {
+          return Err(DesktopShellHostError::WrongTarget {
+            id: command_id,
+            target: submission.target(),
+          });
+        };
+        self.dispatch_command_with_window(command.clone(), window, cx);
         self.builtin_shell.complete_frontend(command_id)?;
         Ok(DesktopShellDispatch::Frontend { command_id })
       }
