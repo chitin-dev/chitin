@@ -1,19 +1,30 @@
-//! Built-in shell parsing around the shared portable command fragments.
+//! Built-in shell grammar composed around shared portable command fragments.
 
 use std::ffi::OsString;
 
-use chitin_command::{ChitinCommand, CommandId};
-use clap::{ColorChoice, Parser, error::ErrorKind};
+use chitin_command::{CommandId, FrontendCommand, PortableCommand};
+use clap::{ColorChoice, CommandFactory, Parser, Subcommand, error::ErrorKind};
 
 use crate::{PortableCommandArgs, PortableCommandLineError};
 
 /// Result of parsing one built-in shell line.
 #[derive(Debug)]
 pub enum BuiltinCommandLine {
-  /// A typed command ready for execution routing.
-  Command(ChitinCommand),
+  /// A typed command executable without desktop state.
+  Portable(PortableCommand),
+  /// A typed command requiring desktop application state.
+  Frontend(FrontendCommand),
+  /// A command implemented by the shell session itself.
+  ShellBuiltin(ShellBuiltin),
   /// Help or version text that should be displayed without execution.
   Display(String),
+}
+
+/// Commands whose semantics belong to the built-in shell session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellBuiltin {
+  /// Clear visible scrollback without changing command history.
+  Clear,
 }
 
 /// Failure while tokenizing or parsing built-in shell text.
@@ -36,51 +47,24 @@ pub enum CommandLineParseError {
     /// Byte offset of the escape character.
     position: usize,
   },
-  /// Clap rejected the portable command grammar.
+  /// Clap rejected the composed built-in shell grammar.
   #[error("{0}")]
   Grammar(String),
+  /// A frontend grammar branch has no argument-free command to invoke.
+  ///
+  /// This is unreachable while every frontend branch stays argument-free; it
+  /// exists so the conversion reports a typed failure instead of panicking.
+  #[error("command '{command}' has no argument-free frontend form")]
+  MissingFrontendCommand {
+    /// Stable identity of the frontend command without an invocation form.
+    command: CommandId,
+  },
   /// A shared command-line value failed domain validation.
   #[error(transparent)]
   Portable(#[from] PortableCommandLineError),
-  /// A stable frontend command identifier was not registered.
-  #[error("unknown command '{0}'")]
-  UnknownCommand(String),
-  /// A frontend command without arguments received trailing values.
-  #[error("unexpected argument '{value}' for '{command}'")]
-  UnexpectedArgument {
-    /// Stable command identifier receiving the extra value.
-    command: &'static str,
-    /// Unexpected argument value.
-    value: String,
-  },
 }
 
-/// Parses one built-in shell line using shared portable command grammar.
-///
-/// # Parameters
-///
-/// * `input` is one complete line without a trailing newline.
-///
-/// # Returns
-///
-/// A typed command or display-only help text.
-///
-/// # Errors
-///
-/// Returns [`CommandLineParseError`] when tokenization, Clap validation, or
-/// domain conversion fails.
-pub fn parse_builtin_command_line(input: &str) -> Result<BuiltinCommandLine, CommandLineParseError> {
-  let tokens = tokenize(input)?;
-  let Some(command) = tokens.first().map(String::as_str) else {
-    return Err(CommandLineParseError::Empty);
-  };
-
-  if matches!(command, "db" | "databases" | "structure" | "help") || command.starts_with('-') {
-    return parse_portable(tokens);
-  }
-  parse_frontend_identifier(command, &tokens[1..]).map(BuiltinCommandLine::Command)
-}
-
+/// Complete grammar available inside Chitin's built-in shell.
 #[derive(Debug, Parser)]
 #[command(
   name = "chitin",
@@ -88,21 +72,195 @@ pub fn parse_builtin_command_line(input: &str) -> Result<BuiltinCommandLine, Com
   color = ColorChoice::Never,
   arg_required_else_help = true
 )]
-struct BuiltinPortableRoot {
+pub struct BuiltinShellGrammar {
   #[command(subcommand)]
-  command: PortableCommandArgs,
+  command: BuiltinShellCommandArgs,
 }
 
-/// Parses tokenized portable syntax through Clap without terminating the host.
-fn parse_portable(tokens: Vec<String>) -> Result<BuiltinCommandLine, CommandLineParseError> {
+/// Top-level commands composed specifically for the built-in shell.
+#[derive(Debug, Subcommand)]
+enum BuiltinShellCommandArgs {
+  /// Execute a command shared with non-GUI frontends.
+  #[command(flatten)]
+  Portable(PortableCommandArgs),
+  /// Clear visible terminal scrollback.
+  Clear,
+  /// Focus the previous project entry.
+  #[command(name = "workspace.focus_previous_entry")]
+  WorkspaceFocusPrevious,
+  /// Focus the next project entry.
+  #[command(name = "workspace.focus_next_entry")]
+  WorkspaceFocusNext,
+  /// Activate the focused project entry.
+  #[command(name = "workspace.activate_focused_entry")]
+  WorkspaceActivateFocused,
+  /// Focus the first project entry.
+  #[command(name = "workspace.focus_first_entry")]
+  WorkspaceFocusFirst,
+  /// Focus the last project entry.
+  #[command(name = "workspace.focus_last_entry")]
+  WorkspaceFocusLast,
+  /// Show or hide the workspace sidebar.
+  #[command(name = "workspace.toggle_workspace")]
+  WorkspaceToggle,
+  /// Focus the previous document tab.
+  #[command(name = "tab.focus_previous")]
+  PanelTabFocusPrevious,
+  /// Focus the next document tab.
+  #[command(name = "tab.focus_next")]
+  PanelTabFocusNext,
+  /// Close the active document tab.
+  #[command(name = "tab.close")]
+  PanelTabClose,
+  /// Show or hide the command panel.
+  #[command(name = "application.toggle_command_panel")]
+  ApplicationToggleCommandPanel,
+  /// Show or hide the built-in terminal panel.
+  #[command(name = "application.toggle_terminal")]
+  ApplicationToggleTerminal,
+}
+
+impl BuiltinShellCommandArgs {
+  /// Converts the selected grammar branch into its execution-domain result.
+  fn into_line(self) -> Result<BuiltinCommandLine, CommandLineParseError> {
+    let line = match self {
+      Self::Portable(arguments) => BuiltinCommandLine::Portable(arguments.into_command()?),
+      Self::Clear => BuiltinCommandLine::ShellBuiltin(ShellBuiltin::Clear),
+      // Frontend branches name only their stable identity. The mapping from
+      // identity to command stays in `CommandId`, so a grammar branch cannot
+      // drift away from the command the rest of the application dispatches.
+      Self::WorkspaceFocusPrevious => {
+        BuiltinCommandLine::Frontend(frontend_command(CommandId::WorkspaceFocusPrevious)?)
+      }
+      Self::WorkspaceFocusNext => BuiltinCommandLine::Frontend(frontend_command(CommandId::WorkspaceFocusNext)?),
+      Self::WorkspaceActivateFocused => {
+        BuiltinCommandLine::Frontend(frontend_command(CommandId::WorkspaceActivateFocused)?)
+      }
+      Self::WorkspaceFocusFirst => BuiltinCommandLine::Frontend(frontend_command(CommandId::WorkspaceFocusFirst)?),
+      Self::WorkspaceFocusLast => BuiltinCommandLine::Frontend(frontend_command(CommandId::WorkspaceFocusLast)?),
+      Self::WorkspaceToggle => BuiltinCommandLine::Frontend(frontend_command(CommandId::WorkspaceToggle)?),
+      Self::PanelTabFocusPrevious => BuiltinCommandLine::Frontend(frontend_command(CommandId::PanelTabFocusPrevious)?),
+      Self::PanelTabFocusNext => BuiltinCommandLine::Frontend(frontend_command(CommandId::PanelTabFocusNext)?),
+      Self::PanelTabClose => BuiltinCommandLine::Frontend(frontend_command(CommandId::PanelTabClose)?),
+      Self::ApplicationToggleCommandPanel => {
+        BuiltinCommandLine::Frontend(frontend_command(CommandId::ApplicationToggleCommandPanel)?)
+      }
+      Self::ApplicationToggleTerminal => {
+        BuiltinCommandLine::Frontend(frontend_command(CommandId::ApplicationToggleTerminal)?)
+      }
+    };
+    Ok(line)
+  }
+}
+
+/// Resolves a stable identity into the argument-free frontend command to run.
+///
+/// # Parameters
+///
+/// * `id` is the stable identity named by a built-in shell grammar branch.
+///
+/// # Returns
+///
+/// The frontend command registered for that identity.
+///
+/// # Errors
+///
+/// Returns [`CommandLineParseError::MissingFrontendCommand`] when the identity
+/// carries required arguments and therefore cannot be invoked from a grammar
+/// branch that accepts none.
+fn frontend_command(id: CommandId) -> Result<FrontendCommand, CommandLineParseError> {
+  id.frontend_command_without_arguments()
+    .ok_or(CommandLineParseError::MissingFrontendCommand { command: id })
+}
+
+/// Parses one built-in shell line using the composed shell grammar.
+///
+/// # Parameters
+///
+/// * `input` is one complete line without a trailing newline.
+///
+/// # Returns
+///
+/// A portable command, frontend command, shell builtin, or display-only help.
+///
+/// # Errors
+///
+/// Returns [`CommandLineParseError`] when tokenization, Clap validation, or
+/// domain conversion fails.
+pub fn parse_builtin_command_line(input: &str) -> Result<BuiltinCommandLine, CommandLineParseError> {
+  let tokens = tokenize(input)?;
+  if tokens.is_empty() {
+    return Err(CommandLineParseError::Empty);
+  }
+  parse_grammar(tokens)
+}
+
+/// Generates full-line completion candidates from the built-in shell grammar.
+///
+/// # Parameters
+///
+/// * `input` is the current editable command line up to the caret.
+///
+/// # Returns
+///
+/// Complete replacement lines whose current command or option starts with the
+/// unfinished token. Invalid or quoted prefixes return no candidates.
+pub fn complete_builtin_shell_line(input: &str) -> Vec<String> {
+  let (head, prefix) = completion_prefix(input);
+  let Ok(tokens) = tokenize(head) else {
+    return Vec::new();
+  };
+  let mut root = BuiltinShellGrammar::command();
+  root.build();
+  let mut command = &root;
+  for token in &tokens {
+    if token.starts_with('-') {
+      continue;
+    }
+    if let Some(subcommand) = command.get_subcommands().find(|subcommand| {
+      subcommand.get_name() == token || subcommand.get_all_aliases().any(|alias| alias == token.as_str())
+    }) {
+      command = subcommand;
+    }
+  }
+
+  let mut candidates = command
+    .get_subcommands()
+    .map(|subcommand| subcommand.get_name().to_owned())
+    .chain(
+      command
+        .get_arguments()
+        .filter_map(|argument| argument.get_long().map(|long| format!("--{long}"))),
+    )
+    .chain(
+      command
+        .get_arguments()
+        .filter_map(|argument| argument.get_short().map(|short| format!("-{short}"))),
+    )
+    .filter(|candidate| candidate.starts_with(prefix))
+    .map(|candidate| format!("{head}{candidate}"))
+    .collect::<Vec<_>>();
+  candidates.sort();
+  candidates.dedup();
+  candidates
+}
+
+/// Separates completed input from the token currently being completed.
+fn completion_prefix(input: &str) -> (&str, &str) {
+  input
+    .char_indices()
+    .rfind(|(_, character)| character.is_whitespace())
+    .map_or(("", input), |(index, character)| {
+      let next = index + character.len_utf8();
+      (&input[..next], &input[next..])
+    })
+}
+
+/// Parses tokenized syntax through Clap without terminating the host process.
+fn parse_grammar(tokens: Vec<String>) -> Result<BuiltinCommandLine, CommandLineParseError> {
   let arguments = std::iter::once(OsString::from("chitin")).chain(tokens.into_iter().map(OsString::from));
-  match BuiltinPortableRoot::try_parse_from(arguments) {
-    Ok(parsed) => parsed
-      .command
-      .into_command()
-      .map(ChitinCommand::from)
-      .map(BuiltinCommandLine::Command)
-      .map_err(CommandLineParseError::from),
+  match BuiltinShellGrammar::try_parse_from(arguments) {
+    Ok(parsed) => parsed.command.into_line(),
     Err(error)
       if matches!(
         error.kind(),
@@ -113,33 +271,6 @@ fn parse_portable(tokens: Vec<String>) -> Result<BuiltinCommandLine, CommandLine
     }
     Err(error) => Err(CommandLineParseError::Grammar(normalize_clap_error(error.to_string()))),
   }
-}
-
-/// Resolves a stable identifier for a frontend command without arguments.
-fn parse_frontend_identifier(command: &str, trailing: &[String]) -> Result<ChitinCommand, CommandLineParseError> {
-  let id = match command {
-    "workspace.focus_previous_entry" => CommandId::WorkspaceFocusPrevious,
-    "workspace.focus_next_entry" => CommandId::WorkspaceFocusNext,
-    "workspace.activate_focused_entry" => CommandId::WorkspaceActivateFocused,
-    "workspace.focus_first_entry" => CommandId::WorkspaceFocusFirst,
-    "workspace.focus_last_entry" => CommandId::WorkspaceFocusLast,
-    "workspace.toggle_workspace" => CommandId::WorkspaceToggle,
-    "tab.focus_previous" => CommandId::PanelTabFocusPrevious,
-    "tab.focus_next" => CommandId::PanelTabFocusNext,
-    "tab.close" => CommandId::PanelTabClose,
-    "application.toggle_command_panel" => CommandId::ApplicationToggleCommandPanel,
-    "application.toggle_terminal" => CommandId::ApplicationToggleTerminal,
-    _ => return Err(CommandLineParseError::UnknownCommand(command.to_owned())),
-  };
-  if let Some(value) = trailing.first() {
-    return Err(CommandLineParseError::UnexpectedArgument {
-      command: id.as_str(),
-      value: value.clone(),
-    });
-  }
-  id.frontend_command_without_arguments()
-    .map(ChitinCommand::from)
-    .ok_or_else(|| CommandLineParseError::UnknownCommand(command.to_owned()))
 }
 
 /// Splits command text while preserving quoted whitespace and escapes.
@@ -203,7 +334,7 @@ fn normalize_clap_error(message: String) -> String {
 mod tests {
   use std::path::Path;
 
-  use chitin_command::{DatabaseCommand, PortableCommand, RcsbDownloadArguments};
+  use chitin_command::{CommandId, DatabaseCommand, RcsbDownloadArguments};
   use chitin_databases::providers::rcsb::StructureFormat;
 
   use super::*;
@@ -214,12 +345,12 @@ mod tests {
 
     assert!(matches!(
       parsed,
-      BuiltinCommandLine::Command(ChitinCommand::Portable(PortableCommand::Database(
-        DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+      BuiltinCommandLine::Portable(PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(
+        RcsbDownloadArguments {
           format: StructureFormat::Pdb,
           output: Some(output),
           ..
-        })
+        }
       ))) if output == Path::new("saved structure")
     ));
     Ok(())
@@ -237,7 +368,114 @@ mod tests {
   fn stable_frontend_identifier_should_still_parse() -> Result<(), CommandLineParseError> {
     let parsed = parse_builtin_command_line("tab.close")?;
 
-    assert!(matches!(parsed, BuiltinCommandLine::Command(command) if command.id() == CommandId::PanelTabClose));
+    assert!(matches!(parsed, BuiltinCommandLine::Frontend(command) if command.id() == CommandId::PanelTabClose));
     Ok(())
+  }
+
+  #[test]
+  fn clear_should_parse_as_a_shell_builtin() -> Result<(), CommandLineParseError> {
+    let parsed = parse_builtin_command_line("clear")?;
+
+    assert!(matches!(parsed, BuiltinCommandLine::ShellBuiltin(ShellBuiltin::Clear)));
+    Ok(())
+  }
+
+  #[test]
+  fn root_help_should_include_all_execution_domains() -> Result<(), CommandLineParseError> {
+    let parsed = parse_builtin_command_line("help")?;
+
+    assert!(matches!(parsed, BuiltinCommandLine::Display(help)
+      if help.contains("db") && help.contains("tab.close") && help.contains("clear")));
+    Ok(())
+  }
+
+  #[test]
+  fn completion_should_follow_the_composed_shell_grammar() {
+    assert_eq!(complete_builtin_shell_line("db r"), vec!["db rcsb"]);
+    assert!(complete_builtin_shell_line("tab.").contains(&"tab.close".to_owned()));
+    assert!(complete_builtin_shell_line("cl").contains(&"clear".to_owned()));
+  }
+
+  #[test]
+  fn completion_should_list_every_option_of_a_nested_subcommand() {
+    // Clap contributes its own `--help` flag, so it is listed alongside the
+    // options declared by the shared portable fragment.
+    assert_eq!(
+      complete_builtin_shell_line("db rcsb download --"),
+      vec![
+        "db rcsb download --format",
+        "db rcsb download --help",
+        "db rcsb download --id",
+        "db rcsb download --output",
+      ]
+    );
+  }
+
+  #[test]
+  fn subcommand_help_should_render_from_the_builtin_grammar() -> Result<(), CommandLineParseError> {
+    let parsed = parse_builtin_command_line("help structure")?;
+
+    assert!(matches!(parsed, BuiltinCommandLine::Display(help)
+      if help.contains("inspect") && help.contains("validate")));
+    Ok(())
+  }
+
+  #[test]
+  fn nested_subcommand_help_should_render_from_the_builtin_grammar() -> Result<(), CommandLineParseError> {
+    let parsed = parse_builtin_command_line("help db rcsb download")?;
+
+    assert!(matches!(parsed, BuiltinCommandLine::Display(help)
+      if help.contains("--id") && help.contains("--format") && help.contains("--output")));
+    Ok(())
+  }
+
+  #[test]
+  fn frontend_grammar_names_should_round_trip_through_command_ids() -> Result<(), CommandLineParseError> {
+    let names = grammar_subcommand_names();
+    let mut frontend_names = 0_usize;
+    for name in &names {
+      // Only frontend branches carry a stable identity to compare against;
+      // portable and built-in names are covered by their own tests.
+      if let Ok(BuiltinCommandLine::Frontend(command)) = parse_builtin_command_line(name) {
+        assert_eq!(command.id().as_str(), name);
+        frontend_names += 1;
+      }
+    }
+    // Guards against the loop going vacuous if every branch stopped parsing.
+    assert_eq!(frontend_names, frontend_command_id_count());
+    Ok(())
+  }
+
+  #[test]
+  fn builtin_grammar_should_cover_every_frontend_command_id() {
+    let names = grammar_subcommand_names();
+
+    for id in CommandId::ALL {
+      if id.frontend_command_without_arguments().is_some() {
+        assert!(
+          names.iter().any(|name| name == id.as_str()),
+          "built-in grammar is missing a branch for {}",
+          id.as_str()
+        );
+      }
+    }
+  }
+
+  /// Returns every top-level built-in grammar subcommand name, aliases excluded.
+  fn grammar_subcommand_names() -> Vec<String> {
+    let mut root = BuiltinShellGrammar::command();
+    root.build();
+    root
+      .get_subcommands()
+      .map(|subcommand| subcommand.get_name().to_owned())
+      .collect()
+  }
+
+  /// Counts the stable identities that have an argument-free frontend command.
+  fn frontend_command_id_count() -> usize {
+    CommandId::ALL
+      .iter()
+      .filter(|id| id.frontend_command_without_arguments().is_some())
+      .count()
   }
 }

@@ -62,6 +62,27 @@ pub enum CommandId {
 }
 
 impl CommandId {
+  /// Every stable command identity, in declaration order.
+  ///
+  /// Frontends that mirror the command set, such as the built-in shell grammar,
+  /// iterate this list to prove their own coverage instead of restating it.
+  pub const ALL: &[Self] = &[
+    Self::WorkspaceFocusPrevious,
+    Self::WorkspaceFocusNext,
+    Self::WorkspaceActivateFocused,
+    Self::WorkspaceFocusFirst,
+    Self::WorkspaceFocusLast,
+    Self::WorkspaceToggle,
+    Self::PanelTabFocusPrevious,
+    Self::PanelTabFocusNext,
+    Self::PanelTabClose,
+    Self::DatabaseDownloadRcsbStructure,
+    Self::ApplicationToggleCommandPanel,
+    Self::ApplicationToggleTerminal,
+    Self::StructureInspect,
+    Self::StructureValidate,
+  ];
+
   /// Returns the stable dotted identifier.
   pub const fn as_str(self) -> &'static str {
     match self {
@@ -439,6 +460,32 @@ mod tests {
       ChitinCommand::from(WorkspaceCommand::FocusNext).id(),
       CommandId::WorkspaceFocusNext
     );
+  }
+
+  #[test]
+  fn command_id_all_should_cover_every_variant() {
+    // The or-pattern lists every variant on purpose. Adding a `CommandId`
+    // without extending `ALL` leaves this match non-exhaustive, so the test
+    // stops compiling rather than silently skipping the new identity.
+    for id in CommandId::ALL {
+      match id {
+        CommandId::WorkspaceFocusPrevious
+        | CommandId::WorkspaceFocusNext
+        | CommandId::WorkspaceActivateFocused
+        | CommandId::WorkspaceFocusFirst
+        | CommandId::WorkspaceFocusLast
+        | CommandId::WorkspaceToggle
+        | CommandId::PanelTabFocusPrevious
+        | CommandId::PanelTabFocusNext
+        | CommandId::PanelTabClose
+        | CommandId::DatabaseDownloadRcsbStructure
+        | CommandId::ApplicationToggleCommandPanel
+        | CommandId::ApplicationToggleTerminal
+        | CommandId::StructureInspect
+        | CommandId::StructureValidate => {}
+      }
+    }
+    assert_eq!(CommandId::ALL.len(), 14);
   }
 
   #[test]

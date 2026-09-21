@@ -120,11 +120,7 @@ impl CommandTerminalState {
   ///
   /// A terminal-local identity used to attach subsequent output and results.
   pub fn begin_submission(&mut self, input: String, cx: &mut Context<Self>) -> CommandTerminalId {
-    let id = CommandTerminalId(self.next_id);
-    self.next_id = self.next_id.saturating_add(1);
-    if self.blocks.len() == MAX_COMMAND_BLOCKS {
-      self.blocks.pop_front();
-    }
+    let id = self.reserve_block();
     self.blocks.push_back(CommandTerminalBlock {
       id,
       prompt: self.prompt.clone(),
@@ -140,6 +136,33 @@ impl CommandTerminalState {
     });
     self.reveal_tail(cx);
     id
+  }
+
+  /// Appends a finished block for output that no command produced.
+  ///
+  /// The live prompt keeps its text and stays editable, so completion
+  /// candidates can be listed above the line still being edited.
+  ///
+  /// # Parameters
+  ///
+  /// * `input` is the unfinished line the output was produced for.
+  /// * `lines` are the output rows appended below the echoed line.
+  /// * `cx` reveals the new tail and schedules viewport repainting.
+  ///
+  /// # Returns
+  ///
+  /// This function returns `()` and never claims the foreground slot.
+  pub fn push_notice(&mut self, input: String, lines: Vec<TerminalLine>, cx: &mut Context<Self>) {
+    let id = self.reserve_block();
+    self.blocks.push_back(CommandTerminalBlock {
+      id,
+      prompt: self.prompt.clone(),
+      input,
+      output: Vec::new(),
+      result: lines,
+      status: CommandTerminalStatus::Succeeded,
+    });
+    self.reveal_tail(cx);
   }
 
   /// Replaces transient output for one command without growing scrollback.
@@ -216,9 +239,30 @@ impl CommandTerminalState {
     );
   }
 
+  /// Clears submitted blocks and restores the editable live prompt.
+  pub fn clear(&mut self, cx: &mut Context<Self>) {
+    self.blocks.clear();
+    self.active = None;
+    self.input.update(cx, |input, cx| {
+      input.clear(cx);
+      input.set_disabled(false, cx);
+    });
+    self.reveal_tail(cx);
+  }
+
   /// Replaces the prompt used by subsequent commands.
   pub fn set_prompt(&mut self, prompt: TerminalLine) {
     self.prompt = prompt;
+  }
+
+  /// Reserves the next block identity, evicting the oldest block at capacity.
+  fn reserve_block(&mut self) -> CommandTerminalId {
+    let id = CommandTerminalId(self.next_id);
+    self.next_id = self.next_id.saturating_add(1);
+    if self.blocks.len() == MAX_COMMAND_BLOCKS {
+      self.blocks.pop_front();
+    }
+    id
   }
 
   /// Requests that the newest command and live prompt remain visible.

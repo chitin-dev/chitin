@@ -10,4 +10,7 @@ mod portable;
 mod shell;
 
 pub use portable::{PortableCommandArgs, PortableCommandLineError};
-pub use shell::{BuiltinCommandLine, CommandLineParseError, parse_builtin_command_line};
+pub use shell::{
+  BuiltinCommandLine, BuiltinShellGrammar, CommandLineParseError, ShellBuiltin, complete_builtin_shell_line,
+  parse_builtin_command_line,
+};

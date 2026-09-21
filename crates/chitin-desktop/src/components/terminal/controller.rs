@@ -1,11 +1,12 @@
 //! Keyboard and command-execution control for the desktop terminal.
 
-use chitin_builtin_shell::ShellInvocationSource;
-use chitin_ui::composite::command_terminal::CommandTerminalStatus;
+use chitin_builtin_shell::{BuiltinShell, ShellBuiltinEffect, ShellInvocationSource};
+use chitin_ui::{composite::command_terminal::CommandTerminalStatus, primitive::terminal::TerminalLine};
 use gpui::{AppContext, AsyncApp, Context, KeyDownEvent, WeakEntity, Window};
 
 use super::{
   TERMINAL_DOCK_ITEM_ID,
+  completion::{CompletionAction, completion_action},
   presenter::{shell_output_lines, shell_terminal_status, terminal_outcome},
 };
 use crate::{app::ChitinApp, builtin_shell::DesktopShellDispatch};
@@ -43,6 +44,12 @@ impl ChitinApp {
             cx,
           );
         });
+      }
+      Ok(DesktopShellDispatch::ShellBuiltin {
+        effect: ShellBuiltinEffect::ClearScrollback,
+      }) => {
+        self.terminal_panel.clear_bindings();
+        controls.terminal.update(cx, |terminal, cx| terminal.clear(cx));
       }
       Ok(DesktopShellDispatch::Frontend { command_id }) => {
         self.terminal_panel.bind(command_id, terminal_id);
@@ -146,6 +153,31 @@ impl ChitinApp {
     }
 
     if !input.read(cx).focus_handle().is_focused(window) {
+      return;
+    }
+
+    if key == "tab" {
+      let modifiers = &event.keystroke.modifiers;
+      if modifiers.control || modifiers.alt || modifiers.platform {
+        return;
+      }
+      let line = input.read(cx).text().to_owned();
+      match completion_action(BuiltinShell::complete(&line)) {
+        CompletionAction::Insert(completed) => {
+          input.update(cx, |input, cx| {
+            input.set_text(completed, cx);
+          });
+        }
+        CompletionAction::List(candidates) => {
+          let lines = candidates.into_iter().map(TerminalLine::plain).collect::<Vec<_>>();
+          controls
+            .terminal
+            .update(cx, |terminal, cx| terminal.push_notice(line, lines, cx));
+        }
+        CompletionAction::None => {}
+      }
+      cx.stop_propagation();
+      cx.notify();
       return;
     }
 

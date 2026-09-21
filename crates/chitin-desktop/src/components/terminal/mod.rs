@@ -1,5 +1,6 @@
 //! Desktop adapter for the reusable structured command terminal.
 
+mod completion;
 mod controller;
 mod presenter;
 mod render;
@@ -54,6 +55,11 @@ impl TerminalPanelState {
   /// Associates one shell execution with its visible command block.
   pub(super) fn bind(&mut self, shell_id: ShellCommandId, terminal_id: CommandTerminalId) {
     self.bindings.push(TerminalShellBinding { shell_id, terminal_id });
+  }
+
+  /// Removes view bindings for command blocks cleared from scrollback.
+  pub(super) fn clear_bindings(&mut self) {
+    self.bindings.clear();
   }
 }
 

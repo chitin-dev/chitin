@@ -3,8 +3,8 @@
 use std::path::PathBuf;
 
 use chitin_builtin_shell::{
-  BuiltinShell, BuiltinShellError, ShellCommandId, ShellCommandTarget, ShellExecutionResult, ShellInvocationSource,
-  ShellLineSubmission, ShellSubmission,
+  BuiltinShell, BuiltinShellError, ShellBuiltinEffect, ShellCommandId, ShellCommandTarget, ShellExecutionResult,
+  ShellInvocationSource, ShellLineSubmission, ShellSubmission,
 };
 use chitin_command::{ChitinCommand, CommandEventSink, CommandExecutionContext};
 use gpui::{AppContext, AsyncApp, Context, WeakEntity, Window};
@@ -174,6 +174,8 @@ impl DesktopShellTask {
 pub enum DesktopShellDispatch {
   /// Clap produced help text without scheduling a command.
   Display { output: String },
+  /// The shell session synchronously produced a presentation effect.
+  ShellBuiltin { effect: ShellBuiltinEffect },
   /// The command mutated desktop state synchronously.
   Frontend { command_id: ShellCommandId },
   /// The command is running through the shared background executor.
@@ -236,6 +238,7 @@ impl ChitinApp {
   ) -> Result<DesktopShellDispatch, DesktopShellHostError> {
     match self.builtin_shell.submit_line(input, source)? {
       ShellLineSubmission::Command(submission) => self.route_builtin_shell_submission(submission, window, cx),
+      ShellLineSubmission::ShellBuiltin(effect) => Ok(DesktopShellDispatch::ShellBuiltin { effect }),
       ShellLineSubmission::Display(output) => Ok(DesktopShellDispatch::Display { output }),
     }
   }

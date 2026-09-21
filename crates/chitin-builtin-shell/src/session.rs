@@ -9,7 +9,7 @@ use chitin_command::{
   ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionDomain, CommandExecutionEvent, CommandId,
   CommandMessage, CommandProgress,
 };
-use chitin_command_line::{BuiltinCommandLine, parse_builtin_command_line};
+use chitin_command_line::{BuiltinCommandLine, ShellBuiltin, parse_builtin_command_line};
 use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome};
 use chitin_databases::{CancellationToken, PersistedArtifact};
 
@@ -156,8 +156,17 @@ pub struct ShellSubmission {
 pub enum ShellLineSubmission {
   /// A typed command was reserved for execution.
   Command(ShellSubmission),
+  /// The shell session applied a built-in command synchronously.
+  ShellBuiltin(ShellBuiltinEffect),
   /// Help text should be displayed without invoking an executor.
   Display(String),
+}
+
+/// Presentation effect produced by a command owned by the shell session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellBuiltinEffect {
+  /// Remove visible command blocks while preserving navigable history.
+  ClearScrollback,
 }
 
 impl ShellLineSubmission {
@@ -166,6 +175,7 @@ impl ShellLineSubmission {
     match self {
       Self::Command(submission) => Ok(submission),
       Self::Display(output) => Err(BuiltinShellError::DisplayOnly { output }),
+      Self::ShellBuiltin(effect) => Err(BuiltinShellError::BuiltinOnly { effect }),
     }
   }
 }
@@ -217,6 +227,12 @@ pub enum BuiltinShellError {
   DisplayOnly {
     /// Help text produced by the command-line grammar.
     output: String,
+  },
+  /// A caller requiring execution received a synchronous shell builtin.
+  #[error("shell line produced a built-in effect instead of an executable command")]
+  BuiltinOnly {
+    /// Effect already applied to the shell session.
+    effect: ShellBuiltinEffect,
   },
   /// Another foreground command is still active.
   #[error("shell command {} is still active", active_id.get())]
@@ -371,12 +387,49 @@ impl BuiltinShell {
       }
     };
     match parsed {
-      BuiltinCommandLine::Command(command) => self
-        .submit_typed(input, command, source)
+      BuiltinCommandLine::Portable(command) => self
+        .submit_typed(input, command.into(), source)
         .map(ShellLineSubmission::Command),
+      BuiltinCommandLine::Frontend(command) => self
+        .submit_typed(input, command.into(), source)
+        .map(ShellLineSubmission::Command),
+      BuiltinCommandLine::ShellBuiltin(command) => self
+        .execute_builtin(input, command)
+        .map(ShellLineSubmission::ShellBuiltin),
       BuiltinCommandLine::Display(output) => {
         self.remember_unsubmitted_input(input)?;
         Ok(ShellLineSubmission::Display(output))
+      }
+    }
+  }
+
+  /// Applies a command whose state and lifecycle belong to the shell session.
+  ///
+  /// # Parameters
+  ///
+  /// * `input` is retained in navigable history after successful execution.
+  /// * `command` identifies the synchronous session mutation to apply.
+  ///
+  /// # Returns
+  ///
+  /// A presentation effect for the host terminal to mirror.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`BuiltinShellError::Busy`] while a foreground command is active,
+  /// or [`BuiltinShellError::StateUnavailable`] when session state is poisoned.
+  fn execute_builtin(&self, input: String, command: ShellBuiltin) -> Result<ShellBuiltinEffect, BuiltinShellError> {
+    let mut state = self.lock_state()?;
+    if let Some(active) = state.active.as_ref() {
+      return Err(BuiltinShellError::Busy { active_id: active.id });
+    }
+    state.history.push(input);
+    state.history_cursor = None;
+    state.navigation_draft.clear();
+    match command {
+      ShellBuiltin::Clear => {
+        state.transcript.clear();
+        Ok(ShellBuiltinEffect::ClearScrollback)
       }
     }
   }
@@ -645,6 +698,25 @@ impl BuiltinShell {
     Ok(Some(state.navigation_draft.clone()))
   }
 
+  /// Returns full replacement lines matching the unfinished shell token.
+  ///
+  /// # Parameters
+  ///
+  /// * `input` is the current editable command line up to the caret.
+  ///
+  /// # Returns
+  ///
+  /// Sorted, de-duplicated replacement lines, or an empty list when the input
+  /// is not a completable prefix.
+  ///
+  /// # Notes
+  ///
+  /// Completion is derived from the built-in grammar alone and never reads
+  /// session state, so it stays an associated function rather than a method.
+  pub fn complete(input: &str) -> Vec<String> {
+    chitin_command_line::complete_builtin_shell_line(input)
+  }
+
   /// Returns a presentation-safe copy of the current session state.
   pub fn snapshot(&self) -> Result<BuiltinShellSnapshot, BuiltinShellError> {
     let state = self.lock_state()?;
@@ -816,6 +888,11 @@ mod tests {
   }
 
   #[test]
+  fn completion_should_not_require_session_state() {
+    assert!(BuiltinShell::complete("cl").contains(&"clear".to_owned()));
+  }
+
+  #[test]
   fn rejected_input_should_remain_in_history() -> Result<(), BuiltinShellError> {
     let shell = BuiltinShell::new(".");
 
@@ -845,6 +922,24 @@ mod tests {
     let _ = shell.submit("db")?;
 
     assert!(shell.snapshot()?.active.is_none());
+    Ok(())
+  }
+
+  #[test]
+  fn clear_should_reset_transcript_without_erasing_history() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+    let submission = shell.submit("tab.close")?.into_command()?;
+    shell.complete_frontend(submission.id())?;
+
+    let result = shell.submit("clear")?;
+    let snapshot = shell.snapshot()?;
+
+    assert!(matches!(
+      result,
+      ShellLineSubmission::ShellBuiltin(ShellBuiltinEffect::ClearScrollback)
+    ));
+    assert!(snapshot.transcript.is_empty());
+    assert_eq!(shell.previous_history("")?.as_deref(), Some("clear"));
     Ok(())
   }
 
@@ -928,11 +1023,12 @@ mod tests {
   fn typed_agent_submission_should_preserve_source_and_arguments() -> Result<(), BuiltinShellError> {
     let shell = BuiltinShell::new(".");
     let parsed = parse_builtin_command_line("structure validate model.pdb --format pdb")?;
-    let BuiltinCommandLine::Command(parsed) = parsed else {
+    let BuiltinCommandLine::Portable(parsed) = parsed else {
       return Err(BuiltinShellError::DisplayOnly {
         output: "expected an executable structure command".to_owned(),
       });
     };
+    let parsed = ChitinCommand::from(parsed);
 
     let submission = shell.submit_typed(
       "agent validation request",
