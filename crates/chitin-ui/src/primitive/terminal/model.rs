@@ -126,6 +126,31 @@ impl TerminalLine {
   pub fn is_empty(&self) -> bool {
     self.spans.is_empty()
   }
+
+  /// Splits embedded newline characters into independently laid-out rows.
+  pub(super) fn into_rows(self) -> Vec<Self> {
+    if self.spans.iter().all(|span| !span.text.contains('\n')) {
+      return vec![self];
+    }
+
+    let mut rows = Vec::new();
+    let mut current = Vec::new();
+    for span in self.spans {
+      for (index, text) in span.text.split('\n').enumerate() {
+        if index > 0 {
+          rows.push(Self {
+            spans: std::mem::take(&mut current),
+          });
+        }
+        let text = text.strip_suffix('\r').unwrap_or(text);
+        if !text.is_empty() {
+          current.push(TerminalSpan::new(text.to_owned(), span.tone));
+        }
+      }
+    }
+    rows.push(Self { spans: current });
+    rows
+  }
 }
 
 #[cfg(test)]
@@ -137,5 +162,19 @@ mod tests {
     let line = TerminalLine::new([TerminalSpan::accent("❯ "), TerminalSpan::primary("help")]);
 
     assert_eq!(line.spans()[1].text, "help");
+  }
+
+  #[test]
+  fn multiline_span_should_split_into_independent_styled_rows() {
+    let line = TerminalLine::new([
+      TerminalSpan::error("error: missing argument\n"),
+      TerminalSpan::secondary("  --id <PDB_ID>"),
+    ]);
+
+    let rows = line.into_rows();
+
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].spans()[0], TerminalSpan::error("error: missing argument"));
+    assert_eq!(rows[1].spans()[0], TerminalSpan::secondary("  --id <PDB_ID>"));
   }
 }

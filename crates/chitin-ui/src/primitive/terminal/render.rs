@@ -32,7 +32,7 @@ impl TerminalViewport {
 
   /// Replaces the ordered terminal lines.
   pub fn lines(mut self, lines: impl IntoIterator<Item = TerminalLine>) -> Self {
-    self.lines = lines.into_iter().collect();
+    self.lines = lines.into_iter().flat_map(TerminalLine::into_rows).collect();
     self
   }
 
