@@ -3,6 +3,9 @@
 /// Vertical activity-bar composition.
 pub mod activity_bar;
 
+/// Resizable workbench dock for terminal, tasks, output, and similar tools.
+pub mod bottom_dock;
+
 /// Structured command terminal assembled from terminal and input primitives.
 pub mod command_terminal;
 

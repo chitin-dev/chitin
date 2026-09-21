@@ -1,88 +1,81 @@
-//! Bottom-panel chrome around the reusable command terminal.
+//! Terminal content hosted by the reusable workbench bottom dock.
 
 use chitin_ui::{
-  composite::command_terminal::CommandTerminal,
-  primitive::{
-    button::{Button, ButtonSize, ButtonStyle, ButtonVariant},
-    icon::Icon,
+  composite::{
+    bottom_dock::{BottomDock, BottomDockResizeConfig},
+    command_terminal::CommandTerminal,
   },
+  primitive::button::ButtonState,
   themes::UIThemes,
 };
-use gpui::{CursorStyle, InteractiveElement, MouseButton, ParentElement, Pixels, WeakEntity, div, prelude::*, px};
+use gpui::{Entity, InteractiveElement, ParentElement, Pixels, Styled, WeakEntity, div};
 
 use super::{TERMINAL_FONT_FAMILY, TerminalPanelControls};
 use crate::{app::ChitinApp, keybindings::COMMAND_TERMINAL_KEY_CONTEXT};
 
-/// Renders the bottom panel chrome around the reusable command terminal.
-pub(crate) fn render_terminal_panel(
+/// Renders the command terminal as the active bottom-dock item.
+///
+/// # Parameters
+///
+/// * `controls` contains the persistent terminal transcript and input state.
+/// * `close` is the bottom dock's shared close-button state.
+/// * `height` is the current workbench-level dock height.
+/// * `theme` supplies semantic colors for the dock and terminal.
+/// * `app` receives resize and keyboard events from the rendered content.
+///
+/// # Returns
+///
+/// A bottom-dock element containing the structured command terminal.
+pub(crate) fn render_terminal_bottom_dock(
   controls: TerminalPanelControls,
+  close: Entity<ButtonState>,
   height: Pixels,
   theme: UIThemes,
   app: WeakEntity<ChitinApp>,
 ) -> impl gpui::IntoElement {
   let resize_app = app.clone();
-  div()
-    .relative()
+  let resize_move_app = app.clone();
+  let resize_end_app = app.clone();
+  let terminal = div()
     .flex()
     .flex_col()
-    .h(height)
-    .min_h(height)
-    .border_t_1()
-    .border_color(theme.border.primary)
-    .bg(theme.background.primary)
+    .flex_1()
+    .min_h_0()
     .key_context(COMMAND_TERMINAL_KEY_CONTEXT)
     .capture_key_down(move |event, window, cx| {
       let _ = app.update(cx, |this, cx| this.handle_terminal_key(event, window, cx));
     })
     .child(
-      div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .h(px(34.0))
-        .min_h(px(34.0))
-        .px_3()
-        .border_b_1()
-        .border_color(theme.border.muted)
-        .child(
-          div()
-            .text_xs()
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .child("TERMINAL"),
-        )
-        .child(
-          Button::new(controls.close)
-            .theme(theme)
-            .variant(ButtonVariant::Transparent)
-            .size(ButtonSize::Small)
-            .style(
-              ButtonStyle::new()
-                .width(px(26.0))
-                .height(px(24.0))
-                .horizontal_padding(px(0.0)),
-            )
-            .child(Icon::new("icons/window-close.svg").size(px(14.0)).theme(theme)),
-        ),
-    )
-    .child(
       CommandTerminal::new(controls.terminal)
         .theme(theme)
         .font_family(TERMINAL_FONT_FAMILY),
-    )
-    .child(
-      div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .h(px(5.0))
-        .cursor(CursorStyle::ResizeUpDown)
-        .hover(move |style| style.bg(theme.border.focus))
-        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-          let _ = resize_app.update(cx, |this, cx| {
-            this.terminal_panel.start_resize(event.position.y);
+    );
+
+  BottomDock::new("TERMINAL", close)
+    .height(height)
+    .theme(theme)
+    .resizable(
+      BottomDockResizeConfig::new(move |start_y, _, cx| {
+        let _ = resize_app.update(cx, |this, cx| {
+          this.bottom_dock.start_resize(start_y);
+          cx.notify();
+        });
+      })
+      .on_resize(move |current_y, window, cx| {
+        let available_height = ChitinApp::document_panel_root_height(window.bounds().size.height);
+        let _ = resize_move_app.update(cx, |this, cx| {
+          if this.bottom_dock.drag_resize(current_y, available_height) {
             cx.notify();
-          });
-        }),
+          }
+        });
+      })
+      .on_resize_end(move |_, cx| {
+        let _ = resize_end_app.update(cx, |this, cx| {
+          if this.bottom_dock.stop_resize() {
+            cx.notify();
+          }
+        });
+      }),
     )
+    .child(terminal)
 }

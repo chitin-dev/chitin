@@ -4,7 +4,10 @@ use chitin_builtin_shell::ShellInvocationSource;
 use chitin_ui::composite::command_terminal::CommandTerminalStatus;
 use gpui::{AppContext, AsyncApp, Context, KeyDownEvent, WeakEntity, Window};
 
-use super::presenter::{shell_output_lines, shell_terminal_status, terminal_outcome};
+use super::{
+  TERMINAL_DOCK_ITEM_ID,
+  presenter::{shell_output_lines, shell_terminal_status, terminal_outcome},
+};
 use crate::{app::ChitinApp, builtin_shell::DesktopShellDispatch};
 
 impl ChitinApp {
@@ -64,7 +67,7 @@ impl ChitinApp {
                 controls.terminal.update(cx, |terminal, cx| {
                   terminal.finish(terminal_id, status, lines, cx);
                 });
-                if this.terminal_panel.is_visible() {
+                if this.bottom_dock.is_active(TERMINAL_DOCK_ITEM_ID) {
                   let input = controls.input(cx);
                   let focus = input.read(cx).focus_handle().clone();
                   window.focus(&focus, cx);
