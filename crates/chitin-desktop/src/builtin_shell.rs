@@ -6,14 +6,16 @@ use chitin_builtin_shell::{
   BuiltinShell, BuiltinShellError, ShellCommandId, ShellCommandTarget, ShellExecutionResult, ShellInvocationSource,
   ShellLineSubmission, ShellSubmission,
 };
-use chitin_command::{ChitinCommand, CommandEventSink, CommandExecutionContext, DatabaseCommand, PortableCommand};
-use chitin_command_runtime::{CommandExecutionError, CommandExecutor, resolve_rcsb_download_paths};
+use chitin_command::{ChitinCommand, CommandEventSink, CommandExecutionContext};
 use gpui::{AppContext, AsyncApp, Context, WeakEntity, Window};
-use tokio::sync::oneshot;
 
 use crate::{
   app::ChitinApp,
-  tasks::{BackgroundTaskCenter, TaskCenterError, TaskFailure, TaskHandle, TaskKind, TaskTarget},
+  portable_command::{
+    DesktopPortableCommandError, DesktopPortableCommandRunner, DesktopPortableCommandTask, PortableCommandCompletion,
+    PortableCommandSubmission,
+  },
+  tasks::{BackgroundTaskCenter, TaskHandle, TaskKind},
 };
 
 /// Desktop-owned shell session and adapters for application background work.
@@ -70,7 +72,8 @@ impl DesktopShellHost {
   ///
   /// * `submission` contains the correlated typed command and execution context.
   /// * `tasks` owns the shared Tokio executor and durable task state.
-  /// * `executor` dispatches portable work into database and scientific crates.
+  /// * `runner` resolves targets and dispatches portable work through the
+  ///   application-wide command executor.
   ///
   /// # Returns
   ///
@@ -80,7 +83,7 @@ impl DesktopShellHost {
     &self,
     submission: ShellSubmission,
     tasks: &BackgroundTaskCenter,
-    executor: CommandExecutor,
+    runner: &DesktopPortableCommandRunner,
   ) -> Result<DesktopShellTask, DesktopShellHostError> {
     if submission.target() != ShellCommandTarget::Portable {
       return Err(DesktopShellHostError::WrongTarget {
@@ -91,46 +94,37 @@ impl DesktopShellHost {
 
     let id = submission.id();
     let command_id = submission.command().id();
-    let targets = match submission_targets(&submission) {
-      Ok(targets) => targets,
-      Err(error) => {
-        let _ = self.session.fail_submission(id, error.to_string());
-        return Err(error.into());
-      }
+    let ChitinCommand::Portable(command) = submission.command().clone() else {
+      return Err(DesktopShellHostError::WrongTarget {
+        id,
+        target: submission.target(),
+      });
     };
     let cancellation = submission.context().cancellation.clone();
-    let execution_session = self.session.clone();
+    let context = submission.context().clone();
+    let events = self
+      .session
+      .portable_event_sink(&submission, CommandEventSink::silent())?;
+    let completion_session = self.session.clone();
     let failure_session = self.session.clone();
-    let (result_sender, result_receiver) = oneshot::channel();
-    let task = tasks.submit_with_cancellation(
-      TaskKind::BuiltinShell { command_id },
-      targets,
-      cancellation,
-      move |context| async move {
-        let event_context = context.clone();
-        let events = CommandEventSink::new(move |event| event_context.report_command_event(event));
-        match execution_session
-          .execute_portable_with_events(submission, &executor, events)
-          .await
-        {
-          Ok(result) => {
-            let _ = result_sender.send(Ok(result));
-            Ok(())
+    let task = runner.submit(
+      tasks,
+      PortableCommandSubmission::new(TaskKind::BuiltinShell { command_id }, command, context)
+        .with_cancellation(cancellation)
+        .with_events(events)
+        .on_completion(move |completion| {
+          let result = match completion {
+            PortableCommandCompletion::Succeeded => completion_session.complete_portable(id),
+            PortableCommandCompletion::Cancelled => completion_session.cancel_portable(id),
+            PortableCommandCompletion::Failed(message) => completion_session.fail_submission(id, message),
+          };
+          if let Err(error) = result {
+            log::error!("failed to update built-in shell completion state: {error}");
           }
-          Err(error) => {
-            let failure = TaskFailure::new(error.to_string());
-            let _ = result_sender.send(Err(error));
-            Err(failure)
-          }
-        }
-      },
+        }),
     );
     match task {
-      Ok(task) => Ok(DesktopShellTask {
-        command_id: id,
-        task,
-        result: result_receiver,
-      }),
+      Ok(task) => Ok(DesktopShellTask { command_id: id, task }),
       Err(error) => {
         let _ = failure_session.fail_submission(id, error.to_string());
         Err(error.into())
@@ -152,8 +146,7 @@ impl DesktopShellHost {
 /// Running portable shell command exposed to desktop and agent consumers.
 pub struct DesktopShellTask {
   command_id: ShellCommandId,
-  task: TaskHandle,
-  result: oneshot::Receiver<Result<ShellExecutionResult, BuiltinShellError>>,
+  task: DesktopPortableCommandTask,
 }
 
 impl DesktopShellTask {
@@ -164,17 +157,16 @@ impl DesktopShellTask {
 
   /// Returns the background task observation handle.
   pub const fn task(&self) -> &TaskHandle {
-    &self.task
+    self.task.task()
   }
 
   /// Waits for the structured portable-command result.
   pub async fn result(self) -> Result<ShellExecutionResult, DesktopShellHostError> {
-    Ok(
-      self
-        .result
-        .await
-        .map_err(|_| DesktopShellHostError::ResultChannelClosed)??,
-    )
+    let outcome = self.task.result().await?;
+    Ok(ShellExecutionResult {
+      id: self.command_id,
+      outcome,
+    })
   }
 }
 
@@ -194,12 +186,9 @@ pub enum DesktopShellHostError {
   /// The frontend-independent shell rejected the request or execution.
   #[error(transparent)]
   Shell(#[from] BuiltinShellError),
-  /// Portable command preparation failed before task submission.
+  /// Portable command preparation, submission, or execution failed.
   #[error(transparent)]
-  Execution(#[from] CommandExecutionError),
-  /// The application task center rejected the command.
-  #[error(transparent)]
-  TaskCenter(#[from] TaskCenterError),
+  Portable(#[from] DesktopPortableCommandError),
   /// A submission was sent to an incompatible host route.
   #[error("shell command {} has target {target:?}, which cannot use this route", id.get())]
   WrongTarget {
@@ -208,23 +197,6 @@ pub enum DesktopShellHostError {
     /// Target selected by the frontend-independent shell.
     target: ShellCommandTarget,
   },
-  /// The background task ended without publishing its structured result.
-  #[error("built-in shell result channel closed before completion")]
-  ResultChannelClosed,
-}
-
-/// Resolves resources protected while a portable command is active.
-fn submission_targets(submission: &ShellSubmission) -> Result<Vec<TaskTarget>, CommandExecutionError> {
-  match submission.command() {
-    ChitinCommand::Portable(PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(arguments))) => {
-      resolve_rcsb_download_paths(arguments, submission.context())
-        .map(|paths| paths.into_iter().map(TaskTarget::File).collect())
-    }
-    _ => Ok(vec![TaskTarget::Resource(format!(
-      "builtin-shell:{}",
-      submission.id().get()
-    ))]),
-  }
 }
 
 /// Builds workspace-aware defaults for a desktop shell session.
@@ -316,7 +288,7 @@ impl ChitinApp {
       ShellCommandTarget::Portable => {
         let running = self
           .builtin_shell
-          .submit_portable(submission, &self.tasks, self.command_executor.clone())?;
+          .submit_portable(submission, &self.tasks, &self.portable_commands)?;
         observe_shell_task(running.task().clone(), window, cx);
         Ok(DesktopShellDispatch::Portable(running))
       }
@@ -344,6 +316,7 @@ fn observe_shell_task(mut task: TaskHandle, window: &Window, cx: &mut Context<Ch
 #[cfg(test)]
 mod tests {
   use chitin_command::CommandOutputFormat;
+  use chitin_command_runtime::CommandExecutor;
   use chitin_databases::{ClientConfig, providers::rcsb::StructureFormat};
 
   use super::*;
@@ -363,7 +336,8 @@ mod tests {
       .into_command()?;
     let command_id = submission.id();
     let tasks = BackgroundTaskCenter::new();
-    let running = host.submit_portable(submission, &tasks, CommandExecutor::new(ClientConfig::default()))?;
+    let runner = DesktopPortableCommandRunner::new(CommandExecutor::new(ClientConfig::default()));
+    let running = host.submit_portable(submission, &tasks, &runner)?;
     let result_runtime = tokio::runtime::Builder::new_current_thread().build()?;
 
     let result = result_runtime.block_on(running.result())?;

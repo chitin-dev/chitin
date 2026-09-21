@@ -9,7 +9,7 @@ pub(crate) use controller::CommandPanelController;
 use controller::{CommandPanelEvent, CommandPanelMode};
 use form::rcsb::{RcsbDownloadState, RcsbFormPanel};
 
-use chitin_command::{CommandExecutionContext, CommandId, RcsbDownloadArguments};
+use chitin_command::{CommandExecutionContext, CommandId, DatabaseCommand, PortableCommand, RcsbDownloadArguments};
 use chitin_databases::providers::rcsb::PdbId;
 use chitin_ui::{
   composite::{
@@ -33,7 +33,8 @@ use gpui::{
 use crate::{
   app::ChitinApp,
   components::document_area::state::OpenedProjectDocument,
-  tasks::{TaskOutput, TaskState, rcsb::submit_download},
+  portable_command::PortableCommandSubmission,
+  tasks::{TaskKind, TaskOutput, TaskState},
 };
 
 /// Callback invoked when a rendered command row is selected.
@@ -255,15 +256,26 @@ impl ChitinApp {
     let execution_context = CommandExecutionContext::new(&workspace_root)
       .with_workspace_root(&workspace_root)
       .with_default_download_root(workspace_root.join(".chitin").join("download"));
-    let (mut task, total_items) =
-      match submit_download(&self.tasks, self.command_executor.clone(), arguments, execution_context) {
-        Ok(submission) => submission,
-        Err(error) => {
-          log::error!("failed to submit RCSB download task: {error}");
-          form.download.update(cx, |state, cx| state.fail(error.to_string(), cx));
-          return;
-        }
-      };
+    let command = PortableCommand::from(DatabaseCommand::DownloadRcsbStructure(arguments));
+    let running = match self.portable_commands.submit(
+      &self.tasks,
+      PortableCommandSubmission::new(
+        TaskKind::DatabaseDownload {
+          provider: "RCSB".to_string(),
+        },
+        command,
+        execution_context,
+      ),
+    ) {
+      Ok(submission) => submission,
+      Err(error) => {
+        log::error!("failed to submit RCSB download task: {error}");
+        form.download.update(cx, |state, cx| state.fail(error.to_string(), cx));
+        return;
+      }
+    };
+    let total_items = running.target_count();
+    let mut task = running.into_task_handle();
     log::info!(
       "RCSB batch download task submitted: id={}, items={total_items}",
       task.id()

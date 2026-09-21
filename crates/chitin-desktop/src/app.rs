@@ -34,6 +34,7 @@ use crate::{
     window_bar::{WindowBarControls, render_window_bar},
   },
   keybindings::{ToggleCommandPanel, ToggleTerminal, ToggleWorkspace, WORKBENCH_KEY_CONTEXT},
+  portable_command::DesktopPortableCommandRunner,
   tasks::BackgroundTaskCenter,
 };
 
@@ -61,8 +62,8 @@ pub struct ChitinApp {
   pub(crate) command_panel: CommandPanelController,
   /// Application-wide executor and registry for background work.
   pub(crate) tasks: BackgroundTaskCenter,
-  /// Shared executor for frontend-independent typed commands.
-  pub(crate) command_executor: CommandExecutor,
+  /// Shared adapter for frontend-independent commands submitted by desktop views.
+  pub(crate) portable_commands: DesktopPortableCommandRunner,
   /// Shared command bridge for terminal, agent, and system invocations.
   pub(crate) builtin_shell: DesktopShellHost,
   /// Active tool and geometry of the workbench-level bottom dock.
@@ -143,6 +144,7 @@ impl ChitinApp {
       ProjectSidebarState::with_workspace_root(workspace.as_ref().map(|workspace| workspace.tree.root.path.as_path()));
 
     let shell_workspace_root = workspace.as_ref().map(|workspace| workspace.root.clone());
+    let command_executor = CommandExecutor::new(ClientConfig::default());
     Self {
       workspace,
       project_sidebar_state,
@@ -154,7 +156,7 @@ impl ChitinApp {
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
       tasks: BackgroundTaskCenter::new(),
-      command_executor: CommandExecutor::new(ClientConfig::default()),
+      portable_commands: DesktopPortableCommandRunner::new(command_executor),
       builtin_shell: DesktopShellHost::new(desktop_shell_context(shell_workspace_root)),
       bottom_dock: BottomDockState::new(),
       bottom_dock_controls: None,

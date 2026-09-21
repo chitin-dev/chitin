@@ -17,8 +17,6 @@ use tokio::{
   sync::{broadcast, watch},
 };
 
-pub(crate) mod rcsb;
-
 /// Stable identity assigned to one submitted task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TaskId(u64);

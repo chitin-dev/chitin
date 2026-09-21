@@ -502,17 +502,8 @@ impl BuiltinShell {
     executor: &CommandExecutor,
     host_events: CommandEventSink,
   ) -> Result<ShellExecutionResult, BuiltinShellError> {
-    self.validate_active_submission(&submission)?;
-    if submission.target != ShellCommandTarget::Portable {
-      return Err(BuiltinShellError::FrontendCommand { id: submission.id });
-    }
-
-    let shell = self.clone();
     let id = submission.id;
-    let events = CommandEventSink::new(move |event| {
-      shell.record_command_event(id, event.clone());
-      host_events.emit(event);
-    });
+    let events = self.portable_event_sink(&submission, host_events)?;
     let ChitinCommand::Portable(command) = submission.command else {
       return Err(BuiltinShellError::FrontendCommand { id: submission.id });
     };
@@ -537,6 +528,48 @@ impl BuiltinShell {
         Err(BuiltinShellError::Execution(error))
       }
     }
+  }
+
+  /// Creates an event sink that records portable executor events in this session.
+  ///
+  /// # Parameters
+  ///
+  /// * `submission` identifies the active portable command receiving events.
+  /// * `host_events` receives a copy for task-center or protocol projection.
+  ///
+  /// # Returns
+  ///
+  /// A sink that updates the shell transcript before forwarding each event.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`BuiltinShellError`] when the submission is no longer active or
+  /// targets the desktop frontend instead of the portable executor.
+  pub fn portable_event_sink(
+    &self,
+    submission: &ShellSubmission,
+    host_events: CommandEventSink,
+  ) -> Result<CommandEventSink, BuiltinShellError> {
+    self.validate_active_submission(submission)?;
+    if submission.target != ShellCommandTarget::Portable {
+      return Err(BuiltinShellError::FrontendCommand { id: submission.id });
+    }
+    let shell = self.clone();
+    let id = submission.id;
+    Ok(CommandEventSink::new(move |event| {
+      shell.record_command_event(id, event.clone());
+      host_events.emit(event);
+    }))
+  }
+
+  /// Marks a portable command as successfully completed by its host executor.
+  pub fn complete_portable(&self, id: ShellCommandId) -> Result<(), BuiltinShellError> {
+    self.finish(id, ShellExecutionStatus::Succeeded, ShellTranscriptContent::Completed)
+  }
+
+  /// Marks a portable command as cooperatively cancelled by its host executor.
+  pub fn cancel_portable(&self, id: ShellCommandId) -> Result<(), BuiltinShellError> {
+    self.finish(id, ShellExecutionStatus::Cancelled, ShellTranscriptContent::Cancelled)
   }
 
   /// Marks a frontend-routed command as successfully completed.
