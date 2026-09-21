@@ -7,8 +7,9 @@ use std::{
 
 use chitin_command::{
   ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionDomain, CommandExecutionEvent, CommandId,
-  CommandMessage, CommandProgress, parse_command_line,
+  CommandMessage, CommandProgress,
 };
+use chitin_command_line::{BuiltinCommandLine, parse_builtin_command_line};
 use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome};
 use chitin_databases::{CancellationToken, PersistedArtifact};
 
@@ -150,6 +151,25 @@ pub struct ShellSubmission {
   context: CommandExecutionContext,
 }
 
+/// Result of evaluating one textual built-in shell line.
+#[derive(Clone, Debug)]
+pub enum ShellLineSubmission {
+  /// A typed command was reserved for execution.
+  Command(ShellSubmission),
+  /// Help text should be displayed without invoking an executor.
+  Display(String),
+}
+
+impl ShellLineSubmission {
+  /// Extracts an executable submission from a command-producing line.
+  pub fn into_command(self) -> Result<ShellSubmission, BuiltinShellError> {
+    match self {
+      Self::Command(submission) => Ok(submission),
+      Self::Display(output) => Err(BuiltinShellError::DisplayOnly { output }),
+    }
+  }
+}
+
 impl ShellSubmission {
   /// Returns the shell-local submission identity.
   pub const fn id(&self) -> ShellCommandId {
@@ -191,7 +211,13 @@ pub struct ShellExecutionResult {
 pub enum BuiltinShellError {
   /// The submitted command line is syntactically or semantically invalid.
   #[error(transparent)]
-  Parse(#[from] chitin_command::CommandParseError),
+  Parse(#[from] chitin_command_line::CommandLineParseError),
+  /// A caller requiring execution received display-only help text.
+  #[error("shell line produced display output instead of an executable command")]
+  DisplayOnly {
+    /// Help text produced by the command-line grammar.
+    output: String,
+  },
   /// Another foreground command is still active.
   #[error("shell command {} is still active", active_id.get())]
   Busy {
@@ -317,7 +343,7 @@ impl BuiltinShell {
   ///
   /// Returns [`BuiltinShellError::Busy`] while another command is active, or a
   /// parse error when the command line is invalid.
-  pub fn submit(&self, input: impl Into<String>) -> Result<ShellSubmission, BuiltinShellError> {
+  pub fn submit(&self, input: impl Into<String>) -> Result<ShellLineSubmission, BuiltinShellError> {
     self.submit_line(input, ShellInvocationSource::Interactive)
   }
 
@@ -335,16 +361,24 @@ impl BuiltinShell {
     &self,
     input: impl Into<String>,
     source: ShellInvocationSource,
-  ) -> Result<ShellSubmission, BuiltinShellError> {
+  ) -> Result<ShellLineSubmission, BuiltinShellError> {
     let input = input.into();
-    let command = match parse_command_line(&input) {
-      Ok(command) => command,
+    let parsed = match parse_builtin_command_line(&input) {
+      Ok(parsed) => parsed,
       Err(error) => {
-        self.remember_rejected_input(input.clone())?;
+        self.remember_unsubmitted_input(input.clone())?;
         return Err(error.into());
       }
     };
-    self.submit_typed(input, command, source)
+    match parsed {
+      BuiltinCommandLine::Command(command) => self
+        .submit_typed(input, command, source)
+        .map(ShellLineSubmission::Command),
+      BuiltinCommandLine::Display(output) => {
+        self.remember_unsubmitted_input(input)?;
+        Ok(ShellLineSubmission::Display(output))
+      }
+    }
   }
 
   /// Submits an already typed command from an agent or application subsystem.
@@ -671,7 +705,7 @@ impl BuiltinShell {
   }
 
   /// Retains a rejected interactive line for conventional shell history.
-  fn remember_rejected_input(&self, input: String) -> Result<(), BuiltinShellError> {
+  fn remember_unsubmitted_input(&self, input: String) -> Result<(), BuiltinShellError> {
     let mut state = self.lock_state()?;
     state.history.push(input);
     state.history_cursor = None;
@@ -708,9 +742,9 @@ mod tests {
   #[test]
   fn submit_should_route_portable_and_frontend_commands() -> Result<(), BuiltinShellError> {
     let portable_shell = BuiltinShell::new(".");
-    let portable = portable_shell.submit("structure validate model.pdb")?;
+    let portable = portable_shell.submit("structure validate model.pdb")?.into_command()?;
     let frontend_shell = BuiltinShell::new(".");
-    let frontend = frontend_shell.submit("tab.close")?;
+    let frontend = frontend_shell.submit("tab.close")?.into_command()?;
 
     assert_eq!(portable.target(), ShellCommandTarget::Portable);
     assert_eq!(frontend.target(), ShellCommandTarget::Frontend);
@@ -720,7 +754,7 @@ mod tests {
   #[test]
   fn submit_should_reject_a_second_foreground_command() -> Result<(), BuiltinShellError> {
     let shell = BuiltinShell::new(".");
-    let first = shell.submit("tab.close")?;
+    let first = shell.submit("tab.close")?.into_command()?;
 
     let result = shell.submit("tab.focus_next");
 
@@ -731,9 +765,9 @@ mod tests {
   #[test]
   fn history_navigation_should_restore_the_current_draft() -> Result<(), BuiltinShellError> {
     let shell = BuiltinShell::new(".");
-    let first = shell.submit("tab.close")?;
+    let first = shell.submit("tab.close")?.into_command()?;
     shell.complete_frontend(first.id())?;
-    let second = shell.submit("workspace.toggle_workspace")?;
+    let second = shell.submit("workspace.toggle_workspace")?.into_command()?;
     shell.complete_frontend(second.id())?;
 
     let newest = shell.previous_history("structure inspect draft.pdb")?;
@@ -762,9 +796,29 @@ mod tests {
   }
 
   #[test]
+  fn help_line_should_return_display_output() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+
+    let result = shell.submit("db")?;
+
+    assert!(matches!(result, ShellLineSubmission::Display(help) if help.contains("Usage: chitin db <COMMAND>")));
+    Ok(())
+  }
+
+  #[test]
+  fn help_line_should_not_reserve_the_execution_slot() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+
+    let _ = shell.submit("db")?;
+
+    assert!(shell.snapshot()?.active.is_none());
+    Ok(())
+  }
+
+  #[test]
   fn cancel_should_update_the_active_command_and_token() -> Result<(), BuiltinShellError> {
     let shell = BuiltinShell::new(".");
-    let submission = shell.submit("structure validate model.pdb")?;
+    let submission = shell.submit("structure validate model.pdb")?.into_command()?;
 
     let cancelled = shell.cancel_active()?;
     let snapshot = shell.snapshot()?;
@@ -793,7 +847,7 @@ mod tests {
     shell.set_standard_input(Some(Arc::from(
       b"ATOM      1  CA  GLY A   1       1.000   2.000   3.000  1.00 20.00           C  \nEND\n".as_slice(),
     )))?;
-    let submission = shell.submit("structure validate - --format pdb")?;
+    let submission = shell.submit("structure validate - --format pdb")?.into_command()?;
     let executor = CommandExecutor::new(ClientConfig::default());
 
     let result = shell.execute_portable(submission, &executor).await?;
@@ -821,7 +875,7 @@ mod tests {
   #[test]
   fn frontend_completion_should_append_a_terminal_marker() -> Result<(), BuiltinShellError> {
     let shell = BuiltinShell::new(".");
-    let submission = shell.submit("tab.close")?;
+    let submission = shell.submit("tab.close")?.into_command()?;
 
     shell.complete_frontend(submission.id())?;
     let snapshot = shell.snapshot()?;
@@ -840,7 +894,12 @@ mod tests {
   #[test]
   fn typed_agent_submission_should_preserve_source_and_arguments() -> Result<(), BuiltinShellError> {
     let shell = BuiltinShell::new(".");
-    let parsed = parse_command_line("structure validate model.pdb --format pdb")?;
+    let parsed = parse_builtin_command_line("structure validate model.pdb --format pdb")?;
+    let BuiltinCommandLine::Command(parsed) = parsed else {
+      return Err(BuiltinShellError::DisplayOnly {
+        output: "expected an executable structure command".to_owned(),
+      });
+    };
 
     let submission = shell.submit_typed(
       "agent validation request",

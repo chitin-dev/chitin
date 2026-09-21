@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use chitin_builtin_shell::{
   BuiltinShell, BuiltinShellError, ShellCommandId, ShellCommandTarget, ShellExecutionResult, ShellInvocationSource,
-  ShellSubmission,
+  ShellLineSubmission, ShellSubmission,
 };
 use chitin_command::{ChitinCommand, CommandEventSink, CommandExecutionContext, DatabaseCommand, PortableCommand};
 use chitin_command_runtime::{CommandExecutionError, CommandExecutor, resolve_rcsb_download_paths};
@@ -40,7 +40,7 @@ impl DesktopShellHost {
     &self,
     input: impl Into<String>,
     source: ShellInvocationSource,
-  ) -> Result<ShellSubmission, DesktopShellHostError> {
+  ) -> Result<ShellLineSubmission, DesktopShellHostError> {
     Ok(self.session.submit_line(input, source)?)
   }
 
@@ -180,6 +180,8 @@ impl DesktopShellTask {
 
 /// Result of routing one shell submission through the desktop host.
 pub enum DesktopShellDispatch {
+  /// Clap produced help text without scheduling a command.
+  Display { output: String },
   /// The command mutated desktop state synchronously.
   Frontend { command_id: ShellCommandId },
   /// The command is running through the shared background executor.
@@ -260,8 +262,10 @@ impl ChitinApp {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Result<DesktopShellDispatch, DesktopShellHostError> {
-    let submission = self.builtin_shell.submit_line(input, source)?;
-    self.route_builtin_shell_submission(submission, window, cx)
+    match self.builtin_shell.submit_line(input, source)? {
+      ShellLineSubmission::Command(submission) => self.route_builtin_shell_submission(submission, window, cx),
+      ShellLineSubmission::Display(output) => Ok(DesktopShellDispatch::Display { output }),
+    }
   }
 
   /// Routes an already typed command from an agent or application subsystem.
@@ -349,12 +353,14 @@ mod tests {
     let host = DesktopShellHost::new(CommandExecutionContext::new(".").with_standard_input(
       b"ATOM      1  CA  GLY A   1       1.000   2.000   3.000  1.00 20.00           C  \nEND\n".to_vec(),
     ));
-    let submission = host.submit_line(
-      "structure validate - --format pdb",
-      ShellInvocationSource::Agent {
-        name: "validation-agent".to_owned(),
-      },
-    )?;
+    let submission = host
+      .submit_line(
+        "structure validate - --format pdb",
+        ShellInvocationSource::Agent {
+          name: "validation-agent".to_owned(),
+        },
+      )?
+      .into_command()?;
     let command_id = submission.id();
     let tasks = BackgroundTaskCenter::new();
     let running = host.submit_portable(submission, &tasks, CommandExecutor::new(ClientConfig::default()))?;
@@ -377,7 +383,9 @@ mod tests {
   fn frontend_submission_should_remain_available_for_desktop_dispatch() -> Result<(), DesktopShellHostError> {
     let host = DesktopShellHost::new(CommandExecutionContext::new("."));
 
-    let submission = host.submit_line("tab.close", ShellInvocationSource::Interactive)?;
+    let submission = host
+      .submit_line("tab.close", ShellInvocationSource::Interactive)?
+      .into_command()?;
 
     assert_eq!(submission.target(), ShellCommandTarget::Frontend);
     host.complete_frontend(submission.id())?;

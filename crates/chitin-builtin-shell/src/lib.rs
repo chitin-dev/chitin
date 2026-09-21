@@ -12,6 +12,6 @@ mod session;
 pub use event::{ShellEvent, ShellEventSink};
 pub use session::{
   BuiltinShell, BuiltinShellError, BuiltinShellSnapshot, ShellActiveCommand, ShellCommandId, ShellCommandTarget,
-  ShellExecutionRecord, ShellExecutionResult, ShellExecutionStatus, ShellInvocationSource, ShellSubmission,
-  ShellTranscriptContent, ShellTranscriptEntry,
+  ShellExecutionRecord, ShellExecutionResult, ShellExecutionStatus, ShellInvocationSource, ShellLineSubmission,
+  ShellSubmission, ShellTranscriptContent, ShellTranscriptEntry,
 };

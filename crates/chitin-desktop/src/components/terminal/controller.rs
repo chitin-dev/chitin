@@ -34,6 +34,16 @@ impl ChitinApp {
       .update(cx, |terminal, cx| terminal.begin_submission(line.clone(), cx));
 
     match self.submit_builtin_shell_line(line, ShellInvocationSource::Interactive, window, cx) {
+      Ok(DesktopShellDispatch::Display { output }) => {
+        controls.terminal.update(cx, |terminal, cx| {
+          terminal.finish(
+            terminal_id,
+            CommandTerminalStatus::Succeeded,
+            super::presenter::terminal_text_lines(&output),
+            cx,
+          );
+        });
+      }
       Ok(DesktopShellDispatch::Frontend { command_id }) => {
         self.terminal_panel.bind(command_id, terminal_id);
         controls.terminal.update(cx, |terminal, cx| {

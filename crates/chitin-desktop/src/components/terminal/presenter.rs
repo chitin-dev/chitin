@@ -21,6 +21,11 @@ pub(super) fn terminal_prompt(working_directory: &Path) -> TerminalLine {
   ])
 }
 
+/// Converts preformatted command help into terminal rows.
+pub(super) fn terminal_text_lines(text: &str) -> Vec<TerminalLine> {
+  text.lines().map(TerminalLine::plain).collect()
+}
+
 /// Converts one shell command's event stream into terminal output rows.
 ///
 /// # Parameters

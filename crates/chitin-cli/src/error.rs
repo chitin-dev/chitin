@@ -1,14 +1,13 @@
 //! Errors produced while parsing and executing CLI workflows.
 
-use chitin_databases::providers::rcsb::PdbIdListError;
 use std::path::PathBuf;
 
 /// Error returned by the Chitin CLI command handlers.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CliError {
-  /// A comma-separated identifier list contains an invalid element.
-  #[error("{0}")]
-  InvalidPdbIdList(#[from] PdbIdListError),
+  /// Shared command-line arguments could not be converted into a typed command.
+  #[error(transparent)]
+  CommandLine(#[from] chitin_command_line::PortableCommandLineError),
   /// A portable typed command could not be executed.
   #[error(transparent)]
   CommandExecution(#[from] chitin_command_runtime::CommandExecutionError),

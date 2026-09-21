@@ -4,7 +4,6 @@ mod application;
 mod database;
 mod execution;
 mod panel_tab;
-mod parser;
 mod structure;
 mod workspace;
 
@@ -15,7 +14,6 @@ pub use execution::{
   CommandProgress,
 };
 pub use panel_tab::PanelTabCommand;
-pub use parser::{CommandParseError, parse_command_line};
 pub use structure::{
   CommandOutputFormat, StructureCommand, StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };
