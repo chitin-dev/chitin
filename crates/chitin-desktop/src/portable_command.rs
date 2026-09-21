@@ -1,7 +1,9 @@
 //! Desktop adapter for executing portable commands as background tasks.
 
-use chitin_command::{CommandEventSink, CommandExecutionContext, DatabaseCommand, PortableCommand, StructureCommand};
-use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome, resolve_rcsb_download_paths};
+use chitin_command::{
+  CommandEventSink, CommandExecutionContext, CommandExecutionError, CommandExecutor, CommandOutcome, DatabaseCommand,
+  PortableCommand, StructureCommand, resolve_rcsb_download_paths,
+};
 use chitin_databases::CancellationToken;
 use tokio::sync::oneshot;
 

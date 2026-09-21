@@ -1,10 +1,10 @@
-#![forbid(unsafe_code)]
 //! Frontend-independent execution for portable Chitin commands.
 //!
-//! This crate performs database and structure workflows without printing to a
-//! terminal or accessing GPUI. Frontends supply an execution context, observe
-//! structured events, and render the returned outcome in their own language.
+//! Frontends supply an execution context, observe structured events, and
+//! convert the returned outcome through [`crate::output`] without embedding
+//! CLI or GPUI behavior in the executor.
 
+mod context;
 mod database;
 mod structure;
 
@@ -14,12 +14,15 @@ use std::{
 };
 
 use chitin_bio::structure::StructureParseResult;
-use chitin_command::{
-  CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandId, CommandOutputFormat, PortableCommand,
-};
 use chitin_databases::{Client, ClientConfig, TransportError, providers::rcsb::StructureFormat};
 
+pub use context::{
+  CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandMessage, CommandMessageLevel,
+  CommandProgress,
+};
 pub use database::resolve_rcsb_download_paths;
+
+use crate::{CommandId, CommandOutputFormat, PortableCommand};
 
 /// Successful result returned by a portable command.
 #[derive(Clone, Debug, PartialEq)]
@@ -177,9 +180,10 @@ impl CommandExecutor {
 mod tests {
   use std::{path::PathBuf, sync::Mutex};
 
-  use chitin_command::{CommandOutputFormat, StructureCommand, StructureInputArguments, StructureInspectArguments};
+  use chitin_databases::providers::rcsb::StructureFormat;
 
   use super::*;
+  use crate::{StructureCommand, StructureInputArguments, StructureInspectArguments};
 
   #[tokio::test]
   async fn executor_should_emit_lifecycle_events_around_structure_inspection() -> Result<(), CommandExecutionError> {

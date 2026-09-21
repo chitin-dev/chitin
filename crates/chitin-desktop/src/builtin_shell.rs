@@ -318,8 +318,7 @@ fn observe_shell_task(mut task: TaskHandle, window: &Window, cx: &mut Context<Ch
 
 #[cfg(test)]
 mod tests {
-  use chitin_command::CommandOutputFormat;
-  use chitin_command_runtime::CommandExecutor;
+  use chitin_command::{CommandExecutor, CommandOutputFormat};
   use chitin_databases::{ClientConfig, providers::rcsb::StructureFormat};
 
   use super::*;
@@ -348,7 +347,7 @@ mod tests {
     assert_eq!(result.id, command_id);
     assert!(matches!(
       result.outcome,
-      chitin_command_runtime::CommandOutcome::StructureValidation(validation)
+      chitin_command::CommandOutcome::StructureValidation(validation)
         if validation.format == StructureFormat::Pdb
           && validation.output == CommandOutputFormat::Text
           && validation.is_valid()

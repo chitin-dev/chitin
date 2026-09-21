@@ -6,10 +6,10 @@ use std::{
 };
 
 use chitin_bio::structure::{MmcifParser, PdbParser, Structure, StructureParseResult};
-use chitin_command::{CommandExecutionContext, StructureCommand, StructureInputArguments};
 use chitin_databases::providers::rcsb::StructureFormat;
 
-use crate::{CommandExecutionError, CommandOutcome, StructureInspection, StructureValidation};
+use super::{CommandExecutionError, CommandOutcome, StructureInspection, StructureValidation};
+use crate::{CommandExecutionContext, StructureCommand, StructureInputArguments};
 
 /// Executes a local structure command against frontend-provided resources.
 ///
@@ -160,7 +160,7 @@ fn resolve_from_working_directory(path: &Path, working_directory: &Path) -> Path
 
 #[cfg(test)]
 mod tests {
-  use chitin_command::{CommandOutputFormat, StructureInspectArguments};
+  use crate::{CommandOutputFormat, StructureInspectArguments};
 
   use super::*;
 

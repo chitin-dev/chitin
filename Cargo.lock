@@ -686,16 +686,12 @@ dependencies = [
 name = "chitin"
 version = "0.1.0"
 dependencies = [
- "chitin-bio",
  "chitin-command",
- "chitin-command-line",
- "chitin-command-runtime",
  "chitin-databases",
  "clap",
  "clap_complete",
  "console",
  "indicatif",
- "serde_json",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -731,9 +727,8 @@ name = "chitin-builtin-shell"
 version = "0.1.0"
 dependencies = [
  "chitin-command",
- "chitin-command-line",
- "chitin-command-runtime",
  "chitin-databases",
+ "clap",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -742,27 +737,10 @@ dependencies = [
 name = "chitin-command"
 version = "0.1.0"
 dependencies = [
- "chitin-databases",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "chitin-command-line"
-version = "0.1.0"
-dependencies = [
- "chitin-command",
+ "chitin-bio",
  "chitin-databases",
  "clap",
- "thiserror 2.0.20",
-]
-
-[[package]]
-name = "chitin-command-runtime"
-version = "0.1.0"
-dependencies = [
- "chitin-bio",
- "chitin-command",
- "chitin-databases",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -794,7 +772,6 @@ dependencies = [
  "chitin-bio",
  "chitin-builtin-shell",
  "chitin-command",
- "chitin-command-runtime",
  "chitin-databases",
  "chitin-molecule-renderer",
  "chitin-ui",

@@ -2,10 +2,11 @@
 
 use std::ffi::OsString;
 
-use chitin_command::{CommandId, FrontendCommand, PortableCommand};
+use chitin_command::{
+  CommandId, FrontendCommand, PortableCommand,
+  grammar::{PortableCommandArgs, PortableCommandLineError},
+};
 use clap::{ColorChoice, CommandFactory, Parser, Subcommand, error::ErrorKind};
-
-use crate::{PortableCommandArgs, PortableCommandLineError};
 
 /// Result of parsing one built-in shell line.
 #[derive(Debug)]

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use chitin_command::{
+use crate::{
   CommandOutputFormat, DatabaseCommand, PortableCommand, RcsbDownloadArguments, StructureCommand,
   StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };

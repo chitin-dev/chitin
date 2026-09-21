@@ -3,8 +3,9 @@
 use std::path::Path;
 
 use chitin_builtin_shell::{BuiltinShellSnapshot, ShellCommandId, ShellExecutionStatus, ShellTranscriptContent};
-use chitin_command::CommandMessageLevel;
-use chitin_command_runtime::CommandOutcome;
+use chitin_command::{
+  CommandMessageLevel, CommandOutcome, CommandOutputTone, CommandReportStatus, render_outcome as render_command_outcome,
+};
 use chitin_ui::{
   composite::command_terminal::{CommandTerminalId, CommandTerminalStatus},
   primitive::terminal::{TerminalLine, TerminalSpan, TerminalTone},
@@ -83,58 +84,35 @@ pub(super) fn shell_output_lines(snapshot: &BuiltinShellSnapshot, shell_id: Shel
 ///
 /// The terminal status and final rows for the corresponding command block.
 pub(super) fn terminal_outcome(outcome: CommandOutcome) -> (CommandTerminalStatus, Vec<TerminalLine>) {
-  match outcome {
-    CommandOutcome::DatabaseDownload { artifact_count } => (
-      CommandTerminalStatus::Succeeded,
-      vec![TerminalLine::new([TerminalSpan::success(format!(
-        "Downloaded {artifact_count} structure artifact(s)."
-      ))])],
-    ),
-    CommandOutcome::StructureValidation(validation) => match validation.error {
-      Some(error) => (
-        CommandTerminalStatus::Failed,
-        vec![TerminalLine::new([TerminalSpan::error(format!(
-          "Invalid structure {}: {error}",
-          validation.path.display()
-        ))])],
-      ),
-      None => (
-        CommandTerminalStatus::Succeeded,
-        vec![TerminalLine::new([TerminalSpan::success(format!(
-          "Valid structure: {} ({})",
-          validation.path.display(),
-          validation.format.label()
-        ))])],
-      ),
-    },
-    CommandOutcome::StructureInspection(inspection) => {
-      let structure = &inspection.parsed.structure;
-      (
-        CommandTerminalStatus::Succeeded,
-        vec![
-          TerminalLine::new([
-            TerminalSpan::secondary("Structure: "),
-            TerminalSpan::primary(inspection.path.display().to_string()),
-          ]),
-          TerminalLine::new([
-            TerminalSpan::secondary("Format: "),
-            TerminalSpan::primary(inspection.format.label()),
-            TerminalSpan::secondary(" | Bytes: "),
-            TerminalSpan::primary(inspection.byte_count.to_string()),
-            TerminalSpan::secondary(" | Diagnostics: "),
-            TerminalSpan::primary(inspection.parsed.diagnostics.len().to_string()),
-          ]),
-          TerminalLine::plain(format!(
-            "Models: {} | Chains: {} | Residues: {} | Atoms: {} | Bonds: {}",
-            structure.models().len(),
-            structure.chains().len(),
-            structure.residues().len(),
-            structure.atoms().len(),
-            structure.bonds().len()
-          )),
-        ],
+  let report = render_command_outcome(&outcome);
+  let status = match report.status {
+    CommandReportStatus::Succeeded => CommandTerminalStatus::Succeeded,
+    CommandReportStatus::Failed => CommandTerminalStatus::Failed,
+  };
+  let lines = report
+    .lines
+    .into_iter()
+    .map(|line| {
+      TerminalLine::new(
+        line
+          .spans
+          .into_iter()
+          .map(|span| TerminalSpan::new(span.text, terminal_tone(span.tone))),
       )
-    }
+    })
+    .collect();
+  (status, lines)
+}
+
+/// Maps a shared output tone to the command terminal theme.
+fn terminal_tone(tone: CommandOutputTone) -> TerminalTone {
+  match tone {
+    CommandOutputTone::Primary => TerminalTone::Primary,
+    CommandOutputTone::Secondary => TerminalTone::Secondary,
+    CommandOutputTone::Heading => TerminalTone::Accent,
+    CommandOutputTone::Success => TerminalTone::Success,
+    CommandOutputTone::Warning => TerminalTone::Warning,
+    CommandOutputTone::Error => TerminalTone::Error,
   }
 }
 
@@ -168,4 +146,24 @@ pub(super) fn shell_terminal_status(
       ShellExecutionStatus::Succeeded => CommandTerminalStatus::Succeeded,
       ShellExecutionStatus::Running | ShellExecutionStatus::Cancelling => CommandTerminalStatus::Failed,
     })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn terminal_adapter_should_preserve_shared_report_text() {
+    let outcome = CommandOutcome::DatabaseDownload { artifact_count: 2 };
+    let expected = render_command_outcome(&outcome).plain_text();
+
+    let (_, lines) = terminal_outcome(outcome);
+    let actual = lines
+      .iter()
+      .map(|line| line.spans().iter().map(|span| span.text.as_ref()).collect::<String>())
+      .collect::<Vec<_>>()
+      .join("\n");
+
+    assert_eq!(actual, expected);
+  }
 }

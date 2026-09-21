@@ -5,12 +5,12 @@ use std::{
   sync::{Arc, Mutex, MutexGuard},
 };
 
+use crate::grammar::{BuiltinCommandLine, ShellBuiltin, parse_builtin_command_line};
 use chitin_command::{
   ChitinCommand, CommandEventSink, CommandExecutionContext, CommandExecutionDomain, CommandExecutionEvent, CommandId,
   CommandMessage, CommandProgress,
 };
-use chitin_command_line::{BuiltinCommandLine, ShellBuiltin, parse_builtin_command_line};
-use chitin_command_runtime::{CommandExecutionError, CommandExecutor, CommandOutcome};
+use chitin_command::{CommandExecutionError, CommandExecutor, CommandOutcome};
 use chitin_databases::{CancellationToken, PersistedArtifact};
 
 use crate::{ShellEvent, ShellEventSink};
@@ -221,7 +221,7 @@ pub struct ShellExecutionResult {
 pub enum BuiltinShellError {
   /// The submitted command line is syntactically or semantically invalid.
   #[error(transparent)]
-  Parse(#[from] chitin_command_line::CommandLineParseError),
+  Parse(#[from] crate::grammar::CommandLineParseError),
   /// A caller requiring execution received display-only help text.
   #[error("shell line produced display output instead of an executable command")]
   DisplayOnly {
@@ -714,7 +714,7 @@ impl BuiltinShell {
   /// Completion is derived from the built-in grammar alone and never reads
   /// session state, so it stays an associated function rather than a method.
   pub fn complete(input: &str) -> Vec<String> {
-    chitin_command_line::complete_builtin_shell_line(input)
+    crate::grammar::complete_builtin_shell_line(input)
   }
 
   /// Returns a presentation-safe copy of the current session state.

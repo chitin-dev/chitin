@@ -3,10 +3,9 @@
 use std::{io::Read, path::PathBuf};
 
 use chitin_command::{
-  CommandExecutionContext, DatabaseCommand, PortableCommand, RcsbDownloadArguments, StructureCommand,
+  CommandExecutionContext, CommandExecutor, CommandReportStatus, DatabaseCommand, PortableCommand, PortableCommandArgs,
+  RcsbDownloadArguments, StructureCommand,
 };
-use chitin_command_line::PortableCommandArgs;
-use chitin_command_runtime::CommandExecutor;
 use chitin_databases::ClientConfig;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
@@ -40,18 +39,18 @@ pub(crate) enum CliCommand {
 ///
 /// # Returns
 ///
-/// Returns `Ok(())` after execution or completion generation finishes.
+/// The report status after execution or completion generation finishes.
 ///
 /// # Errors
 ///
 /// Returns [`CliError`] when typed conversion, execution, or output rendering
 /// fails.
-pub(crate) async fn dispatch(command: CliCommand) -> Result<(), CliError> {
+pub(crate) async fn dispatch(command: CliCommand) -> Result<CommandReportStatus, CliError> {
   match command {
     CliCommand::Completions { shell } => {
       let mut command = Cli::command();
       generate(shell, &mut command, "chitin", &mut std::io::stdout());
-      Ok(())
+      Ok(CommandReportStatus::Succeeded)
     }
     CliCommand::Portable(arguments) => dispatch_command(arguments.into_command()?).await,
   }
@@ -65,17 +64,17 @@ pub(crate) async fn dispatch(command: CliCommand) -> Result<(), CliError> {
 ///
 /// # Returns
 ///
-/// Returns `Ok(())` after execution and frontend-specific rendering complete.
+/// The rendered command's domain-level completion status.
 ///
 /// # Errors
 ///
 /// Returns [`CliError`] when process context, command execution, or output
 /// rendering fails.
-async fn dispatch_command(command: PortableCommand) -> Result<(), CliError> {
+async fn dispatch_command(command: PortableCommand) -> Result<CommandReportStatus, CliError> {
   let context = execution_context(&command)?;
   let executor = CommandExecutor::new(ClientConfig::default());
   let outcome = executor.execute(command, context, terminal_event_sink()).await?;
-  crate::structure::render_outcome(outcome)
+  Ok(crate::structure::render_outcome(&outcome))
 }
 
 /// Builds frontend-neutral execution context from the current process state.

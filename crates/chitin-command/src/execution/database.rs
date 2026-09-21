@@ -2,8 +2,8 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use chitin_command::{
-  CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandMessage, CommandMessageLevel,
+use crate::{
+  CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandId, CommandMessage, CommandMessageLevel,
   CommandProgress, DatabaseCommand, RcsbDownloadArguments,
 };
 use chitin_databases::{
@@ -11,7 +11,7 @@ use chitin_databases::{
   providers::rcsb::{RcsbBatchDownloadEvent, RcsbBatchDownloadRequest},
 };
 
-use crate::{CommandExecutionError, CommandOutcome};
+use super::{CommandExecutionError, CommandOutcome};
 
 /// Executes a portable database command through the shared provider client.
 ///
@@ -75,7 +75,7 @@ pub fn resolve_rcsb_download_paths(
           .default_download_root
           .as_ref()
           .ok_or(CommandExecutionError::MissingDownloadRoot {
-            command_id: chitin_command::CommandId::DatabaseDownloadRcsbStructure,
+            command_id: CommandId::DatabaseDownloadRcsbStructure,
           })
           .map(|root| resolve_from_working_directory(root, &context.working_directory))?
           .join(arguments.format.id())

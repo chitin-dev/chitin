@@ -5,7 +5,7 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
-use chitin_command_runtime::CommandExecutor;
+use chitin_command::CommandExecutor;
 use chitin_databases::ClientConfig;
 use chitin_ui::{
   composite::{
