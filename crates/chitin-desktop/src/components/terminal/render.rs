@@ -119,22 +119,16 @@ pub(crate) fn render_terminal_bottom_dock(
         .flex_row()
         .flex_1()
         .min_h_0()
-        .child(
-          div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w_0()
-            .min_h_0()
-            .p(px(8.0))
-            .when_some(active_terminal, |terminal, active_terminal| {
-              terminal.child(
-                TerminalEmulator::new(active_terminal)
-                  .theme(theme)
-                  .font_family(TERMINAL_FONT_FAMILY),
-              )
-            }),
-        )
+        .child(div().flex().flex_col().flex_1().min_w_0().min_h_0().p_2().when_some(
+          active_terminal,
+          |terminal, active_terminal| {
+            terminal.child(
+              TerminalEmulator::new(active_terminal)
+                .theme(theme)
+                .font_family(TERMINAL_FONT_FAMILY),
+            )
+          },
+        ))
         .child(sessions),
     );
 
