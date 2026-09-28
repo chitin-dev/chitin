@@ -260,6 +260,11 @@ impl SelectInputState {
     true
   }
 
+  /// Clears the current selection without changing the available options.
+  pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+    self.set_selected_id(None, cx);
+  }
+
   /// Updates selector availability, closing the popup and emitting semantic events when it changes.
   pub fn set_disabled(&mut self, disabled: bool, cx: &mut Context<Self>) {
     if self.disabled == disabled {

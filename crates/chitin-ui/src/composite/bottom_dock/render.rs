@@ -66,6 +66,7 @@ pub struct BottomDock {
   height: Pixels,
   theme: UIThemes,
   resize: Option<BottomDockResizeConfig>,
+  header_actions: Option<AnyElement>,
   child: Option<AnyElement>,
 }
 
@@ -78,6 +79,7 @@ impl BottomDock {
       height: super::DEFAULT_BOTTOM_DOCK_HEIGHT,
       theme: builtins::dark(),
       resize: None,
+      header_actions: None,
       child: None,
     }
   }
@@ -97,6 +99,12 @@ impl BottomDock {
   /// Enables top-edge resizing with the supplied callback configuration.
   pub fn resizable(mut self, resize: BottomDockResizeConfig) -> Self {
     self.resize = Some(resize);
+    self
+  }
+
+  /// Adds tool-specific controls before the dock's close button.
+  pub fn header_actions(mut self, actions: impl IntoElement) -> Self {
+    self.header_actions = Some(actions.into_any_element());
     self
   }
 
@@ -143,17 +151,26 @@ impl RenderOnce for BottomDock {
               .child(self.title),
           )
           .child(
-            Button::new(self.close)
-              .theme(theme)
-              .variant(ButtonVariant::Transparent)
-              .size(ButtonSize::Small)
-              .style(
-                ButtonStyle::new()
-                  .width(px(26.0))
-                  .height(px(24.0))
-                  .horizontal_padding(px(0.0)),
-              )
-              .child(Icon::new("icons/window-close.svg").size(px(14.0)).theme(theme)),
+            div()
+              .flex()
+              .items_center()
+              .gap_1()
+              .when_some(self.header_actions, |actions, header_actions| {
+                actions.child(header_actions)
+              })
+              .child(
+                Button::new(self.close)
+                  .theme(theme)
+                  .variant(ButtonVariant::Transparent)
+                  .size(ButtonSize::Small)
+                  .style(
+                    ButtonStyle::new()
+                      .width(px(26.0))
+                      .height(px(24.0))
+                      .horizontal_padding(px(0.0)),
+                  )
+                  .child(Icon::new("icons/window-close.svg").size(px(14.0)).theme(theme)),
+              ),
           ),
       )
       .when_some(self.child, |dock, child| dock.child(child))
