@@ -10,8 +10,8 @@ use chitin_ui::{
 };
 use gpui::{Entity, InteractiveElement, ParentElement, Pixels, Styled, WeakEntity, div};
 
-use super::{TERMINAL_FONT_FAMILY, TerminalPanelControls};
-use crate::{app::ChitinApp, keybindings::COMMAND_TERMINAL_KEY_CONTEXT};
+use super::TerminalPanelControls;
+use crate::{app::ChitinApp, fonts::TERMINAL_FONT_FAMILY, keybindings::COMMAND_TERMINAL_KEY_CONTEXT};
 
 /// Renders the command terminal as the active bottom-dock item.
 ///

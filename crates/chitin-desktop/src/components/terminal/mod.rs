@@ -19,7 +19,6 @@ use crate::app::ChitinApp;
 pub(crate) use render::render_terminal_bottom_dock;
 
 pub(crate) const TERMINAL_DOCK_ITEM_ID: &str = "terminal";
-pub(super) const TERMINAL_FONT_FAMILY: &str = "Cascadia Code";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TerminalShellBinding {
