@@ -7,17 +7,52 @@ use std::collections::VecDeque;
 pub enum TerminalProfile {
   /// Chitin's structured command language and application command executor.
   BuiltinShell,
-  /// The operating system's interactive shell attached to a native PTY.
+  /// The operating system's default interactive shell attached to a native PTY.
   SystemShell,
+  /// An explicit interactive Bash process attached to a native PTY.
+  Bash,
+  /// An explicit interactive Fish process attached to a native PTY.
+  Fish,
 }
 
 impl TerminalProfile {
+  /// Profiles offered by the desktop terminal selector, in display order.
+  pub const ALL: [Self; 4] = [Self::BuiltinShell, Self::SystemShell, Self::Bash, Self::Fish];
+
+  /// Returns the stable selector identifier for this profile.
+  pub const fn id(self) -> &'static str {
+    match self {
+      Self::BuiltinShell => "builtin-shell",
+      Self::SystemShell => "system-shell",
+      Self::Bash => "bash",
+      Self::Fish => "fish",
+    }
+  }
+
   /// Returns the user-facing profile name.
   pub const fn label(self) -> &'static str {
     match self {
       Self::BuiltinShell => "Built-in shell",
-      Self::SystemShell => "System shell",
+      Self::SystemShell => "Default shell",
+      Self::Bash => "Bash",
+      Self::Fish => "Fish",
     }
+  }
+
+  /// Resolves a selector identifier to its terminal profile.
+  pub fn from_id(id: &str) -> Option<Self> {
+    match id {
+      "builtin-shell" => Some(Self::BuiltinShell),
+      "system-shell" => Some(Self::SystemShell),
+      "bash" => Some(Self::Bash),
+      "fish" => Some(Self::Fish),
+      _ => None,
+    }
+  }
+
+  /// Reports whether this profile requires an operating-system pseudo-terminal.
+  pub const fn is_system_shell(self) -> bool {
+    !matches!(self, Self::BuiltinShell)
   }
 }
 
@@ -325,6 +360,15 @@ impl TerminalBuffer {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn terminal_profiles_distinguish_in_process_and_native_shells() {
+    assert!(!TerminalProfile::BuiltinShell.is_system_shell());
+    assert!(TerminalProfile::SystemShell.is_system_shell());
+    assert!(TerminalProfile::Bash.is_system_shell());
+    assert!(TerminalProfile::Fish.is_system_shell());
+    assert_eq!(TerminalProfile::SystemShell.label(), "Default shell");
+  }
 
   #[test]
   fn buffer_should_preserve_profile_and_command_lifecycle() {

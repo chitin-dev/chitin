@@ -158,7 +158,41 @@ impl TerminalSession {
     command.cwd(working_directory.as_ref());
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
-    Self::spawn(command, size)
+    Self::spawn_with_profile(command, TerminalProfile::SystemShell, size)
+  }
+
+  /// Spawns a selected operating-system shell profile.
+  ///
+  /// # Parameters
+  ///
+  /// * `profile` selects the default shell, Bash, or Fish.
+  /// * `working_directory` is the initial directory for the child shell.
+  /// * `size` is the initial character-grid and cell-pixel size.
+  ///
+  /// # Returns
+  ///
+  /// A live PTY session tagged with the selected profile. The built-in profile
+  /// is rejected because it requires an in-process program endpoint.
+  pub fn spawn_system_shell(
+    profile: TerminalProfile,
+    working_directory: impl AsRef<Path>,
+    size: TerminalSize,
+  ) -> Result<Self, TerminalSessionError> {
+    let mut command = match profile {
+      TerminalProfile::SystemShell => CommandBuilder::new_default_prog(),
+      TerminalProfile::Bash => CommandBuilder::new("bash"),
+      TerminalProfile::Fish => CommandBuilder::new("fish"),
+      TerminalProfile::BuiltinShell => {
+        return Err(TerminalSessionError::Pty {
+          operation: "spawn system shell profile",
+          message: "the built-in shell uses an in-process terminal program".into(),
+        });
+      }
+    };
+    command.cwd(working_directory.as_ref());
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    Self::spawn_with_profile(command, profile, size)
   }
 
   /// Spawns a command attached to a native pseudo-terminal.
@@ -172,6 +206,15 @@ impl TerminalSession {
   ///
   /// A live PTY session and VT terminal state.
   pub fn spawn(command: CommandBuilder, size: TerminalSize) -> Result<Self, TerminalSessionError> {
+    Self::spawn_with_profile(command, TerminalProfile::SystemShell, size)
+  }
+
+  /// Spawns a native PTY command and records its terminal profile.
+  fn spawn_with_profile(
+    command: CommandBuilder,
+    profile: TerminalProfile,
+    size: TerminalSize,
+  ) -> Result<Self, TerminalSessionError> {
     let pty_system = native_pty_system();
     let pair = pty_system
       .openpty(size.pty_size())
@@ -206,7 +249,7 @@ impl TerminalSession {
     spawn_wait_thread(&event_sender, child)?;
 
     Ok(Self {
-      profile: TerminalProfile::SystemShell,
+      profile,
       terminal,
       writer,
       backend: TerminalBackend::NativePty {
