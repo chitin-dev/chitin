@@ -43,6 +43,12 @@ impl ChitinApp {
 
   /// Closes whichever tool is active in the bottom dock.
   pub(crate) fn close_bottom_dock(&mut self, cx: &mut Context<Self>) {
+    if self.bottom_dock.is_active(super::terminal::TERMINAL_DOCK_ITEM_ID) {
+      if let Err(error) = self.builtin_shell().cancel_active() {
+        log::warn!("failed to cancel active built-in terminal command: {error}");
+      }
+      self.terminal_panel_controls = None;
+    }
     self.bottom_dock.close();
     self.terminal_panel.request_focus(false);
     cx.notify();

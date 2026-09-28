@@ -2,14 +2,25 @@
 
 use chitin_ui::{
   composite::bottom_dock::{BottomDock, BottomDockResizeConfig},
-  primitive::button::ButtonState,
-  primitive::terminal::TerminalEmulator,
-  themes::UIThemes,
+  primitive::{
+    button::{Button, ButtonSize, ButtonState, ButtonStyle, ButtonVariant},
+    icon::Icon,
+    input::select::{
+      Select, SelectContent, SelectContentPosition, SelectGroup, SelectInputSize, SelectInputStyle, SelectInputVariant,
+      SelectItem, SelectTrigger, SelectValue,
+    },
+    terminal::TerminalEmulator,
+  },
+  themes::{UIThemes, builtins},
 };
-use gpui::{Entity, InteractiveElement, ParentElement, Pixels, Styled, WeakEntity, div};
+use gpui::{
+  Entity, InteractiveElement, ParentElement, Pixels, StatefulInteractiveElement, Styled, WeakEntity, div,
+  prelude::FluentBuilder, px,
+};
 
-use super::TerminalPanelControls;
+use super::{TerminalPanelControls, terminal_profile_icon};
 use crate::{app::ChitinApp, fonts::TERMINAL_FONT_FAMILY, keybindings::COMMAND_TERMINAL_KEY_CONTEXT};
+use chitin_terminal::TerminalProfile;
 
 /// Renders the VT terminal emulator as the active bottom-dock item.
 ///
@@ -34,6 +45,68 @@ pub(crate) fn render_terminal_bottom_dock(
   let resize_app = app.clone();
   let resize_move_app = app.clone();
   let resize_end_app = app.clone();
+  let active_terminal = controls.active().map(|session| session.terminal.clone());
+  let sessions = controls.sessions.iter().fold(
+    div()
+      .flex()
+      .flex_col()
+      .gap_1()
+      .w(px(38.0))
+      .min_h_0()
+      .p_1()
+      .border_l_1()
+      .border_color(theme.border.muted)
+      .overflow_y_scroll(),
+    |sessions, session| {
+      let selected = session.id == controls.active_session;
+      sessions.child(
+        Button::new(session.tab.clone())
+          .size(ButtonSize::Small)
+          .variant(ButtonVariant::Transparent)
+          .style(
+            ButtonStyle::new()
+              .width(px(28.0))
+              .height(px(28.0))
+              .horizontal_padding(px(0.0))
+              .background(if selected {
+                theme.background.selection
+              } else {
+                builtins::TRANSPARENT
+              }),
+          )
+          .theme(theme)
+          .child(
+            Icon::new(terminal_profile_icon(session.profile))
+              .size(px(14.0))
+              .color(if selected {
+                theme.text.primary
+              } else {
+                theme.text.secondary
+              })
+              .hover_color(theme.text.primary)
+              .theme(theme),
+          ),
+      )
+    },
+  );
+  let header_actions = div()
+    .flex()
+    .items_center()
+    .gap_1()
+    .child(new_terminal_select(controls.profile_select.clone(), theme))
+    .child(
+      Button::new(controls.close_session.clone())
+        .size(ButtonSize::Small)
+        .variant(ButtonVariant::Transparent)
+        .style(
+          ButtonStyle::new()
+            .width(px(26.0))
+            .height(px(24.0))
+            .horizontal_padding(px(0.0)),
+        )
+        .theme(theme)
+        .child(Icon::new("icons/terminal-trash.svg").size(px(14.0)).theme(theme)),
+    );
   let terminal = div()
     .flex()
     .flex_col()
@@ -41,14 +114,34 @@ pub(crate) fn render_terminal_bottom_dock(
     .min_h_0()
     .key_context(COMMAND_TERMINAL_KEY_CONTEXT)
     .child(
-      TerminalEmulator::new(controls.terminal)
-        .theme(theme)
-        .font_family(TERMINAL_FONT_FAMILY),
+      div()
+        .flex()
+        .flex_row()
+        .flex_1()
+        .min_h_0()
+        .child(
+          div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .p(px(8.0))
+            .when_some(active_terminal, |terminal, active_terminal| {
+              terminal.child(
+                TerminalEmulator::new(active_terminal)
+                  .theme(theme)
+                  .font_family(TERMINAL_FONT_FAMILY),
+              )
+            }),
+        )
+        .child(sessions),
     );
 
   BottomDock::new("TERMINAL", close)
     .height(height)
     .theme(theme)
+    .header_actions(header_actions)
     .resizable(
       BottomDockResizeConfig::new(move |start_y, _, cx| {
         let _ = resize_app.update(cx, |this, cx| {
@@ -73,4 +166,39 @@ pub(crate) fn render_terminal_bottom_dock(
       }),
     )
     .child(terminal)
+}
+
+/// Builds the icon-only selector used to create a terminal profile session.
+fn new_terminal_select(
+  profile_select: Entity<chitin_ui::primitive::input::select::SelectInputState>,
+  theme: UIThemes,
+) -> impl gpui::IntoElement {
+  let group = TerminalProfile::ALL
+    .into_iter()
+    .fold(SelectGroup::new(), |group, profile| {
+      group.item(SelectItem::new(profile.id(), profile.label()).icon(terminal_profile_icon(profile)))
+    });
+  Select::new(profile_select)
+    .trigger(
+      SelectTrigger::new()
+        .value(SelectValue::new().placeholder(""))
+        .icon("icons/terminal-add.svg")
+        .show_indicator(false),
+    )
+    .content(
+      SelectContent::new()
+        .position(SelectContentPosition::Popper)
+        .align_end()
+        .group(group),
+    )
+    .variant(SelectInputVariant::Transparent)
+    .size(SelectInputSize::Small)
+    .style(
+      SelectInputStyle::new()
+        .width(px(28.0))
+        .trigger_padding_x(px(6.0))
+        .trigger_icon_size(px(16.0))
+        .menu_width(px(180.0)),
+    )
+    .theme(theme)
 }

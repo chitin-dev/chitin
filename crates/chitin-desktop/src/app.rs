@@ -495,8 +495,8 @@ impl Render for ChitinApp {
     }
     if self.terminal_panel.take_focus_request()
       && let Some((controls, _)) = terminal_dock_controls.as_ref()
+      && let Some(focus) = controls.focus(cx)
     {
-      let focus = controls.focus(cx);
       window.focus(&focus, cx);
     }
     let app = cx.weak_entity();
