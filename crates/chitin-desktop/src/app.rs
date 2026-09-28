@@ -483,19 +483,20 @@ impl Render for ChitinApp {
     let toast_viewport = self.toast_viewport(cx);
     let command_panel_search_input = self.command_panel_search_input(window, cx);
     self.command_panel_rcsb_form(window, cx);
-    let terminal_dock_controls = self.bottom_dock.is_active(TERMINAL_DOCK_ITEM_ID).then(|| {
-      (
-        self.terminal_panel_controls(window, cx),
-        self.bottom_dock_controls(window, cx),
-      )
-    });
+    let terminal_dock_controls = if self.bottom_dock.is_active(TERMINAL_DOCK_ITEM_ID) {
+      self
+        .terminal_panel_controls(window, cx)
+        .map(|controls| (controls, self.bottom_dock_controls(window, cx)))
+    } else {
+      None
+    };
     if terminal_dock_controls.is_some() {
-      self.sync_terminal_output(cx);
+      self.sync_terminal_output();
     }
     if self.terminal_panel.take_focus_request()
       && let Some((controls, _)) = terminal_dock_controls.as_ref()
     {
-      let focus = controls.input(cx).read(cx).focus_handle().clone();
+      let focus = controls.focus(cx);
       window.focus(&focus, cx);
     }
     let app = cx.weak_entity();

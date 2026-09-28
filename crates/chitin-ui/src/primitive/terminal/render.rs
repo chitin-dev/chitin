@@ -90,6 +90,19 @@ fn render_line(line: TerminalLine, theme: UIThemes) -> impl IntoElement {
     line
       .spans()
       .iter()
-      .map(|span| div().text_color(span.tone.color(theme)).child(span.text.clone())),
+      .map(|span| div().text_color(tone_color(span.tone, theme)).child(span.text.clone())),
   )
+}
+
+/// Resolves a frontend-independent terminal tone through the active UI theme.
+fn tone_color(tone: super::TerminalTone, theme: UIThemes) -> gpui::Rgba {
+  match tone {
+    super::TerminalTone::Primary => theme.text.primary,
+    super::TerminalTone::Secondary => theme.text.secondary,
+    super::TerminalTone::Accent => theme.accent.primary,
+    super::TerminalTone::Success => theme.text.success,
+    super::TerminalTone::Warning => theme.text.warning,
+    super::TerminalTone::Error => theme.text.error,
+    super::TerminalTone::Info => theme.text.info,
+  }
 }

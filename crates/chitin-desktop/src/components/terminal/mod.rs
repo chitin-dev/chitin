@@ -5,13 +5,14 @@ mod controller;
 mod presenter;
 mod render;
 
-use std::path::Path;
-
-use chitin_builtin_shell::ShellCommandId;
-use chitin_ui::{
-  composite::command_terminal::{CommandTerminalId, CommandTerminalState},
-  primitive::input::text::{TextInputEvent, TextInputState},
+use std::{
+  path::Path,
+  sync::{Arc, Mutex},
 };
+
+use chitin_builtin_shell::{BuiltinTerminalProgram, ShellCommandId};
+use chitin_terminal::{TerminalSessionError, TerminalSize};
+use chitin_ui::primitive::terminal::{TerminalEmulatorEvent, TerminalEmulatorState};
 use gpui::{AppContext, Context, Entity, Subscription, Window};
 
 use crate::app::ChitinApp;
@@ -20,16 +21,11 @@ pub(crate) use render::render_terminal_bottom_dock;
 
 pub(crate) const TERMINAL_DOCK_ITEM_ID: &str = "terminal";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct TerminalShellBinding {
-  pub(super) shell_id: ShellCommandId,
-  pub(super) terminal_id: CommandTerminalId,
-}
-
-/// Terminal focus and shell-to-view identity mapping.
+/// Terminal focus and active built-in-shell command state.
 pub(crate) struct TerminalPanelState {
   focus_requested: bool,
-  pub(super) bindings: Vec<TerminalShellBinding>,
+  pub(super) active_shell_command: Option<ShellCommandId>,
+  pub(super) rendered_running_output: String,
 }
 
 impl TerminalPanelState {
@@ -37,7 +33,8 @@ impl TerminalPanelState {
   pub(crate) fn new() -> Self {
     Self {
       focus_requested: false,
-      bindings: Vec::new(),
+      active_shell_command: None,
+      rendered_running_output: String::new(),
     }
   }
 
@@ -51,14 +48,16 @@ impl TerminalPanelState {
     std::mem::take(&mut self.focus_requested)
   }
 
-  /// Associates one shell execution with its visible command block.
-  pub(super) fn bind(&mut self, shell_id: ShellCommandId, terminal_id: CommandTerminalId) {
-    self.bindings.push(TerminalShellBinding { shell_id, terminal_id });
+  /// Tracks the portable shell command currently writing terminal output.
+  pub(super) fn start_command(&mut self, command_id: ShellCommandId) {
+    self.active_shell_command = Some(command_id);
+    self.rendered_running_output.clear();
   }
 
-  /// Removes view bindings for command blocks cleared from scrollback.
-  pub(super) fn clear_bindings(&mut self) {
-    self.bindings.clear();
+  /// Clears the active output projection after its command reaches a terminal state.
+  pub(super) fn finish_command(&mut self) {
+    self.active_shell_command = None;
+    self.rendered_running_output.clear();
   }
 }
 
@@ -71,32 +70,36 @@ impl Default for TerminalPanelState {
 /// Persistent primitive and composite controls for the bottom terminal panel.
 #[derive(Clone)]
 pub(crate) struct TerminalPanelControls {
-  pub(super) terminal: Entity<CommandTerminalState>,
+  pub(super) terminal: Entity<TerminalEmulatorState>,
+  pub(super) program: Arc<Mutex<BuiltinTerminalProgram>>,
 }
 
 impl TerminalPanelControls {
   /// Creates terminal state and panel controls for one working directory.
-  fn new(working_directory: &Path, cx: &mut Context<ChitinApp>) -> Self {
-    let prompt = presenter::terminal_prompt(working_directory);
-    Self {
-      terminal: cx.new(|cx| CommandTerminalState::new(prompt, cx)),
-    }
+  fn new(working_directory: &Path, cx: &mut Context<ChitinApp>) -> Result<Self, TerminalSessionError> {
+    let prompt = presenter::terminal_prompt_ansi(working_directory);
+    let size = TerminalSize::new(80, 24, 9, 21);
+    let (session, program) = BuiltinTerminalProgram::connect(size, prompt)?;
+    Ok(Self {
+      terminal: cx.new(|cx| TerminalEmulatorState::new(session, size, cx)),
+      program: Arc::new(Mutex::new(program)),
+    })
   }
 
   /// Connects primitive semantic events to the desktop shell adapter.
   fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
-    let input = self.input(cx);
-    let input_subscription: Subscription = cx.subscribe_in(&input, window, |this, _, event, window, cx| match event {
-      TextInputEvent::Submit { value } => this.submit_terminal_line(value.to_string(), window, cx),
-      TextInputEvent::Cancel => this.close_terminal(cx),
-      _ => {}
+    let terminal = self.terminal.clone();
+    let subscription: Subscription = cx.subscribe_in(&terminal, window, |this, _, event, window, cx| {
+      if *event == TerminalEmulatorEvent::InputWritten {
+        this.process_builtin_terminal_input(window, cx);
+      }
     });
-    input_subscription.detach();
+    subscription.detach();
   }
 
-  /// Returns the live prompt's editable input.
-  pub(crate) fn input(&self, cx: &gpui::App) -> Entity<TextInputState> {
-    self.terminal.read(cx).input().clone()
+  /// Returns the focus handle owned by the VT terminal surface.
+  pub(crate) fn focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    self.terminal.read(cx).focus_handle().clone()
   }
 }
 
@@ -106,9 +109,9 @@ impl ChitinApp {
     &mut self,
     window: &mut Window,
     cx: &mut Context<Self>,
-  ) -> TerminalPanelControls {
+  ) -> Option<TerminalPanelControls> {
     if let Some(controls) = self.terminal_panel_controls.as_ref() {
-      return controls.clone();
+      return Some(controls.clone());
     }
 
     let working_directory = self
@@ -116,10 +119,16 @@ impl ChitinApp {
       .snapshot()
       .map(|snapshot| snapshot.working_directory)
       .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let controls = TerminalPanelControls::new(&working_directory, cx);
+    let controls = match TerminalPanelControls::new(&working_directory, cx) {
+      Ok(controls) => controls,
+      Err(error) => {
+        log::error!("failed to create built-in terminal: {error}");
+        return None;
+      }
+    };
     controls.subscribe(window, cx);
     self.terminal_panel_controls = Some(controls.clone());
-    controls
+    Some(controls)
   }
 
   /// Shows or hides the bottom terminal panel.
@@ -127,10 +136,5 @@ impl ChitinApp {
     let visible = self.bottom_dock.toggle(TERMINAL_DOCK_ITEM_ID);
     self.terminal_panel.request_focus(visible);
     cx.notify();
-  }
-
-  /// Hides the bottom terminal panel.
-  fn close_terminal(&mut self, cx: &mut Context<Self>) {
-    self.close_bottom_dock(cx);
   }
 }

@@ -87,7 +87,7 @@ fn render_live_prompt(
       prompt
         .spans()
         .iter()
-        .map(|span| div().text_color(span.tone.color(theme)).child(span.text.clone())),
+        .map(|span| div().text_color(tone_color(span.tone, theme)).child(span.text.clone())),
     )
     .child(
       TextInput::new(input)
@@ -103,4 +103,17 @@ fn render_live_prompt(
         )
         .full_width(true),
     )
+}
+
+/// Resolves a frontend-independent terminal tone through the active UI theme.
+fn tone_color(tone: chitin_terminal::TerminalTone, theme: UIThemes) -> gpui::Rgba {
+  match tone {
+    chitin_terminal::TerminalTone::Primary => theme.text.primary,
+    chitin_terminal::TerminalTone::Secondary => theme.text.secondary,
+    chitin_terminal::TerminalTone::Accent => theme.accent.primary,
+    chitin_terminal::TerminalTone::Success => theme.text.success,
+    chitin_terminal::TerminalTone::Warning => theme.text.warning,
+    chitin_terminal::TerminalTone::Error => theme.text.error,
+    chitin_terminal::TerminalTone::Info => theme.text.info,
+  }
 }

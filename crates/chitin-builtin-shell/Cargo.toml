@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 chitin-command = { path = "../chitin-command" }
 chitin-databases = { path = "../chitin-databases" }
+chitin-terminal = { path = "../chitin-terminal" }
 clap = { version = "4.6", features = ["derive"] }
 thiserror = "2.0"
 

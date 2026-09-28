@@ -19,10 +19,22 @@ use alacritty_terminal::{
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, native_pty_system};
 use thiserror::Error;
 
-use crate::{TerminalSize, TerminalSnapshot};
+use crate::{TerminalProfile, TerminalSize, TerminalSnapshot};
 
 type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type SharedTerminal = Arc<FairMutex<Term<TerminalEventProxy>>>;
+type SharedProcessor = Arc<Mutex<ansi::Processor<ansi::StdSyncHandler>>>;
+
+/// Input sent from a terminal emulator to an in-process terminal program.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TerminalProgramInput {
+  /// Keyboard, paste, or terminal-response bytes.
+  Bytes(Vec<u8>),
+  /// Updated character-grid and cell-pixel dimensions.
+  Resize(TerminalSize),
+  /// The owning terminal session is shutting down.
+  Shutdown,
+}
 
 /// A state change emitted by a native terminal session.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,16 +58,83 @@ pub enum TerminalSessionError {
   Pty { operation: &'static str, message: String },
   #[error("terminal writer lock is poisoned")]
   WriterPoisoned,
+  #[error("terminal output parser lock is poisoned")]
+  ParserPoisoned,
+  #[error("in-process terminal program is disconnected")]
+  ProgramDisconnected,
   #[error("failed to write terminal input: {0}")]
   Write(#[from] std::io::Error),
 }
 
-/// Owns a native PTY child and its frontend-independent VT terminal state.
+/// Output side of an in-process program connected to a VT terminal emulator.
+#[derive(Clone)]
+pub struct TerminalProgramOutput {
+  terminal: SharedTerminal,
+  processor: SharedProcessor,
+  events: mpsc::Sender<TerminalEvent>,
+  render_pending: Arc<AtomicBool>,
+}
+
+impl TerminalProgramOutput {
+  /// Parses program output as ANSI/VT bytes and schedules a terminal repaint.
+  pub fn write(&self, bytes: &[u8]) -> Result<(), TerminalSessionError> {
+    let mut processor = self
+      .processor
+      .lock()
+      .map_err(|_| TerminalSessionError::ParserPoisoned)?;
+    processor.advance(&mut *self.terminal.lock(), bytes);
+    send_render_event(&self.events, &self.render_pending);
+    Ok(())
+  }
+}
+
+/// Program-facing endpoint paired with an in-process terminal session.
+pub struct TerminalProgram {
+  input: Mutex<mpsc::Receiver<TerminalProgramInput>>,
+  output: TerminalProgramOutput,
+}
+
+impl TerminalProgram {
+  /// Returns a cloneable handle for writing ANSI/VT output to the emulator.
+  pub fn output(&self) -> TerminalProgramOutput {
+    self.output.clone()
+  }
+
+  /// Drains input currently waiting for the in-process program.
+  pub fn drain_input(&self) -> Result<Vec<TerminalProgramInput>, TerminalSessionError> {
+    let receiver = self
+      .input
+      .lock()
+      .map_err(|_| TerminalSessionError::ProgramDisconnected)?;
+    Ok(receiver.try_iter().collect())
+  }
+
+  /// Waits for the next input event from the terminal emulator.
+  pub fn recv(&self) -> Result<TerminalProgramInput, TerminalSessionError> {
+    let receiver = self
+      .input
+      .lock()
+      .map_err(|_| TerminalSessionError::ProgramDisconnected)?;
+    receiver.recv().map_err(|_| TerminalSessionError::ProgramDisconnected)
+  }
+}
+
+enum TerminalBackend {
+  NativePty {
+    master: Box<dyn MasterPty + Send>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+  },
+  InProcess {
+    input: mpsc::Sender<TerminalProgramInput>,
+  },
+}
+
+/// Owns one terminal backend and its frontend-independent VT terminal state.
 pub struct TerminalSession {
+  profile: TerminalProfile,
   terminal: SharedTerminal,
   writer: SharedWriter,
-  master: Box<dyn MasterPty + Send>,
-  killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+  backend: TerminalBackend,
   events: Mutex<mpsc::Receiver<TerminalEvent>>,
   render_pending: Arc<AtomicBool>,
 }
@@ -127,13 +206,65 @@ impl TerminalSession {
     spawn_wait_thread(&event_sender, child)?;
 
     Ok(Self {
+      profile: TerminalProfile::SystemShell,
       terminal,
       writer,
-      master: pair.master,
-      killer: Mutex::new(killer),
+      backend: TerminalBackend::NativePty {
+        master: pair.master,
+        killer: Mutex::new(killer),
+      },
       events: Mutex::new(event_receiver),
       render_pending,
     })
+  }
+
+  /// Creates a VT terminal connected to an in-process program endpoint.
+  ///
+  /// # Parameters
+  ///
+  /// * `profile` identifies the program hosted by the terminal surface.
+  /// * `size` supplies the initial character-grid and cell-pixel dimensions.
+  ///
+  /// # Returns
+  ///
+  /// A terminal session for the frontend and a program endpoint that receives
+  /// input bytes and writes ANSI/VT output.
+  pub fn in_process(profile: TerminalProfile, size: TerminalSize) -> (Self, TerminalProgram) {
+    let (input_sender, input_receiver) = mpsc::channel();
+    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(ProgramInputWriter {
+      sender: input_sender.clone(),
+    })));
+    let (event_sender, event_receiver) = mpsc::channel();
+    let render_pending = Arc::new(AtomicBool::new(false));
+    let proxy = TerminalEventProxy {
+      sender: event_sender.clone(),
+      writer: Arc::clone(&writer),
+      render_pending: Arc::clone(&render_pending),
+    };
+    let terminal = Arc::new(FairMutex::new(Term::new(Config::default(), &size, proxy)));
+    let program = TerminalProgram {
+      input: Mutex::new(input_receiver),
+      output: TerminalProgramOutput {
+        terminal: Arc::clone(&terminal),
+        processor: Arc::new(Mutex::new(ansi::Processor::<ansi::StdSyncHandler>::new())),
+        events: event_sender,
+        render_pending: Arc::clone(&render_pending),
+      },
+    };
+    let session = Self {
+      profile,
+      terminal,
+      writer,
+      backend: TerminalBackend::InProcess { input: input_sender },
+      events: Mutex::new(event_receiver),
+      render_pending,
+    };
+    (session, program)
+  }
+
+  /// Returns the profile represented by this terminal backend.
+  pub const fn profile(&self) -> TerminalProfile {
+    self.profile
   }
 
   /// Writes encoded keyboard or paste bytes to the terminal child.
@@ -146,10 +277,14 @@ impl TerminalSession {
 
   /// Updates both the native PTY and the VT screen dimensions.
   pub fn resize(&self, size: TerminalSize) -> Result<(), TerminalSessionError> {
-    self
-      .master
-      .resize(size.pty_size())
-      .map_err(|error| pty_error("resize native pseudo-terminal", error))?;
+    match &self.backend {
+      TerminalBackend::NativePty { master, .. } => master
+        .resize(size.pty_size())
+        .map_err(|error| pty_error("resize native pseudo-terminal", error))?,
+      TerminalBackend::InProcess { input } => input
+        .send(TerminalProgramInput::Resize(size))
+        .map_err(|_| TerminalSessionError::ProgramDisconnected)?,
+    }
     self.terminal.lock().resize(size);
     Ok(())
   }
@@ -173,9 +308,39 @@ impl TerminalSession {
 
 impl Drop for TerminalSession {
   fn drop(&mut self) {
-    if let Ok(killer) = self.killer.get_mut() {
-      let _ = killer.kill();
+    match &mut self.backend {
+      TerminalBackend::NativePty { killer, .. } => {
+        if let Ok(killer) = killer.get_mut() {
+          let _ = killer.kill();
+        }
+      }
+      TerminalBackend::InProcess { input } => {
+        let _ = input.send(TerminalProgramInput::Shutdown);
+      }
     }
+  }
+}
+
+struct ProgramInputWriter {
+  sender: mpsc::Sender<TerminalProgramInput>,
+}
+
+impl Write for ProgramInputWriter {
+  fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+    self
+      .sender
+      .send(TerminalProgramInput::Bytes(buffer.to_vec()))
+      .map_err(|_| {
+        std::io::Error::new(
+          std::io::ErrorKind::BrokenPipe,
+          "in-process terminal program disconnected",
+        )
+      })?;
+    Ok(buffer.len())
+  }
+
+  fn flush(&mut self) -> std::io::Result<()> {
+    Ok(())
   }
 }
 
@@ -311,5 +476,47 @@ mod tests {
       session.snapshot().cell(0, 0).map(|cell| cell.foreground),
       Some(crate::TerminalColor::Named(crate::TerminalNamedColor::Green)),
     );
+  }
+
+  #[test]
+  fn in_process_program_should_receive_terminal_input_bytes() {
+    let (session, program) =
+      TerminalSession::in_process(TerminalProfile::BuiltinShell, TerminalSize::new(40, 4, 8, 16));
+
+    let write_result = session.write(b"help\r");
+    let input = program.recv();
+
+    assert!(write_result.is_ok());
+    assert_eq!(input.ok(), Some(TerminalProgramInput::Bytes(b"help\r".to_vec())));
+  }
+
+  #[test]
+  fn in_process_program_output_should_update_the_shared_vt_snapshot() {
+    let (session, program) =
+      TerminalSession::in_process(TerminalProfile::BuiltinShell, TerminalSize::new(40, 4, 8, 16));
+
+    let write_result = program.output().write(b"\x1b[32mbuiltin-shell\x1b[0m");
+    let visible_text = session
+      .snapshot()
+      .cells
+      .iter()
+      .map(|cell| cell.character)
+      .collect::<String>();
+
+    assert!(write_result.is_ok());
+    assert!(visible_text.contains("builtin-shell"));
+  }
+
+  #[test]
+  fn in_process_program_should_receive_terminal_resize() {
+    let (session, program) =
+      TerminalSession::in_process(TerminalProfile::BuiltinShell, TerminalSize::new(40, 4, 8, 16));
+    let expected = TerminalSize::new(80, 24, 9, 18);
+
+    let resize_result = session.resize(expected);
+    let input = program.recv();
+
+    assert!(resize_result.is_ok());
+    assert_eq!(input.ok(), Some(TerminalProgramInput::Resize(expected)));
   }
 }

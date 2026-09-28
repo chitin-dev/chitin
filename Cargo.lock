@@ -755,6 +755,7 @@ version = "0.1.0"
 dependencies = [
  "chitin-command",
  "chitin-databases",
+ "chitin-terminal",
  "clap",
  "thiserror 2.0.20",
  "tokio",
@@ -850,6 +851,7 @@ dependencies = [
 name = "chitin-ui"
 version = "0.1.0"
 dependencies = [
+ "chitin-terminal",
  "criterion",
  "env_logger",
  "gpui-ce",

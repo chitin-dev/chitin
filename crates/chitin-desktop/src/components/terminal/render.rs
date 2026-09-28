@@ -1,11 +1,9 @@
 //! Terminal content hosted by the reusable workbench bottom dock.
 
 use chitin_ui::{
-  composite::{
-    bottom_dock::{BottomDock, BottomDockResizeConfig},
-    command_terminal::CommandTerminal,
-  },
+  composite::bottom_dock::{BottomDock, BottomDockResizeConfig},
   primitive::button::ButtonState,
+  primitive::terminal::TerminalEmulator,
   themes::UIThemes,
 };
 use gpui::{Entity, InteractiveElement, ParentElement, Pixels, Styled, WeakEntity, div};
@@ -13,11 +11,11 @@ use gpui::{Entity, InteractiveElement, ParentElement, Pixels, Styled, WeakEntity
 use super::TerminalPanelControls;
 use crate::{app::ChitinApp, fonts::TERMINAL_FONT_FAMILY, keybindings::COMMAND_TERMINAL_KEY_CONTEXT};
 
-/// Renders the command terminal as the active bottom-dock item.
+/// Renders the VT terminal emulator as the active bottom-dock item.
 ///
 /// # Parameters
 ///
-/// * `controls` contains the persistent terminal transcript and input state.
+/// * `controls` contains the persistent emulator and in-process shell endpoint.
 /// * `close` is the bottom dock's shared close-button state.
 /// * `height` is the current workbench-level dock height.
 /// * `theme` supplies semantic colors for the dock and terminal.
@@ -25,7 +23,7 @@ use crate::{app::ChitinApp, fonts::TERMINAL_FONT_FAMILY, keybindings::COMMAND_TE
 ///
 /// # Returns
 ///
-/// A bottom-dock element containing the structured command terminal.
+/// A bottom-dock element containing the shared VT terminal surface.
 pub(crate) fn render_terminal_bottom_dock(
   controls: TerminalPanelControls,
   close: Entity<ButtonState>,
@@ -42,11 +40,8 @@ pub(crate) fn render_terminal_bottom_dock(
     .flex_1()
     .min_h_0()
     .key_context(COMMAND_TERMINAL_KEY_CONTEXT)
-    .capture_key_down(move |event, window, cx| {
-      let _ = app.update(cx, |this, cx| this.handle_terminal_key(event, window, cx));
-    })
     .child(
-      CommandTerminal::new(controls.terminal)
+      TerminalEmulator::new(controls.terminal)
         .theme(theme)
         .font_family(TERMINAL_FONT_FAMILY),
     );

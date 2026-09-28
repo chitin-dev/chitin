@@ -2,41 +2,33 @@
 
 use std::path::Path;
 
-use chitin_builtin_shell::{BuiltinShellSnapshot, ShellCommandId, ShellExecutionStatus, ShellTranscriptContent};
+use chitin_builtin_shell::{BuiltinShellSnapshot, ShellCommandId, ShellTranscriptContent};
 use chitin_command::{
   CommandMessageLevel, CommandOutcome, CommandOutputTone, CommandReportStatus, render_outcome as render_command_outcome,
 };
 use chitin_ui::{
-  composite::command_terminal::{CommandTerminalId, CommandTerminalStatus},
+  composite::command_terminal::CommandTerminalStatus,
   primitive::terminal::{TerminalLine, TerminalSpan, TerminalTone},
 };
 
-use super::TerminalPanelState;
-
-/// Builds the two-tone prompt shared by frozen and live command lines.
-pub(super) fn terminal_prompt(working_directory: &Path) -> TerminalLine {
-  TerminalLine::new([
-    TerminalSpan::accent("chitin "),
-    TerminalSpan::secondary(format!("{} ", working_directory.display())),
-    TerminalSpan::accent("❯ "),
-  ])
+/// Builds an ANSI-colored prompt for the in-process terminal program.
+pub(super) fn terminal_prompt_ansi(working_directory: &Path) -> String {
+  format!(
+    "\x1b[38;2;0;145;220mchitin\x1b[0m \x1b[90m{}\x1b[0m \x1b[38;2;0;145;220m❯\x1b[0m ",
+    working_directory.display(),
+  )
 }
 
-/// Converts preformatted command help into terminal rows.
-pub(super) fn terminal_text_lines(text: &str) -> Vec<TerminalLine> {
-  text.lines().map(TerminalLine::plain).collect()
-}
-
-/// Converts one shell command's event stream into terminal output rows.
+/// Converts one command's structured event stream into terminal rows.
 ///
 /// # Parameters
 ///
-/// * `snapshot` supplies the frontend-neutral session transcript.
+/// * `snapshot` supplies the current shell transcript.
 /// * `shell_id` selects entries belonging to one submitted command.
 ///
 /// # Returns
 ///
-/// Ordered progress, diagnostic, artifact, failure, and cancellation rows.
+/// Ordered progress, message, artifact, failure, and cancellation rows.
 pub(super) fn shell_output_lines(snapshot: &BuiltinShellSnapshot, shell_id: ShellCommandId) -> Vec<TerminalLine> {
   snapshot
     .transcript
@@ -116,36 +108,31 @@ fn terminal_tone(tone: CommandOutputTone) -> TerminalTone {
   }
 }
 
-/// Resolves cancellation or failure state for one terminal command mapping.
-///
-/// # Parameters
-///
-/// * `snapshot` supplies completed shell execution records.
-/// * `terminal_id` identifies the visible command block.
-/// * `panel` maps terminal blocks back to shell-local identities.
-///
-/// # Returns
-///
-/// The final presentation status when both mapping and execution still exist.
-pub(super) fn shell_terminal_status(
-  snapshot: &BuiltinShellSnapshot,
-  terminal_id: CommandTerminalId,
-  panel: &TerminalPanelState,
-) -> Option<CommandTerminalStatus> {
-  let shell_id = panel
-    .bindings
+/// Converts semantic terminal lines into ANSI-colored program output.
+pub(super) fn terminal_lines_ansi(lines: &[TerminalLine]) -> String {
+  lines
     .iter()
-    .find_map(|binding| (binding.terminal_id == terminal_id).then_some(binding.shell_id))?;
-  snapshot
-    .executions
-    .iter()
-    .find(|record| record.id == shell_id)
-    .map(|record| match record.status {
-      ShellExecutionStatus::Cancelled => CommandTerminalStatus::Cancelled,
-      ShellExecutionStatus::Failed => CommandTerminalStatus::Failed,
-      ShellExecutionStatus::Succeeded => CommandTerminalStatus::Succeeded,
-      ShellExecutionStatus::Running | ShellExecutionStatus::Cancelling => CommandTerminalStatus::Failed,
+    .map(|line| {
+      line
+        .spans()
+        .iter()
+        .map(|span| format!("{}{}\x1b[0m", tone_ansi(span.tone), span.text))
+        .collect::<String>()
     })
+    .collect::<Vec<_>>()
+    .join("\n")
+}
+
+/// Returns the ANSI SGR prefix for a semantic terminal tone.
+fn tone_ansi(tone: TerminalTone) -> &'static str {
+  match tone {
+    TerminalTone::Primary => "\x1b[39m",
+    TerminalTone::Secondary => "\x1b[90m",
+    TerminalTone::Accent | TerminalTone::Info => "\x1b[36m",
+    TerminalTone::Success => "\x1b[32m",
+    TerminalTone::Warning => "\x1b[33m",
+    TerminalTone::Error => "\x1b[31m",
+  }
 }
 
 #[cfg(test)]
@@ -160,7 +147,7 @@ mod tests {
     let (_, lines) = terminal_outcome(outcome);
     let actual = lines
       .iter()
-      .map(|line| line.spans().iter().map(|span| span.text.as_ref()).collect::<String>())
+      .map(|line| line.spans().iter().map(|span| span.text.as_str()).collect::<String>())
       .collect::<Vec<_>>()
       .join("\n");
 
