@@ -25,6 +25,11 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
 pub enum TerminalEmulatorEvent {
   /// Input bytes were delivered to the active terminal backend.
   InputWritten,
+  /// The terminal backend stopped and reported its exit code.
+  Exited {
+    /// Code the backend reported for the program that ended.
+    code: u32,
+  },
 }
 
 /// Persistent focus, backend, and VT state for a rendered terminal emulator.
@@ -33,7 +38,10 @@ pub struct TerminalEmulatorState {
   focus: FocusHandle,
   size: TerminalSize,
   metrics: TerminalMetrics,
+  /// Message painted below the grid, describing a backend that failed or stopped.
   status: Option<String>,
+  /// Exit code once the backend has stopped, which is also what ends its input.
+  ended: Option<u32>,
   preedit: Option<TerminalPreedit>,
   _event_task: Task<()>,
 }
@@ -84,6 +92,7 @@ impl TerminalEmulatorState {
         font_size: px(FONT_SIZE),
       },
       status: None,
+      ended: None,
       preedit: None,
       _event_task: event_task,
     }
@@ -115,8 +124,14 @@ impl TerminalEmulatorState {
       return;
     }
     for event in events {
+      // A backend that has already stopped has nothing further to report: what arrives
+      // after its exit is a consequence of the shutdown, and must not overwrite the
+      // exit status the surface is showing.
+      if self.ended.is_some() {
+        break;
+      }
       match event {
-        TerminalEvent::Exited(code) => self.status = Some(format!("process exited with code {code}")),
+        TerminalEvent::Exited(code) => self.end(code, cx),
         TerminalEvent::Error(error) => self.status = Some(error),
         TerminalEvent::Render | TerminalEvent::Title(_) | TerminalEvent::Bell => {}
       }
@@ -124,12 +139,25 @@ impl TerminalEmulatorState {
     cx.notify();
   }
 
+  /// Records a backend that stopped and hands its exit code to the host.
+  ///
+  /// The session itself stays in place. Whether a stopped backend should also take its
+  /// session down depends on what else the host has open, so that decision belongs to
+  /// the host and travels there as [`TerminalEmulatorEvent::Exited`].
+  fn end(&mut self, code: u32, cx: &mut Context<Self>) {
+    self.ended = Some(code);
+    self.status = Some(format!("process exited with code {code}"));
+    cx.emit(TerminalEmulatorEvent::Exited { code });
+  }
+
   fn resize(&mut self, bounds: Bounds<Pixels>, metrics: TerminalMetrics) {
     // Kept so the input method can be pointed at the same cell geometry the grid is painted
     // with, which is finer than the whole-pixel cell size reported to the backend.
     self.metrics = metrics;
     let next = terminal_size_for_bounds(bounds, metrics);
-    if next == self.size {
+    // A stopped backend has no grid left to resize, and the failure it would report for
+    // one would replace the exit status the surface is showing.
+    if next == self.size || self.ended.is_some() {
       return;
     }
     match self.session.resize(next) {
@@ -139,6 +167,12 @@ impl TerminalEmulatorState {
   }
 
   fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    // A stopped backend has nowhere to put input, but the surface still swallows the
+    // keystroke so it cannot reach a window shortcut behind the frozen grid.
+    if self.ended.is_some() {
+      cx.stop_propagation();
+      return;
+    }
     // A live composition owns every keystroke: Enter commits it, Escape cancels it,
     // and the arrow keys pick a candidate. Forwarding those bytes would send them to
     // the child program as well, which is what the composition has not done yet.
@@ -155,6 +189,11 @@ impl TerminalEmulatorState {
 
   /// Delivers encoded input to the active backend and repaints the surface.
   fn write_input(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
+    // Committed composition text arrives here too, and a stopped backend would answer
+    // both with an error rather than with the child program's own echo.
+    if self.ended.is_some() {
+      return;
+    }
     match self.session.write(bytes) {
       Ok(()) => cx.emit(TerminalEmulatorEvent::InputWritten),
       Err(error) => self.status = Some(error.to_string()),
@@ -319,8 +358,15 @@ impl TerminalEmulator {
 impl RenderOnce for TerminalEmulator {
   fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let metrics = measure_terminal_metrics(window, self.font_family.clone());
+    let status_font = self.font_family.clone();
+    let status = self.state.read(cx).status.clone();
     let preedit = self.state.read(cx).preedit().cloned();
-    let snapshot = self.state.read(cx).session.snapshot();
+    let mut snapshot = self.state.read(cx).session.snapshot();
+    // A stopped backend leaves its last frame on the grid, so the cursor is what
+    // separates a session that has ended from one that is merely waiting.
+    if self.state.read(cx).ended.is_some() {
+      snapshot.cursor = None;
+    }
     let focus = self.state.read(cx).focus.clone();
     let state_for_mouse = self.state.clone();
     let state_for_keys = self.state.clone();
@@ -364,11 +410,42 @@ impl RenderOnce for TerminalEmulator {
       .line_height(metrics.cell_height)
       .child(div().flex().flex_col().size_full().children(rows));
 
-    TerminalSurface {
-      content: grid.into_any_element(),
-      state: self.state,
-    }
+    // The grid keeps the whole surface to itself until the backend has something to
+    // report, so the input method anchor and the painted grid stay on the same bounds.
+    div()
+      .flex()
+      .flex_col()
+      .size_full()
+      .child(div().flex_1().min_h_0().child(TerminalSurface {
+        content: grid.into_any_element(),
+        state: self.state,
+      }))
+      .when_some(status, move |surface, status| {
+        surface.child(render_status(&status, metrics, theme, status_font))
+      })
   }
+}
+
+/// Paints a backend's final or failed state below the grid.
+fn render_status(
+  status: &str,
+  metrics: TerminalMetrics,
+  theme: UIThemes,
+  font_family: SharedString,
+) -> impl IntoElement {
+  div()
+    .flex_none()
+    .w_full()
+    .h(metrics.cell_height)
+    .px(metrics.cell_width)
+    .border_t_1()
+    .border_color(theme.border.muted)
+    .whitespace_nowrap()
+    .overflow_hidden()
+    .font(terminal_font(font_family))
+    .text_size(metrics.font_size)
+    .text_color(theme.text.secondary)
+    .child(status.to_owned())
 }
 
 /// Wraps the terminal grid so the surface can register itself as a text input target.

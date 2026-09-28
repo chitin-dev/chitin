@@ -493,7 +493,7 @@ fn pty_error(operation: &'static str, error: impl std::fmt::Display) -> Terminal
 
 #[cfg(all(test, unix))]
 mod tests {
-  use std::{thread, time::Duration};
+  use std::{path::PathBuf, thread, time::Duration};
 
   use super::*;
 
@@ -519,6 +519,60 @@ mod tests {
       session.snapshot().cell(0, 0).map(|cell| cell.foreground),
       Some(crate::TerminalColor::Named(crate::TerminalNamedColor::Green)),
     );
+  }
+
+  #[test]
+  fn native_pty_should_report_the_child_exit_code() {
+    let mut command = CommandBuilder::new("sh");
+    command.args(["-c", "exit 3"]);
+    let Ok(session) = TerminalSession::spawn(command, TerminalSize::new(40, 4, 8, 16)) else {
+      panic!("native PTY should be available during a Unix test");
+    };
+
+    let mut exit_code = None;
+    for _ in 0..200 {
+      exit_code = session.drain_events().into_iter().find_map(|event| match event {
+        TerminalEvent::Exited(code) => Some(code),
+        _ => None,
+      });
+      if exit_code.is_some() {
+        break;
+      }
+      thread::sleep(Duration::from_millis(10));
+    }
+
+    assert_eq!(exit_code, Some(3));
+  }
+
+  #[cfg(target_os = "linux")]
+  #[test]
+  fn dropping_a_session_should_terminate_the_pty_child() {
+    let pid_file = std::env::temp_dir().join("chitin-terminal-dropped-child.pid");
+    let _ = std::fs::remove_file(&pid_file);
+    let mut command = CommandBuilder::new("sh");
+    command.args(["-c", &format!("echo $$ > {}; exec sleep 300", pid_file.display())]);
+    let Ok(session) = TerminalSession::spawn(command, TerminalSize::new(40, 4, 8, 16)) else {
+      panic!("native PTY should be available during a Unix test");
+    };
+    let reported = (0..200)
+      .find_map(|_| {
+        thread::sleep(Duration::from_millis(10));
+        std::fs::read_to_string(&pid_file).ok()
+      })
+      .and_then(|pid| pid.trim().parse::<i32>().ok());
+    let Some(child_pid) = reported else {
+      panic!("child should report its process id");
+    };
+    assert!(PathBuf::from(format!("/proc/{child_pid}")).exists());
+
+    drop(session);
+
+    let exited = (0..500).any(|_| {
+      thread::sleep(Duration::from_millis(10));
+      !PathBuf::from(format!("/proc/{child_pid}")).exists()
+    });
+    let _ = std::fs::remove_file(&pid_file);
+    assert!(exited, "child {child_pid} outlived the session that owned it");
   }
 
   #[test]

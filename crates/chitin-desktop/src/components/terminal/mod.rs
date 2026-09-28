@@ -198,11 +198,11 @@ impl TerminalPanelControls {
   fn subscribe_session(&self, session: &ManagedTerminalSession, window: &mut Window, cx: &mut Context<ChitinApp>) {
     let id = session.id;
     let terminal = session.terminal.clone();
-    let subscription: Subscription = cx.subscribe_in(&terminal, window, move |this, _, event, window, cx| {
-      if *event == TerminalEmulatorEvent::InputWritten {
-        this.process_builtin_terminal_input(id, window, cx);
-      }
-    });
+    let subscription: Subscription =
+      cx.subscribe_in(&terminal, window, move |this, _, event, window, cx| match *event {
+        TerminalEmulatorEvent::InputWritten => this.process_builtin_terminal_input(id, window, cx),
+        TerminalEmulatorEvent::Exited { code } => this.terminal_session_exited(id, code, cx),
+      });
     subscription.detach();
 
     let tab = session.tab.clone();
@@ -331,10 +331,34 @@ impl ChitinApp {
 
   /// Closes the active session and selects its nearest remaining neighbor.
   fn close_active_terminal_session(&mut self, cx: &mut Context<Self>) {
-    let running = self
+    let Some(id) = self
       .terminal_panel_controls
       .as_ref()
       .and_then(TerminalPanelControls::active)
+      .map(|session| session.id)
+    else {
+      return;
+    };
+    self.close_terminal_session(id, cx);
+  }
+
+  /// Retires a session whose terminal backend stopped on its own.
+  ///
+  /// A program that exited cleanly has nothing left to show, so its tab goes away with
+  /// it. One that failed keeps its tab, because the surface is showing the exit status
+  /// and closing it would discard the last screen along with the reason for it.
+  fn terminal_session_exited(&mut self, id: TerminalSessionId, code: u32, cx: &mut Context<Self>) {
+    if code == 0 {
+      self.close_terminal_session(id, cx);
+    }
+  }
+
+  /// Closes one session and moves the selection when the active one is gone.
+  fn close_terminal_session(&mut self, id: TerminalSessionId, cx: &mut Context<Self>) {
+    let running = self
+      .terminal_panel_controls
+      .as_ref()
+      .and_then(|controls| controls.session(id))
       .is_some_and(|session| session.active_shell_command.is_some());
     if running && let Err(error) = self.builtin_shell().cancel_active() {
       log::warn!("failed to cancel active built-in terminal command: {error}");
@@ -342,13 +366,10 @@ impl ChitinApp {
     let Some(controls) = self.terminal_panel_controls.as_mut() else {
       return;
     };
-    let Some(index) = controls
-      .sessions
-      .iter()
-      .position(|session| session.id == controls.active_session)
-    else {
+    let Some(index) = controls.sessions.iter().position(|session| session.id == id) else {
       return;
     };
+    let was_active = controls.active_session == id;
     controls.sessions.remove(index);
     if controls.sessions.is_empty() {
       self.terminal_panel_controls = None;
@@ -356,10 +377,13 @@ impl ChitinApp {
       self.terminal_panel.request_focus(false);
       cx.notify();
       return;
-    } else if let Some(session) = controls.sessions.get(index.min(controls.sessions.len() - 1)) {
-      controls.active_session = session.id;
     }
-    self.terminal_panel.request_focus(true);
+    if was_active {
+      if let Some(session) = controls.sessions.get(index.min(controls.sessions.len() - 1)) {
+        controls.active_session = session.id;
+      }
+      self.terminal_panel.request_focus(true);
+    }
     cx.notify();
   }
 
