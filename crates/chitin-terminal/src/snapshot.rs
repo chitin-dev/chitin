@@ -52,6 +52,7 @@ impl TerminalSnapshot {
           underline: indexed.cell.flags.intersects(Flags::ALL_UNDERLINES),
           inverse: indexed.cell.flags.contains(Flags::INVERSE),
           hidden: indexed.cell.flags.contains(Flags::HIDDEN),
+          wide: indexed.cell.flags.contains(Flags::WIDE_CHAR),
           wide_spacer: indexed
             .cell
             .flags
@@ -114,6 +115,9 @@ pub struct TerminalCellAttributes {
   pub underline: bool,
   pub inverse: bool,
   pub hidden: bool,
+  /// Whether the cell leads a glyph that occupies this column and the next one.
+  pub wide: bool,
+  /// Whether the cell continues a wide glyph instead of holding one of its own.
   pub wide_spacer: bool,
 }
 
@@ -253,6 +257,36 @@ mod tests {
       snapshot.cell(0, 0).map(|cell| cell.combining_characters.as_slice()),
       Some(&['\u{fe0f}'][..])
     );
+  }
+
+  #[test]
+  fn wide_character_should_own_two_columns() {
+    let size = TerminalSize::new(12, 3, 8, 16);
+    let mut term = Term::new(Config::default(), &size, VoidListener);
+    let mut processor = Processor::<StdSyncHandler>::new();
+
+    processor.advance(&mut term, "中文".as_bytes());
+    let snapshot = TerminalSnapshot::from_term(&term);
+
+    assert_eq!(snapshot.cell(0, 0).map(|cell| cell.character), Some('中'));
+    assert_eq!(snapshot.cell(0, 0).map(|cell| cell.attributes.wide), Some(true));
+    assert_eq!(snapshot.cell(0, 1).map(|cell| cell.attributes.wide_spacer), Some(true));
+    assert_eq!(snapshot.cell(0, 2).map(|cell| cell.character), Some('文'));
+    assert_eq!(snapshot.cell(0, 2).map(|cell| cell.attributes.wide), Some(true));
+    assert_eq!(snapshot.cell(0, 3).map(|cell| cell.attributes.wide_spacer), Some(true));
+  }
+
+  #[test]
+  fn narrow_character_should_own_one_column() {
+    let size = TerminalSize::new(12, 3, 8, 16);
+    let mut term = Term::new(Config::default(), &size, VoidListener);
+    let mut processor = Processor::<StdSyncHandler>::new();
+
+    processor.advance(&mut term, b"M");
+    let snapshot = TerminalSnapshot::from_term(&term);
+
+    assert_eq!(snapshot.cell(0, 0).map(|cell| cell.attributes.wide), Some(false));
+    assert_eq!(snapshot.cell(0, 1).map(|cell| cell.attributes.wide_spacer), Some(false));
   }
 
   #[test]

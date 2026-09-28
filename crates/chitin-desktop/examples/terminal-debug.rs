@@ -242,6 +242,8 @@ struct TerminalRun {
   foreground: TerminalColor,
   background: TerminalColor,
   attributes: TerminalCellAttributes,
+  /// Whether the run holds a single glyph that is painted across two grid columns.
+  wide: bool,
   cursor: bool,
 }
 
@@ -253,7 +255,8 @@ impl TerminalRun {
       columns: 0,
       foreground: cell.foreground,
       background: cell.background,
-      attributes: upright_attributes(cell.attributes),
+      attributes: run_attributes(cell.attributes),
+      wide: cell.attributes.wide,
       cursor,
     };
     run.push(cell);
@@ -264,14 +267,17 @@ impl TerminalRun {
   fn matches(&self, cell: &TerminalCell, cursor: bool) -> bool {
     self.foreground == cell.foreground
       && self.background == cell.background
-      && self.attributes == upright_attributes(cell.attributes)
+      && self.attributes == run_attributes(cell.attributes)
+      && self.wide == cell.attributes.wide
       && self.cursor == cursor
   }
 
   /// Appends one cell while retaining its fixed grid-column budget.
   fn push(&mut self, cell: &TerminalCell) {
-    self.columns += 1;
-    if cell.attributes.hidden || cell.attributes.wide_spacer {
+    // A wide cell is the only cell of its run, and it is the one that accounts for both of
+    // the columns the glyph covers.
+    self.columns += if cell.attributes.wide { 2 } else { 1 };
+    if cell.attributes.hidden {
       self.text.push(' ');
       return;
     }
@@ -294,11 +300,20 @@ fn build_row_runs(snapshot: &TerminalSnapshot, row: usize) -> Vec<TerminalRun> {
     let Some(cell) = snapshot.cell(row, column) else {
       continue;
     };
+    // The cell that continues a wide glyph is a placeholder: the wide glyph's own run
+    // already covers its column, and painting it as a space would cover the right half of
+    // the glyph that precedes it.
+    if cell.attributes.wide_spacer {
+      continue;
+    }
     let cursor = snapshot.cursor == Some((row, column));
-    if let Some(run) = runs.last_mut().filter(|run| run.matches(cell, cursor)) {
-      run.push(cell);
-    } else {
-      runs.push(TerminalRun::new(cell, cursor));
+    // A wide glyph is placed by the grid rather than by the text flow, because its advance
+    // is not exactly two cell widths. Keeping it in a run of its own leaves every following
+    // run starting exactly where the grid says the next column starts.
+    let extended = runs.last_mut().filter(|run| !run.wide && run.matches(cell, cursor));
+    match extended {
+      Some(run) => run.push(cell),
+      None => runs.push(TerminalRun::new(cell, cursor)),
     }
   }
   runs
@@ -316,6 +331,17 @@ fn is_default_blank(cell: &TerminalCell) -> bool {
 /// Removes font slant while preserving the remaining terminal text attributes.
 fn upright_attributes(mut attributes: TerminalCellAttributes) -> TerminalCellAttributes {
   attributes.italic = false;
+  attributes
+}
+
+/// Attributes that decide where one painted run ends and the next one begins.
+///
+/// Slant is dropped because the grid font ships upright only, and the wide-continuation
+/// marker is dropped because it describes the cell's role in the grid rather than how the
+/// cell looks.
+fn run_attributes(mut attributes: TerminalCellAttributes) -> TerminalCellAttributes {
+  attributes.italic = false;
+  attributes.wide_spacer = false;
   attributes
 }
 
