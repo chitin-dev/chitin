@@ -3,22 +3,30 @@
 use std::{ops::Range, sync::Arc, time::Duration};
 
 use chitin_terminal::{
-  TerminalCell, TerminalCellAttributes, TerminalColor, TerminalEvent, TerminalNamedColor, TerminalSession,
-  TerminalSessionError, TerminalSize, TerminalSnapshot,
+  TerminalCell, TerminalCellAttributes, TerminalColor, TerminalEvent, TerminalNamedColor, TerminalScroll,
+  TerminalScrollState, TerminalSession, TerminalSessionError, TerminalSize, TerminalSnapshot,
 };
 use gpui::{
   AnyElement, App, AsyncApp, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
   EventEmitter, FocusHandle, Font, FontFallbacks, FontFeatures, FontWeight, GlobalElementId, Hsla, InspectorElementId,
-  InteractiveElement, IntoElement, KeyDownEvent, LayoutId, MouseButton, ParentElement, Pixels, Point, RenderOnce,
-  SharedString, Styled, Task, TextRun, Timer, UTF16Selection, WeakEntity, Window, div, font, point, prelude::*, px,
-  rgb, size,
+  InteractiveElement, IntoElement, KeyDownEvent, Keystroke, LayoutId, MouseButton, ParentElement, Pixels, Point,
+  RenderOnce, ScrollDelta, ScrollWheelEvent, SharedString, Styled, Subscription, Task, TextRun, Timer, UTF16Selection,
+  WeakEntity, Window, div, font, point, prelude::*, px, rgb, size,
 };
 
-use crate::themes::{UIThemes, builtins};
+use crate::{
+  primitive::scrollbar::{Scrollbar, ScrollbarEvent, ScrollbarMetrics, ScrollbarState},
+  themes::{UIThemes, builtins},
+};
 
 const FONT_SIZE: f32 = 15.0;
 const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
+/// Largest viewport motion one wheel event may ask for.
+///
+/// A platform is free to report a very large pixel delta, and one such event
+/// should not throw the viewport across the whole scrollback.
+const MAX_WHEEL_LINES_PER_EVENT: i32 = 10;
 
 /// Semantic events emitted by the terminal emulator primitive.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,6 +51,12 @@ pub struct TerminalEmulatorState {
   /// Exit code once the backend has stopped, which is also what ends its input.
   ended: Option<u32>,
   preedit: Option<TerminalPreedit>,
+  /// Where the viewport sits in the scrollback, refreshed once per poll.
+  scroll_state: TerminalScrollState,
+  /// Sub-line part of a pixel scroll, carried so a slow trackpad still moves.
+  scroll_remainder: f32,
+  scrollbar: Entity<ScrollbarState>,
+  _scrollbar_subscription: Subscription,
   _event_task: Task<()>,
 }
 
@@ -82,6 +96,14 @@ impl TerminalEmulatorState {
         }
       }
     });
+    let scrollbar = cx.new(ScrollbarState::new);
+    // The subscription is held for as long as the state lives: dropping it would
+    // silently disconnect the bar from the viewport it moves.
+    let scrollbar_subscription = cx.subscribe(&scrollbar, |state, _, event, cx| {
+      let ScrollbarEvent::Scrolled { offset } = *event;
+      state.scroll_to_scrollbar_offset(offset, cx);
+    });
+    let scroll_state = session.scroll_state();
     Self {
       session,
       focus: cx.focus_handle(),
@@ -94,6 +116,10 @@ impl TerminalEmulatorState {
       status: None,
       ended: None,
       preedit: None,
+      scroll_state,
+      scroll_remainder: 0.0,
+      scrollbar,
+      _scrollbar_subscription: scrollbar_subscription,
       _event_task: event_task,
     }
   }
@@ -119,6 +145,10 @@ impl TerminalEmulatorState {
   }
 
   fn process_events(&mut self, cx: &mut Context<Self>) {
+    // Read before the events are drained: a child program entering or leaving the
+    // alternate screen changes what the wheel means, and that is observed here rather
+    // than at the next wheel event. The read is a few counters under the terminal lock.
+    self.scroll_state = self.session.scroll_state();
     let events = self.session.drain_events();
     if events.is_empty() {
       return;
@@ -161,12 +191,33 @@ impl TerminalEmulatorState {
       return;
     }
     match self.session.resize(next) {
-      Ok(()) => self.size = next,
+      Ok(()) => {
+        self.size = next;
+        // A resize reflows the grid and can shorten the history the viewport sits in,
+        // which the backend answers by clamping the position it had.
+        self.refresh_scroll_state();
+        // The cell height the wheel was measured against has changed, so a fraction
+        // carried over from before it no longer names the same distance.
+        self.scroll_remainder = 0.0;
+      }
       Err(error) => self.status = Some(error.to_string()),
     }
   }
 
   fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    // Scrolling reaches back through whatever a stopped program left on screen, which
+    // is exactly when its last screen is worth reading, and it writes no bytes for the
+    // guards below to withhold. A live composition is the one case it waits for: the
+    // composition is anchored to the row it captured when it started, so moving the
+    // viewport would paint it over different content. The guard below then swallows
+    // the keystroke, exactly as the wheel does.
+    if self.preedit.is_none()
+      && let Some(scroll) = scroll_keystroke(&event.keystroke)
+    {
+      self.scroll_viewport(scroll, cx);
+      cx.stop_propagation();
+      return;
+    }
     // A stopped backend has nowhere to put input, but the surface still swallows the
     // keystroke so it cannot reach a window shortcut behind the frozen grid.
     if self.ended.is_some() {
@@ -194,11 +245,78 @@ impl TerminalEmulatorState {
     if self.ended.is_some() {
       return;
     }
+    // Input is aimed at the live edge. Echoing into a viewport that has been scrolled
+    // back would put the child program's answer somewhere the user cannot see.
+    if self.scroll_state.display_offset != 0 {
+      self.session.scroll(TerminalScroll::Bottom);
+      self.refresh_scroll_state();
+    }
     match self.session.write(bytes) {
       Ok(()) => cx.emit(TerminalEmulatorEvent::InputWritten),
       Err(error) => self.status = Some(error.to_string()),
     }
     cx.notify();
+  }
+
+  /// Applies one wheel event to the viewport, or forwards it to a full-screen program.
+  fn handle_scroll_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    // A live composition anchors to a row captured when it started, and scrolling
+    // would paint it over different content. A stopped backend has nothing to scroll.
+    if self.ended.is_some() || self.preedit.is_some() {
+      cx.stop_propagation();
+      return;
+    }
+
+    let lines = wheel_lines(&event.delta, self.metrics.cell_height, &mut self.scroll_remainder);
+    if lines == 0 {
+      cx.stop_propagation();
+      return;
+    }
+    // A full-screen program keeps no scrollback of its own, so the wheel means to it
+    // what the arrow keys mean: the only viewport motion it understands.
+    if self.scroll_state.alt_screen {
+      self.write_arrows(lines, cx);
+    } else {
+      self.scroll_viewport(TerminalScroll::Lines(lines), cx);
+    }
+    cx.stop_propagation();
+  }
+
+  /// Forwards wheel motion to a full-screen program as the arrow keys it reads.
+  fn write_arrows(&mut self, lines: i32, cx: &mut Context<Self>) {
+    let key = if lines > 0 { "up" } else { "down" };
+    let Some(bytes) = encode_special_key(key, false) else {
+      return;
+    };
+    // One arrow per whole line, capped so a trackpad fling cannot flood the child.
+    for _ in 0..lines.unsigned_abs().min(MAX_WHEEL_LINES_PER_EVENT as u32) {
+      self.write_input(bytes, cx);
+    }
+  }
+
+  /// Moves the viewport and repaints the surface.
+  fn scroll_viewport(&mut self, scroll: TerminalScroll, cx: &mut Context<Self>) {
+    self.session.scroll(scroll);
+    self.refresh_scroll_state();
+    // The backend reports a viewport motion as a cursor-dirty event and coalesces it,
+    // so the repaint is asked for here rather than waited for.
+    cx.notify();
+  }
+
+  /// Moves the viewport to the position a scrollbar drag described.
+  fn scroll_to_scrollbar_offset(&mut self, offset: Pixels, cx: &mut Context<Self>) {
+    let display_offset =
+      display_offset_for_scrollbar_offset(offset, self.metrics.cell_height, self.scroll_state.history_size);
+    self.scroll_viewport(TerminalScroll::Offset(display_offset), cx);
+  }
+
+  /// Reads the viewport position back from the session.
+  ///
+  /// The wheel remainder is deliberately left alone: it is the sub-line part of a
+  /// gesture still in progress, and clearing it here would drop that fraction every
+  /// time the viewport crossed a whole line.
+  fn refresh_scroll_state(&mut self) {
+    self.scroll_state = self.session.scroll_state();
   }
 }
 
@@ -368,9 +486,12 @@ impl RenderOnce for TerminalEmulator {
       snapshot.cursor = None;
     }
     let focus = self.state.read(cx).focus.clone();
+    let scrollbar = self.state.read(cx).scrollbar.clone();
+    let scrollbar_metrics = scrollbar_metrics(self.state.read(cx).scroll_state, metrics.cell_height);
     let state_for_mouse = self.state.clone();
     let state_for_keys = self.state.clone();
     let state_for_layout = self.state.clone();
+    let state_for_scroll = self.state.clone();
     let theme = self.theme;
     let rows = (0..snapshot.rows).map(move |row| {
       let cells = build_row_runs(&snapshot, row)
@@ -412,14 +533,28 @@ impl RenderOnce for TerminalEmulator {
 
     // The grid keeps the whole surface to itself until the backend has something to
     // report, so the input method anchor and the painted grid stay on the same bounds.
+    // The wheel listener sits on this outer surface rather than on the grid so that it
+    // also covers the scrollbar, whose lane is a sibling of the surface below.
     div()
       .flex()
       .flex_col()
       .size_full()
-      .child(div().flex_1().min_h_0().child(TerminalSurface {
-        content: grid.into_any_element(),
-        state: self.state,
-      }))
+      .on_scroll_wheel(move |event, _, cx| {
+        state_for_scroll.update(cx, |state, cx| state.handle_scroll_wheel(event, cx));
+      })
+      .child(
+        div()
+          .relative()
+          .flex_1()
+          .min_h_0()
+          .child(TerminalSurface {
+            content: grid.into_any_element(),
+            state: self.state,
+          })
+          // The bar is an overlay rather than a column of its own, so gaining and
+          // losing scrollback cannot change the width the backend is laid out for.
+          .child(Scrollbar::new(scrollbar).metrics(scrollbar_metrics).theme(theme)),
+      )
       .when_some(status, move |surface, status| {
         surface.child(render_status(&status, metrics, theme, status_font))
       })
@@ -799,28 +934,111 @@ fn indexed_color(index: u8) -> Hsla {
   rgb(value).into()
 }
 
+/// Returns the bytes a terminal program expects for a named special key.
+///
+/// The table is shared by key encoding and by the wheel, which forwards motion to a
+/// full-screen program as arrow keys, so the two cannot disagree about what an arrow is.
+fn encode_special_key(key: &str, shift: bool) -> Option<&'static [u8]> {
+  match key {
+    "enter" => Some(b"\r"),
+    "backspace" => Some(b"\x7f"),
+    "tab" if shift => Some(b"\x1b[Z"),
+    "tab" => Some(b"\t"),
+    "escape" => Some(b"\x1b"),
+    "up" => Some(b"\x1b[A"),
+    "down" => Some(b"\x1b[B"),
+    "right" => Some(b"\x1b[C"),
+    "left" => Some(b"\x1b[D"),
+    "home" => Some(b"\x1b[H"),
+    "end" => Some(b"\x1b[F"),
+    "pageup" => Some(b"\x1b[5~"),
+    "pagedown" => Some(b"\x1b[6~"),
+    "delete" => Some(b"\x1b[3~"),
+    "insert" => Some(b"\x1b[2~"),
+    _ => None,
+  }
+}
+
+/// Returns the viewport motion a keystroke asks for.
+///
+/// Only the shifted forms scroll. Unmodified keys have to keep reaching the child
+/// program as the bytes it expects, and the combinations that select text elsewhere
+/// are left alone rather than guessed at.
+fn scroll_keystroke(keystroke: &Keystroke) -> Option<TerminalScroll> {
+  let modifiers = keystroke.modifiers;
+  if !modifiers.shift || modifiers.control || modifiers.alt || modifiers.platform {
+    return None;
+  }
+
+  match keystroke.key.as_str() {
+    "pageup" => Some(TerminalScroll::PageUp),
+    "pagedown" => Some(TerminalScroll::PageDown),
+    "home" => Some(TerminalScroll::Top),
+    "end" => Some(TerminalScroll::Bottom),
+    _ => None,
+  }
+}
+
+/// Converts one wheel event into whole lines of viewport motion.
+///
+/// # Parameters
+///
+/// * `delta` is the platform's scroll delta for this event.
+/// * `cell_height` measures a pixel delta in lines.
+/// * `remainder` carries the sub-line part of earlier events. A precision trackpad
+///   reports fractions of a line per event, and discarding each one separately would
+///   make a slow gesture scroll nothing at all.
+///
+/// # Returns
+///
+/// Whole lines to scroll, positive toward older output, capped at
+/// [`MAX_WHEEL_LINES_PER_EVENT`]. Zero when this event only accumulated a fraction.
+fn wheel_lines(delta: &ScrollDelta, cell_height: Pixels, remainder: &mut f32) -> i32 {
+  let lines = match delta {
+    ScrollDelta::Lines(lines) => lines.y,
+    ScrollDelta::Pixels(pixels) => f32::from(pixels.y) / f32::from(cell_height.max(px(1.0))),
+  };
+
+  *remainder += lines;
+  let whole = remainder.trunc();
+  *remainder -= whole;
+  (whole as i32).clamp(-MAX_WHEEL_LINES_PER_EVENT, MAX_WHEEL_LINES_PER_EVENT)
+}
+
+/// Describes a viewport position in scrollbar geometry.
+///
+/// The bar puts the oldest output at the top of the content and the live edge at the
+/// bottom, and it measures downward from zero the way GPUI scroll offsets do.
+fn scrollbar_metrics(scroll: TerminalScrollState, cell_height: Pixels) -> ScrollbarMetrics {
+  let viewport_height = cell_height * scroll.screen_lines as f32;
+  let content_height = cell_height * (scroll.screen_lines + scroll.history_size) as f32;
+  let offset = -(cell_height * scroll.lines_above() as f32);
+
+  ScrollbarMetrics::new(content_height, viewport_height, offset)
+}
+
+/// Converts a position on the scrollbar back into a viewport display offset.
+///
+/// # Parameters
+///
+/// * `offset` is the bar's distance from the top of the content, negative downward.
+/// * `cell_height` measures that distance in lines.
+/// * `history_size` bounds the result to the lines that are actually retained.
+///
+/// # Returns
+///
+/// The number of lines the viewport should sit above the live edge.
+fn display_offset_for_scrollbar_offset(offset: Pixels, cell_height: Pixels, history_size: usize) -> usize {
+  let lines = f32::from(offset) / f32::from(cell_height.max(px(1.0)));
+  let display_offset = history_size as f32 + lines.round();
+
+  display_offset.clamp(0.0, history_size as f32) as usize
+}
+
 fn encode_key(event: &KeyDownEvent) -> Option<Vec<u8>> {
   let key = event.keystroke.key.as_str();
   let modifiers = event.keystroke.modifiers;
-  let special = match key {
-    "enter" => Some(b"\r".as_slice()),
-    "backspace" => Some(b"\x7f".as_slice()),
-    "tab" if modifiers.shift => Some(b"\x1b[Z".as_slice()),
-    "tab" => Some(b"\t".as_slice()),
-    "escape" => Some(b"\x1b".as_slice()),
-    "up" => Some(b"\x1b[A".as_slice()),
-    "down" => Some(b"\x1b[B".as_slice()),
-    "right" => Some(b"\x1b[C".as_slice()),
-    "left" => Some(b"\x1b[D".as_slice()),
-    "home" => Some(b"\x1b[H".as_slice()),
-    "end" => Some(b"\x1b[F".as_slice()),
-    "pageup" => Some(b"\x1b[5~".as_slice()),
-    "pagedown" => Some(b"\x1b[6~".as_slice()),
-    "delete" => Some(b"\x1b[3~".as_slice()),
-    "insert" => Some(b"\x1b[2~".as_slice()),
-    _ => None,
-  };
-  if let Some(special) = special {
+  if let Some(special) = encode_special_key(key, modifiers.shift) {
     return Some(special.to_vec());
   }
   if modifiers.platform {
@@ -892,6 +1110,8 @@ mod tests {
       rows: 1,
       cells,
       cursor: None,
+      display_offset: 0,
+      history_size: 0,
     }
   }
 
@@ -931,5 +1151,178 @@ mod tests {
       ["a", " ", "b"]
     );
     assert_eq!(runs.iter().map(|run| run.columns).sum::<usize>(), 3);
+  }
+
+  /// Builds a viewport position for the scrollbar helper tests.
+  fn scroll_state(history: usize, offset: usize, lines: usize) -> TerminalScrollState {
+    TerminalScrollState {
+      history_size: history,
+      display_offset: offset,
+      screen_lines: lines,
+      alt_screen: false,
+    }
+  }
+
+  #[test]
+  fn a_wheel_tick_toward_the_top_should_reveal_older_lines() {
+    let mut remainder = 0.0;
+
+    let lines = wheel_lines(&ScrollDelta::Lines(point(0.0, 1.0)), px(20.0), &mut remainder);
+
+    assert_eq!(lines, 1);
+  }
+
+  #[test]
+  fn a_wheel_tick_toward_the_bottom_should_move_toward_the_live_edge() {
+    let mut remainder = 0.0;
+
+    let lines = wheel_lines(&ScrollDelta::Lines(point(0.0, -1.0)), px(20.0), &mut remainder);
+
+    assert_eq!(lines, -1);
+  }
+
+  #[test]
+  fn pixel_scrolling_should_accumulate_until_a_whole_line_is_reached() {
+    let mut remainder = 0.0;
+    // Quarters rather than thirds: a third of a line is not exactly representable,
+    // and three of them sum to just under one.
+    let quarter = ScrollDelta::Pixels(point(px(0.0), px(5.0)));
+
+    let steps = (0..4)
+      .map(|_| wheel_lines(&quarter, px(20.0), &mut remainder))
+      .collect::<Vec<_>>();
+
+    // Four quarters of a line must scroll once between them, not four times zero.
+    assert_eq!(steps, [0, 0, 0, 1]);
+  }
+
+  #[test]
+  fn a_pixel_delta_smaller_than_a_line_should_not_scroll_yet() {
+    let mut remainder = 0.0;
+
+    let lines = wheel_lines(&ScrollDelta::Pixels(point(px(0.0), px(2.0))), px(20.0), &mut remainder);
+
+    assert_eq!(lines, 0);
+    assert!(
+      remainder > 0.0,
+      "the unused part of the delta should carry to the next event"
+    );
+  }
+
+  #[test]
+  fn a_wheel_event_should_not_scroll_more_than_the_per_event_cap() {
+    let mut remainder = 0.0;
+
+    let lines = wheel_lines(
+      &ScrollDelta::Pixels(point(px(0.0), px(10_000.0))),
+      px(20.0),
+      &mut remainder,
+    );
+
+    assert_eq!(lines, MAX_WHEEL_LINES_PER_EVENT);
+  }
+
+  #[test]
+  fn a_scroll_keystroke_should_require_shift_and_no_other_modifier() {
+    let plain = Keystroke {
+      key: "pageup".into(),
+      ..Keystroke::default()
+    };
+    let shifted = Keystroke {
+      modifiers: gpui::Modifiers {
+        shift: true,
+        ..gpui::Modifiers::default()
+      },
+      key: "pageup".into(),
+      ..Keystroke::default()
+    };
+
+    assert_eq!(scroll_keystroke(&plain), None);
+    assert_eq!(scroll_keystroke(&shifted), Some(TerminalScroll::PageUp));
+  }
+
+  #[test]
+  fn a_scroll_keystroke_should_map_the_viewport_motions() {
+    let keystroke = |key: &'static str| Keystroke {
+      modifiers: gpui::Modifiers {
+        shift: true,
+        ..gpui::Modifiers::default()
+      },
+      key: key.into(),
+      ..Keystroke::default()
+    };
+
+    assert_eq!(scroll_keystroke(&keystroke("pageup")), Some(TerminalScroll::PageUp));
+    assert_eq!(scroll_keystroke(&keystroke("pagedown")), Some(TerminalScroll::PageDown));
+    assert_eq!(scroll_keystroke(&keystroke("home")), Some(TerminalScroll::Top));
+    assert_eq!(scroll_keystroke(&keystroke("end")), Some(TerminalScroll::Bottom));
+    assert_eq!(scroll_keystroke(&keystroke("a")), None);
+  }
+
+  #[test]
+  fn an_unmodified_page_key_should_still_reach_the_child_program() {
+    // The scroll branch runs before key encoding, so it must decline the keystrokes
+    // that the program is waiting for.
+    let keystroke = Keystroke {
+      key: "pageup".into(),
+      ..Keystroke::default()
+    };
+
+    assert_eq!(scroll_keystroke(&keystroke), None);
+    assert_eq!(encode_special_key("pageup", false), Some(b"\x1b[5~".as_slice()));
+  }
+
+  #[test]
+  fn a_wheel_arrow_should_match_the_arrow_key_encoding() {
+    // The wheel forwards motion to a full-screen program as arrow keys, so the bytes
+    // it sends and the bytes the arrow keys send have to be the same ones.
+    assert_eq!(encode_special_key("up", false), Some(b"\x1b[A".as_slice()));
+    assert_eq!(encode_special_key("down", false), Some(b"\x1b[B".as_slice()));
+  }
+
+  #[test]
+  fn a_shifted_tab_should_still_encode_as_a_back_tab() {
+    assert_eq!(encode_special_key("tab", true), Some(b"\x1b[Z".as_slice()));
+    assert_eq!(encode_special_key("tab", false), Some(b"\t".as_slice()));
+  }
+
+  #[test]
+  fn the_scrollbar_should_measure_from_the_oldest_line_to_the_live_edge() {
+    let metrics = scrollbar_metrics(scroll_state(100, 0, 24), px(20.0));
+
+    // At the live edge the viewport sits at the bottom of the content.
+    assert_eq!(metrics.viewport_height, px(480.0));
+    assert_eq!(metrics.content_height, px(2480.0));
+    assert_eq!(metrics.offset, px(-2000.0));
+    assert_eq!(metrics.thumb_top_fraction(), 1.0 - metrics.thumb_extent_fraction());
+  }
+
+  #[test]
+  fn the_scrollbar_should_sit_at_the_top_when_scrolled_all_the_way_back() {
+    let metrics = scrollbar_metrics(scroll_state(100, 100, 24), px(20.0));
+
+    assert_eq!(metrics.offset, Pixels::ZERO);
+    assert_eq!(metrics.thumb_top_fraction(), 0.0);
+  }
+
+  #[test]
+  fn a_scrollbar_offset_should_round_trip_through_the_display_offset() {
+    for display_offset in [0, 1, 37, 100] {
+      let metrics = scrollbar_metrics(scroll_state(100, display_offset, 24), px(20.0));
+
+      assert_eq!(
+        display_offset_for_scrollbar_offset(metrics.offset, px(20.0), 100),
+        display_offset,
+      );
+    }
+  }
+
+  #[test]
+  fn a_display_offset_should_stay_inside_the_retained_history() {
+    // The bar measures downward from the oldest line, so an offset above the top
+    // of the content asks for more history than is retained and lands on the
+    // oldest line, and one below the bottom lands on the live edge.
+    assert_eq!(display_offset_for_scrollbar_offset(px(5_000.0), px(20.0), 100), 100);
+    assert_eq!(display_offset_for_scrollbar_offset(px(-5_000.0), px(20.0), 100), 0);
   }
 }
