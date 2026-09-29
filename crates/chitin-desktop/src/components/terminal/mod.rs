@@ -20,7 +20,7 @@ use chitin_ui::{
     terminal::{TerminalEmulatorEvent, TerminalEmulatorState},
   },
 };
-use gpui::{AppContext, Context, Entity, Subscription, Window};
+use gpui::{AppContext, Context, Entity, ScrollHandle, Subscription, Window};
 
 use crate::app::ChitinApp;
 
@@ -105,6 +105,11 @@ pub(crate) struct TerminalPanelControls {
   next_session_id: u64,
   pub(super) close_session: Entity<ButtonState>,
   pub(super) profile_select: Entity<SelectInputState>,
+  /// Scroll position of the session tab strip.
+  ///
+  /// This has to outlive a render: a handle created while rendering would start every
+  /// frame at the top of the strip and the lane would never move.
+  pub(super) tab_scroll: ScrollHandle,
 }
 
 impl TerminalPanelControls {
@@ -131,6 +136,7 @@ impl TerminalPanelControls {
       next_session_id: 2,
       close_session,
       profile_select,
+      tab_scroll: ScrollHandle::new(),
     })
   }
 
@@ -309,6 +315,9 @@ impl ChitinApp {
       controls.sessions.push(session);
       controls.active_session = id;
       controls.next_session_id += 1;
+      // The new tab is the last child, so revealing it keeps the active session in
+      // view without the session manager having to know the strip's geometry.
+      controls.tab_scroll.scroll_to_bottom();
     }
     self.terminal_panel.request_focus(true);
     cx.notify();

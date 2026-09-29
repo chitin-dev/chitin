@@ -46,8 +46,10 @@ pub(crate) fn render_terminal_bottom_dock(
   let resize_move_app = app.clone();
   let resize_end_app = app.clone();
   let active_terminal = controls.active().map(|session| session.terminal.clone());
-  let sessions = controls.sessions.iter().fold(
+  let tab_scroll = controls.tab_scroll.clone();
+  let tab_strip = Styled::scrollbar_width(
     div()
+      .id("terminal-session-tabs")
       .flex()
       .flex_col()
       .gap_1()
@@ -56,39 +58,43 @@ pub(crate) fn render_terminal_bottom_dock(
       .p_1()
       .border_l_1()
       .border_color(theme.border.muted)
-      .overflow_y_scroll(),
-    |sessions, session| {
-      let selected = session.id == controls.active_session;
-      sessions.child(
-        Button::new(session.tab.clone())
-          .size(ButtonSize::Small)
-          .variant(ButtonVariant::Transparent)
-          .style(
-            ButtonStyle::new()
-              .width(px(28.0))
-              .height(px(28.0))
-              .horizontal_padding(px(0.0))
-              .background(if selected {
-                theme.background.selection
-              } else {
-                builtins::TRANSPARENT
-              }),
-          )
-          .theme(theme)
-          .child(
-            Icon::new(terminal_profile_icon(session.profile))
-              .size(px(14.0))
-              .color(if selected {
-                theme.text.primary
-              } else {
-                theme.text.secondary
-              })
-              .hover_color(theme.text.primary)
-              .theme(theme),
-          ),
-      )
-    },
+      .overflow_y_scroll()
+      .track_scroll(&tab_scroll),
+    // The lane is only wide enough for one icon column, so the native bar would
+    // cover the tabs themselves.
+    px(0.0),
   );
+  let sessions = controls.sessions.iter().fold(tab_strip, |sessions, session| {
+    let selected = session.id == controls.active_session;
+    sessions.child(
+      Button::new(session.tab.clone())
+        .size(ButtonSize::Small)
+        .variant(ButtonVariant::Transparent)
+        .style(
+          ButtonStyle::new()
+            .width(px(28.0))
+            .height(px(28.0))
+            .horizontal_padding(px(0.0))
+            .background(if selected {
+              theme.background.selection
+            } else {
+              builtins::TRANSPARENT
+            }),
+        )
+        .theme(theme)
+        .child(
+          Icon::new(terminal_profile_icon(session.profile))
+            .size(px(14.0))
+            .color(if selected {
+              theme.text.primary
+            } else {
+              theme.text.secondary
+            })
+            .hover_color(theme.text.primary)
+            .theme(theme),
+        ),
+    )
+  });
   let header_actions = div()
     .flex()
     .items_center()
