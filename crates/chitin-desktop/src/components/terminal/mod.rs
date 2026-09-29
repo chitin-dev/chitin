@@ -12,7 +12,7 @@ use std::{
 
 use chitin_builtin_shell::{BuiltinTerminalProgram, ShellCommandId};
 use chitin_command::CommandExecutionContext;
-use chitin_terminal::{TerminalProfile, TerminalSession, TerminalSessionError, TerminalSize};
+use chitin_terminal::{ShellCatalog, ShellDefinition, TerminalSession, TerminalSessionError, TerminalSize};
 use chitin_ui::{
   composite::toast::{Toast, ToastVariant},
   primitive::{
@@ -34,12 +34,38 @@ pub(crate) const TERMINAL_DOCK_ITEM_ID: &str = "terminal";
 const INITIAL_TERMINAL_SIZE: TerminalSize = TerminalSize::new(80, 24, 9, 21);
 
 /// Returns the desktop asset used to represent one terminal profile.
-pub(super) const fn terminal_profile_icon(profile: TerminalProfile) -> &'static str {
-  match profile {
-    TerminalProfile::BuiltinShell => "icons/terminal-builtin.svg",
-    TerminalProfile::SystemShell => "icons/terminal-shell.svg",
-    TerminalProfile::Bash => "icons/terminal-bash.svg",
-    TerminalProfile::Fish => "icons/terminal-fish.svg",
+pub(super) fn terminal_profile_icon(id: &str) -> &'static str {
+  match id {
+    "builtin-shell" => "icons/terminal-builtin.svg",
+    "bash" | "git-bash" => "icons/terminal-bash.svg",
+    "fish" => "icons/terminal-fish.svg",
+    "powershell" | "pwsh" => "icons/terminal-powershell.svg",
+    "zsh" => "icons/terminal-zsh.svg",
+    "nushell" => "icons/terminal-nushell.svg",
+    _ => "icons/terminal-shell.svg",
+  }
+}
+
+/// One launchable desktop choice; only PTY shells come from platform discovery.
+#[derive(Clone)]
+enum DesktopTerminalProfile {
+  Builtin,
+  Shell(ShellDefinition),
+}
+
+impl DesktopTerminalProfile {
+  fn id(&self) -> &str {
+    match self {
+      Self::Builtin => "builtin-shell",
+      Self::Shell(shell) => &shell.id,
+    }
+  }
+
+  fn label(&self) -> &str {
+    match self {
+      Self::Builtin => "Built-in shell",
+      Self::Shell(shell) => &shell.label,
+    }
   }
 }
 
@@ -90,7 +116,7 @@ impl Default for TerminalPanelState {
 #[derive(Clone)]
 pub(super) struct ManagedTerminalSession {
   pub(super) id: TerminalSessionId,
-  pub(super) profile: TerminalProfile,
+  profile: DesktopTerminalProfile,
   pub(super) terminal: Entity<TerminalEmulatorState>,
   pub(super) builtin: Option<ManagedBuiltinShell>,
   pub(super) tab: Entity<ButtonState>,
@@ -122,6 +148,7 @@ impl ManagedTerminalSession {
 /// Persistent session manager and controls for the bottom terminal panel.
 #[derive(Clone)]
 pub(crate) struct TerminalPanelControls {
+  catalog: ShellCatalog,
   pub(super) sessions: Vec<ManagedTerminalSession>,
   pub(super) active_session: TerminalSessionId,
   pub(super) close_session: Entity<ButtonState>,
@@ -141,23 +168,31 @@ impl TerminalPanelControls {
     shell_context: CommandExecutionContext,
     cx: &mut Context<ChitinApp>,
   ) -> Result<Self, TerminalSessionError> {
+    let catalog = ShellCatalog::discover();
     let close_session = cx.new(ButtonState::new);
     let profile_select = cx.new(|cx| {
       SelectInputState::new(
-        TerminalProfile::ALL
-          .into_iter()
-          .map(|profile| SelectOption::new(profile.id(), profile.label()).icon(terminal_profile_icon(profile))),
+        std::iter::once(
+          SelectOption::new("builtin-shell", "Built-in shell").icon(terminal_profile_icon("builtin-shell")),
+        )
+        .chain(
+          catalog
+            .available()
+            .iter()
+            .map(|shell| SelectOption::new(&shell.id, &shell.label).icon(terminal_profile_icon(&shell.id))),
+        ),
         cx,
       )
     });
     let session = Self::build_session(
       initial_id,
-      TerminalProfile::BuiltinShell,
+      &DesktopTerminalProfile::Builtin,
       working_directory,
       shell_context,
       cx,
     )?;
     Ok(Self {
+      catalog,
       sessions: vec![session],
       active_session: initial_id,
       close_session,
@@ -169,32 +204,33 @@ impl TerminalPanelControls {
   /// Builds a terminal surface for one launch profile.
   fn build_session(
     id: TerminalSessionId,
-    profile: TerminalProfile,
+    profile: &DesktopTerminalProfile,
     working_directory: &Path,
     mut shell_context: CommandExecutionContext,
     cx: &mut Context<ChitinApp>,
   ) -> Result<ManagedTerminalSession, TerminalSessionError> {
-    let (session, builtin) = if profile == TerminalProfile::BuiltinShell {
-      // The prompt and relative-path execution must start in the same directory.
-      shell_context.working_directory = working_directory.to_path_buf();
-      let prompt = presenter::terminal_prompt_ansi(working_directory);
-      let (session, program) = BuiltinTerminalProgram::connect(INITIAL_TERMINAL_SIZE, prompt)?;
-      (
-        session,
-        Some(ManagedBuiltinShell {
-          host: DesktopShellHost::new(shell_context),
-          program: Arc::new(Mutex::new(program)),
-        }),
-      )
-    } else {
-      (
-        TerminalSession::spawn_system_shell(profile, working_directory, INITIAL_TERMINAL_SIZE)?,
+    let (session, builtin) = match profile {
+      DesktopTerminalProfile::Builtin => {
+        // The prompt and relative-path execution must start in the same directory.
+        shell_context.working_directory = working_directory.to_path_buf();
+        let prompt = presenter::terminal_prompt_ansi(working_directory);
+        let (session, program) = BuiltinTerminalProgram::connect(INITIAL_TERMINAL_SIZE, prompt)?;
+        (
+          session,
+          Some(ManagedBuiltinShell {
+            host: DesktopShellHost::new(shell_context),
+            program: Arc::new(Mutex::new(program)),
+          }),
+        )
+      }
+      DesktopTerminalProfile::Shell(shell) => (
+        TerminalSession::spawn_shell(shell, working_directory, INITIAL_TERMINAL_SIZE)?,
         None,
-      )
+      ),
     };
     Ok(ManagedTerminalSession {
       id,
-      profile,
+      profile: profile.clone(),
       terminal: cx.new(|cx| TerminalEmulatorState::new(session, INITIAL_TERMINAL_SIZE, cx)),
       builtin,
       tab: cx.new(ButtonState::new),
@@ -223,7 +259,17 @@ impl TerminalPanelControls {
       else {
         return;
       };
-      let Some(profile) = TerminalProfile::from_id(selected_id.as_ref()) else {
+      let Some(profile) = this.terminal_panel_controls.as_ref().and_then(|controls| {
+        if selected_id.as_ref() == "builtin-shell" {
+          Some(DesktopTerminalProfile::Builtin)
+        } else {
+          controls
+            .catalog
+            .get(selected_id.as_ref())
+            .cloned()
+            .map(DesktopTerminalProfile::Shell)
+        }
+      }) else {
         return;
       };
       this.create_terminal_session(profile, window, cx);
@@ -323,14 +369,14 @@ impl ChitinApp {
   }
 
   /// Creates a new terminal session for the selected profile.
-  fn create_terminal_session(&mut self, profile: TerminalProfile, window: &mut Window, cx: &mut Context<Self>) {
+  fn create_terminal_session(&mut self, profile: DesktopTerminalProfile, window: &mut Window, cx: &mut Context<Self>) {
     let working_directory = self.terminal_working_directory();
     let shell_context = desktop_shell_context(self.workspace.as_ref().map(|workspace| workspace.root.clone()));
     if self.terminal_panel_controls.is_none() {
       return;
     }
     let id = self.terminal_panel.next_session_id();
-    let session = match TerminalPanelControls::build_session(id, profile, &working_directory, shell_context, cx) {
+    let session = match TerminalPanelControls::build_session(id, &profile, &working_directory, shell_context, cx) {
       Ok(session) => session,
       Err(error) => {
         log::error!("failed to create {} terminal session: {error}", profile.label());
@@ -459,5 +505,16 @@ mod tests {
     let second = state.next_session_id();
 
     assert_ne!(first, second);
+  }
+
+  #[test]
+  fn terminal_shell_icons_should_resolve_to_existing_assets() {
+    let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+    let all_exist = ["powershell", "pwsh", "zsh", "nushell"]
+      .into_iter()
+      .map(terminal_profile_icon)
+      .all(|icon| assets.join(icon).is_file());
+
+    assert!(all_exist);
   }
 }

@@ -20,7 +20,7 @@ use alacritty_terminal::{
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, native_pty_system};
 use thiserror::Error;
 
-use crate::{TerminalProfile, TerminalSize, TerminalSnapshot};
+use crate::{ShellDefinition, TerminalProfile, TerminalSize, TerminalSnapshot};
 
 type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type SharedTerminal = Arc<FairMutex<Term<TerminalEventProxy>>>;
@@ -196,6 +196,38 @@ pub struct TerminalSession {
 }
 
 impl TerminalSession {
+  /// Spawns a discovered shell using its resolved executable and launch arguments.
+  ///
+  /// # Parameters
+  ///
+  /// * `shell` is a catalog definition selected by the user.
+  /// * `working_directory` is the initial directory for the child shell.
+  /// * `size` is the initial character-grid and cell-pixel size.
+  ///
+  /// # Returns
+  ///
+  /// A live PTY session, or an error if the executable disappeared or spawning failed.
+  pub fn spawn_shell(
+    shell: &ShellDefinition,
+    working_directory: impl AsRef<Path>,
+    size: TerminalSize,
+  ) -> Result<Self, TerminalSessionError> {
+    if !crate::shell::is_executable(&shell.executable) {
+      return Err(TerminalSessionError::Pty {
+        operation: "spawn shell profile",
+        message: format!("{} is no longer available", shell.executable.display()),
+      });
+    }
+    let mut command = CommandBuilder::new(&shell.executable);
+    for argument in &shell.arguments {
+      command.arg(argument);
+    }
+    command.cwd(working_directory.as_ref());
+    command.env("TERM", "xterm-256color");
+    command.env("COLORTERM", "truecolor");
+    Self::spawn_with_profile(command, TerminalProfile::SystemShell, size)
+  }
+
   /// Spawns the operating system's default interactive shell.
   ///
   /// # Parameters
@@ -215,40 +247,6 @@ impl TerminalSession {
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     Self::spawn_with_profile(command, TerminalProfile::SystemShell, size)
-  }
-
-  /// Spawns a selected operating-system shell profile.
-  ///
-  /// # Parameters
-  ///
-  /// * `profile` selects the default shell, Bash, or Fish.
-  /// * `working_directory` is the initial directory for the child shell.
-  /// * `size` is the initial character-grid and cell-pixel size.
-  ///
-  /// # Returns
-  ///
-  /// A live PTY session tagged with the selected profile. The built-in profile
-  /// is rejected because it requires an in-process program endpoint.
-  pub fn spawn_system_shell(
-    profile: TerminalProfile,
-    working_directory: impl AsRef<Path>,
-    size: TerminalSize,
-  ) -> Result<Self, TerminalSessionError> {
-    let mut command = match profile {
-      TerminalProfile::SystemShell => CommandBuilder::new_default_prog(),
-      TerminalProfile::Bash => CommandBuilder::new("bash"),
-      TerminalProfile::Fish => CommandBuilder::new("fish"),
-      TerminalProfile::BuiltinShell => {
-        return Err(TerminalSessionError::Pty {
-          operation: "spawn system shell profile",
-          message: "the built-in shell uses an in-process terminal program".into(),
-        });
-      }
-    };
-    command.cwd(working_directory.as_ref());
-    command.env("TERM", "xterm-256color");
-    command.env("COLORTERM", "truecolor");
-    Self::spawn_with_profile(command, profile, size)
   }
 
   /// Spawns a command attached to a native pseudo-terminal.

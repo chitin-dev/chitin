@@ -3,6 +3,7 @@
 
 mod model;
 mod session;
+mod shell;
 mod size;
 mod snapshot;
 
@@ -14,5 +15,6 @@ pub use session::{
   TerminalEvent, TerminalProgram, TerminalProgramInput, TerminalProgramOutput, TerminalScroll, TerminalScrollState,
   TerminalSession, TerminalSessionError,
 };
+pub use shell::{ShellCatalog, ShellDefinition};
 pub use size::TerminalSize;
 pub use snapshot::{TerminalCell, TerminalCellAttributes, TerminalColor, TerminalNamedColor, TerminalSnapshot};

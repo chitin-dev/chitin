@@ -20,7 +20,6 @@ use gpui::{
 
 use super::{TerminalPanelControls, terminal_profile_icon};
 use crate::{app::ChitinApp, fonts::TERMINAL_FONT_FAMILY, keybindings::COMMAND_TERMINAL_KEY_CONTEXT};
-use chitin_terminal::TerminalProfile;
 
 /// Renders the VT terminal emulator as the active bottom-dock item.
 ///
@@ -83,7 +82,7 @@ pub(crate) fn render_terminal_bottom_dock(
         )
         .theme(theme)
         .child(
-          Icon::new(terminal_profile_icon(session.profile))
+          Icon::new(terminal_profile_icon(session.profile.id()))
             .size(px(14.0))
             .color(if selected {
               theme.text.primary
@@ -99,7 +98,11 @@ pub(crate) fn render_terminal_bottom_dock(
     .flex()
     .items_center()
     .gap_1()
-    .child(new_terminal_select(controls.profile_select.clone(), theme))
+    .child(new_terminal_select(
+      controls.profile_select.clone(),
+      &controls.catalog,
+      theme,
+    ))
     .child(
       Button::new(controls.close_session.clone())
         .size(ButtonSize::Small)
@@ -171,13 +174,14 @@ pub(crate) fn render_terminal_bottom_dock(
 /// Builds the icon-only selector used to create a terminal profile session.
 fn new_terminal_select(
   profile_select: Entity<chitin_ui::primitive::input::select::SelectInputState>,
+  catalog: &chitin_terminal::ShellCatalog,
   theme: UIThemes,
 ) -> impl gpui::IntoElement {
-  let group = TerminalProfile::ALL
-    .into_iter()
-    .fold(SelectGroup::new(), |group, profile| {
-      group.item(SelectItem::new(profile.id(), profile.label()).icon(terminal_profile_icon(profile)))
-    });
+  let group = catalog.available().iter().fold(
+    SelectGroup::new()
+      .item(SelectItem::new("builtin-shell", "Built-in shell").icon(terminal_profile_icon("builtin-shell"))),
+    |group, shell| group.item(SelectItem::new(&shell.id, &shell.label).icon(terminal_profile_icon(&shell.id))),
+  );
   Select::new(profile_select)
     .trigger(
       SelectTrigger::new()
