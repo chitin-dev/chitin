@@ -1,13 +1,10 @@
 //! Experimental WGPU document panel component.
 
-use std::{
-  sync::Arc,
-  time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use chitin_bio::surface::MolecularSurfaceArtifact;
 use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportDrag};
-use chitin_wgpu::{ClearRenderer, RenderTargetSize};
+use chitin_wgpu::RenderTargetSize;
 use gpui::{
   Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollWheelEvent,
   WgpuSurfaceHandle, Window, div, prelude::*, px, rgb, wgpu_surface,
@@ -73,49 +70,6 @@ pub trait WgpuPanelScene {
   }
 }
 
-/// Default scene used when no specialized renderer is supplied.
-struct ClearScene {
-  /// Lazy renderer using the surface's device and queue.
-  renderer: Option<ClearRenderer>,
-}
-
-impl ClearScene {
-  /// Creates a scene that clears the WGPU surface each frame.
-  fn new() -> Self {
-    Self { renderer: None }
-  }
-}
-
-impl WgpuPanelScene for ClearScene {
-  /// Clears the current frame using the shared WGPU helper.
-  ///
-  /// # Parameters
-  ///
-  /// * `frame` contains the GPUI surface resources and back-buffer target.
-  ///
-  /// # Returns
-  ///
-  /// The queue submission index for synchronized presentation.
-  fn render_frame(&mut self, frame: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex {
-    let renderer = self.renderer.get_or_insert_with(|| {
-      ClearRenderer::new(
-        Arc::new(frame.device.clone()),
-        Arc::new(frame.queue.clone()),
-        frame.size,
-        wgpu::Color {
-          r: 0.025,
-          g: 0.030,
-          b: 0.045,
-          a: 1.0,
-        },
-      )
-    });
-
-    renderer.resize_if_needed(frame.size);
-    renderer.render(frame.view)
-  }
-}
-
 /// Experimental interactive WGPU panel suitable for a document-area tab.
 pub struct ChitinWgpuDocumentPanel {
   /// GPUI surface handle, absent only if the backend cannot create WGPU surfaces.
@@ -137,20 +91,6 @@ pub struct ChitinWgpuDocumentPanel {
 }
 
 impl ChitinWgpuDocumentPanel {
-  /// Creates an interactive WGPU document panel.
-  ///
-  /// # Parameters
-  ///
-  /// * `surface` is the GPUI-owned WGPU surface created by the desktop window.
-  ///
-  /// # Returns
-  ///
-  /// A panel ready to render when GPUI schedules its first frame.
-  #[allow(dead_code)]
-  pub fn new(surface: Option<WgpuSurfaceHandle>) -> Self {
-    Self::new_with_scene(surface, ClearScene::new())
-  }
-
   /// Creates an interactive WGPU document panel with a custom scene.
   ///
   /// # Parameters

@@ -7,6 +7,7 @@ repository.workspace = true
 description = "Reusable GPUI components for chitin desktop application"
 
 [dependencies]
+chitin-terminal = { path = "../chitin-terminal" }
 gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "d01b063d0dce9df2be24a53f59201e010712fc01" }
 log = "0.4.33"
 

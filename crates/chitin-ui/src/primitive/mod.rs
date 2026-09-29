@@ -14,8 +14,12 @@ pub mod popover;
 pub mod progress;
 /// Generic resize gesture state.
 pub mod resize;
+/// Draggable scrollbars reporting viewport positions.
+pub mod scrollbar;
 /// Sidebar layout and resize controls.
 pub mod sidebar;
+/// Monospace terminal rows and tail-following scroll viewport.
+pub mod terminal;
 /// Text display controls with optional clipboard support.
 pub mod text;
 /// Virtualized tree layout and scroll state.

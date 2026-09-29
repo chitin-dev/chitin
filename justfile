@@ -47,6 +47,10 @@ generate-mmcif-schema:
 desktop path=".":
   cargo run -p chitin-desktop -- "{{path}}"
 
+# Launch the native PTY and VT-emulation integration example.
+terminal-debug path=".":
+  cargo run -p chitin-desktop --example terminal-debug -- "{{path}}"
+
 # Rebuild the browser WASM package before starting Vite's development server.
 browser-dev:
   pnpm --dir browser wasm:build

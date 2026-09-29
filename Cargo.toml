@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/chitin-builtin-shell",
   "crates/chitin-command",
   "crates/chitin-cli",
   "crates/chitin-bio",
@@ -8,6 +9,7 @@ members = [
   "crates/chitin-databases",
   "crates/chitin-desktop",
   "crates/chitin-molecule-renderer",
+  "crates/chitin-terminal",
   "crates/chitin-ui",
   "crates/chitin-wgpu",
   "crates/chitin-wasm",

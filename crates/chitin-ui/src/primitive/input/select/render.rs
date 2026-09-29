@@ -24,6 +24,8 @@ const DEFAULT_PADDING_X: Pixels = px(8.0);
 const DEFAULT_MENU_MAX_HEIGHT: Pixels = px(240.0);
 /// Default height of each item
 const ITEM_HEIGHT: Pixels = px(30.0);
+/// Default rendered size of the icon shown inside a trigger.
+const DEFAULT_TRIGGER_ICON_SIZE: Pixels = px(14.0);
 /// Default height of each label in the items, notice it's different from the
 /// font size of label in the items.
 const LABEL_HEIGHT: Pixels = px(24.0);
@@ -47,8 +49,14 @@ pub enum SelectInputVariant {
 pub struct SelectInputStyle {
   /// Explicit trigger width, when visual layout requires one.
   width: Option<Pixels>,
+  /// Optional horizontal padding for a compact trigger.
+  trigger_padding_x: Option<Pixels>,
+  /// Optional popup width independent of a compact trigger.
+  menu_width: Option<Pixels>,
   /// Maximum popup height before its content scrolls.
   menu_max_height: Option<Pixels>,
+  /// Optional rendered size for the trigger's leading icon.
+  trigger_icon_size: Option<Pixels>,
 }
 
 impl SelectInputStyle {
@@ -63,9 +71,27 @@ impl SelectInputStyle {
     self
   }
 
+  /// Sets a popup width independent of the trigger width.
+  pub fn menu_width(mut self, width: Pixels) -> Self {
+    self.menu_width = Some(width);
+    self
+  }
+
+  /// Sets the trigger's horizontal padding.
+  pub fn trigger_padding_x(mut self, padding: Pixels) -> Self {
+    self.trigger_padding_x = Some(padding);
+    self
+  }
+
   /// Sets the maximum visible popup height before its option list scrolls.
   pub fn menu_max_height(mut self, height: Pixels) -> Self {
     self.menu_max_height = Some(height);
+    self
+  }
+
+  /// Sets the rendered size of the trigger's leading icon.
+  pub fn trigger_icon_size(mut self, size: Pixels) -> Self {
+    self.trigger_icon_size = Some(size);
     self
   }
 }
@@ -233,10 +259,13 @@ impl RenderOnce for Select {
     let popup_layout = SelectPopupLayout {
       trigger: metrics,
       configured_width: width,
+      menu_width: self.style.menu_width,
+      align_end: self.content.align_end,
       trigger_bounds,
       viewport_size,
     };
     let value = self.trigger.value;
+    let show_indicator = self.trigger.show_indicator;
 
     div()
       .relative()
@@ -255,7 +284,7 @@ impl RenderOnce for Select {
               .items_center()
               .justify_between()
               .h(metrics.height)
-              .px(DEFAULT_PADDING_X)
+              .px(self.style.trigger_padding_x.unwrap_or(DEFAULT_PADDING_X))
               .rounded_sm()
               .border_1()
               .border_color(colors.border)
@@ -286,12 +315,16 @@ impl RenderOnce for Select {
               .track_focus(&focus_handle)
               .child(render_value(
                 value,
+                self.trigger.icon,
                 selected_label,
                 selected_icon,
+                self.style.trigger_icon_size.unwrap_or(DEFAULT_TRIGGER_ICON_SIZE),
                 colors.foreground,
                 self.theme.text.disabled,
               ))
-              .child(Icon::new("icons/tree-expand.svg").theme(self.theme)),
+              .when(show_indicator, |trigger| {
+                trigger.child(Icon::new("icons/tree-expand.svg").theme(self.theme))
+              }),
           ),
       )
       .when(open, |parent| {
@@ -323,10 +356,24 @@ impl RenderOnce for Select {
 }
 
 /// Trigger popup panel for a [`Select`].
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SelectTrigger {
   /// Value subtree displayed before the trigger icon.
   value: SelectValue,
+  /// Optional icon shown when the selector has no selected value.
+  icon: Option<SharedString>,
+  /// Whether the trigger draws the default trailing chevron.
+  show_indicator: bool,
+}
+
+impl Default for SelectTrigger {
+  fn default() -> Self {
+    Self {
+      value: SelectValue::default(),
+      icon: None,
+      show_indicator: true,
+    }
+  }
 }
 
 impl SelectTrigger {
@@ -338,6 +385,18 @@ impl SelectTrigger {
   /// Sets the value display nested inside this trigger.
   pub fn value(mut self, value: SelectValue) -> Self {
     self.value = value;
+    self
+  }
+
+  /// Sets the icon shown while the selector has no selected value.
+  pub fn icon(mut self, path: impl Into<SharedString>) -> Self {
+    self.icon = Some(path.into());
+    self
+  }
+
+  /// Shows or hides the default trailing chevron.
+  pub fn show_indicator(mut self, show: bool) -> Self {
+    self.show_indicator = show;
     self
   }
 }
@@ -378,6 +437,8 @@ pub struct SelectContent {
   position: SelectContentPosition,
   /// Ordered content nodes used for rendering and selection-state flattening.
   children: Vec<SelectContentChild>,
+  /// Whether the popup's right edge aligns with the trigger's right edge.
+  align_end: bool,
 }
 
 impl SelectContent {
@@ -389,6 +450,12 @@ impl SelectContent {
   /// Selects how the content is positioned relative to the trigger.
   pub fn position(mut self, position: SelectContentPosition) -> Self {
     self.position = position;
+    self
+  }
+
+  /// Aligns the popup's right edge with the trigger's right edge.
+  pub fn align_end(mut self) -> Self {
+    self.align_end = true;
     self
   }
 
@@ -638,8 +705,11 @@ impl SelectSeparator {
 /// # Parameters
 ///
 /// * `value` configures the placeholder displayed for an empty selection.
+/// * `trigger_icon` is the icon shown while the selector has no selection.
 /// * `selected_label` is the current selected item label, when available.
-/// * `foreground` colors selected text.
+/// * `selected_icon` is the icon owned by the selected item, when available.
+/// * `icon_size` is the rendered size of whichever icon is displayed.
+/// * `foreground` colors selected text and icons.
 /// * `placeholder` colors the empty-state text.
 ///
 /// # Returns
@@ -647,12 +717,16 @@ impl SelectSeparator {
 /// A flexible value element that leaves room for the trigger icon.
 fn render_value(
   value: SelectValue,
+  trigger_icon: Option<SharedString>,
   selected_label: Option<SharedString>,
   selected_icon: Option<SharedString>,
+  icon_size: Pixels,
   foreground: gpui::Rgba,
   placeholder: gpui::Rgba,
 ) -> Div {
   let selected = selected_label.is_some();
+  let icon = selected_icon.or(trigger_icon);
+  let label = selected_label.unwrap_or(value.placeholder);
   let mut value_element = div()
     .flex()
     .items_center()
@@ -660,10 +734,20 @@ fn render_value(
     .min_w_0()
     .flex_1()
     .text_color(if selected { foreground } else { placeholder });
-  if let Some(path) = selected_icon {
-    value_element = value_element.child(Icon::new(path).size(px(14.0)).color(foreground));
+  // An icon-only trigger carries no text to lay out, so centering the icon keeps
+  // it off the padding edge instead of left-aligning it against an empty label.
+  if label.is_empty() {
+    return match icon {
+      Some(path) => value_element
+        .justify_center()
+        .child(Icon::new(path).size(icon_size).color(foreground)),
+      None => value_element.child(label),
+    };
   }
-  value_element.child(selected_label.unwrap_or(value.placeholder))
+  if let Some(path) = icon {
+    value_element = value_element.child(Icon::new(path).size(icon_size).color(foreground));
+  }
+  value_element.child(label)
 }
 
 /// Renders one popup content tree at its selected positioning mode.
@@ -757,7 +841,12 @@ fn render_content(
     .theme(theme)
     .scroll_handle(interaction.scroll_handle);
   let popover = if let Some(trigger_bounds) = layout.trigger_bounds {
-    popover.anchor_position(trigger_bounds.origin)
+    let origin = if layout.align_end {
+      point(trigger_bounds.right() - layout.popup_width(), trigger_bounds.top())
+    } else {
+      trigger_bounds.origin
+    };
+    popover.anchor_position(origin)
   } else {
     popover
   };
@@ -911,6 +1000,10 @@ struct SelectPopupLayout {
   trigger: SelectInputMetrics,
   /// Configured width used until the trigger has been measured.
   configured_width: Pixels,
+  /// Explicit menu width for compact triggers.
+  menu_width: Option<Pixels>,
+  /// Whether the popup aligns its right edge with the trigger.
+  align_end: bool,
   /// Trigger bounds measured during the previous prepaint pass.
   trigger_bounds: Option<Bounds<Pixels>>,
   /// Current window size used to constrain item-aligned content.
@@ -1050,9 +1143,11 @@ impl SelectPopupLayout {
 
   /// Returns the measured trigger width, falling back before the first prepaint pass.
   fn popup_width(self) -> Pixels {
-    self
-      .trigger_bounds
-      .map_or(self.configured_width, |trigger_bounds| trigger_bounds.size.width)
+    self.menu_width.unwrap_or_else(|| {
+      self
+        .trigger_bounds
+        .map_or(self.configured_width, |trigger_bounds| trigger_bounds.size.width)
+    })
   }
 
   /// Returns the measured trigger height used by conventional anchor placement.
@@ -1112,7 +1207,7 @@ impl SelectInputColors {
         background: theme.background.primary,
         hover_background: theme.background.hover,
         foreground: theme.text.primary,
-        border: theme.border.muted,
+        border: builtins::TRANSPARENT,
         focus_border: theme.border.focus,
       },
     }
@@ -1197,6 +1292,8 @@ mod tests {
         font_size: px(13.0),
       },
       configured_width: px(240.0),
+      menu_width: None,
+      align_end: false,
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(20.0)),
         size: Size {
@@ -1232,6 +1329,8 @@ mod tests {
         font_size: px(13.0),
       },
       configured_width: px(240.0),
+      menu_width: None,
+      align_end: false,
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(650.0)),
         size: Size {
@@ -1267,6 +1366,8 @@ mod tests {
         font_size: px(13.0),
       },
       configured_width: px(240.0),
+      menu_width: None,
+      align_end: false,
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(300.0)),
         size: Size {
@@ -1299,6 +1400,8 @@ mod tests {
         font_size: px(13.0),
       },
       configured_width: px(240.0),
+      menu_width: None,
+      align_end: false,
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(580.0)),
         size: Size {
@@ -1329,6 +1432,8 @@ mod tests {
         font_size: px(13.0),
       },
       configured_width: px(240.0),
+      menu_width: None,
+      align_end: false,
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(0.0)),
         size: Size {
@@ -1353,6 +1458,8 @@ mod tests {
         font_size: px(13.0),
       },
       configured_width: px(240.0),
+      menu_width: None,
+      align_end: false,
       trigger_bounds: Some(Bounds {
         origin: point(px(0.0), px(300.0)),
         size: Size {

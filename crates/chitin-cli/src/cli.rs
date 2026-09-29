@@ -1,256 +1,131 @@
-//! Command-line schema and command-bus routing.
+//! Process CLI schema and command-bus routing.
 
-use std::path::PathBuf;
+use std::{io::Read, path::PathBuf};
 
-use chitin_command::{ChitinCommand, DatabaseCommand, StructureCommand};
-use chitin_databases::providers::rcsb::StructureFormat;
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use chitin_command::{
+  CommandExecutionContext, CommandExecutor, CommandReportStatus, DatabaseCommand, PortableCommand, PortableCommandArgs,
+  RcsbDownloadArguments, StructureCommand,
+};
+use chitin_databases::ClientConfig;
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 
-use crate::{download::download_rcsb, error::CliError};
+use crate::{download::terminal_event_sink, error::CliError};
 
 /// Root command parsed by the `chitin` binary.
 #[derive(Debug, Parser)]
 #[command(name = "chitin", version, about = "Chitin structural biology tools")]
 pub(crate) struct Cli {
-  /// Selected top-level workflow.
+  /// Selected command-line workflow.
   #[command(subcommand)]
   pub(crate) command: CliCommand,
 }
 
-/// Top-level CLI workflows.
+/// CLI-specific actions composed with the shared portable command tree.
 #[derive(Debug, Subcommand)]
 pub(crate) enum CliCommand {
-  /// Work with external biological databases.
-  #[command(name = "db", visible_alias = "databases")]
-  Database(DatabaseCommandArgs),
-  /// Inspect or validate a local PDB/mmCIF structure file.
-  Structure(StructureCommandArgs),
+  /// Execute a portable Chitin workflow.
+  #[command(flatten)]
+  Portable(PortableCommandArgs),
   /// Generate shell completion scripts.
   Completions { shell: Shell },
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct StructureCommandArgs {
-  #[command(subcommand)]
-  command: StructureSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum StructureSubcommand {
-  /// Print a human-readable or JSON structure summary.
-  Inspect(StructureInspectArgs),
-  /// Parse a structure and verify its indexed model invariants.
-  Validate(StructureValidateArgs),
-}
-
-#[derive(Debug, Args)]
-struct StructureInspectArgs {
-  #[command(flatten)]
-  input: StructureInputArgs,
-  /// Output representation.
-  #[arg(long, value_enum, default_value_t = OutputArg::Text)]
-  output: OutputArg,
-  /// Include chains, metadata, assembly, and diagnostics.
-  #[arg(long)]
-  verbose: bool,
-}
-
-#[derive(Debug, Args)]
-struct StructureValidateArgs {
-  #[command(flatten)]
-  input: StructureInputArgs,
-  /// Output representation.
-  #[arg(long, value_enum, default_value_t = OutputArg::Text)]
-  output: OutputArg,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct StructureInputArgs {
-  /// Structure file path, or `-` to read stdin.
-  #[arg(value_name = "FILE")]
-  pub(crate) input: PathBuf,
-  /// Input format; inferred from the extension when omitted.
-  #[arg(long, value_enum)]
-  pub(crate) format: Option<FormatArg>,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(crate) enum OutputArg {
-  /// Human-readable terminal output.
-  Text,
-  /// Stable machine-readable JSON output.
-  Json,
-}
-
-#[derive(Debug, Args)]
-pub(crate) struct DatabaseCommandArgs {
-  #[command(subcommand)]
-  command: DatabaseSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum DatabaseSubcommand {
-  /// Download an RCSB structure file.
-  Rcsb(RcsbCommandArgs),
-}
-
-#[derive(Debug, Args)]
-struct RcsbCommandArgs {
-  #[command(subcommand)]
-  command: RcsbSubcommand,
-}
-
-#[derive(Debug, Subcommand)]
-enum RcsbSubcommand {
-  /// Download a PDB or mmCIF structure.
-  Download {
-    /// Comma-separated list of four-character PDB identifiers, such as 4HHB,1YTH.
-    #[arg(long, value_name = "PDB_ID")]
-    id: String,
-    /// Structure format to download.
-    #[arg(long, value_enum, default_value_t = FormatArg::Pdb)]
-    format: FormatArg,
-    /// Output file or directory. Existing directories receive a generated filename.
-    #[arg(short, long, value_name = "PATH")]
-    output: Option<PathBuf>,
-  },
-}
-
-/// CLI spelling for the two RCSB structure formats.
-#[derive(Clone, Copy, Debug, ValueEnum)]
-pub(crate) enum FormatArg {
-  /// Legacy PDB format.
-  Pdb,
-  /// PDBx/mmCIF format.
-  Mmcif,
-}
-
-impl FormatArg {
-  /// Converts the CLI value into the shared provider format.
-  pub(crate) fn structure_format(self) -> StructureFormat {
-    match self {
-      Self::Pdb => StructureFormat::Pdb,
-      Self::Mmcif => StructureFormat::Mmcif,
-    }
-  }
 }
 
 /// Dispatches a parsed CLI workflow.
 ///
 /// # Parameters
 ///
-/// * `command` is the validated top-level CLI command.
+/// * `command` is the validated top-level CLI action.
 ///
 /// # Returns
 ///
-/// Returns `Ok(())` after the selected workflow completes.
+/// The report status after execution or completion generation finishes.
 ///
 /// # Errors
 ///
-/// Returns [`CliError`] when command execution or output generation fails.
-pub(crate) async fn dispatch(command: CliCommand) -> Result<(), CliError> {
+/// Returns [`CliError`] when typed conversion, execution, or output rendering
+/// fails.
+pub(crate) async fn dispatch(command: CliCommand) -> Result<CommandReportStatus, CliError> {
   match command {
     CliCommand::Completions { shell } => {
       let mut command = Cli::command();
       generate(shell, &mut command, "chitin", &mut std::io::stdout());
-      Ok(())
+      Ok(CommandReportStatus::Succeeded)
     }
-    CliCommand::Database(database) => dispatch_database_command(database.command).await,
-    CliCommand::Structure(structure) => dispatch_structure_command(structure.command).await,
+    CliCommand::Portable(arguments) => dispatch_command(arguments.into_command()?).await,
   }
 }
 
-/// Dispatches a structure command through the shared command bus.
-async fn dispatch_structure_command(command: StructureSubcommand) -> Result<(), CliError> {
-  match command {
-    StructureSubcommand::Inspect(args) => {
-      crate::structure::dispatch(
-        ChitinCommand::from(StructureCommand::Inspect),
-        args.input,
-        Some(args.output),
-        args.verbose,
-      )
-      .await
-    }
-    StructureSubcommand::Validate(args) => {
-      crate::structure::dispatch(
-        ChitinCommand::from(StructureCommand::Validate),
-        args.input,
-        Some(args.output),
-        false,
-      )
-      .await
-    }
-  }
-}
-
-/// Dispatches a database command to its provider-specific workflow.
+/// Routes one CLI request through the shared portable command executor.
 ///
 /// # Parameters
 ///
-/// * `command` is the parsed database subcommand.
+/// * `command` contains the validated portable command and arguments.
 ///
 /// # Returns
 ///
-/// Returns `Ok(())` after the database workflow completes.
+/// The rendered command's domain-level completion status.
 ///
 /// # Errors
 ///
-/// Returns [`CliError`] when the selected workflow fails.
-async fn dispatch_database_command(command: DatabaseSubcommand) -> Result<(), CliError> {
-  match command {
-    DatabaseSubcommand::Rcsb(command) => dispatch_rcsb_command(command.command).await,
-  }
+/// Returns [`CliError`] when process context, command execution, or output
+/// rendering fails.
+async fn dispatch_command(command: PortableCommand) -> Result<CommandReportStatus, CliError> {
+  let context = execution_context(&command)?;
+  let executor = CommandExecutor::new(ClientConfig::default());
+  let outcome = executor.execute(command, context, terminal_event_sink()).await?;
+  Ok(crate::structure::render_outcome(&outcome))
 }
 
-/// Dispatches an RCSB subcommand to the shared command bus.
+/// Builds frontend-neutral execution context from the current process state.
 ///
 /// # Parameters
 ///
-/// * `command` is the parsed RCSB subcommand and its download options.
+/// * `command` identifies which optional process resources are required.
 ///
 /// # Returns
 ///
-/// Returns `Ok(())` after the RCSB workflow completes.
-///
-/// # Errors
-///
-/// Returns [`CliError`] when the RCSB download or output resolution fails.
-async fn dispatch_rcsb_command(command: RcsbSubcommand) -> Result<(), CliError> {
+/// Working-directory, download-root, and standard-input data for the executor.
+fn execution_context(command: &PortableCommand) -> Result<CommandExecutionContext, CliError> {
+  let working_directory = std::env::current_dir().map_err(CliError::WorkingDirectory)?;
+  let mut context = CommandExecutionContext::new(working_directory);
+  if requires_default_download_root(command) {
+    context = context.with_default_download_root(home_directory()?.join(".chitin").join("download"));
+  }
+  if requires_standard_input(command) {
+    let mut bytes = Vec::new();
+    std::io::stdin()
+      .read_to_end(&mut bytes)
+      .map_err(CliError::StandardInput)?;
+    context = context.with_standard_input(bytes);
+  }
+  Ok(context)
+}
+
+/// Returns whether a database command needs the process download root.
+fn requires_default_download_root(command: &PortableCommand) -> bool {
+  matches!(
+    command,
+    PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(RcsbDownloadArguments {
+      output: None,
+      ..
+    }))
+  )
+}
+
+/// Returns whether a structure command reads bytes from standard input.
+fn requires_standard_input(command: &PortableCommand) -> bool {
   match command {
-    RcsbSubcommand::Download { id, format, output } => {
-      let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure);
-      dispatch_command(command, id, format.structure_format(), output).await
-    }
+    PortableCommand::Structure(StructureCommand::Inspect(arguments)) => arguments.input.input.as_os_str() == "-",
+    PortableCommand::Structure(StructureCommand::Validate(arguments)) => arguments.input.input.as_os_str() == "-",
+    PortableCommand::Database(_) => false,
   }
 }
 
-/// Routes the CLI request through the shared typed command bus.
-///
-/// # Parameters
-///
-/// * `command` identifies the typed command to dispatch.
-/// * `raw_id` contains one or more comma-separated PDB identifiers.
-/// * `format` selects the structure file format.
-/// * `output` optionally overrides the generated output path.
-///
-/// # Returns
-///
-/// Returns `Ok(())` after the command completes successfully.
-///
-/// # Errors
-///
-/// Returns [`CliError`] when the command is unsupported or the RCSB download
-/// fails.
-async fn dispatch_command(
-  command: ChitinCommand,
-  raw_id: String,
-  format: StructureFormat,
-  output: Option<PathBuf>,
-) -> Result<(), CliError> {
-  match command {
-    ChitinCommand::Database(DatabaseCommand::DownloadRcsbStructure) => download_rcsb(raw_id, format, output).await,
-    other => Err(CliError::UnsupportedCommand(other.id())),
-  }
+/// Finds the platform home directory used by default downloads.
+fn home_directory() -> Result<PathBuf, CliError> {
+  std::env::var_os("HOME")
+    .or_else(|| std::env::var_os("USERPROFILE"))
+    .map(PathBuf::from)
+    .ok_or(CliError::HomeDirectory)
 }

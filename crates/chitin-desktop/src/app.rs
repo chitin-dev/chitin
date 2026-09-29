@@ -5,9 +5,12 @@
 
 use std::{collections::BTreeSet, path::PathBuf};
 
+use chitin_command::CommandExecutor;
+use chitin_databases::ClientConfig;
 use chitin_ui::{
   composite::{
     activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
+    bottom_dock::BottomDockState,
     panel::{PanelSplitAxis, PanelTabDrag},
     toast::{Toast, ToastHost, ToastId, ToastViewport},
     window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
@@ -20,14 +23,18 @@ use gpui::{
 };
 
 use crate::{
+  builtin_shell::{DesktopShellHost, desktop_shell_context},
   components::{
     activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
+    bottom_dock::BottomDockControls,
     command_panel::{CommandPanelController, render_command_panel},
     document_area::{DocumentOptionsControls, DocumentPanelState, render_document_area, state::DocumentPanelContent},
     project_sidebar::{ProjectSidebarState, render_project_sidebar},
+    terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_bottom_dock},
     window_bar::{WindowBarControls, render_window_bar},
   },
-  keybindings::{ToggleCommandPanel, ToggleWorkspace},
+  keybindings::{ToggleCommandPanel, ToggleTerminal, ToggleWorkspace, WORKBENCH_KEY_CONTEXT},
+  portable_command::DesktopPortableCommandRunner,
   tasks::BackgroundTaskCenter,
 };
 
@@ -55,6 +62,18 @@ pub struct ChitinApp {
   pub(crate) command_panel: CommandPanelController,
   /// Application-wide executor and registry for background work.
   pub(crate) tasks: BackgroundTaskCenter,
+  /// Shared adapter for frontend-independent commands submitted by desktop views.
+  pub(crate) portable_commands: DesktopPortableCommandRunner,
+  /// Application-level command bridge for agent and system invocations.
+  pub(crate) builtin_shell: DesktopShellHost,
+  /// Active tool and geometry of the workbench-level bottom dock.
+  pub(crate) bottom_dock: BottomDockState,
+  /// Persistent controls shared by all bottom-dock tools.
+  pub(crate) bottom_dock_controls: Option<BottomDockControls>,
+  /// Scrollback presentation, shell mapping, and focus state for the terminal.
+  pub(crate) terminal_panel: TerminalPanelState,
+  /// Persistent primitive controls for the bottom terminal.
+  pub(crate) terminal_panel_controls: Option<TerminalPanelControls>,
   /// Structure paths currently being read and parsed off the UI thread.
   pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
   /// Primitive button state for platform window actions.
@@ -124,6 +143,8 @@ impl ChitinApp {
     let project_sidebar_state =
       ProjectSidebarState::with_workspace_root(workspace.as_ref().map(|workspace| workspace.tree.root.path.as_path()));
 
+    let shell_workspace_root = workspace.as_ref().map(|workspace| workspace.root.clone());
+    let command_executor = CommandExecutor::new(ClientConfig::default());
     Self {
       workspace,
       project_sidebar_state,
@@ -135,6 +156,12 @@ impl ChitinApp {
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
       tasks: BackgroundTaskCenter::new(),
+      portable_commands: DesktopPortableCommandRunner::new(command_executor),
+      builtin_shell: DesktopShellHost::new(desktop_shell_context(shell_workspace_root)),
+      bottom_dock: BottomDockState::new(),
+      bottom_dock_controls: None,
+      terminal_panel: TerminalPanelState::new(),
+      terminal_panel_controls: None,
       pending_structure_loads: BTreeSet::new(),
       window_bar_controls: None,
       activity_bar_controls: None,
@@ -372,7 +399,7 @@ impl ChitinApp {
   ///
   /// The approximate height available to the document panel root after removing
   /// the window bar.
-  fn document_panel_root_height(window_height: gpui::Pixels) -> gpui::Pixels {
+  pub(crate) fn document_panel_root_height(window_height: gpui::Pixels) -> gpui::Pixels {
     gpui::px((f32::from(window_height) - f32::from(DEFAULT_WINDOW_BAR_HEIGHT)).max(0.0))
   }
 
@@ -456,12 +483,30 @@ impl Render for ChitinApp {
     let toast_viewport = self.toast_viewport(cx);
     let command_panel_search_input = self.command_panel_search_input(window, cx);
     self.command_panel_rcsb_form(window, cx);
+    let terminal_dock_controls = if self.bottom_dock.is_active(TERMINAL_DOCK_ITEM_ID) {
+      self
+        .terminal_panel_controls(window, cx)
+        .map(|controls| (controls, self.bottom_dock_controls(window, cx)))
+    } else {
+      None
+    };
+    if terminal_dock_controls.is_some() {
+      self.sync_terminal_output();
+    }
+    if self.terminal_panel.take_focus_request()
+      && let Some((controls, _)) = terminal_dock_controls.as_ref()
+      && let Some(focus) = controls.focus(cx)
+    {
+      window.focus(&focus, cx);
+    }
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
     let document_panel_focus = self.document_panel_focus(cx);
     let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
     let document_panel_resize_axis = self.document_panel_resize_axis();
+    let bottom_dock_is_resizing = self.bottom_dock.is_resizing();
+    let bottom_dock_height = self.bottom_dock.height();
     let visible_sidebar_width = if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
       self.project_sidebar_state.resize.width()
     } else {
@@ -473,6 +518,7 @@ impl Render for ChitinApp {
       .flex_col()
       .size_full()
       .relative()
+      .key_context(WORKBENCH_KEY_CONTEXT)
       .track_focus(&workbench_focus)
       .bg(theme.background.primary)
       .text_color(theme.text.primary)
@@ -483,6 +529,9 @@ impl Render for ChitinApp {
         if this.command_panel.toggle(window, cx) {
           cx.notify();
         }
+      }))
+      .on_action(cx.listener(|this, _: &ToggleTerminal, _, cx| {
+        this.toggle_terminal(cx);
       }))
       .capture_key_down({
         let app = app.clone();
@@ -502,10 +551,13 @@ impl Render for ChitinApp {
       .when(document_panel_resize_axis == Some(PanelSplitAxis::Vertical), |layout| {
         layout.cursor(CursorStyle::ResizeUpDown)
       })
+      .when(bottom_dock_is_resizing, |layout| {
+        layout.cursor(CursorStyle::ResizeUpDown)
+      })
       .on_mouse_move({
         let app = app.clone();
         move |event, window, cx| {
-          if !project_sidebar_is_resizing && document_panel_resize_axis.is_none() {
+          if !project_sidebar_is_resizing && document_panel_resize_axis.is_none() && !bottom_dock_is_resizing {
             return;
           }
 
@@ -532,6 +584,15 @@ impl Render for ChitinApp {
               }
             });
           }
+
+          if bottom_dock_is_resizing {
+            let available_height = Self::document_panel_root_height(window.bounds().size.height);
+            let _ = app.update(cx, |this, cx| {
+              if this.bottom_dock.drag_resize(event.position.y, available_height) {
+                cx.notify();
+              }
+            });
+          }
         }
       })
       .on_drag_move::<PanelTabDrag>({
@@ -550,9 +611,10 @@ impl Render for ChitinApp {
           let _ = app.update(cx, |this, cx| {
             let sidebar_stopped = this.project_sidebar_state.stop_resize();
             let document_panel_stopped = this.stop_document_panel_resize();
+            let bottom_dock_stopped = this.bottom_dock.stop_resize();
             let document_tab_drag_cancelled = this.cancel_document_panel_tab_drag();
 
-            if sidebar_stopped || document_panel_stopped || document_tab_drag_cancelled {
+            if sidebar_stopped || document_panel_stopped || bottom_dock_stopped || document_tab_drag_cancelled {
               cx.notify();
             }
           });
@@ -577,14 +639,32 @@ impl Render for ChitinApp {
               ))
             },
           )
-          .child(render_document_area(
-            &self.document_panels,
-            theme,
-            &document_panel_focus,
-            app.clone(),
-            document_options_controls,
-            cx,
-          )),
+          .child(
+            div()
+              .relative()
+              .flex()
+              .flex_col()
+              .flex_1()
+              .min_w_0()
+              .min_h_0()
+              .child(render_document_area(
+                &self.document_panels,
+                theme,
+                &document_panel_focus,
+                app.clone(),
+                document_options_controls,
+                cx,
+              ))
+              .when_some(terminal_dock_controls, |layout, (controls, dock_controls)| {
+                layout.child(render_terminal_bottom_dock(
+                  controls,
+                  dock_controls.close(),
+                  bottom_dock_height,
+                  theme,
+                  app.clone(),
+                ))
+              }),
+          ),
       )
       .when(self.command_panel.is_open(), |layout| {
         layout.child(render_command_panel(

@@ -3,7 +3,7 @@
 
 use std::{borrow::Cow, collections::BTreeSet, path::PathBuf};
 
-use chitin_desktop::{app::ChitinApp, keybindings::default_key_bindings};
+use chitin_desktop::{app::ChitinApp, fonts::register_terminal_fonts, keybindings::default_key_bindings};
 use gpui::{
   App, AppContext, Application, AssetSource, Bounds, Result, SharedString, WindowBounds, WindowOptions, px, size,
 };
@@ -12,6 +12,7 @@ use rust_embed::RustEmbed;
 /// Compile-time asset bundle for the desktop application.
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../assets"]
+#[exclude = "fonts/**"]
 struct EmbeddedAssets;
 
 /// GPUI asset source backed by the embedded desktop assets.
@@ -68,6 +69,11 @@ fn main() {
   let project_path = std::env::args_os().nth(1).map(PathBuf::from);
 
   Application::new().with_assets(DesktopAssets).run(|cx: &mut App| {
+    if let Err(error) = register_terminal_fonts(cx) {
+      eprintln!("failed to register bundled terminal fonts: {error}");
+      cx.quit();
+      return;
+    }
     cx.bind_keys(default_key_bindings());
 
     let bounds = Bounds::centered(None, size(px(1100.0), px(760.0)), cx);

@@ -22,6 +22,7 @@ use std::{
 use chitin_bio::structure::{MmcifParser, PdbParser, StructureScene};
 use chitin_desktop::{
   app::{ChitinApp, WgpuDocumentView, WgpuDocumentViewFactory},
+  fonts::register_terminal_fonts,
   keybindings::default_key_bindings,
   wgpu_panel::ChitinWgpuDocumentPanel,
 };
@@ -194,6 +195,11 @@ fn main() {
       base: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
     })
     .run(move |cx: &mut App| {
+      if let Err(error) = register_terminal_fonts(cx) {
+        eprintln!("failed to register bundled terminal fonts: {error}");
+        cx.quit();
+        return;
+      }
       cx.bind_keys(default_key_bindings());
 
       let bounds = Bounds::centered(None, size(px(1180.0), px(800.0)), cx);

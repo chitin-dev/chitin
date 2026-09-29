@@ -1,0 +1,16 @@
+[package]
+name = "chitin-terminal"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Frontend-independent PTY sessions and VT terminal state for Chitin"
+
+[dependencies]
+alacritty_terminal = { git = "https://github.com/l0ng-ai/alacritty", rev = "1276f128fbaa8832cbc66210675cbe8aeb570499" }
+async-channel = "2.5"
+portable-pty = "0.8"
+thiserror = "2.0"
+
+[lints]
+workspace = true

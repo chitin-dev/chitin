@@ -1,16 +1,16 @@
 //! Desktop command panel rendering and input handling.
 
-use std::{collections::BTreeSet, rc::Rc};
+use std::rc::Rc;
 
 mod controller;
 mod form;
 
 pub(crate) use controller::CommandPanelController;
 use controller::{CommandPanelEvent, CommandPanelMode};
-use form::rcsb::{RcsbDownloadState, RcsbFormPanel, download_path};
+use form::rcsb::{RcsbDownloadState, RcsbFormPanel};
 
-use chitin_command::{ApplicationCommand, ChitinCommand, CommandInvocationKind};
-use chitin_databases::providers::rcsb::{PdbId, RcsbBatchDownloadRequest};
+use chitin_command::{CommandExecutionContext, CommandId, DatabaseCommand, PortableCommand, RcsbDownloadArguments};
+use chitin_databases::providers::rcsb::PdbId;
 use chitin_ui::{
   composite::{
     quickpick::{QuickPickItem, QuickPickOverlay, QuickPickSearchInput, render_quick_pick_overlay},
@@ -33,7 +33,8 @@ use gpui::{
 use crate::{
   app::ChitinApp,
   components::document_area::state::OpenedProjectDocument,
-  tasks::{TaskOutput, TaskState, rcsb::submit_downloads},
+  portable_command::PortableCommandSubmission,
+  tasks::{TaskKind, TaskOutput, TaskState},
 };
 
 /// Callback invoked when a rendered command row is selected.
@@ -57,7 +58,11 @@ pub(crate) fn render_command_panel(
   cx: &mut Context<ChitinApp>,
   search_input: Entity<TextInputState>,
 ) -> Div {
-  let rcsb_form = matches!(controller.mode(), CommandPanelMode::Form(_)).then(|| controller.rcsb_form(cx));
+  let rcsb_form = matches!(
+    controller.mode(),
+    CommandPanelMode::Form(CommandId::DatabaseDownloadRcsbStructure)
+  )
+  .then(|| controller.rcsb_form(cx));
   let focus_handle = rcsb_form
     .as_ref()
     .map(|form| form.pdb_id.read(cx).focus_handle().clone())
@@ -84,28 +89,25 @@ pub(crate) fn render_command_panel(
   }
 
   let results = controller.registry().search(controller.query());
-  let selected_commands = results
-    .iter()
-    .map(|result| result.descriptor.command.clone())
-    .collect::<Vec<_>>();
+  let selected_ids = results.iter().map(|result| result.spec.id).collect::<Vec<_>>();
   let overlay = QuickPickOverlay {
     query: controller.query().into(),
     placeholder: "Type a command".into(),
     search_input: Some(QuickPickSearchInput::new(search_input)),
     items: results
       .iter()
-      .map(|result| QuickPickItem::new(result.descriptor.title, result.descriptor.shortcut))
+      .map(|result| QuickPickItem::new(result.spec.title, result.spec.shortcut))
       .collect(),
     selected_index: controller.selected_index(),
     scroll_handle: Some(controller.result_scroll_handle()),
     empty_message: "No commands found".into(),
   };
   let on_select: Rc<CommandPanelSelectHandler> = Rc::new(move |index, window, cx: &mut App| {
-    let Some(command) = selected_commands.get(index).cloned() else {
+    let Some(id) = selected_ids.get(index).copied() else {
       return;
     };
     let _ = app.update(cx, |app, cx| {
-      app.invoke_command_from_panel(command, window, cx);
+      app.invoke_command_from_panel(id, window, cx);
     });
   });
 
@@ -150,7 +152,10 @@ impl ChitinApp {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Option<RcsbFormPanel> {
-    if !matches!(self.command_panel.mode(), CommandPanelMode::Form(_)) {
+    if !matches!(
+      self.command_panel.mode(),
+      CommandPanelMode::Form(CommandId::DatabaseDownloadRcsbStructure)
+    ) {
       return None;
     }
     let form = self.command_panel.rcsb_form(cx);
@@ -189,7 +194,7 @@ impl ChitinApp {
     Some(form)
   }
 
-  /// Submits the current RCSB form and closes its modal panel.
+  /// Validates the current RCSB form and dispatches a typed download command.
   fn submit_rcsb_form(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     let Some(form) = self.command_panel.rcsb_form_if_created() else {
       return;
@@ -198,10 +203,6 @@ impl ChitinApp {
       log::debug!("RCSB download submission ignored because a batch is already active");
       return;
     }
-    let Some(workspace_root) = self.workspace.as_ref().map(|workspace| workspace.root.clone()) else {
-      log::warn!("RCSB download ignored because no workspace is open");
-      return;
-    };
     let raw_pdb_ids = form.pdb_id.read(cx).text().trim().to_owned();
     let ids = match PdbId::parse_many(&raw_pdb_ids) {
       Ok(ids) => ids,
@@ -215,25 +216,66 @@ impl ChitinApp {
       }
     };
     let format = form.selected_format(cx);
-    let mut unique_ids = BTreeSet::new();
-    let requests = ids
-      .into_iter()
-      .filter(|pdb_id| unique_ids.insert(pdb_id.clone()))
-      .map(|pdb_id| RcsbBatchDownloadRequest {
-        destination: download_path(&workspace_root, &pdb_id, format),
-        id: pdb_id,
+    self.execute_rcsb_download(
+      RcsbDownloadArguments {
+        ids,
         format,
-      })
-      .collect::<Vec<_>>();
-    let total_items = requests.len();
-    let mut task = match submit_downloads(&self.tasks, requests) {
-      Ok(task) => task,
+        output: None,
+      },
+      window,
+      cx,
+    );
+  }
+
+  /// Executes a typed RCSB download against the active desktop workspace.
+  ///
+  /// # Parameters
+  ///
+  /// * `arguments` contains validated identifiers, format, and output override.
+  /// * `window` identifies the window that receives completed documents.
+  /// * `cx` submits the background task and updates form presentation state.
+  ///
+  /// # Returns
+  ///
+  /// This function returns after the background task has been submitted.
+  pub(crate) fn execute_rcsb_download(
+    &mut self,
+    arguments: RcsbDownloadArguments,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) {
+    let Some(form) = self.command_panel.rcsb_form_if_created() else {
+      return;
+    };
+    let Some(workspace_root) = self.workspace.as_ref().map(|workspace| workspace.root.clone()) else {
+      let error = "RCSB download requires an open workspace".to_string();
+      log::warn!("{error}");
+      form.download.update(cx, |state, cx| state.fail(error, cx));
+      return;
+    };
+    let execution_context = CommandExecutionContext::new(&workspace_root)
+      .with_workspace_root(&workspace_root)
+      .with_default_download_root(workspace_root.join(".chitin").join("download"));
+    let command = PortableCommand::from(DatabaseCommand::DownloadRcsbStructure(arguments));
+    let running = match self.portable_commands.submit(
+      &self.tasks,
+      PortableCommandSubmission::new(
+        TaskKind::DatabaseDownload {
+          provider: "RCSB".to_string(),
+        },
+        command,
+        execution_context,
+      ),
+    ) {
+      Ok(submission) => submission,
       Err(error) => {
         log::error!("failed to submit RCSB download task: {error}");
         form.download.update(cx, |state, cx| state.fail(error.to_string(), cx));
         return;
       }
     };
+    let total_items = running.target_count();
+    let mut task = running.into_task_handle();
     log::info!(
       "RCSB batch download task submitted: id={}, items={total_items}",
       task.id()
@@ -317,45 +359,36 @@ impl ChitinApp {
         self.command_panel.close(window, cx);
         cx.notify();
       }
-      CommandPanelEvent::Invoke(command) => self.invoke_command_from_panel(command, window, cx),
+      CommandPanelEvent::Invoke(id) => self.invoke_command_from_panel(id, window, cx),
     }
   }
 
   /// Invokes one command selected from the command panel.
   /// # Parameters
   ///
-  /// * `command` is the typed command selected by the controller.
+  /// * `id` is the command identity selected by the controller.
   /// * `window` receives focus restoration when an immediate command closes the panel.
   /// * `cx` is used to dispatch or notify state changes.
-  pub(crate) fn invoke_command_from_panel(
-    &mut self,
-    command: ChitinCommand,
-    window: &mut Window,
-    cx: &mut Context<Self>,
-  ) {
-    let Some(invocation) = self
-      .command_panel
-      .registry()
-      .descriptor_for(&command)
-      .map(|descriptor| descriptor.invocation)
-    else {
+  pub(crate) fn invoke_command_from_panel(&mut self, id: CommandId, window: &mut Window, cx: &mut Context<Self>) {
+    let Some(spec) = self.command_panel.registry().spec_for(id) else {
       return;
     };
 
-    match invocation {
-      CommandInvocationKind::Form => {
-        if self.command_panel.open_form(command) {
-          cx.notify();
-        }
+    if spec.requires_arguments {
+      if self.command_panel.open_form(id) {
+        cx.notify();
       }
-      CommandInvocationKind::Immediate => {
-        self.command_panel.close(window, cx);
-        if command == ChitinCommand::Application(ApplicationCommand::ToggleCommandPanel) {
-          cx.notify();
-        } else {
-          self.dispatch_command_with_window(command, window, cx);
-        }
-      }
+      return;
+    }
+
+    let Some(command) = id.frontend_command_without_arguments() else {
+      return;
+    };
+    self.command_panel.close(window, cx);
+    if id == CommandId::ApplicationToggleCommandPanel {
+      cx.notify();
+    } else {
+      self.dispatch_command_with_window(command, window, cx);
     }
   }
 }

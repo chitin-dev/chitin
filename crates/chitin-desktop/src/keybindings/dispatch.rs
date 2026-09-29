@@ -1,8 +1,6 @@
 //! Desktop execution adapters for shared commands.
 
-use chitin_command::{
-  ApplicationCommand, ChitinCommand, DatabaseCommand, PanelTabCommand, StructureCommand, WorkspaceCommand,
-};
+use chitin_command::{ApplicationCommand, FrontendCommand, PanelTabCommand, WorkspaceCommand};
 use gpui::{Context, Window};
 
 use crate::{app::ChitinApp, components::workspace_tree::WorkspaceTreeNavigation};
@@ -33,14 +31,15 @@ impl ChitinApp {
   /// the regular context-only dispatch path.
   pub(crate) fn dispatch_command_with_window(
     &mut self,
-    command: ChitinCommand,
+    command: FrontendCommand,
     window: &mut Window,
     cx: &mut Context<Self>,
   ) {
-    if matches!(command, ChitinCommand::Workspace(WorkspaceCommand::ActivateFocused)) {
-      self.activate_focused_project_tree_entry_with_window(window, cx);
-    } else {
-      self.dispatch_command(command, cx);
+    match command {
+      FrontendCommand::Workspace(WorkspaceCommand::ActivateFocused) => {
+        self.activate_focused_project_tree_entry_with_window(window, cx);
+      }
+      command => self.dispatch_command(command, cx),
     }
   }
 
@@ -54,20 +53,13 @@ impl ChitinApp {
   /// # Returns
   ///
   /// This function returns `()` after routing the command to its feature handler.
-  pub(crate) fn dispatch_command(&mut self, command: ChitinCommand, cx: &mut Context<Self>) {
+  pub(crate) fn dispatch_command(&mut self, command: FrontendCommand, cx: &mut Context<Self>) {
     log::debug!("Dispatch command {}", command.id());
 
     match command {
-      ChitinCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
-      ChitinCommand::Database(command) => self.dispatch_database_command(command, cx),
-      ChitinCommand::Application(command) => self.dispatch_application_command(command, cx),
-      ChitinCommand::Structure(command) => self.dispatch_structure_command(command),
+      FrontendCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
+      FrontendCommand::Application(command) => self.dispatch_application_command(command, cx),
     }
-  }
-
-  /// Reports structure commands that are currently CLI-only.
-  pub(crate) fn dispatch_structure_command(&mut self, command: StructureCommand) {
-    log::debug!("Structure command {} is not a desktop action yet", command.id());
   }
 
   /// Executes an application command.
@@ -83,27 +75,7 @@ impl ChitinApp {
   pub(crate) fn dispatch_application_command(&mut self, command: ApplicationCommand, cx: &mut Context<Self>) {
     match command {
       ApplicationCommand::ToggleCommandPanel => self.toggle_command_panel(cx),
-    }
-  }
-
-  /// Executes a database command.
-  ///
-  /// # Parameters
-  ///
-  /// * `command` identifies the database workflow to start.
-  /// * `cx` is the GPUI context notified when the form is opened.
-  ///
-  /// # Returns
-  ///
-  /// This function returns `()` after opening the corresponding form.
-  pub(crate) fn dispatch_database_command(&mut self, command: DatabaseCommand, cx: &mut Context<Self>) {
-    match command {
-      DatabaseCommand::DownloadRcsbStructure => {
-        let command = ChitinCommand::from(DatabaseCommand::DownloadRcsbStructure);
-        if self.command_panel.open_form(command) {
-          cx.notify();
-        }
-      }
+      ApplicationCommand::ToggleTerminal => self.toggle_terminal(cx),
     }
   }
 
