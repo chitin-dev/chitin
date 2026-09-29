@@ -26,6 +26,23 @@ type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type SharedTerminal = Arc<FairMutex<Term<TerminalEventProxy>>>;
 type SharedProcessor = Arc<Mutex<ansi::Processor<ansi::StdSyncHandler>>>;
 
+/// Sends terminal events and coalesces UI wakeups independently of event payloads.
+#[derive(Clone)]
+struct TerminalEventSender {
+  events: mpsc::Sender<TerminalEvent>,
+  wake: async_channel::Sender<()>,
+}
+
+impl TerminalEventSender {
+  /// Queues an event before waking its observer, so the observer can drain it immediately.
+  fn send(&self, event: TerminalEvent) {
+    if self.events.send(event).is_ok() {
+      // One pending wake is enough: the observer drains every queued event together.
+      let _ = self.wake.try_send(());
+    }
+  }
+}
+
 /// Input sent from a terminal emulator to an in-process terminal program.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalProgramInput {
@@ -109,7 +126,7 @@ pub enum TerminalSessionError {
 pub struct TerminalProgramOutput {
   terminal: SharedTerminal,
   processor: SharedProcessor,
-  events: mpsc::Sender<TerminalEvent>,
+  events: TerminalEventSender,
   render_pending: Arc<AtomicBool>,
 }
 
@@ -174,6 +191,7 @@ pub struct TerminalSession {
   writer: SharedWriter,
   backend: TerminalBackend,
   events: Mutex<mpsc::Receiver<TerminalEvent>>,
+  wake: async_channel::Receiver<()>,
   render_pending: Arc<AtomicBool>,
 }
 
@@ -274,7 +292,12 @@ impl TerminalSession {
         .take_writer()
         .map_err(|error| pty_error("take terminal writer", error))?,
     ));
-    let (event_sender, event_receiver) = mpsc::channel();
+    let (events, event_receiver) = mpsc::channel();
+    let (wake_sender, wake) = async_channel::bounded(1);
+    let event_sender = TerminalEventSender {
+      events,
+      wake: wake_sender,
+    };
     let render_pending = Arc::new(AtomicBool::new(false));
     let proxy = TerminalEventProxy {
       sender: event_sender.clone(),
@@ -295,6 +318,7 @@ impl TerminalSession {
         killer: Mutex::new(killer),
       },
       events: Mutex::new(event_receiver),
+      wake,
       render_pending,
     })
   }
@@ -315,7 +339,12 @@ impl TerminalSession {
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(ProgramInputWriter {
       sender: input_sender.clone(),
     })));
-    let (event_sender, event_receiver) = mpsc::channel();
+    let (events, event_receiver) = mpsc::channel();
+    let (wake_sender, wake) = async_channel::bounded(1);
+    let event_sender = TerminalEventSender {
+      events,
+      wake: wake_sender,
+    };
     let render_pending = Arc::new(AtomicBool::new(false));
     let proxy = TerminalEventProxy {
       sender: event_sender.clone(),
@@ -338,6 +367,7 @@ impl TerminalSession {
       writer,
       backend: TerminalBackend::InProcess { input: input_sender },
       events: Mutex::new(event_receiver),
+      wake,
       render_pending,
     };
     (session, program)
@@ -420,6 +450,14 @@ impl TerminalSession {
     }
   }
 
+  /// Returns a wake receiver for the session's sole event observer.
+  ///
+  /// A wake carries no payload; after receiving one, the observer should call
+  /// [`Self::drain_events`]. Wakeups are coalesced while one is pending.
+  pub fn event_wakeups(&self) -> async_channel::Receiver<()> {
+    self.wake.clone()
+  }
+
   /// Drains terminal events accumulated since the previous call.
   pub fn drain_events(&self) -> Vec<TerminalEvent> {
     // Clear before draining so a concurrent parser update can enqueue the next
@@ -472,7 +510,7 @@ impl Write for ProgramInputWriter {
 
 #[derive(Clone)]
 struct TerminalEventProxy {
-  sender: mpsc::Sender<TerminalEvent>,
+  sender: TerminalEventSender,
   writer: SharedWriter,
   render_pending: Arc<AtomicBool>,
 }
@@ -484,19 +522,19 @@ impl EventListener for TerminalEventProxy {
         send_render_event(&self.sender, &self.render_pending);
       }
       AlacrittyEvent::Title(title) => {
-        let _ = self.sender.send(TerminalEvent::Title(title));
+        self.sender.send(TerminalEvent::Title(title));
       }
       AlacrittyEvent::Bell => {
-        let _ = self.sender.send(TerminalEvent::Bell);
+        self.sender.send(TerminalEvent::Bell);
       }
       AlacrittyEvent::PtyWrite(text) => match self.writer.lock() {
         Ok(mut writer) => {
           if let Err(error) = writer.write_all(text.as_bytes()).and_then(|()| writer.flush()) {
-            let _ = self.sender.send(TerminalEvent::Error(error.to_string()));
+            self.sender.send(TerminalEvent::Error(error.to_string()));
           }
         }
         Err(_) => {
-          let _ = self
+          self
             .sender
             .send(TerminalEvent::Error("terminal writer lock is poisoned".into()));
         }
@@ -509,7 +547,7 @@ impl EventListener for TerminalEventProxy {
 /// Starts the blocking PTY reader without holding the terminal lock while waiting for bytes.
 fn spawn_reader_thread(
   terminal: &SharedTerminal,
-  sender: &mpsc::Sender<TerminalEvent>,
+  sender: &TerminalEventSender,
   render_pending: &Arc<AtomicBool>,
   mut reader: Box<dyn Read + Send>,
 ) -> Result<(), TerminalSessionError> {
@@ -530,7 +568,7 @@ fn spawn_reader_thread(
           }
           Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
           Err(error) => {
-            let _ = sender.send(TerminalEvent::Error(error.to_string()));
+            sender.send(TerminalEvent::Error(error.to_string()));
             break;
           }
         }
@@ -541,15 +579,15 @@ fn spawn_reader_thread(
 }
 
 /// Coalesces repeated parser wakeups into at most one queued repaint request.
-fn send_render_event(sender: &mpsc::Sender<TerminalEvent>, pending: &AtomicBool) {
+fn send_render_event(sender: &TerminalEventSender, pending: &AtomicBool) {
   if !pending.swap(true, Ordering::AcqRel) {
-    let _ = sender.send(TerminalEvent::Render);
+    sender.send(TerminalEvent::Render);
   }
 }
 
 /// Starts a waiter that reports the child exit code without blocking a UI executor.
 fn spawn_wait_thread(
-  sender: &mpsc::Sender<TerminalEvent>,
+  sender: &TerminalEventSender,
   mut child: Box<dyn portable_pty::Child + Send + Sync>,
 ) -> Result<(), TerminalSessionError> {
   let sender = sender.clone();
@@ -557,10 +595,10 @@ fn spawn_wait_thread(
     .name("chitin-terminal-wait".into())
     .spawn(move || match child.wait() {
       Ok(status) => {
-        let _ = sender.send(TerminalEvent::Exited(status.exit_code()));
+        sender.send(TerminalEvent::Exited(status.exit_code()));
       }
       Err(error) => {
-        let _ = sender.send(TerminalEvent::Error(error.to_string()));
+        sender.send(TerminalEvent::Error(error.to_string()));
       }
     })
     .map(|_| ())
@@ -571,6 +609,53 @@ fn pty_error(operation: &'static str, error: impl std::fmt::Display) -> Terminal
   TerminalSessionError::Pty {
     operation,
     message: error.to_string(),
+  }
+}
+
+#[cfg(test)]
+mod event_tests {
+  use super::*;
+
+  #[test]
+  fn event_sender_should_coalesce_wakeups_without_discarding_events() {
+    let (events, receiver) = mpsc::channel();
+    let (wake, wakeups) = async_channel::bounded(1);
+    let sender = TerminalEventSender { events, wake };
+
+    sender.send(TerminalEvent::Title("first".into()));
+    sender.send(TerminalEvent::Bell);
+
+    assert_eq!(wakeups.try_recv(), Ok(()));
+    assert_eq!(wakeups.try_recv(), Err(async_channel::TryRecvError::Empty));
+    assert_eq!(
+      receiver.try_iter().collect::<Vec<_>>(),
+      vec![TerminalEvent::Title("first".into()), TerminalEvent::Bell]
+    );
+  }
+
+  #[test]
+  fn event_sender_should_wake_again_after_prior_wakeup_is_consumed() {
+    let (events, _receiver) = mpsc::channel();
+    let (wake, wakeups) = async_channel::bounded(1);
+    let sender = TerminalEventSender { events, wake };
+
+    sender.send(TerminalEvent::Bell);
+    assert_eq!(wakeups.try_recv(), Ok(()));
+    sender.send(TerminalEvent::Bell);
+    assert_eq!(wakeups.try_recv(), Ok(()));
+  }
+
+  #[test]
+  fn in_process_session_should_sleep_until_program_output_arrives() {
+    let (session, program) =
+      TerminalSession::in_process(TerminalProfile::BuiltinShell, TerminalSize::new(40, 4, 8, 16));
+    let wakeups = session.event_wakeups();
+    assert_eq!(wakeups.try_recv(), Err(async_channel::TryRecvError::Empty));
+
+    assert!(program.output().write(b"output").is_ok());
+    assert_eq!(wakeups.try_recv(), Ok(()));
+    assert!(session.drain_events().contains(&TerminalEvent::Render));
+    assert_eq!(wakeups.try_recv(), Err(async_channel::TryRecvError::Empty));
   }
 }
 

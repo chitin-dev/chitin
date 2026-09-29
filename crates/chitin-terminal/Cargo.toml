@@ -8,6 +8,7 @@ description = "Frontend-independent PTY sessions and VT terminal state for Chiti
 
 [dependencies]
 alacritty_terminal = { git = "https://github.com/l0ng-ai/alacritty", rev = "1276f128fbaa8832cbc66210675cbe8aeb570499" }
+async-channel = "2.5"
 portable-pty = "0.8"
 thiserror = "2.0"
 

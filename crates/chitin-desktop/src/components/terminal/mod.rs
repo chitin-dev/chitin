@@ -11,6 +11,7 @@ use std::{
 };
 
 use chitin_builtin_shell::{BuiltinTerminalProgram, ShellCommandId};
+use chitin_command::CommandExecutionContext;
 use chitin_terminal::{TerminalProfile, TerminalSession, TerminalSessionError, TerminalSize};
 use chitin_ui::{
   composite::toast::{Toast, ToastVariant},
@@ -22,7 +23,10 @@ use chitin_ui::{
 };
 use gpui::{AppContext, Context, Entity, ScrollHandle, Subscription, Window};
 
-use crate::app::ChitinApp;
+use crate::{
+  app::ChitinApp,
+  builtin_shell::{DesktopShellHost, desktop_shell_context},
+};
 
 pub(crate) use render::render_terminal_bottom_dock;
 
@@ -46,12 +50,16 @@ pub(super) struct TerminalSessionId(u64);
 /// Terminal focus state that belongs to the bottom dock rather than a session.
 pub(crate) struct TerminalPanelState {
   focus_requested: bool,
+  next_session_id: u64,
 }
 
 impl TerminalPanelState {
   /// Creates a closed terminal panel.
   pub(crate) fn new() -> Self {
-    Self { focus_requested: false }
+    Self {
+      focus_requested: false,
+      next_session_id: 1,
+    }
   }
 
   /// Updates whether the active session should receive focus on the next render.
@@ -62,6 +70,13 @@ impl TerminalPanelState {
   /// Takes the pending input-focus request.
   pub(crate) fn take_focus_request(&mut self) -> bool {
     std::mem::take(&mut self.focus_requested)
+  }
+
+  /// Allocates an identity that is not reused when the dock is closed and reopened.
+  fn next_session_id(&mut self) -> TerminalSessionId {
+    let id = TerminalSessionId(self.next_session_id);
+    self.next_session_id += 1;
+    id
   }
 }
 
@@ -77,10 +92,17 @@ pub(super) struct ManagedTerminalSession {
   pub(super) id: TerminalSessionId,
   pub(super) profile: TerminalProfile,
   pub(super) terminal: Entity<TerminalEmulatorState>,
-  pub(super) program: Option<Arc<Mutex<BuiltinTerminalProgram>>>,
+  pub(super) builtin: Option<ManagedBuiltinShell>,
   pub(super) tab: Entity<ButtonState>,
   pub(super) active_shell_command: Option<ShellCommandId>,
   pub(super) rendered_running_output: String,
+}
+
+/// Command state and byte-stream program owned by one built-in terminal tab.
+#[derive(Clone)]
+pub(super) struct ManagedBuiltinShell {
+  pub(super) host: DesktopShellHost,
+  pub(super) program: Arc<Mutex<BuiltinTerminalProgram>>,
 }
 
 impl ManagedTerminalSession {
@@ -102,7 +124,6 @@ impl ManagedTerminalSession {
 pub(crate) struct TerminalPanelControls {
   pub(super) sessions: Vec<ManagedTerminalSession>,
   pub(super) active_session: TerminalSessionId,
-  next_session_id: u64,
   pub(super) close_session: Entity<ButtonState>,
   pub(super) profile_select: Entity<SelectInputState>,
   /// Scroll position of the session tab strip.
@@ -114,7 +135,12 @@ pub(crate) struct TerminalPanelControls {
 
 impl TerminalPanelControls {
   /// Creates the session manager with an initial built-in shell.
-  fn new(working_directory: &Path, cx: &mut Context<ChitinApp>) -> Result<Self, TerminalSessionError> {
+  fn new(
+    initial_id: TerminalSessionId,
+    working_directory: &Path,
+    shell_context: CommandExecutionContext,
+    cx: &mut Context<ChitinApp>,
+  ) -> Result<Self, TerminalSessionError> {
     let close_session = cx.new(ButtonState::new);
     let profile_select = cx.new(|cx| {
       SelectInputState::new(
@@ -125,15 +151,15 @@ impl TerminalPanelControls {
       )
     });
     let session = Self::build_session(
-      TerminalSessionId(1),
+      initial_id,
       TerminalProfile::BuiltinShell,
       working_directory,
+      shell_context,
       cx,
     )?;
     Ok(Self {
       sessions: vec![session],
-      active_session: TerminalSessionId(1),
-      next_session_id: 2,
+      active_session: initial_id,
       close_session,
       profile_select,
       tab_scroll: ScrollHandle::new(),
@@ -145,12 +171,21 @@ impl TerminalPanelControls {
     id: TerminalSessionId,
     profile: TerminalProfile,
     working_directory: &Path,
+    mut shell_context: CommandExecutionContext,
     cx: &mut Context<ChitinApp>,
   ) -> Result<ManagedTerminalSession, TerminalSessionError> {
-    let (session, program) = if profile == TerminalProfile::BuiltinShell {
+    let (session, builtin) = if profile == TerminalProfile::BuiltinShell {
+      // The prompt and relative-path execution must start in the same directory.
+      shell_context.working_directory = working_directory.to_path_buf();
       let prompt = presenter::terminal_prompt_ansi(working_directory);
       let (session, program) = BuiltinTerminalProgram::connect(INITIAL_TERMINAL_SIZE, prompt)?;
-      (session, Some(Arc::new(Mutex::new(program))))
+      (
+        session,
+        Some(ManagedBuiltinShell {
+          host: DesktopShellHost::new(shell_context),
+          program: Arc::new(Mutex::new(program)),
+        }),
+      )
     } else {
       (
         TerminalSession::spawn_system_shell(profile, working_directory, INITIAL_TERMINAL_SIZE)?,
@@ -161,7 +196,7 @@ impl TerminalPanelControls {
       id,
       profile,
       terminal: cx.new(|cx| TerminalEmulatorState::new(session, INITIAL_TERMINAL_SIZE, cx)),
-      program,
+      builtin,
       tab: cx.new(ButtonState::new),
       active_shell_command: None,
       rendered_running_output: String::new(),
@@ -244,6 +279,17 @@ impl TerminalPanelControls {
 }
 
 impl ChitinApp {
+  /// Returns the command host owned by one built-in terminal session.
+  fn terminal_shell_host(&self, id: TerminalSessionId) -> Option<DesktopShellHost> {
+    self
+      .terminal_panel_controls
+      .as_ref()?
+      .session(id)?
+      .builtin
+      .as_ref()
+      .map(|builtin| builtin.host.clone())
+  }
+
   /// Returns terminal controls, creating and subscribing them on first use.
   pub(crate) fn terminal_panel_controls(
     &mut self,
@@ -255,7 +301,9 @@ impl ChitinApp {
     }
 
     let working_directory = self.terminal_working_directory();
-    let controls = match TerminalPanelControls::new(&working_directory, cx) {
+    let shell_context = desktop_shell_context(self.workspace.as_ref().map(|workspace| workspace.root.clone()));
+    let initial_id = self.terminal_panel.next_session_id();
+    let controls = match TerminalPanelControls::new(initial_id, &working_directory, shell_context, cx) {
       Ok(controls) => controls,
       Err(error) => {
         log::error!("failed to create built-in terminal: {error}");
@@ -274,28 +322,15 @@ impl ChitinApp {
     cx.notify();
   }
 
-  /// Creates or activates a terminal session for the selected profile.
+  /// Creates a new terminal session for the selected profile.
   fn create_terminal_session(&mut self, profile: TerminalProfile, window: &mut Window, cx: &mut Context<Self>) {
-    if profile == TerminalProfile::BuiltinShell
-      && let Some(existing) = self
-        .terminal_panel_controls
-        .as_ref()
-        .and_then(|controls| controls.sessions.iter().find(|session| session.profile == profile))
-        .map(|session| session.id)
-    {
-      self.activate_terminal_session(existing, window, cx);
+    let working_directory = self.terminal_working_directory();
+    let shell_context = desktop_shell_context(self.workspace.as_ref().map(|workspace| workspace.root.clone()));
+    if self.terminal_panel_controls.is_none() {
       return;
     }
-
-    let working_directory = self.terminal_working_directory();
-    let Some(id) = self
-      .terminal_panel_controls
-      .as_ref()
-      .map(|controls| TerminalSessionId(controls.next_session_id))
-    else {
-      return;
-    };
-    let session = match TerminalPanelControls::build_session(id, profile, &working_directory, cx) {
+    let id = self.terminal_panel.next_session_id();
+    let session = match TerminalPanelControls::build_session(id, profile, &working_directory, shell_context, cx) {
       Ok(session) => session,
       Err(error) => {
         log::error!("failed to create {} terminal session: {error}", profile.label());
@@ -314,7 +349,6 @@ impl ChitinApp {
     if let Some(controls) = self.terminal_panel_controls.as_mut() {
       controls.sessions.push(session);
       controls.active_session = id;
-      controls.next_session_id += 1;
       // The new tab is the last child, so revealing it keeps the active session in
       // view without the session manager having to know the strip's geometry.
       controls.tab_scroll.scroll_to_bottom();
@@ -364,12 +398,14 @@ impl ChitinApp {
 
   /// Closes one session and moves the selection when the active one is gone.
   fn close_terminal_session(&mut self, id: TerminalSessionId, cx: &mut Context<Self>) {
-    let running = self
+    let builtin = self
       .terminal_panel_controls
       .as_ref()
       .and_then(|controls| controls.session(id))
-      .is_some_and(|session| session.active_shell_command.is_some());
-    if running && let Err(error) = self.builtin_shell().cancel_active() {
+      .and_then(|session| session.builtin.clone());
+    if let Some(builtin) = builtin
+      && let Err(error) = builtin.host.session().cancel_active()
+    {
       log::warn!("failed to cancel active built-in terminal command: {error}");
     }
     let Some(controls) = self.terminal_panel_controls.as_mut() else {
@@ -399,10 +435,29 @@ impl ChitinApp {
   /// Resolves the directory inherited by newly created terminal sessions.
   fn terminal_working_directory(&self) -> PathBuf {
     self
-      .builtin_shell()
+      .terminal_panel_controls
+      .as_ref()
+      .and_then(TerminalPanelControls::active)
+      .and_then(|session| session.builtin.as_ref())
+      .map(|builtin| builtin.host.session())
+      .unwrap_or_else(|| self.builtin_shell())
       .snapshot()
       .map(|snapshot| snapshot.working_directory)
       .or_else(|_| std::env::current_dir())
       .unwrap_or_else(|_| PathBuf::from("."))
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn terminal_session_ids_should_not_repeat_after_a_dock_reopen() {
+    let mut state = TerminalPanelState::new();
+    let first = state.next_session_id();
+    let second = state.next_session_id();
+
+    assert_ne!(first, second);
   }
 }

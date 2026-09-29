@@ -64,7 +64,7 @@ pub struct ChitinApp {
   pub(crate) tasks: BackgroundTaskCenter,
   /// Shared adapter for frontend-independent commands submitted by desktop views.
   pub(crate) portable_commands: DesktopPortableCommandRunner,
-  /// Shared command bridge for terminal, agent, and system invocations.
+  /// Application-level command bridge for agent and system invocations.
   pub(crate) builtin_shell: DesktopShellHost,
   /// Active tool and geometry of the workbench-level bottom dock.
   pub(crate) bottom_dock: BottomDockState,

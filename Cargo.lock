@@ -843,6 +843,7 @@ name = "chitin-terminal"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "async-channel 2.5.0",
  "portable-pty",
  "thiserror 2.0.20",
 ]

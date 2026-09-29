@@ -32,7 +32,7 @@ impl DesktopShellHost {
     }
   }
 
-  /// Returns the session shared with terminal and agent callers.
+  /// Returns the session owned by this desktop shell host.
   pub fn session(&self) -> &BuiltinShell {
     &self.session
   }
@@ -212,7 +212,7 @@ pub(crate) fn desktop_shell_context(workspace_root: Option<PathBuf>) -> CommandE
 }
 
 impl ChitinApp {
-  /// Returns the shared built-in shell session used by desktop and agent callers.
+  /// Returns the application-level built-in shell used by agent and system callers.
   pub fn builtin_shell(&self) -> &BuiltinShell {
     self.builtin_shell.session()
   }
@@ -236,8 +236,21 @@ impl ChitinApp {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Result<DesktopShellDispatch, DesktopShellHostError> {
-    match self.builtin_shell.submit_line(input, source)? {
-      ShellLineSubmission::Command(submission) => self.route_builtin_shell_submission(submission, window, cx),
+    let host = self.builtin_shell.clone();
+    self.submit_shell_line_with_host(&host, input, source, window, cx)
+  }
+
+  /// Routes text through a specific shell session, such as one terminal tab.
+  pub(crate) fn submit_shell_line_with_host(
+    &mut self,
+    host: &DesktopShellHost,
+    input: impl Into<String>,
+    source: ShellInvocationSource,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+  ) -> Result<DesktopShellDispatch, DesktopShellHostError> {
+    match host.submit_line(input, source)? {
+      ShellLineSubmission::Command(submission) => self.route_builtin_shell_submission(host, submission, window, cx),
       ShellLineSubmission::ShellBuiltin(effect) => Ok(DesktopShellDispatch::ShellBuiltin { effect }),
       ShellLineSubmission::Display(output) => Ok(DesktopShellDispatch::Display { output }),
     }
@@ -264,13 +277,15 @@ impl ChitinApp {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) -> Result<DesktopShellDispatch, DesktopShellHostError> {
-    let submission = self.builtin_shell.submit_typed(input, command, source)?;
-    self.route_builtin_shell_submission(submission, window, cx)
+    let host = self.builtin_shell.clone();
+    let submission = host.submit_typed(input, command, source)?;
+    self.route_builtin_shell_submission(&host, submission, window, cx)
   }
 
   /// Routes one prepared submission without reparsing its typed command.
   fn route_builtin_shell_submission(
     &mut self,
+    host: &DesktopShellHost,
     submission: ShellSubmission,
     window: &mut Window,
     cx: &mut Context<Self>,
@@ -285,13 +300,11 @@ impl ChitinApp {
           });
         };
         self.dispatch_command_with_window(command.clone(), window, cx);
-        self.builtin_shell.complete_frontend(command_id)?;
+        host.complete_frontend(command_id)?;
         Ok(DesktopShellDispatch::Frontend { command_id })
       }
       ShellCommandTarget::Portable => {
-        let running = self
-          .builtin_shell
-          .submit_portable(submission, &self.tasks, &self.portable_commands)?;
+        let running = host.submit_portable(submission, &self.tasks, &self.portable_commands)?;
         observe_shell_task(running.task().clone(), window, cx);
         Ok(DesktopShellDispatch::Portable(running))
       }
@@ -366,6 +379,22 @@ mod tests {
     assert_eq!(submission.target(), ShellCommandTarget::Frontend);
     host.complete_frontend(submission.id())?;
     assert!(host.session().snapshot()?.active.is_none());
+    Ok(())
+  }
+
+  #[test]
+  fn separate_terminal_hosts_should_keep_commands_and_history_independent() -> Result<(), DesktopShellHostError> {
+    let first = DesktopShellHost::new(CommandExecutionContext::new("."));
+    let second = DesktopShellHost::new(CommandExecutionContext::new("."));
+
+    let submission = first
+      .submit_line("tab.close", ShellInvocationSource::Interactive)?
+      .into_command()?;
+    first.complete_frontend(submission.id())?;
+
+    assert_eq!(first.session().snapshot()?.executions.len(), 1);
+    assert!(second.session().snapshot()?.executions.is_empty());
+    assert_eq!(second.session().previous_history("")?, None);
     Ok(())
   }
 }

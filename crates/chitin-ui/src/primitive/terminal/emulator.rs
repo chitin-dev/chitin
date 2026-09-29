@@ -1,6 +1,6 @@
 //! GPUI rendering and input handling for a VT terminal session.
 
-use std::{ops::Range, sync::Arc, time::Duration};
+use std::{ops::Range, sync::Arc};
 
 use chitin_terminal::{
   TerminalCell, TerminalCellAttributes, TerminalColor, TerminalEvent, TerminalNamedColor, TerminalScroll,
@@ -10,7 +10,7 @@ use gpui::{
   AnyElement, App, AsyncApp, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
   EventEmitter, FocusHandle, Font, FontFallbacks, FontFeatures, FontWeight, GlobalElementId, Hsla, InspectorElementId,
   InteractiveElement, IntoElement, KeyDownEvent, Keystroke, LayoutId, MouseButton, ParentElement, Pixels, Point,
-  RenderOnce, ScrollDelta, ScrollWheelEvent, SharedString, Styled, Subscription, Task, TextRun, Timer, UTF16Selection,
+  RenderOnce, ScrollDelta, ScrollWheelEvent, SharedString, Styled, Subscription, Task, TextRun, UTF16Selection,
   WeakEntity, Window, div, font, point, prelude::*, px, rgb, size,
 };
 
@@ -21,7 +21,6 @@ use crate::{
 
 const FONT_SIZE: f32 = 15.0;
 const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
-const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(16);
 /// Largest viewport motion one wheel event may ask for.
 ///
 /// A platform is free to report a very large pixel delta, and one such event
@@ -51,7 +50,7 @@ pub struct TerminalEmulatorState {
   /// Exit code once the backend has stopped, which is also what ends its input.
   ended: Option<u32>,
   preedit: Option<TerminalPreedit>,
-  /// Where the viewport sits in the scrollback, refreshed once per poll.
+  /// Where the viewport sits in the scrollback, refreshed when events arrive.
   scroll_state: TerminalScrollState,
   /// Sub-line part of a pixel scroll, carried so a slow trackpad still moves.
   scroll_remainder: f32,
@@ -79,11 +78,11 @@ struct TerminalPreedit {
 impl TerminalEmulatorState {
   /// Creates state around an existing terminal session.
   pub fn new(session: TerminalSession, size: TerminalSize, cx: &mut Context<Self>) -> Self {
+    let wakeups = session.event_wakeups();
     let event_task = cx.spawn(|this: WeakEntity<Self>, async_cx: &mut AsyncApp| {
       let mut async_cx = async_cx.clone();
       async move {
-        loop {
-          Timer::after(EVENT_POLL_INTERVAL).await;
+        while wakeups.recv().await.is_ok() {
           let should_continue = this
             .update(&mut async_cx, |state, cx| {
               state.process_events(cx);

@@ -22,7 +22,8 @@ impl ChitinApp {
       .terminal_panel_controls
       .as_ref()
       .and_then(|controls| controls.session(session_id))
-      .and_then(|session| session.program.clone())
+      .and_then(|session| session.builtin.as_ref())
+      .map(|builtin| builtin.program.clone())
     else {
       return;
     };
@@ -53,15 +54,18 @@ impl ChitinApp {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) {
+    let Some(host) = self.terminal_shell_host(session_id) else {
+      return;
+    };
     match event {
       BuiltinTerminalEvent::Submit(line) => self.submit_terminal_line(session_id, line, window, cx),
       BuiltinTerminalEvent::Interrupt => {
-        if self
-          .builtin_shell()
+        if host
+          .session()
           .snapshot()
           .is_ok_and(|snapshot| snapshot.active.is_some())
         {
-          let _ = self.builtin_shell().cancel_active();
+          let _ = host.session().cancel_active();
         }
       }
       BuiltinTerminalEvent::Complete(line) => self.complete_terminal_line(session_id, line),
@@ -70,15 +74,16 @@ impl ChitinApp {
           .terminal_panel_controls
           .as_ref()
           .and_then(|controls| controls.session(session_id))
-          .and_then(|session| session.program.as_ref())
+          .and_then(|session| session.builtin.as_ref())
+          .map(|builtin| &builtin.program)
           .and_then(|program| program.lock().ok().map(|program| program.line().to_owned()))
           .unwrap_or_default();
-        if let Ok(Some(line)) = self.builtin_shell().previous_history(&draft) {
+        if let Ok(Some(line)) = host.session().previous_history(&draft) {
           self.replace_terminal_line(session_id, line);
         }
       }
       BuiltinTerminalEvent::NextHistory => {
-        if let Ok(Some(line)) = self.builtin_shell().next_history() {
+        if let Ok(Some(line)) = host.session().next_history() {
           self.replace_terminal_line(session_id, line);
         }
       }
@@ -95,12 +100,15 @@ impl ChitinApp {
     window: &mut Window,
     cx: &mut Context<Self>,
   ) {
+    let Some(host) = self.terminal_shell_host(session_id) else {
+      return;
+    };
     let line = line.trim().to_owned();
     if line.is_empty() {
       self.finish_terminal_command(session_id, "");
       return;
     }
-    match self.submit_builtin_shell_line(line, ShellInvocationSource::Interactive, window, cx) {
+    match self.submit_shell_line_with_host(&host, line, ShellInvocationSource::Interactive, window, cx) {
       Ok(DesktopShellDispatch::Display { output }) => self.finish_terminal_command(session_id, &output),
       Ok(DesktopShellDispatch::ShellBuiltin {
         effect: ShellBuiltinEffect::ClearScrollback,
@@ -122,8 +130,8 @@ impl ChitinApp {
             let _ = app.update(cx, |this, cx| {
               let output = match result {
                 Ok(result) => {
-                  let mut lines = this
-                    .builtin_shell()
+                  let mut lines = host
+                    .session()
                     .snapshot()
                     .map(|snapshot| shell_output_lines(&snapshot, command_id))
                     .unwrap_or_default();
@@ -131,7 +139,7 @@ impl ChitinApp {
                   lines.extend(result_lines);
                   terminal_lines_ansi(&lines)
                 }
-                Err(error) => match this.builtin_shell().snapshot() {
+                Err(error) => match host.session().snapshot() {
                   Ok(snapshot) => {
                     let output = terminal_lines_ansi(&shell_output_lines(&snapshot, command_id));
                     if output.is_empty() {
@@ -171,7 +179,8 @@ impl ChitinApp {
           .terminal_panel_controls
           .as_ref()
           .and_then(|controls| controls.session(session_id))
-          .and_then(|session| session.program.as_ref())
+          .and_then(|session| session.builtin.as_ref())
+          .map(|builtin| &builtin.program)
           && let Ok(program) = program.lock()
           && let Err(error) = program.show_notice(&output)
         {
@@ -188,7 +197,8 @@ impl ChitinApp {
       .terminal_panel_controls
       .as_ref()
       .and_then(|controls| controls.session(session_id))
-      .and_then(|session| session.program.as_ref())
+      .and_then(|session| session.builtin.as_ref())
+      .map(|builtin| &builtin.program)
       && let Ok(mut program) = program.lock()
       && let Err(error) = program.replace_line(line)
     {
@@ -202,7 +212,8 @@ impl ChitinApp {
       .terminal_panel_controls
       .as_ref()
       .and_then(|controls| controls.session(session_id))
-      .and_then(|session| session.program.as_ref())
+      .and_then(|session| session.builtin.as_ref())
+      .map(|builtin| &builtin.program)
       && let Ok(mut program) = program.lock()
       && let Err(error) = program.finish_command(output)
     {
@@ -223,7 +234,8 @@ impl ChitinApp {
       .terminal_panel_controls
       .as_ref()
       .and_then(|controls| controls.session(session_id))
-      .and_then(|session| session.program.as_ref())
+      .and_then(|session| session.builtin.as_ref())
+      .map(|builtin| &builtin.program)
       && let Ok(mut program) = program.lock()
       && let Err(error) = program.clear_screen()
     {
@@ -238,43 +250,47 @@ impl ChitinApp {
     }
   }
 
-  /// Projects the active command's replaceable transcript into the VT grid.
+  /// Projects every running session's replaceable transcript into its own VT grid.
   pub(crate) fn sync_terminal_output(&mut self) {
-    let Some((session_id, command_id, previous_output, program)) =
-      self.terminal_panel_controls.as_ref().and_then(|controls| {
-        controls.sessions.iter().find_map(|session| {
-          Some((
-            session.id,
-            session.active_shell_command?,
-            session.rendered_running_output.clone(),
-            session.program.clone()?,
-          ))
-        })
+    let Some(controls) = self.terminal_panel_controls.as_ref() else {
+      return;
+    };
+    let running: Vec<_> = controls
+      .sessions
+      .iter()
+      .filter_map(|session| {
+        Some((
+          session.id,
+          session.active_shell_command?,
+          session.rendered_running_output.clone(),
+          session.builtin.clone()?,
+        ))
       })
-    else {
-      return;
-    };
-    let Ok(snapshot) = self.builtin_shell().snapshot() else {
-      return;
-    };
-    let output = terminal_lines_ansi(&shell_output_lines(&snapshot, command_id));
-    if output == previous_output {
-      return;
-    }
-    let Ok(mut program) = program.lock() else {
-      log::error!("built-in terminal program lock is poisoned");
-      return;
-    };
-    if let Err(error) = program.update_command_output(&output) {
-      log::error!("failed to update built-in terminal output: {error}");
-      return;
-    }
-    if let Some(session) = self
-      .terminal_panel_controls
-      .as_mut()
-      .and_then(|controls| controls.session_mut(session_id))
-    {
-      session.rendered_running_output = output;
+      .collect();
+
+    for (session_id, command_id, previous_output, builtin) in running {
+      let Ok(snapshot) = builtin.host.session().snapshot() else {
+        continue;
+      };
+      let output = terminal_lines_ansi(&shell_output_lines(&snapshot, command_id));
+      if output == previous_output {
+        continue;
+      }
+      let Ok(mut program) = builtin.program.lock() else {
+        log::error!("built-in terminal program lock is poisoned");
+        continue;
+      };
+      if let Err(error) = program.update_command_output(&output) {
+        log::error!("failed to update built-in terminal output: {error}");
+        continue;
+      }
+      if let Some(session) = self
+        .terminal_panel_controls
+        .as_mut()
+        .and_then(|controls| controls.session_mut(session_id))
+      {
+        session.rendered_running_output = output;
+      }
     }
   }
 }
