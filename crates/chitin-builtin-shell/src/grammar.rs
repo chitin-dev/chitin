@@ -43,12 +43,6 @@ pub enum CommandLineParseError {
     /// Byte offset of the opening quote.
     position: usize,
   },
-  /// A trailing escape character had no following character.
-  #[error("trailing escape character at byte {position}")]
-  TrailingEscape {
-    /// Byte offset of the escape character.
-    position: usize,
-  },
   /// Clap rejected the composed built-in shell grammar.
   #[error("{0}")]
   Grammar(String),
@@ -317,10 +311,13 @@ fn tokenize(input: &str) -> Result<Vec<String>, CommandLineParseError> {
         token_started = true;
       }
       Some(_) | None if character == '\\' => {
-        let Some((_, escaped)) = characters.next() else {
-          return Err(CommandLineParseError::TrailingEscape { position });
-        };
-        token.push(escaped);
+        // Preserve path separators unless the next character is actually escapable.
+        let escaped = characters.next_if(|(_, next)| match quote {
+          Some(('"', _)) => matches!(next, '"' | '\\'),
+          None => matches!(next, '\'' | '"' | '\\') || next.is_whitespace(),
+          Some(_) => false,
+        });
+        token.push(escaped.map_or('\\', |(_, character)| character));
         token_started = true;
       }
       None if character == '\'' || character == '"' => {
@@ -362,7 +359,7 @@ fn normalize_clap_error(message: String) -> String {
 mod tests {
   use std::path::Path;
 
-  use chitin_command::{CommandId, DatabaseCommand, RcsbDownloadArguments};
+  use chitin_command::{CommandId, DatabaseCommand, RcsbDownloadArguments, StructureCommand};
   use chitin_databases::providers::rcsb::StructureFormat;
 
   use super::*;
@@ -381,6 +378,55 @@ mod tests {
         }
       ))) if output == Path::new("saved structure")
     ));
+    Ok(())
+  }
+
+  #[test]
+  fn structure_validate_should_preserve_unquoted_windows_path() -> Result<(), CommandLineParseError> {
+    let parsed = parse_builtin_command_line(r"structure validate C:\data\x.pdb")?;
+
+    assert!(matches!(
+      parsed,
+      BuiltinCommandLine::Portable(PortableCommand::Structure(StructureCommand::Validate(arguments)))
+        if arguments.input.input == Path::new(r"C:\data\x.pdb")
+    ));
+    Ok(())
+  }
+
+  #[test]
+  fn database_download_should_preserve_quoted_windows_output_path() -> Result<(), CommandLineParseError> {
+    let parsed = parse_builtin_command_line(r#"db rcsb download --id 4hhb -o "C:\out""#)?;
+
+    assert!(matches!(
+      parsed,
+      BuiltinCommandLine::Portable(PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(
+        RcsbDownloadArguments { output: Some(output), .. }
+      ))) if output == Path::new(r"C:\out")
+    ));
+    Ok(())
+  }
+
+  #[test]
+  fn tokenize_should_preserve_trailing_unquoted_backslash() -> Result<(), CommandLineParseError> {
+    assert_eq!(
+      tokenize("structure validate C:\\")?,
+      vec!["structure", "validate", "C:\\"]
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn tokenize_should_still_escape_unquoted_whitespace() -> Result<(), CommandLineParseError> {
+    assert_eq!(
+      tokenize(r"structure validate C:\my\ file.pdb")?,
+      vec!["structure", "validate", r"C:\my file.pdb"]
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn tokenize_should_still_escape_double_quote_inside_double_quotes() -> Result<(), CommandLineParseError> {
+    assert_eq!(tokenize(r#""a\"b""#)?, vec!["a\"b"]);
     Ok(())
   }
 
