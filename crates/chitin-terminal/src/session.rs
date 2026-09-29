@@ -12,8 +12,9 @@ use std::{
 use alacritty_terminal::{
   Term,
   event::{Event as AlacrittyEvent, EventListener},
+  grid::{Dimensions, Scroll},
   sync::FairMutex,
-  term::Config,
+  term::{Config, TermMode},
   vte::ansi,
 };
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, native_pty_system};
@@ -49,6 +50,43 @@ pub enum TerminalEvent {
   Exited(u32),
   /// A background terminal operation failed.
   Error(String),
+}
+
+/// A viewport motion through the terminal's scrollback history.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalScroll {
+  /// Moves the viewport by whole lines, negative toward the live edge.
+  Lines(i32),
+  /// Moves the viewport back by one screenful.
+  PageUp,
+  /// Moves the viewport toward the live edge by one screenful.
+  PageDown,
+  /// Moves to the oldest line still retained.
+  Top,
+  /// Moves to the live edge, where new output appears.
+  Bottom,
+  /// Moves so that `lines` of history sit above the viewport.
+  Offset(usize),
+}
+
+/// Where a terminal viewport sits inside its scrollback history.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TerminalScrollState {
+  /// Lines of scrollback retained behind the viewport.
+  pub history_size: usize,
+  /// Lines of history the viewport has been scrolled back over.
+  pub display_offset: usize,
+  /// Lines the viewport shows at once.
+  pub screen_lines: usize,
+  /// Whether the child program owns the alternate screen, which has no history.
+  pub alt_screen: bool,
+}
+
+impl TerminalScrollState {
+  /// Returns how many lines of history sit above the viewport.
+  pub const fn lines_above(&self) -> usize {
+    self.history_size.saturating_sub(self.display_offset)
+  }
 }
 
 /// Errors produced while creating or controlling a terminal session.
@@ -337,6 +375,51 @@ impl TerminalSession {
     TerminalSnapshot::from_term(&self.terminal.lock())
   }
 
+  /// Moves the visible viewport through the scrollback history.
+  ///
+  /// # Parameters
+  ///
+  /// * `scroll` is the requested viewport motion. It is clamped to the lines
+  ///   that are actually retained.
+  ///
+  /// # Returns
+  ///
+  /// This function does not return a value: a viewport motion cannot fail. It
+  /// does nothing while the child program owns the alternate screen, because
+  /// that screen keeps no history to move through.
+  pub fn scroll(&self, scroll: TerminalScroll) {
+    let mut terminal = self.terminal.lock();
+    let scroll = match scroll {
+      TerminalScroll::Lines(lines) => Scroll::Delta(lines),
+      TerminalScroll::PageUp => Scroll::PageUp,
+      TerminalScroll::PageDown => Scroll::PageDown,
+      TerminalScroll::Top => Scroll::Top,
+      TerminalScroll::Bottom => Scroll::Bottom,
+      // Alacritty only exposes relative viewport motion, so an absolute target
+      // is reached by asking for the difference from where the viewport is now.
+      // The target is clamped before the cast so a caller asking for a line far
+      // past the oldest one cannot wrap the difference around into a scroll the
+      // wrong way.
+      TerminalScroll::Offset(lines) => {
+        let offset = terminal.grid().display_offset();
+        let target = lines.min(terminal.history_size());
+        Scroll::Delta(target as i32 - offset as i32)
+      }
+    };
+    terminal.scroll_display(scroll);
+  }
+
+  /// Returns where the viewport currently sits in the scrollback history.
+  pub fn scroll_state(&self) -> TerminalScrollState {
+    let terminal = self.terminal.lock();
+    TerminalScrollState {
+      history_size: terminal.history_size(),
+      display_offset: terminal.grid().display_offset(),
+      screen_lines: terminal.screen_lines(),
+      alt_screen: terminal.mode().contains(TermMode::ALT_SCREEN),
+    }
+  }
+
   /// Drains terminal events accumulated since the previous call.
   pub fn drain_events(&self) -> Vec<TerminalEvent> {
     // Clear before draining so a concurrent parser update can enqueue the next
@@ -602,6 +685,162 @@ mod tests {
 
     assert!(write_result.is_ok());
     assert!(visible_text.contains("builtin-shell"));
+  }
+
+  /// Writes bytes out of an in-process program, failing the test if it refuses them.
+  fn feed(program: &TerminalProgram, bytes: &[u8]) {
+    assert!(
+      program.output().write(bytes).is_ok(),
+      "an in-process program should accept output"
+    );
+  }
+
+  /// Runs a terminal whose scrollback holds `lines` numbered lines.
+  fn session_with_scrollback(lines: usize) -> TerminalSession {
+    let (session, program) =
+      TerminalSession::in_process(TerminalProfile::BuiltinShell, TerminalSize::new(20, 4, 8, 16));
+    let written = (1..=lines).map(|line| format!("line-{line}\r\n")).collect::<String>();
+    feed(&program, written.as_bytes());
+    session
+  }
+
+  /// Returns the trimmed text of one visible row.
+  fn row_text(snapshot: &TerminalSnapshot, row: usize) -> String {
+    (0..snapshot.columns)
+      .filter_map(|column| snapshot.cell(row, column))
+      .map(|cell| cell.character)
+      .collect::<String>()
+      .trim_end()
+      .to_owned()
+  }
+
+  #[test]
+  fn scroll_should_move_the_viewport_back_through_history() {
+    let session = session_with_scrollback(10);
+
+    assert_eq!(session.scroll_state().display_offset, 0);
+    session.scroll(TerminalScroll::Lines(2));
+
+    assert_eq!(session.scroll_state().display_offset, 2);
+    assert_eq!(session.snapshot().display_offset, 2);
+  }
+
+  #[test]
+  fn a_scrolled_snapshot_should_show_older_rows_than_the_live_edge() {
+    let session = session_with_scrollback(10);
+    let live = session.snapshot();
+    let history_size = live.history_size;
+
+    session.scroll(TerminalScroll::Lines(2));
+    let scrolled = session.snapshot();
+
+    assert!(
+      history_size >= 2,
+      "the scrollback should hold the two lines being scrolled over"
+    );
+    assert_ne!(row_text(&scrolled, 0), row_text(&live, 0));
+    // The two views overlap: what the scrolled viewport shows at row `row` is
+    // what the live viewport shows at row `row - 2`, because scrolled content is
+    // older content.
+    for row in 2..scrolled.rows {
+      assert_eq!(row_text(&scrolled, row), row_text(&live, row - 2));
+    }
+    assert_eq!(scrolled.history_size, history_size);
+  }
+
+  #[test]
+  fn scrolling_forward_past_the_live_edge_should_stop_there() {
+    let session = session_with_scrollback(10);
+
+    session.scroll(TerminalScroll::Lines(-5));
+
+    assert_eq!(session.scroll_state().display_offset, 0);
+  }
+
+  #[test]
+  fn scrolling_back_past_the_oldest_line_should_stop_there() {
+    let session = session_with_scrollback(10);
+    let history_size = session.scroll_state().history_size;
+
+    session.scroll(TerminalScroll::Lines(history_size as i32 + 50));
+
+    assert_eq!(session.scroll_state().display_offset, history_size);
+  }
+
+  #[test]
+  fn the_top_motion_should_reach_the_oldest_line_and_the_bottom_motion_should_return() {
+    let session = session_with_scrollback(10);
+    let history_size = session.scroll_state().history_size;
+    assert!(history_size > 0, "the fixture should have pushed lines into history");
+
+    session.scroll(TerminalScroll::Top);
+    assert_eq!(session.scroll_state().display_offset, history_size);
+    assert_eq!(session.scroll_state().lines_above(), 0);
+
+    session.scroll(TerminalScroll::Bottom);
+    assert_eq!(session.scroll_state().display_offset, 0);
+    assert_eq!(session.scroll_state().lines_above(), history_size);
+  }
+
+  #[test]
+  fn page_scroll_should_move_the_viewport_by_one_screenful() {
+    let session = session_with_scrollback(40);
+    let screen_lines = session.scroll_state().screen_lines;
+
+    session.scroll(TerminalScroll::PageUp);
+    assert_eq!(session.scroll_state().display_offset, screen_lines);
+
+    session.scroll(TerminalScroll::PageDown);
+    assert_eq!(session.scroll_state().display_offset, 0);
+  }
+
+  #[test]
+  fn an_offset_should_set_the_viewport_absolutely() {
+    let session = session_with_scrollback(40);
+    let history_size = session.scroll_state().history_size;
+
+    session.scroll(TerminalScroll::Offset(3));
+    assert_eq!(session.scroll_state().display_offset, 3);
+    assert_eq!(session.snapshot().display_offset, 3);
+
+    // A target past the oldest retained line lands on it rather than wrapping.
+    session.scroll(TerminalScroll::Offset(usize::MAX));
+    assert_eq!(session.scroll_state().display_offset, history_size);
+  }
+
+  #[test]
+  fn a_snapshot_should_not_report_a_cursor_while_scrolled() {
+    let session = session_with_scrollback(10);
+
+    assert!(session.snapshot().cursor.is_some());
+    session.scroll(TerminalScroll::Lines(2));
+    assert_eq!(session.snapshot().cursor, None);
+
+    session.scroll(TerminalScroll::Bottom);
+    assert!(session.snapshot().cursor.is_some());
+  }
+
+  #[test]
+  fn scrolling_should_do_nothing_on_the_alternate_screen() {
+    let (session, program) =
+      TerminalSession::in_process(TerminalProfile::BuiltinShell, TerminalSize::new(20, 4, 8, 16));
+    let written = (1..=10).map(|line| format!("line-{line}\r\n")).collect::<String>();
+    feed(&program, written.as_bytes());
+    feed(&program, b"\x1b[?1049h");
+
+    let alternate = session.scroll_state();
+    assert!(alternate.alt_screen, "the fixture should have switched screens");
+    assert_eq!(alternate.history_size, 0);
+
+    session.scroll(TerminalScroll::Top);
+    assert_eq!(session.scroll_state().display_offset, 0);
+
+    feed(&program, b"\x1b[?1049l");
+    assert!(!session.scroll_state().alt_screen);
+    assert!(
+      session.scroll_state().history_size > 0,
+      "the primary scrollback should return"
+    );
   }
 
   #[test]

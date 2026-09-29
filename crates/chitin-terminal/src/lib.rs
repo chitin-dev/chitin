@@ -11,7 +11,8 @@ pub use model::{
   TerminalTone,
 };
 pub use session::{
-  TerminalEvent, TerminalProgram, TerminalProgramInput, TerminalProgramOutput, TerminalSession, TerminalSessionError,
+  TerminalEvent, TerminalProgram, TerminalProgramInput, TerminalProgramOutput, TerminalScroll, TerminalScrollState,
+  TerminalSession, TerminalSessionError,
 };
 pub use size::TerminalSize;
 pub use snapshot::{TerminalCell, TerminalCellAttributes, TerminalColor, TerminalNamedColor, TerminalSnapshot};

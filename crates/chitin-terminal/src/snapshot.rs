@@ -16,7 +16,15 @@ pub struct TerminalSnapshot {
   /// Visible cells stored in row-major order.
   pub cells: Vec<TerminalCell>,
   /// Visible cursor location, when the terminal requests a cursor.
+  ///
+  /// A cursor the terminal has hidden, or one that is not inside the visible
+  /// viewport because the viewport has been scrolled back, is reported absent.
   pub cursor: Option<(usize, usize)>,
+  /// Lines of history the viewport has been scrolled back over, where zero is
+  /// the live edge.
+  pub display_offset: usize,
+  /// Lines of scrollback retained behind the viewport.
+  pub history_size: usize,
 }
 
 impl TerminalSnapshot {
@@ -25,7 +33,12 @@ impl TerminalSnapshot {
     let content = term.renderable_content();
     let columns = term.columns();
     let rows = term.screen_lines();
-    let cursor = (!matches!(content.cursor.shape, alacritty_terminal::vte::ansi::CursorShape::Hidden)).then(|| {
+    // The cursor point is an absolute grid coordinate, so once the viewport has
+    // been scrolled back it names a line below the visible rows. Clamping it
+    // into range would paint it onto whichever row happened to be last.
+    let cursor = (content.display_offset == 0
+      && !matches!(content.cursor.shape, alacritty_terminal::vte::ansi::CursorShape::Hidden))
+    .then(|| {
       (
         content.cursor.point.line.0.max(0) as usize,
         content.cursor.point.column.0,
@@ -34,7 +47,15 @@ impl TerminalSnapshot {
     let mut cells = vec![TerminalCell::default(); rows.saturating_mul(columns)];
 
     for indexed in content.display_iter {
-      let row = indexed.point.line.0.max(0) as usize;
+      // The iterator reports absolute grid lines and starts one line above the
+      // viewport, so a line is negative whenever the viewport has been scrolled
+      // back. Adding the offset turns an absolute line into the row it occupies
+      // on screen, and the one line above the viewport falls out as row -1.
+      let row = indexed.point.line.0 + content.display_offset as i32;
+      if row < 0 {
+        continue;
+      }
+      let row = row as usize;
       let column = indexed.point.column.0;
       let Some(cell) = cells.get_mut(row.saturating_mul(columns).saturating_add(column)) else {
         continue;
@@ -66,6 +87,8 @@ impl TerminalSnapshot {
       rows,
       cells,
       cursor,
+      display_offset: content.display_offset,
+      history_size: term.history_size(),
     }
   }
 
@@ -296,6 +319,8 @@ mod tests {
       rows: 1,
       cells: vec![TerminalCell::default(); 2],
       cursor: None,
+      display_offset: 0,
+      history_size: 0,
     };
 
     assert!(snapshot.cell(0, 1).is_some());

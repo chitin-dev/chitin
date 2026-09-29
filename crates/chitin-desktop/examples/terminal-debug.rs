@@ -542,6 +542,8 @@ mod tests {
       rows: 1,
       cells: vec![cell; 120],
       cursor: None,
+      display_offset: 0,
+      history_size: 0,
     };
 
     let runs = build_row_runs(&snapshot, 0);
@@ -559,6 +561,8 @@ mod tests {
       rows: 1,
       cells,
       cursor: None,
+      display_offset: 0,
+      history_size: 0,
     };
 
     let runs = build_row_runs(&snapshot, 0);
@@ -578,6 +582,8 @@ mod tests {
       rows: 1,
       cells: vec![cell; 120],
       cursor: Some((0, 60)),
+      display_offset: 0,
+      history_size: 0,
     };
 
     let runs = build_row_runs(&snapshot, 0);
@@ -601,6 +607,8 @@ mod tests {
       rows: 1,
       cells: vec![cell],
       cursor: None,
+      display_offset: 0,
+      history_size: 0,
     };
 
     let runs = build_row_runs(&snapshot, 0);
@@ -628,6 +636,8 @@ mod tests {
       rows: 1,
       cells: vec![upright, italic],
       cursor: None,
+      display_offset: 0,
+      history_size: 0,
     };
 
     let runs = build_row_runs(&snapshot, 0);
