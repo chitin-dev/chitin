@@ -1,8 +1,6 @@
-//! Active-item and resize state for the bottom dock.
+//! Active-item and remembered geometry state for the bottom dock.
 
 use gpui::{Pixels, SharedString, px};
-
-use crate::primitive::resize::ResizeGesture;
 
 /// Default bottom-dock height.
 pub const DEFAULT_BOTTOM_DOCK_HEIGHT: Pixels = px(260.0);
@@ -32,9 +30,6 @@ impl BottomDockItemId {
 pub struct BottomDockState {
   active_item: Option<BottomDockItemId>,
   height: Pixels,
-  min_height: Pixels,
-  min_center_height: Pixels,
-  resize_drag: Option<ResizeGesture<(), Pixels>>,
 }
 
 impl BottomDockState {
@@ -43,9 +38,6 @@ impl BottomDockState {
     Self {
       active_item: None,
       height: DEFAULT_BOTTOM_DOCK_HEIGHT,
-      min_height: DEFAULT_BOTTOM_DOCK_MIN_HEIGHT,
-      min_center_height: DEFAULT_CENTER_AREA_MIN_HEIGHT,
-      resize_drag: None,
     }
   }
 
@@ -95,10 +87,9 @@ impl BottomDockState {
     }
   }
 
-  /// Closes the dock and stops any active resize gesture.
+  /// Closes the dock while retaining its last measured height.
   pub fn close(&mut self) {
     self.active_item = None;
-    self.resize_drag = None;
   }
 
   /// Returns the current dock height.
@@ -106,41 +97,27 @@ impl BottomDockState {
     self.height
   }
 
-  /// Starts resizing from the dock's top edge.
-  pub fn start_resize(&mut self, start_y: Pixels) {
-    self.resize_drag = Some(ResizeGesture::new((), start_y, self.height));
-  }
-
-  /// Updates dock height while preserving minimum center-area space.
+  /// Records Kit's measured height without owning its drag lifecycle.
   ///
   /// # Parameters
   ///
-  /// * `current_y` is the latest vertical pointer position.
-  /// * `available_height` is the workbench height available to the center area
-  ///   and bottom dock together.
+  /// * `height` is the bottom pane's extent reported by Kit. Non-finite values
+  ///   are ignored; Kit enforces the center-area constraint during layout.
   ///
   /// # Returns
   ///
-  /// `true` when an active resize gesture updated the dock; otherwise `false`.
-  pub fn drag_resize(&mut self, current_y: Pixels, available_height: Pixels) -> bool {
-    let Some(resize_drag) = self.resize_drag else {
+  /// Whether the remembered height changed, after enforcing the dock minimum.
+  pub fn set_height(&mut self, height: Pixels) -> bool {
+    let value = f32::from(height);
+    if !value.is_finite() {
       return false;
-    };
-    let maximum_height =
-      px((f32::from(available_height) - f32::from(self.min_center_height)).max(f32::from(self.min_height)));
-    let desired_height = f32::from(resize_drag.start_value()) - resize_drag.delta(current_y);
-    self.height = px(desired_height.clamp(f32::from(self.min_height), f32::from(maximum_height)));
+    }
+    let height = px(value.max(f32::from(DEFAULT_BOTTOM_DOCK_MIN_HEIGHT)));
+    if self.height == height {
+      return false;
+    }
+    self.height = height;
     true
-  }
-
-  /// Stops the active dock resize gesture.
-  pub fn stop_resize(&mut self) -> bool {
-    self.resize_drag.take().is_some()
-  }
-
-  /// Returns whether the dock top edge is being dragged.
-  pub const fn is_resizing(&self) -> bool {
-    self.resize_drag.is_some()
   }
 }
 
@@ -173,29 +150,27 @@ mod tests {
   }
 
   #[test]
-  fn drag_resize_should_increase_height_when_pointer_moves_up() {
+  fn reported_height_should_preserve_minimum_dock_height() {
     let mut state = BottomDockState::new();
-    state.start_resize(px(400.0));
-
-    assert!(state.drag_resize(px(350.0), px(800.0)));
-    assert_eq!(state.height(), px(310.0));
-  }
-
-  #[test]
-  fn drag_resize_should_preserve_minimum_center_height() {
-    let mut state = BottomDockState::new();
-    state.start_resize(px(400.0));
-
-    assert!(state.drag_resize(px(0.0), px(600.0)));
-    assert_eq!(state.height(), px(440.0));
-  }
-
-  #[test]
-  fn drag_resize_should_preserve_minimum_dock_height() {
-    let mut state = BottomDockState::new();
-    state.start_resize(px(400.0));
-
-    assert!(state.drag_resize(px(800.0), px(600.0)));
+    state.set_height(px(50.0));
     assert_eq!(state.height(), DEFAULT_BOTTOM_DOCK_MIN_HEIGHT);
+  }
+
+  #[test]
+  fn closing_should_retain_height_for_reopening() {
+    let mut state = BottomDockState::new();
+    state.set_height(px(350.0));
+    state.show("terminal");
+    state.close();
+    state.show("terminal");
+    assert_eq!(state.height(), px(350.0));
+  }
+
+  #[test]
+  fn invalid_or_unchanged_height_should_not_request_a_render() {
+    let mut state = BottomDockState::new();
+    assert!(!state.set_height(px(f32::NAN)));
+    assert!(!state.set_height(px(f32::INFINITY)));
+    assert!(!state.set_height(DEFAULT_BOTTOM_DOCK_HEIGHT));
   }
 }

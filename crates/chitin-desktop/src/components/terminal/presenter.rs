@@ -6,10 +6,8 @@ use chitin_builtin_shell::{BuiltinShellSnapshot, ShellCommandId, ShellTranscript
 use chitin_command::{
   CommandMessageLevel, CommandOutcome, CommandOutputTone, CommandReportStatus, render_outcome as render_command_outcome,
 };
-use chitin_ui::{
-  composite::command_terminal::CommandTerminalStatus,
-  primitive::terminal::{TerminalLine, TerminalSpan, TerminalTone},
-};
+use chitin_terminal::TerminalBlockStatus;
+use chitin_ui::primitive::terminal::{TerminalLine, TerminalSpan, TerminalTone};
 
 /// Builds an ANSI-colored prompt for the in-process terminal program.
 pub(super) fn terminal_prompt_ansi(working_directory: &Path) -> String {
@@ -75,11 +73,11 @@ pub(super) fn shell_output_lines(snapshot: &BuiltinShellSnapshot, shell_id: Shel
 /// # Returns
 ///
 /// The terminal status and final rows for the corresponding command block.
-pub(super) fn terminal_outcome(outcome: CommandOutcome) -> (CommandTerminalStatus, Vec<TerminalLine>) {
+pub(super) fn terminal_outcome(outcome: CommandOutcome) -> (TerminalBlockStatus, Vec<TerminalLine>) {
   let report = render_command_outcome(&outcome);
   let status = match report.status {
-    CommandReportStatus::Succeeded => CommandTerminalStatus::Succeeded,
-    CommandReportStatus::Failed => CommandTerminalStatus::Failed,
+    CommandReportStatus::Succeeded => TerminalBlockStatus::Succeeded,
+    CommandReportStatus::Failed => TerminalBlockStatus::Failed,
   };
   let lines = report
     .lines

@@ -4,6 +4,7 @@
 //! placeholder for generic files and the molecular viewport for structures.
 
 mod commands;
+pub(crate) mod dock;
 mod render;
 pub(crate) mod state;
 pub(crate) mod structure;

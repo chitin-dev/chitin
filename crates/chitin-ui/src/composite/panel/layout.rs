@@ -1,69 +1,19 @@
 //! Panel tree layout and mutation algorithms.
 
-use std::rc::Rc;
-
-use gpui::{App, Pixels, Window, px};
+use gpui::{Pixels, px};
 
 use super::{
-  drag::PanelTabDropTarget,
+  model::PanelTabDropTarget,
   model::{
     PanelId, PanelLeaf, PanelNode, PanelSplit, PanelSplitAxis, PanelSplitBranch, PanelSplitPath, PanelSplitPlacement,
     PanelTab, PanelTabId, PanelTree,
   },
-  render::DEFAULT_PANEL_SPLIT_HANDLE_SIZE,
 };
 
 /// Minimum split ratio accepted by panel resize state.
 pub const MIN_PANEL_SPLIT_RATIO: f32 = 0.1;
 /// Maximum split ratio accepted by panel resize state.
 pub const MAX_PANEL_SPLIT_RATIO: f32 = 0.9;
-
-/// Callback invoked when a split resize gesture starts.
-pub type PanelResizeStartHandler = dyn Fn(PanelSplitPath, PanelSplitAxis, Pixels, &mut Window, &mut App);
-
-/// Configuration for panel split resize handles.
-#[derive(Clone)]
-pub struct PanelResizeConfig {
-  /// Width or height of the split handle.
-  pub(super) handle_size: Pixels,
-  /// Callback invoked when a split resize gesture starts.
-  pub(super) on_resize_start: Rc<PanelResizeStartHandler>,
-}
-
-impl PanelResizeConfig {
-  /// Creates panel resize configuration.
-  ///
-  /// # Parameters
-  ///
-  /// * `on_resize_start` is invoked with the split path, split axis, cursor
-  ///   position on the resize axis, window, and app context.
-  ///
-  /// # Returns
-  ///
-  /// A [`PanelResizeConfig`] with the default handle size.
-  pub fn new(
-    on_resize_start: impl Fn(PanelSplitPath, PanelSplitAxis, Pixels, &mut Window, &mut App) + 'static,
-  ) -> Self {
-    Self {
-      handle_size: DEFAULT_PANEL_SPLIT_HANDLE_SIZE,
-      on_resize_start: Rc::new(on_resize_start),
-    }
-  }
-
-  /// Sets the split handle size.
-  ///
-  /// # Parameters
-  ///
-  /// * `handle_size` is the width or height of rendered resize handles.
-  ///
-  /// # Returns
-  ///
-  /// The updated [`PanelResizeConfig`] for builder chaining.
-  pub fn handle_size(mut self, handle_size: Pixels) -> Self {
-    self.handle_size = handle_size;
-    self
-  }
-}
 
 impl<T> PanelTree<T> {
   /// Creates a panel tree with one leaf root.

@@ -22,6 +22,11 @@ edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/chitin-dev/chitin"
 
+[workspace.dependencies]
+# Kit and the direct GPUI imports must use the same WGPU backend revision.
+gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "f8c52200f5a4fdec79c6ff7733cd6e1f57f87ae1" }
+gpui-kit = { git = "https://github.com/chitin-dev/gpui-kit", rev = "8d6d45fcf9204452d6b118cbc5dc7fd275cda14a" }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

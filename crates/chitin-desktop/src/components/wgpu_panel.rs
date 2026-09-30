@@ -7,8 +7,9 @@ use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, Vie
 use chitin_wgpu::RenderTargetSize;
 use gpui::{
   Context, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Render, ScrollWheelEvent,
-  WgpuSurfaceHandle, Window, div, prelude::*, px, rgb, wgpu_surface,
+  WgpuSurfaceHandle, Window, div, prelude::*, px, wgpu_surface,
 };
+use gpui_kit::component::Theme;
 
 /// Default fps info postfix used in wgpu panel
 pub(crate) const DEFAULT_FPS_POSTFIX: &str = "fps";
@@ -275,6 +276,7 @@ impl Render for ChitinWgpuDocumentPanel {
   ///
   /// A GPUI element tree containing the WGPU surface and a small FPS overlay.
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let theme = Theme::global(cx).colors;
     if self.surface.is_some() {
       self.render_surface();
       window.request_animation_frame();
@@ -288,7 +290,7 @@ impl Render for ChitinWgpuDocumentPanel {
         .flex_1()
         .min_h_0()
         .overflow_hidden()
-        .bg(rgb(0x0b0e14))
+        .bg(theme.background)
         .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
         .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_mouse_down))
         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_mouse_down))
@@ -314,9 +316,9 @@ impl Render for ChitinWgpuDocumentPanel {
             .px_2()
             .py_1()
             .rounded_sm()
-            .bg(gpui::rgba(0x000000a8))
+            .bg(theme.popover)
             .text_xs()
-            .text_color(rgb(0xd7e0f2))
+            .text_color(theme.popover_foreground)
             .child(format!("{:.0} {}", self.display_fps, DEFAULT_FPS_POSTFIX)),
         )
         .child(
@@ -327,9 +329,9 @@ impl Render for ChitinWgpuDocumentPanel {
             .px_2()
             .py_1()
             .rounded_sm()
-            .bg(gpui::rgba(0x000000a8))
+            .bg(theme.popover)
             .text_xs()
-            .text_color(rgb(0xd7e0f2))
+            .text_color(theme.popover_foreground)
             .child(self.scene.interaction_hint()),
         ),
       None => div()
@@ -338,8 +340,8 @@ impl Render for ChitinWgpuDocumentPanel {
         .flex_1()
         .items_center()
         .justify_center()
-        .bg(rgb(0x180f14))
-        .text_color(rgb(0xffb4c4))
+        .bg(theme.background)
+        .text_color(theme.danger)
         .child(DEFAULT_UNAVAILABLE_MESSAGE),
     }
   }

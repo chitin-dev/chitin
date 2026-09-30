@@ -5,10 +5,10 @@ use std::sync::Arc;
 use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_molecule_renderer::RepresentationLayers;
 use chitin_ui::composite::{
-  panel::{PanelId, PanelSplitAxis, PanelSplitPath, PanelTabDrag, PanelTabDropTarget, PanelTabId},
+  panel::{PanelId, PanelSplitAxis},
   toast::ToastViewport,
 };
-use gpui::{App, AppContext, AsyncApp, Context, Entity, Pixels, WeakEntity, Window};
+use gpui::{App, AppContext, AsyncApp, Context, Entity, WeakEntity, Window};
 
 use crate::{
   app::ChitinApp,
@@ -141,20 +141,6 @@ impl ChitinApp {
       .is_some()
   }
 
-  /// Activates a tab inside a document panel.
-  ///
-  /// # Parameters
-  ///
-  /// * `panel_id` identifies the document panel that owns the tab.
-  /// * `tab_id` identifies the tab to activate.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the panel and tab exist; otherwise `false`.
-  pub(crate) fn activate_document_panel_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
-    self.document_panels.activate_tab(panel_id, tab_id)
-  }
-
   /// Toggles the active molecular document's options menu.
   pub(crate) fn toggle_document_options_menu(&mut self, panel_id: PanelId) -> bool {
     self.document_panels.toggle_options_menu(panel_id)
@@ -208,21 +194,6 @@ impl ChitinApp {
     true
   }
 
-  /// Closes a tab inside a document panel.
-  ///
-  /// # Parameters
-  ///
-  /// * `panel_id` identifies the document panel that owns the tab.
-  /// * `tab_id` identifies the tab to close.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the panel and tab exist and the tab was removed; otherwise
-  /// `false`.
-  pub(crate) fn close_document_panel_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
-    self.document_panels.close_tab(panel_id, tab_id)
-  }
-
   /// Focuses the previous tab in the focused document panel.
   pub(crate) fn focus_previous_document_panel_tab(&mut self) -> bool {
     self.document_panels.focus_previous_tab()
@@ -236,112 +207,6 @@ impl ChitinApp {
   /// Closes the active tab in the focused document panel.
   pub(crate) fn close_focused_document_panel_tab(&mut self) -> bool {
     self.document_panels.close_focused_tab()
-  }
-
-  /// Starts a document tab drag after GPUI crosses its movement threshold.
-  ///
-  /// # Parameters
-  ///
-  /// * `drag` identifies the source panel, tab, index, and preview title.
-  ///
-  /// # Returns
-  ///
-  /// `true` when document panel state accepts the drag; otherwise `false`.
-  pub(crate) fn start_document_panel_tab_drag(&mut self, drag: PanelTabDrag) -> bool {
-    self.document_panels.start_tab_drag(drag)
-  }
-
-  /// Updates the current document tab insertion target.
-  ///
-  /// # Parameters
-  ///
-  /// * `target` identifies a valid panel tab strip and raw insertion index.
-  ///
-  /// # Returns
-  ///
-  /// `true` when temporary target state changed; otherwise `false`.
-  pub(crate) fn update_document_panel_tab_drag_target(&mut self, target: PanelTabDropTarget) -> bool {
-    self.document_panels.update_tab_drag_target(target)
-  }
-
-  /// Clears stale document tab insertion feedback before target hit testing.
-  pub(crate) fn clear_document_panel_tab_drag_target(&mut self) -> bool {
-    self.document_panels.clear_tab_drag_target()
-  }
-
-  /// Commits a dragged document tab released over a valid target strip.
-  ///
-  /// # Parameters
-  ///
-  /// * `drag` is the stable GPUI drag payload.
-  /// * `target_panel_id` identifies the strip accepting the drop.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the tab move succeeds; otherwise `false`.
-  pub(crate) fn drop_document_panel_tab(&mut self, drag: PanelTabDrag, target_panel_id: PanelId) -> bool {
-    self.document_panels.drop_tab(drag, target_panel_id)
-  }
-
-  /// Cancels any uncommitted document tab drag.
-  pub(crate) fn cancel_document_panel_tab_drag(&mut self) -> bool {
-    self.document_panels.cancel_tab_drag()
-  }
-
-  /// Starts resizing one document panel split.
-  ///
-  /// # Parameters
-  ///
-  /// * `path` identifies the split node whose handle was pressed.
-  /// * `axis` controls whether horizontal or vertical pointer movement is used.
-  /// * `start_position` is the cursor position on the resize axis where the drag
-  ///   began.
-  ///
-  /// # Returns
-  ///
-  /// `true` when document panel state exists and accepted the resize start;
-  /// otherwise `false`.
-  pub(crate) fn start_document_panel_resize(
-    &mut self,
-    path: PanelSplitPath,
-    axis: PanelSplitAxis,
-    start_position: Pixels,
-  ) -> bool {
-    self.document_panels.start_resize(path, axis, start_position)
-  }
-
-  /// Updates the active document panel split resize.
-  ///
-  /// # Parameters
-  ///
-  /// * `current_position` is the latest cursor position on the active resize
-  ///   axis.
-  /// * `root_width` is the rendered width available to the document panel root.
-  /// * `root_height` is the rendered height available to the document panel root.
-  ///
-  /// # Returns
-  ///
-  /// `true` when an active document panel drag changed a split ratio; otherwise
-  /// `false`.
-  pub(crate) fn drag_document_panel_resize(
-    &mut self,
-    current_position: Pixels,
-    root_width: Pixels,
-    root_height: Pixels,
-  ) -> bool {
-    self
-      .document_panels
-      .drag_resize(current_position, root_width, root_height)
-  }
-
-  /// Stops the active document panel split resize.
-  pub(crate) fn stop_document_panel_resize(&mut self) -> bool {
-    self.document_panels.stop_resize()
-  }
-
-  /// Returns the active document panel resize axis.
-  pub(crate) fn document_panel_resize_axis(&self) -> Option<PanelSplitAxis> {
-    self.document_panels.resize_axis()
   }
 }
 

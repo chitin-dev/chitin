@@ -11,17 +11,19 @@
 //! [`ActivityBarItem`](crate::composite::activity_bar::ActivityBarItem) values
 //! and keep selection, routing, permissions, and persistence outside this crate.
 
-use gpui::{
-  App, Entity, IntoElement, ParentElement, Pixels, RenderOnce, Rgba, SharedString, Window, div, prelude::*, px,
+use std::rc::Rc;
+
+use gpui_kit::component::theme::ThemeColor;
+
+use gpui::{App, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Window, div, prelude::*, px};
+
+use gpui_kit::component::{
+  Disableable as _, Icon, Selectable as _, Sizable as _,
+  button::{Button, ButtonVariant, ButtonVariants as _},
 };
 
-use crate::{
-  primitive::{
-    button::{Button, ButtonSize, ButtonState, ButtonStyle, ButtonVariant},
-    icon::Icon,
-  },
-  themes::{UIThemes, builtins},
-};
+/// Handler invoked with the activated item's id when an activity item is clicked.
+type ActivityBarItemClickHandler = dyn Fn(&SharedString, &mut Window, &mut App);
 
 /// Default width of the activity bar.
 ///
@@ -50,8 +52,7 @@ pub struct ActivityBarItem {
   label: SharedString,
   icon_path: SharedString,
   badge: Option<SharedString>,
-  button_state: Entity<ButtonState>,
-  theme: UIThemes,
+  theme: ThemeColor,
   selected: bool,
   disabled: bool,
 }
@@ -73,19 +74,13 @@ impl ActivityBarItem {
   /// # Returns
   ///
   /// An [`ActivityBarItem`] with default theme, enabled state, and no badge.
-  pub fn new(
-    id: impl Into<SharedString>,
-    label: impl Into<SharedString>,
-    icon_path: impl Into<SharedString>,
-    button_state: Entity<ButtonState>,
-  ) -> Self {
+  pub fn new(id: impl Into<SharedString>, label: impl Into<SharedString>, icon_path: impl Into<SharedString>) -> Self {
     Self {
       id: id.into(),
       label: label.into(),
       icon_path: icon_path.into(),
       badge: None,
-      button_state,
-      theme: builtins::dark(),
+      theme: *ThemeColor::dark(),
       selected: false,
       disabled: false,
     }
@@ -121,7 +116,7 @@ impl ActivityBarItem {
   ///
   /// This is usually set by [`ActivityBar`] while it renders its children. It is
   /// public so callers can render individual activity items directly.
-  pub fn theme(mut self, theme: UIThemes) -> Self {
+  pub fn theme(mut self, theme: ThemeColor) -> Self {
     self.theme = theme;
     self
   }
@@ -144,55 +139,43 @@ impl ActivityBarItem {
     self.disabled = disabled;
     self
   }
-
-  /// Returns the text/icon color for the current item state.
-  fn text_color(&self) -> Rgba {
-    if self.disabled {
-      self.theme.text.disabled
-    } else if self.selected {
-      self.theme.text.selection
-    } else {
-      self.theme.text.secondary
-    }
-  }
 }
 
 impl ActivityBarItem {
-  /// Renders this item through its primitive button state.
-  fn render(self, theme: UIThemes, cx: &mut App) -> gpui::Div {
+  /// Renders this item, routing activation to `on_item_click` when supplied.
+  fn render(self, on_item_click: Option<Rc<ActivityBarItemClickHandler>>) -> gpui::Div {
+    let theme = self.theme;
     let selected = self.selected;
     let disabled = self.disabled;
-    let text_color = self.text_color();
     let badge = self.badge;
     let icon_path = self.icon_path;
-    let button_state = self.button_state;
-
-    button_state.update(cx, |state, cx| state.set_disabled(disabled, cx));
+    let item_id = self.id;
 
     let mut item = div().relative().child(
-      Button::new(button_state)
-        .theme(theme)
-        .variant(ButtonVariant::Transparent)
-        .style(
-          ButtonStyle::new()
-            .width(px(40.0))
-            .height(px(40.0))
-            .horizontal_padding(px(0.0))
-            .background(theme.background.primary)
-            .hover_background(theme.background.primary)
-            .pressed_background(theme.background.active)
-            .foreground(text_color)
-            .hover_foreground(theme.text.hover)
-            .border(builtins::TRANSPARENT)
-            .focus_border(builtins::TRANSPARENT),
-        )
-        .size(ButtonSize::Medium)
+      Button::new(format!("activity-bar-item-{item_id}"))
+        .with_variant(ButtonVariant::Ghost)
+        .disabled(disabled)
+        .selected(selected)
+        .tooltip(self.label.clone())
+        .accessibility_label(self.label)
+        // The focus ring stays on. Chitin suppressed it because its buttons were
+        // not tab stops and could never receive focus by keyboard; GPUI Kit makes
+        // every button one, so suppressing it here would mean tabbing through the
+        // bar with nothing on screen to show where focus went.
+        .cursor_pointer()
+        .w(px(40.0))
+        .h(px(40.0))
+        .px(px(0.0))
+        .when_some(on_item_click, |button, on_item_click| {
+          let clicked_id = item_id.clone();
+          button.on_click(move |_, window, cx| on_item_click(&clicked_id, window, cx))
+        })
+        // Left uncoloured so the icon inherits the button's foreground, which is
+        // what keeps it legible against the activity bar's own background.
         .child(
-          Icon::new(icon_path)
-            .theme(theme)
-            .color(text_color)
-            .hover_color(theme.text.hover)
-            .size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH),
+          Icon::default()
+            .path(icon_path)
+            .with_size(DEFAULT_ACTIVITY_BAR_ICON_WIDTH),
         ),
     );
 
@@ -205,7 +188,7 @@ impl ActivityBarItem {
           .top_0()
           .w(px(2.0))
           .h(px(40.0))
-          .bg(theme.text.primary),
+          .bg(theme.foreground),
       );
     }
 
@@ -219,12 +202,12 @@ impl ActivityBarItem {
           .h(DEFAULT_ACTIVITY_BAR_BADGE_RADIUS)
           .px_1()
           .rounded_full()
-          .bg(theme.background.info)
+          .bg(theme.info)
           .flex()
           .justify_center()
           .items_center()
           .text_xs()
-          .text_color(theme.accent.foreground)
+          .text_color(theme.info_foreground)
           .child(badge),
       );
     }
@@ -246,14 +229,15 @@ impl ActivityBarItem {
 /// up. This matches the common IDE pattern where primary navigation lives at the
 /// top and account/settings controls live at the bottom.
 ///
-/// Each item receives a persistent [`ButtonState`]. Applications subscribe to
-/// its [`crate::primitive::button::ButtonEvent`] values and retain the state
-/// across renders.
+/// Item activation is reported through [`ActivityBar::on_item_click`], which
+/// receives the activated item's id. The bar stays stateless: applications keep
+/// selection and routing in their own state and re-render with the result.
 #[derive(IntoElement)]
 pub struct ActivityBar {
   width: Pixels,
-  theme: UIThemes,
+  theme: ThemeColor,
   active_item_id: Option<SharedString>,
+  on_item_click: Option<Rc<ActivityBarItemClickHandler>>,
   items: Vec<ActivityBarItem>,
   bottom_items: Vec<ActivityBarItem>,
 }
@@ -263,11 +247,21 @@ impl ActivityBar {
   pub fn new() -> Self {
     Self {
       width: DEFAULT_ACTIVITY_BAR_WIDTH,
-      theme: builtins::dark(),
+      theme: *ThemeColor::dark(),
       active_item_id: None,
+      on_item_click: None,
       items: Vec::new(),
       bottom_items: Vec::new(),
     }
+  }
+
+  /// Sets the handler invoked with an item's id when that item is activated.
+  ///
+  /// One handler covers the whole bar rather than one closure per item, so the
+  /// item id stays the single source of truth for routing.
+  pub fn on_item_click(mut self, on_item_click: impl Fn(&SharedString, &mut Window, &mut App) + 'static) -> Self {
+    self.on_item_click = Some(Rc::new(on_item_click));
+    self
   }
 
   /// Overrides the rendered width of the activity bar.
@@ -281,9 +275,9 @@ impl ActivityBar {
 
   /// Overrides the visual theme used by this activity bar.
   ///
-  /// Components default to [`builtins::dark`], but callers can pass another
-  /// [`UIThemes`] value to keep an application-wide theme consistent.
-  pub fn theme(mut self, theme: UIThemes) -> Self {
+  /// Components default to [`ThemeColor::dark`], but callers can pass another
+  /// [`ThemeColor`] value to keep an application-wide theme consistent.
+  pub fn theme(mut self, theme: ThemeColor) -> Self {
     self.theme = theme;
     self
   }
@@ -332,9 +326,10 @@ impl Default for ActivityBar {
 
 impl RenderOnce for ActivityBar {
   /// Renders the top- and bottom-aligned activity items.
-  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+  fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let active_item_id = self.active_item_id;
     let theme = self.theme;
+    let on_item_click = self.on_item_click;
 
     div()
       .flex()
@@ -345,9 +340,8 @@ impl RenderOnce for ActivityBar {
       .h_full()
       .w(self.width)
       .py_2()
-      .border_r_1()
-      .border_color(theme.border.primary)
-      .bg(theme.background.primary)
+      .border_color(theme.sidebar_border)
+      .bg(theme.sidebar)
       .child(
         div()
           .flex()
@@ -356,7 +350,7 @@ impl RenderOnce for ActivityBar {
           .gap_1()
           .children(self.items.into_iter().map(|item| {
             let selected = active_item_id.as_ref().is_some_and(|active_id| active_id == &item.id);
-            item.theme(theme).selected(selected).render(theme, cx)
+            item.theme(theme).selected(selected).render(on_item_click.clone())
           })),
       )
       .child(
@@ -367,7 +361,7 @@ impl RenderOnce for ActivityBar {
           .gap_1()
           .children(self.bottom_items.into_iter().map(|item| {
             let selected = active_item_id.as_ref().is_some_and(|active_id| active_id == &item.id);
-            item.theme(theme).selected(selected).render(theme, cx)
+            item.theme(theme).selected(selected).render(on_item_click.clone())
           })),
       )
   }

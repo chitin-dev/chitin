@@ -1,7 +1,7 @@
 //! Unit coverage for composite panel tree behavior.
 
 use super::*;
-use gpui::{Bounds, px};
+use gpui::px;
 
 /// Creates a root panel containing four stable test tabs.
 fn four_tab_tree() -> PanelTree<&'static str> {
@@ -436,33 +436,6 @@ fn panel_tree_should_reject_stale_target_atomically() {
   ));
 
   assert_eq!(tree, before);
-}
-
-/// Verifies midpoint hit testing handles variable rendered tab widths.
-#[test]
-fn panel_tab_insertion_index_should_use_actual_variable_width_bounds() {
-  let bounds = [
-    Bounds {
-      origin: gpui::point(px(10.0), px(0.0)),
-      size: gpui::size(px(80.0), px(34.0)),
-    },
-    Bounds {
-      origin: gpui::point(px(90.0), px(0.0)),
-      size: gpui::size(px(200.0), px(34.0)),
-    },
-    Bounds {
-      origin: gpui::point(px(290.0), px(0.0)),
-      size: gpui::size(px(72.0), px(34.0)),
-    },
-  ];
-
-  assert_eq!(panel_tab_insertion_index(&bounds, px(49.0)), 0);
-  assert_eq!(panel_tab_insertion_index(&bounds, px(50.0)), 1);
-  assert_eq!(panel_tab_insertion_index(&bounds, px(189.0)), 1);
-  assert_eq!(panel_tab_insertion_index(&bounds, px(190.0)), 2);
-  assert_eq!(panel_tab_insertion_index(&bounds, px(325.0)), 2);
-  assert_eq!(panel_tab_insertion_index(&bounds, px(326.0)), 3);
-  assert_eq!(panel_tab_insertion_index(&[], px(100.0)), 0);
 }
 
 /// Verifies that immutable leaf lookup returns the requested panel.

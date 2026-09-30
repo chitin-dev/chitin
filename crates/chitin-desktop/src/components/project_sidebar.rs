@@ -1,6 +1,6 @@
 //! Project sidebar composition.
 //!
-//! This module combines generic `chitin-ui` sidebar primitives with the
+//! This module combines GPUI Kit sidebar chrome with the
 //! desktop-specific workspace tree renderer.
 
 use std::{
@@ -9,28 +9,27 @@ use std::{
 };
 
 use chitin_command::WorkspaceCommand;
-use chitin_ui::{
-  primitive::{
-    sidebar::{
-      Sidebar, SidebarBody, SidebarHeader, SidebarResizeConfig, SidebarResizeState, SidebarSection, SidebarTitle,
-    },
-    tree::TreeState,
-  },
-  themes::UIThemes,
-};
 use chitin_utils::workspace::ProjectWorkspace;
-use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, div, prelude::*};
+use gpui_kit::component::{sidebar::SidebarHeader, theme::ThemeColor};
+
+use gpui::{Context, FocusHandle, IntoElement, Pixels, ScrollStrategy, UniformListScrollHandle, div, prelude::*};
 
 use crate::{
   app::ChitinApp,
-  components::workspace_tree::render_workspace_tree,
+  components::workspace_tree::{WorkspaceTreeView, render_workspace_tree},
   keybindings::{
     ActivateFocusedEntry, FocusFirstEntry, FocusLastEntry, FocusNextEntry, FocusPreviousEntry, PROJECT_TREE_KEY_CONTEXT,
   },
 };
 
 /// Default title shown at the top of the project workspace sidebar.
-pub const DEFAULT_PROJECT_WORKSPACE_TITLE: &str = "EXPLORER";
+pub const DEFAULT_PROJECT_WORKSPACE_TITLE: &str = "File Explorer";
+/// Initial width of the explorer pane.
+pub const DEFAULT_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(200.0);
+/// Minimum explorer width supported by the workbench.
+pub const MIN_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(180.0);
+/// Maximum explorer width supported by the workbench.
+pub const MAX_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(480.0);
 
 /// App state managed by the project workspace sidebar.
 ///
@@ -48,9 +47,11 @@ pub struct ProjectSidebarState {
   /// Workspace tree entry focused for keyboard navigation.
   pub focused_path: Option<PathBuf>,
   /// Virtualized workspace tree scroll state.
-  pub tree: TreeState,
-  /// Generic resize state for the project sidebar shell.
-  pub resize: SidebarResizeState,
+  scroll_handle: UniformListScrollHandle,
+  /// Kit tree mount and its last visible-row projection.
+  pub(crate) tree_view: Option<WorkspaceTreeView>,
+  /// Width projected from Kit's resizable group; no application drag state.
+  width: Pixels,
 }
 
 impl ProjectSidebarState {
@@ -63,15 +64,16 @@ impl ProjectSidebarState {
   /// # Returns
   ///
   /// A [`ProjectSidebarState`] with empty selection/focus state and default
-  /// resize state.
+  /// pane width.
   pub fn with_workspace_root(root: Option<&Path>) -> Self {
     Self {
       expanded_paths: root.map(|root| HashSet::from([root.to_path_buf()])).unwrap_or_default(),
       loading_paths: HashSet::new(),
       selected_path: None,
       focused_path: None,
-      tree: TreeState::new(),
-      resize: SidebarResizeState::default(),
+      scroll_handle: UniformListScrollHandle::new(),
+      tree_view: None,
+      width: DEFAULT_PROJECT_SIDEBAR_WIDTH,
     }
   }
 
@@ -114,45 +116,42 @@ impl ProjectSidebarState {
   ///
   /// This function returns `()` and records a deferred GPUI scroll request.
   pub fn reveal_tree_row(&self, row_index: usize, strategy: ScrollStrategy) {
-    self.tree.reveal_row(row_index, strategy);
+    self.scroll_handle.scroll_to_item(row_index, strategy);
   }
 
-  /// Starts a sidebar resize drag at the current cursor position.
+  /// Returns the sidebar width last reported by Kit.
+  pub fn width(&self) -> Pixels {
+    self.width
+  }
+
+  /// Shares Kit's scroll handle with workspace command navigation.
+  pub(crate) fn set_tree_scroll_handle(&mut self, handle: UniformListScrollHandle) {
+    self.scroll_handle = handle;
+  }
+
+  /// Stores the width reported by Kit within the product's sidebar bounds.
   ///
   /// # Parameters
   ///
-  /// * `start_x` is the horizontal cursor position where dragging began.
+  /// * `width` is Kit's measured panel width; non-finite values are ignored.
   ///
   /// # Returns
   ///
-  /// This function returns `()` and records the active resize drag.
-  pub fn start_resize(&mut self, start_x: Pixels) {
-    log::debug!("Project sidebar: start width resizing from width {:?}", start_x);
-    self.resize.start_resize(start_x);
-  }
-
-  /// Updates sidebar width from the current resize cursor position.
-  ///
-  /// # Parameters
-  ///
-  /// * `current_x` is the latest horizontal cursor position during the drag.
-  ///
-  /// # Returns
-  ///
-  /// `true` when an active drag was updated; `false` when no drag is active.
-  pub fn drag_resize(&mut self, current_x: Pixels) -> bool {
-    self.resize.drag_resize(current_x)
-  }
-
-  /// Stops the current sidebar resize drag.
-  pub fn stop_resize(&mut self) -> bool {
-    log::debug!("Project sidebar: stop width resizing from");
-    self.resize.stop_resize()
-  }
-
-  /// Returns whether the sidebar is currently being resized.
-  pub fn is_resizing(&self) -> bool {
-    self.resize.is_resizing()
+  /// Whether the stored width changed. Kit owns drag state and pointer handling.
+  pub fn set_width(&mut self, width: Pixels) -> bool {
+    let value = f32::from(width);
+    if !value.is_finite() {
+      return false;
+    }
+    let width = gpui::px(value.clamp(
+      f32::from(MIN_PROJECT_SIDEBAR_WIDTH),
+      f32::from(MAX_PROJECT_SIDEBAR_WIDTH),
+    ));
+    if self.width == width {
+      return false;
+    }
+    self.width = width;
+    true
   }
 }
 
@@ -175,27 +174,32 @@ impl Default for ProjectSidebarState {
 ///
 /// * `workspace` is the currently opened project workspace. When `None`, the
 ///   sidebar renders an empty-workspace message instead of a tree.
-/// * `state` contains expansion, loading, selection, focus, and resize state used
+/// * `state` contains expansion, loading, selection, focus, and saved width used
 ///   by the sidebar and tree.
 /// * `focus_handle` is the GPUI focus handle associated with the `"ProjectTree"`
 ///   key context.
 /// * `theme` supplies the UI colors and spacing used by the sidebar shell.
-/// * `cx` is the GPUI context used to create command action listeners and obtain
-///   a weak app entity for resize callbacks.
+/// * `cx` creates the workspace command action listeners.
 ///
 /// # Returns
 ///
-/// A GPUI element that renders the resizable project sidebar.
+/// A sidebar body for Kit's workbench resizable group.
 pub fn render_project_sidebar(
   workspace: Option<&ProjectWorkspace>,
-  state: &ProjectSidebarState,
+  state: &mut ProjectSidebarState,
   focus_handle: &FocusHandle,
-  theme: UIThemes,
+  theme: ThemeColor,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
-  let app = cx.weak_entity();
-
-  div()
+  let panel = div()
+    .flex()
+    .flex_col()
+    .flex_1()
+    .min_w_0()
+    .min_h_0()
+    .bg(theme.muted)
+    .rounded(gpui::px(8.0))
+    .overflow_hidden()
     .track_focus(focus_handle)
     .key_context(PROJECT_TREE_KEY_CONTEXT)
     .on_action(cx.listener(|this, _: &FocusPreviousEntry, _, cx| {
@@ -215,63 +219,58 @@ pub fn render_project_sidebar(
       this.dispatch_command(WorkspaceCommand::FocusLast.into(), cx);
     }))
     .child(
-      Sidebar::new()
-        .width(state.resize.width())
-        .resizable(SidebarResizeConfig::new(move |start_x, _, cx| {
-          let _ = app.update(cx, |this, cx| {
-            this.project_sidebar_state.start_resize(start_x);
-            cx.notify();
-          });
-        }))
-        .theme(theme)
-        .child(
-          SidebarHeader::new()
-            .theme(theme)
-            .child(SidebarTitle::new(DEFAULT_PROJECT_WORKSPACE_TITLE).theme(theme)),
-        )
-        .child(
-          SidebarBody::new().theme(theme).child(match workspace {
-            Some(workspace) => SidebarSection::new()
-              .theme(theme)
-              .fill(true)
-              .child(render_workspace_tree(&workspace.tree.root, state, theme, cx)),
-            None => SidebarSection::new().theme(theme).child(
-              div()
-                .p_3()
-                .text_xs()
-                .text_color(theme.text.secondary)
-                .child("Open a project path to show files."),
-            ),
-          }),
-        ),
+      SidebarHeader::new()
+        .flex_none()
+        .h(gpui::px(30.0))
+        .rounded_none()
+        .text_xs()
+        .text_color(theme.sidebar_foreground)
+        .child(DEFAULT_PROJECT_WORKSPACE_TITLE),
     )
+    .child(
+      div().flex().flex_1().min_h_0().w_full().child(match workspace {
+        Some(workspace) => render_workspace_tree(&workspace.tree.root, state, theme, cx).into_any_element(),
+        None => div()
+          .p_3()
+          .text_xs()
+          .text_color(theme.muted_foreground)
+          .child("Open a project path to show files.")
+          .into_any_element(),
+      }),
+    );
+
+  div()
+    .flex()
+    .size_full()
+    .min_w_0()
+    .min_h_0()
+    .p(gpui::px(8.0))
+    .child(panel)
 }
 
 #[cfg(test)]
 mod tests {
-  use chitin_ui::primitive::sidebar::DEFAULT_SIDEBAR_WIDTH;
-
   use super::*;
 
-  /// Verifies that drag resize applies cursor delta to the starting width.
   #[test]
-  fn drag_resize_should_apply_delta_from_drag_start() {
+  fn reported_width_should_be_clamped_to_product_bounds() {
     let mut state = ProjectSidebarState::default();
-
-    state.start_resize(gpui::px(100.0));
-    assert!(state.drag_resize(gpui::px(140.0)));
-
-    assert_eq!(state.resize.width(), gpui::px(f32::from(DEFAULT_SIDEBAR_WIDTH) + 40.0));
+    state.set_width(gpui::px(900.0));
+    assert_eq!(state.width(), MAX_PROJECT_SIDEBAR_WIDTH);
+    state.set_width(gpui::px(10.0));
+    assert_eq!(state.width(), MIN_PROJECT_SIDEBAR_WIDTH);
   }
 
-  /// Verifies that stopping resize clears active resize state.
   #[test]
-  fn stop_resize_should_clear_active_resize_state() {
+  fn unchanged_width_should_not_request_another_render() {
     let mut state = ProjectSidebarState::default();
+    assert!(!state.set_width(DEFAULT_PROJECT_SIDEBAR_WIDTH));
+  }
 
-    state.start_resize(gpui::px(100.0));
-    assert!(state.is_resizing());
-    assert!(state.stop_resize());
-    assert!(!state.is_resizing());
+  #[test]
+  fn non_finite_width_should_not_corrupt_layout() {
+    let mut state = ProjectSidebarState::default();
+    assert!(!state.set_width(gpui::px(f32::NAN)));
+    assert_eq!(state.width(), DEFAULT_PROJECT_SIDEBAR_WIDTH);
   }
 }

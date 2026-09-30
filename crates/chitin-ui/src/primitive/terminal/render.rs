@@ -1,12 +1,13 @@
 //! Rendering for terminal lines and their scroll viewport.
 
+use gpui_kit::component::theme::ThemeColor;
+
 use gpui::{
   AnyElement, App, Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, RenderOnce, SharedString,
   Window, div, prelude::*,
 };
 
 use super::{TerminalLine, TerminalViewportState};
-use crate::themes::{UIThemes, builtins};
 
 /// Scrollable monospace output surface with an optional interactive tail.
 #[derive(IntoElement)]
@@ -14,7 +15,7 @@ pub struct TerminalViewport {
   state: Entity<TerminalViewportState>,
   lines: Vec<TerminalLine>,
   tail: Option<AnyElement>,
-  theme: UIThemes,
+  theme: ThemeColor,
   font_family: SharedString,
 }
 
@@ -25,7 +26,7 @@ impl TerminalViewport {
       state,
       lines: Vec::new(),
       tail: None,
-      theme: builtins::dark(),
+      theme: *ThemeColor::dark(),
       font_family: "monospace".into(),
     }
   }
@@ -43,7 +44,7 @@ impl TerminalViewport {
   }
 
   /// Sets the semantic UI theme.
-  pub fn theme(mut self, theme: UIThemes) -> Self {
+  pub fn theme(mut self, theme: ThemeColor) -> Self {
     self.theme = theme;
     self
   }
@@ -85,7 +86,7 @@ impl RenderOnce for TerminalViewport {
 }
 
 /// Renders one soft-wrapping terminal line.
-fn render_line(line: TerminalLine, theme: UIThemes) -> impl IntoElement {
+fn render_line(line: TerminalLine, theme: ThemeColor) -> impl IntoElement {
   div().flex().flex_wrap().min_h(gpui::px(18.0)).children(
     line
       .spans()
@@ -95,14 +96,14 @@ fn render_line(line: TerminalLine, theme: UIThemes) -> impl IntoElement {
 }
 
 /// Resolves a frontend-independent terminal tone through the active UI theme.
-fn tone_color(tone: super::TerminalTone, theme: UIThemes) -> gpui::Rgba {
+fn tone_color(tone: super::TerminalTone, theme: ThemeColor) -> gpui::Hsla {
   match tone {
-    super::TerminalTone::Primary => theme.text.primary,
-    super::TerminalTone::Secondary => theme.text.secondary,
-    super::TerminalTone::Accent => theme.accent.primary,
-    super::TerminalTone::Success => theme.text.success,
-    super::TerminalTone::Warning => theme.text.warning,
-    super::TerminalTone::Error => theme.text.error,
-    super::TerminalTone::Info => theme.text.info,
+    super::TerminalTone::Primary => theme.foreground,
+    super::TerminalTone::Secondary => theme.muted_foreground,
+    super::TerminalTone::Accent => theme.primary,
+    super::TerminalTone::Success => theme.success,
+    super::TerminalTone::Warning => theme.warning,
+    super::TerminalTone::Error => theme.danger,
+    super::TerminalTone::Info => theme.info,
   }
 }

@@ -14,14 +14,12 @@ use chitin_builtin_shell::{BuiltinTerminalProgram, ShellCommandId};
 use chitin_command::CommandExecutionContext;
 use chitin_terminal::{ShellCatalog, ShellDefinition, TerminalSession, TerminalSessionError, TerminalSize};
 use chitin_ui::{
+  composite::select_item::IconSelectItem,
   composite::toast::{Toast, ToastVariant},
-  primitive::{
-    button::{ButtonEvent, ButtonState},
-    input::select::{SelectInputEvent, SelectInputState, SelectOption},
-    terminal::{TerminalEmulatorEvent, TerminalEmulatorState},
-  },
+  primitive::terminal::{TerminalEmulatorEvent, TerminalEmulatorState},
 };
 use gpui::{AppContext, Context, Entity, ScrollHandle, Subscription, Window};
+use gpui_kit::component::select::{SelectEvent, SelectState};
 
 use crate::{
   app::ChitinApp,
@@ -119,7 +117,6 @@ pub(super) struct ManagedTerminalSession {
   profile: DesktopTerminalProfile,
   pub(super) terminal: Entity<TerminalEmulatorState>,
   pub(super) builtin: Option<ManagedBuiltinShell>,
-  pub(super) tab: Entity<ButtonState>,
   pub(super) active_shell_command: Option<ShellCommandId>,
   pub(super) rendered_running_output: String,
 }
@@ -151,8 +148,7 @@ pub(crate) struct TerminalPanelControls {
   catalog: ShellCatalog,
   pub(super) sessions: Vec<ManagedTerminalSession>,
   pub(super) active_session: TerminalSessionId,
-  pub(super) close_session: Entity<ButtonState>,
-  pub(super) profile_select: Entity<SelectInputState>,
+  pub(super) profile_select: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Scroll position of the session tab strip.
   ///
   /// This has to outlive a render: a handle created while rendering would start every
@@ -166,21 +162,24 @@ impl TerminalPanelControls {
     initial_id: TerminalSessionId,
     working_directory: &Path,
     shell_context: CommandExecutionContext,
+    window: &mut Window,
     cx: &mut Context<ChitinApp>,
   ) -> Result<Self, TerminalSessionError> {
     let catalog = ShellCatalog::discover();
-    let close_session = cx.new(ButtonState::new);
     let profile_select = cx.new(|cx| {
-      SelectInputState::new(
+      SelectState::new(
         std::iter::once(
-          SelectOption::new("builtin-shell", "Built-in shell").icon(terminal_profile_icon("builtin-shell")),
+          IconSelectItem::new("builtin-shell", "Built-in shell").icon(terminal_profile_icon("builtin-shell")),
         )
         .chain(
           catalog
             .available()
             .iter()
-            .map(|shell| SelectOption::new(&shell.id, &shell.label).icon(terminal_profile_icon(&shell.id))),
-        ),
+            .map(|shell| IconSelectItem::new(&shell.id, &shell.label).icon(terminal_profile_icon(&shell.id))),
+        )
+        .collect::<Vec<_>>(),
+        None,
+        window,
         cx,
       )
     });
@@ -195,7 +194,6 @@ impl TerminalPanelControls {
       catalog,
       sessions: vec![session],
       active_session: initial_id,
-      close_session,
       profile_select,
       tab_scroll: ScrollHandle::new(),
     })
@@ -233,7 +231,6 @@ impl TerminalPanelControls {
       profile: profile.clone(),
       terminal: cx.new(|cx| TerminalEmulatorState::new(session, INITIAL_TERMINAL_SIZE, cx)),
       builtin,
-      tab: cx.new(ButtonState::new),
       active_shell_command: None,
       rendered_running_output: String::new(),
     })
@@ -243,20 +240,10 @@ impl TerminalPanelControls {
   fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
     self.subscribe_session(&self.sessions[0], window, cx);
 
-    let subscription: Subscription = cx.subscribe_in(&self.close_session, window, |this, _, event, _, cx| {
-      if matches!(event, ButtonEvent::Click) {
-        this.close_active_terminal_session(cx);
-      }
-    });
-    subscription.detach();
-
     let profile_select = self.profile_select.clone();
     let profile_select_for_event = profile_select.clone();
     let subscription: Subscription = cx.subscribe_in(&profile_select, window, move |this, _, event, window, cx| {
-      let SelectInputEvent::SelectionChange {
-        selected_id: Some(selected_id),
-      } = event
-      else {
+      let SelectEvent::Confirm(Some(selected_id)) = event else {
         return;
       };
       let Some(profile) = this.terminal_panel_controls.as_ref().and_then(|controls| {
@@ -274,14 +261,17 @@ impl TerminalPanelControls {
       };
       this.create_terminal_session(profile, window, cx);
       let profile_select = profile_select_for_event.clone();
-      cx.defer_in(window, move |_, _, cx| {
-        profile_select.update(cx, |state, cx| state.clear_selection(cx));
+      cx.defer_in(window, move |_, window, cx| {
+        profile_select.update(cx, |state, cx| state.set_selected_index(None, window, cx));
       });
     });
     subscription.detach();
   }
 
-  /// Connects input and tab activation for one session.
+  /// Connects terminal input events for one session.
+  ///
+  /// Tab activation is not subscribed here: the session tab button owns its own
+  /// click handler and reaches the session manager through the app entity.
   fn subscribe_session(&self, session: &ManagedTerminalSession, window: &mut Window, cx: &mut Context<ChitinApp>) {
     let id = session.id;
     let terminal = session.terminal.clone();
@@ -290,14 +280,6 @@ impl TerminalPanelControls {
         TerminalEmulatorEvent::InputWritten => this.process_builtin_terminal_input(id, window, cx),
         TerminalEmulatorEvent::Exited { code } => this.terminal_session_exited(id, code, cx),
       });
-    subscription.detach();
-
-    let tab = session.tab.clone();
-    let subscription: Subscription = cx.subscribe_in(&tab, window, move |this, _, event, window, cx| {
-      if matches!(event, ButtonEvent::Click) {
-        this.activate_terminal_session(id, window, cx);
-      }
-    });
     subscription.detach();
   }
 
@@ -349,7 +331,7 @@ impl ChitinApp {
     let working_directory = self.terminal_working_directory();
     let shell_context = desktop_shell_context(self.workspace.as_ref().map(|workspace| workspace.root.clone()));
     let initial_id = self.terminal_panel.next_session_id();
-    let controls = match TerminalPanelControls::new(initial_id, &working_directory, shell_context, cx) {
+    let controls = match TerminalPanelControls::new(initial_id, &working_directory, shell_context, window, cx) {
       Ok(controls) => controls,
       Err(error) => {
         log::error!("failed to create built-in terminal: {error}");

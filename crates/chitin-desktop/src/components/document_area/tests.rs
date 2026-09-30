@@ -2,11 +2,8 @@
 
 use std::path::Path;
 
-use chitin_ui::composite::panel::{
-  PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelTab, PanelTabDrag, PanelTabDragState, PanelTabDropTarget,
-  PanelTabId, PanelTabScrollState, PanelTree,
-};
-use gpui::{SharedString, px};
+use chitin_ui::composite::panel::{PanelLeaf, PanelSplitAxis, PanelTab, PanelTabId, PanelTree};
+use gpui::SharedString;
 
 use super::{
   DocumentPanelState, OpenedProjectDocument,
@@ -61,31 +58,7 @@ fn two_tab_document_panel_state() -> DocumentPanelState {
     focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
     next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
     next_tab_id: PanelTabId::new(3),
-    resize_drag: None,
-    tab_drag: None,
-    tab_scroll: PanelTabScrollState::new(),
     options_menu_panel_id: None,
-    options_menu_anchor: None,
-  }
-}
-
-/// Creates a stable drag payload for one tab in a test panel.
-///
-/// # Parameters
-///
-/// * `panel_id` identifies the source panel.
-/// * `tab_id` identifies the source tab.
-/// * `source_index` is the tab's original position.
-///
-/// # Returns
-///
-/// A [`PanelTabDrag`] with a deterministic preview title.
-fn test_tab_drag(panel_id: PanelId, tab_id: PanelTabId, source_index: usize) -> PanelTabDrag {
-  PanelTabDrag {
-    source_panel_id: panel_id,
-    tab_id,
-    source_index,
-    title: SharedString::from("dragged"),
   }
 }
 
@@ -326,11 +299,7 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
     focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
     next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
     next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
-    resize_drag: None,
-    tab_drag: None,
-    tab_scroll: PanelTabScrollState::new(),
     options_menu_panel_id: None,
-    options_menu_anchor: None,
   };
 
   let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
@@ -370,128 +339,6 @@ fn split_panel_with_content_should_use_caller_payload() {
   assert_eq!(new_leaf.tabs.len(), 1);
   assert_eq!(new_leaf.tabs[0].payload.title(), "independent.rs");
   assert_eq!(new_leaf.active_tab, Some(FIRST_DYNAMIC_DOCUMENT_TAB_ID));
-}
-
-/// Verifies a drag reorder preserves the moved document and focuses its panel.
-#[test]
-fn tab_drag_should_reorder_inside_source_panel() {
-  let mut state = two_tab_document_panel_state();
-  let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
-  assert!(state.start_tab_drag(drag.clone()));
-  assert!(state.update_tab_drag_target(PanelTabDropTarget {
-    panel_id: DEFAULT_DOCUMENT_PANEL_ID,
-    insertion_index: 2,
-  }));
-
-  assert!(state.drop_tab(drag, DEFAULT_DOCUMENT_PANEL_ID));
-
-  let Some(leaf) = state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID) else {
-    panic!("source panel should exist");
-  };
-  assert_eq!(
-    leaf.tabs.iter().map(|tab| tab.payload.title()).collect::<Vec<_>>(),
-    vec!["beta.rs", "alpha.rs"]
-  );
-  assert_eq!(leaf.active_tab, Some(DEFAULT_DOCUMENT_TAB_ID));
-  assert_eq!(state.focused_panel_id, DEFAULT_DOCUMENT_PANEL_ID);
-  assert_eq!(state.tab_drag, None);
-}
-
-/// Verifies a cross-panel drop transfers focus and preserves tab identity.
-#[test]
-fn tab_drag_should_move_existing_tab_to_target_panel() {
-  let mut state = two_tab_document_panel_state();
-  let Some(target_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
-    panic!("target panel should be created");
-  };
-  let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, PanelTabId::new(2), 1);
-  assert!(state.start_tab_drag(drag.clone()));
-  assert!(state.update_tab_drag_target(PanelTabDropTarget {
-    panel_id: target_panel_id,
-    insertion_index: 0,
-  }));
-
-  assert!(state.drop_tab(drag, target_panel_id));
-
-  let Some(target) = state.tree.leaf(target_panel_id) else {
-    panic!("target panel should survive");
-  };
-  assert_eq!(target.tabs[0].id, PanelTabId::new(2));
-  assert_eq!(target.tabs[0].payload.title(), "beta.rs");
-  assert_eq!(target.active_tab, Some(PanelTabId::new(2)));
-  assert_eq!(state.focused_panel_id, target_panel_id);
-}
-
-/// Verifies moving a source panel's final tab collapses around the target.
-#[test]
-fn tab_drag_should_focus_target_after_empty_source_panel_is_removed() {
-  let mut state = DocumentPanelState::new(test_document("alpha.rs"));
-  let Some(target_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {
-    panic!("target panel should be created");
-  };
-  let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
-  assert!(state.start_tab_drag(drag.clone()));
-  assert!(state.update_tab_drag_target(PanelTabDropTarget {
-    panel_id: target_panel_id,
-    insertion_index: 1,
-  }));
-
-  assert!(state.drop_tab(drag, target_panel_id));
-
-  assert_eq!(state.tree.leaf_count(), 1);
-  assert!(state.tree.leaf(DEFAULT_DOCUMENT_PANEL_ID).is_none());
-  assert!(state.tree.leaf(target_panel_id).is_some());
-  assert_eq!(state.focused_panel_id, target_panel_id);
-}
-
-/// Verifies cancelling a drag leaves the persistent panel tree unchanged.
-#[test]
-fn tab_drag_should_not_mutate_tree_when_cancelled() {
-  let mut state = two_tab_document_panel_state();
-  let before = state.tree.clone();
-  let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
-  assert!(state.start_tab_drag(drag));
-  assert!(state.update_tab_drag_target(PanelTabDropTarget {
-    panel_id: DEFAULT_DOCUMENT_PANEL_ID,
-    insertion_index: 2,
-  }));
-
-  assert!(state.cancel_tab_drag());
-
-  assert_eq!(state.tree, before);
-  assert_eq!(state.tab_drag, None);
-}
-
-/// Verifies leaving every strip clears only temporary target feedback.
-#[test]
-fn tab_drag_should_clear_target_without_cancelling_session() {
-  let mut state = two_tab_document_panel_state();
-  let drag = test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 0);
-  assert!(state.start_tab_drag(drag.clone()));
-  assert!(state.update_tab_drag_target(PanelTabDropTarget {
-    panel_id: DEFAULT_DOCUMENT_PANEL_ID,
-    insertion_index: 2,
-  }));
-
-  assert!(state.clear_tab_drag_target());
-
-  assert_eq!(
-    state.tab_drag,
-    Some(PanelTabDragState {
-      drag,
-      drop_target: None,
-    })
-  );
-}
-
-/// Verifies a stale source index cannot begin a tab drag.
-#[test]
-fn tab_drag_should_reject_stale_source_without_temporary_state() {
-  let mut state = two_tab_document_panel_state();
-
-  assert!(!state.start_tab_drag(test_tab_drag(DEFAULT_DOCUMENT_PANEL_ID, DEFAULT_DOCUMENT_TAB_ID, 1,)));
-
-  assert_eq!(state.tab_drag, None);
 }
 
 /// Verifies that closing a non-final tab keeps its panel in the layout.
@@ -621,36 +468,4 @@ fn open_document_as_tab_should_target_focused_panel() {
   assert_eq!(focused_leaf.tabs.len(), 2);
   assert_eq!(focused_leaf.active_tab, Some(PanelTabId::new(4)));
   assert_eq!(focused_leaf.tabs[1].payload.title(), "gamma.rs");
-}
-
-/// Verifies that document panel resize updates the target split ratio.
-#[test]
-fn drag_resize_should_update_split_ratio() {
-  let mut state = two_tab_document_panel_state();
-  assert!(
-    state
-      .split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal)
-      .is_some()
-  );
-
-  assert!(state.start_resize(PanelSplitPath::root(), PanelSplitAxis::Horizontal, px(100.0)));
-  assert!(state.drag_resize(px(150.0), px(500.0), px(300.0)));
-
-  assert_eq!(state.tree.split_ratio(&PanelSplitPath::root()), Some(0.6));
-}
-
-/// Verifies that stopping document panel resize clears active drag state.
-#[test]
-fn stop_resize_should_clear_active_drag_state() {
-  let mut state = two_tab_document_panel_state();
-  assert!(
-    state
-      .split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Vertical)
-      .is_some()
-  );
-  assert!(state.start_resize(PanelSplitPath::root(), PanelSplitAxis::Vertical, px(100.0)));
-
-  assert!(state.stop_resize());
-
-  assert_eq!(state.resize_axis(), None);
 }

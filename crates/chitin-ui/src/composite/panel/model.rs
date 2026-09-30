@@ -4,6 +4,15 @@ use gpui::SharedString;
 
 use super::layout::clamp_split_ratio;
 
+/// Command-level destination for moving an existing tab, independent of gestures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PanelTabDropTarget {
+  /// Stable destination leaf identifier.
+  pub panel_id: PanelId,
+  /// Insertion slot before same-leaf removal normalization.
+  pub insertion_index: usize,
+}
+
 /// Stable identifier for a leaf panel.
 ///
 /// Panel IDs are intentionally numeric and application-owned. They should be

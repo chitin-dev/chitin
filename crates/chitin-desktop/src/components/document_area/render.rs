@@ -1,28 +1,25 @@
 //! GPUI rendering for the document panel area.
 
-use std::{rc::Rc, time::Instant};
-
 use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_command::PanelTabCommand;
 use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers, SurfaceStyle};
 use chitin_ui::{
   composite::grouped_select::{GroupedSelect, GroupedSelectGroup},
-  composite::panel::{
-    PanelContainerConfig, PanelId, PanelResizeConfig, PanelSplitAxis, PanelTabActivateHandler, PanelTabCloseHandler,
-    PanelTabCloseIconRenderer, PanelTabDragConfig, PanelTabDragStartHandler, PanelTabDragTargetHandler,
-    PanelTabDropHandler, render_panel_container,
-  },
-  primitive::popover::{Popover, PopoverPlacement, PopoverStyle},
-  primitive::{
-    button::{Button, ButtonEvent, ButtonSize, ButtonState, ButtonStyle, ButtonVariant},
-    input::select::{SelectContent, SelectGroup, SelectInputEvent, SelectInputState, SelectItem, SelectOption},
-  },
-  themes::UIThemes,
+  composite::panel::{PanelId, PanelSplitAxis},
+  composite::select_item::IconSelectItem,
 };
+use gpui_kit::component::theme::ThemeColor;
+
 use gpui::{
-  AnyElement, App, AppContext, AsyncApp, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-  MouseButton, ParentElement, Pixels, RenderOnce, Styled, Subscription, WeakEntity, Window, div, point,
-  prelude::FluentBuilder, px, size, svg,
+  AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement,
+  ParentElement, Pixels, RenderOnce, Styled, Subscription, WeakEntity, Window, div, px, svg,
+};
+
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
+use gpui_kit::component::popover::Popover;
+use gpui_kit::component::{
+  IndexPath,
+  select::{SelectEvent, SelectItem, SelectState},
 };
 
 use crate::{
@@ -30,7 +27,8 @@ use crate::{
   keybindings::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT},
 };
 
-use super::state::{DocumentPanelContent, DocumentPanelState, OpenedProjectDocument};
+use super::state::{DocumentPanelContent, OpenedProjectDocument};
+use gpui_kit::component::dock::DockArea;
 
 /// Asset path for the horizontal split panel action.
 const SPLIT_HORIZONTAL_ICON_PATH: &str = "icons/panel-split-horizontal.svg";
@@ -54,22 +52,18 @@ const SURFACE_SOLID_ICON_PATH: &str = "icons/surface-solid.svg";
 const IMPLICIT_SURFACE_ICON_PATH: &str = "icons/surface-implicit.svg";
 /// Asset path for the analytical MSMS backend icon.
 const MSMS_SURFACE_ICON_PATH: &str = "icons/surface-msms.svg";
-/// Asset path for document tab close buttons.
-const TAB_CLOSE_ICON_PATH: &str = "icons/tab-close.svg";
 /// Size used by tab strip action icons.
 const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
-/// Size used by close tab button icons.
-const TAB_CLOSE_ICON_SIZE: Pixels = px(12.0);
 /// Width of the molecular document options menu.
 const DOCUMENT_OPTIONS_MENU_WIDTH: Pixels = px(240.0);
 
 /// Molecular rendering choices displayed by one document options popover.
 #[derive(Clone, Copy)]
-struct MolecularDocumentOptions {
+pub(super) struct MolecularDocumentOptions {
   /// Representation layers selected for the molecular scene.
-  representation: RepresentationLayers,
+  pub(super) representation: RepresentationLayers,
   /// Algorithm selected for molecular-surface generation.
-  surface_backend: MolecularSurfaceBackend,
+  pub(super) surface_backend: MolecularSurfaceBackend,
 }
 
 /// Deferred molecular document menu rendered above the clipped tab strip.
@@ -80,11 +74,11 @@ struct DocumentOptionsMenu {
   /// Molecular rendering choices selected when this menu is rendered.
   options: MolecularDocumentOptions,
   /// Semantic colors for the menu surface and rows.
-  theme: UIThemes,
+  theme: ThemeColor,
   /// Weak root app entity used by dismissal and selection callbacks.
   app: WeakEntity<ChitinApp>,
-  /// Trigger bounds used to align the popup with the ellipsis button.
-  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
+  /// Controlled open state shared with document-panel command routing.
+  open: bool,
   /// Persistent interaction state used by the semantic menu primitive.
   controls: DocumentOptionsControls,
 }
@@ -92,16 +86,14 @@ struct DocumentOptionsMenu {
 /// Persistent semantic controls used by molecular document panels.
 #[derive(Clone)]
 pub(crate) struct DocumentOptionsControls {
-  /// Button state for the ellipsis trigger.
-  more: Entity<ButtonState>,
   /// Single-selection state for atom-layer styles.
-  atom: Entity<SelectInputState>,
+  atom: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Single-selection state for polymer-layer styles.
-  polymer: Entity<SelectInputState>,
+  polymer: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Single-selection state for surface-layer styles.
-  surface: Entity<SelectInputState>,
+  surface: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Single-selection state for molecular-surface generation algorithms.
-  surface_backend: Entity<SelectInputState>,
+  surface_backend: Entity<SelectState<Vec<IconSelectItem>>>,
 }
 
 /// Declarative data used to build one representation-layer selector.
@@ -127,31 +119,33 @@ impl SelectOptionSpec {
 
 /// Creates a select state with a valid initial representation choice.
 fn new_representation_select(
+  window: &mut Window,
   cx: &mut Context<ChitinApp>,
   specs: impl IntoIterator<Item = SelectOptionSpec>,
   selected_id: &str,
-) -> Entity<SelectInputState> {
+) -> Entity<SelectState<Vec<IconSelectItem>>> {
   let options = specs
     .into_iter()
     .map(|spec| {
-      let option = SelectOption::new(spec.id, spec.label);
+      let option = IconSelectItem::new(spec.id, spec.label);
       match spec.icon {
         Some(icon) => option.icon(icon),
         None => option,
       }
     })
     .collect::<Vec<_>>();
-  let state = cx.new(|cx| SelectInputState::new(options.clone(), cx));
-  state.update(cx, |state, cx| {
-    state.select(selected_id, cx);
-  });
-  state
+  let selected = options
+    .iter()
+    .position(|option| option.value().as_ref() == selected_id)
+    .map(IndexPath::new);
+  cx.new(|cx| SelectState::new(options, selected, window, cx))
 }
 
 impl DocumentOptionsControls {
   /// Creates the persistent trigger and representation menu state.
-  pub(crate) fn new(cx: &mut Context<ChitinApp>) -> Self {
+  pub(crate) fn new(window: &mut Window, cx: &mut Context<ChitinApp>) -> Self {
     let atom = new_representation_select(
+      window,
       cx,
       [
         SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
@@ -162,6 +156,7 @@ impl DocumentOptionsControls {
       "stick",
     );
     let polymer = new_representation_select(
+      window,
       cx,
       [
         SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
@@ -170,6 +165,7 @@ impl DocumentOptionsControls {
       "none",
     );
     let surface = new_representation_select(
+      window,
       cx,
       [
         SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
@@ -178,6 +174,7 @@ impl DocumentOptionsControls {
       "none",
     );
     let surface_backend = new_representation_select(
+      window,
       cx,
       [
         SelectOptionSpec::new(
@@ -190,7 +187,6 @@ impl DocumentOptionsControls {
       "implicit-scalar-field",
     );
     Self {
-      more: cx.new(ButtonState::new),
       atom,
       polymer,
       surface,
@@ -198,31 +194,18 @@ impl DocumentOptionsControls {
     }
   }
 
-  /// Subscribes semantic button and menu events to document-panel commands.
+  /// Subscribes representation-selector events to document-panel commands.
+  ///
+  /// The ellipsis trigger is not subscribed here: it owns its own click handler
+  /// and reaches the panel state through the app entity.
   ///
   /// # Parameters
   ///
   /// * `window` supplies focus routing for the menu when it opens.
   /// * `cx` owns subscriptions and updates the application state.
   pub(crate) fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
-    let atom = self.atom.clone();
-    let subscription: Subscription = cx.subscribe_in(&self.more, window, move |app, _, event, window, cx| {
-      if !matches!(event, ButtonEvent::Click) {
-        return;
-      }
-      let panel_id = app.document_panels.focused_panel_id;
-      if app.toggle_document_options_menu(panel_id) && app.document_panels.options_menu_panel_id == Some(panel_id) {
-        let focus = atom.read(cx).focus_handle().clone();
-        window.focus(&focus, cx);
-      }
-      cx.notify();
-    });
-    subscription.detach();
-
     let subscription: Subscription = cx.subscribe_in(&self.atom, window, move |app, _, event, _, cx| {
-      let SelectInputEvent::SelectionChange { selected_id } = event else {
-        return;
-      };
+      let SelectEvent::Confirm(selected_id) = event;
       let Some(panel_id) = app.document_panels.options_menu_panel_id else {
         return;
       };
@@ -243,9 +226,7 @@ impl DocumentOptionsControls {
     subscription.detach();
 
     let subscription: Subscription = cx.subscribe_in(&self.polymer, window, move |app, _, event, _, cx| {
-      let SelectInputEvent::SelectionChange { selected_id } = event else {
-        return;
-      };
+      let SelectEvent::Confirm(selected_id) = event;
       let Some(panel_id) = app.document_panels.options_menu_panel_id else {
         return;
       };
@@ -263,9 +244,7 @@ impl DocumentOptionsControls {
     subscription.detach();
 
     let subscription: Subscription = cx.subscribe_in(&self.surface, window, move |app, _, event, _, cx| {
-      let SelectInputEvent::SelectionChange { selected_id } = event else {
-        return;
-      };
+      let SelectEvent::Confirm(selected_id) = event;
       let Some(panel_id) = app.document_panels.options_menu_panel_id else {
         return;
       };
@@ -283,9 +262,7 @@ impl DocumentOptionsControls {
     subscription.detach();
 
     let subscription: Subscription = cx.subscribe_in(&self.surface_backend, window, move |app, _, event, _, cx| {
-      let SelectInputEvent::SelectionChange { selected_id } = event else {
-        return;
-      };
+      let SelectEvent::Confirm(selected_id) = event;
       let Some(panel_id) = app.document_panels.options_menu_panel_id else {
         return;
       };
@@ -303,161 +280,22 @@ impl DocumentOptionsControls {
   }
 }
 
-/// Renders the main workbench document area.
-///
-/// The document area always renders the panel container. Before any file is
-/// opened, the container shows its empty root panel instead of the legacy
-/// workspace summary placeholder.
+/// Composes the Kit docking view with desktop document commands.
 ///
 /// # Parameters
 ///
-/// * `document_panels` contains the current document panel layout.
-/// * `theme` supplies colors for the document area.
-/// * `focus_handle` is the focus handle used to track and direct keyboard focus
-///   for the document area element.
-/// * `app` is the weak app entity used by document panel callbacks.
-/// * `controls` contains persistent button and menu interaction state.
-/// * `cx` is the GPUI context used by action listeners and callbacks to update
-///   application state.
+/// * `area` is the persistent Kit docking mount.
+/// * `focus_handle` marks the document command scope, including child views.
+/// * `cx` dispatches previous/next/close actions through typed commands.
 ///
 /// # Returns
 ///
-/// A GPUI element for the main document region.
+/// A full-size document region; Kit owns its tabs and split interactions.
 pub fn render_document_area(
-  document_panels: &DocumentPanelState,
-  theme: UIThemes,
+  area: Entity<DockArea>,
   focus_handle: &FocusHandle,
-  app: WeakEntity<ChitinApp>,
-  controls: DocumentOptionsControls,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
-  render_opened_document_panels(document_panels, theme, focus_handle, app, controls, cx)
-}
-
-/// Renders document panels for files opened from the workspace tree.
-///
-/// # Parameters
-///
-/// * `document_panels` contains the panel tree and tab state to render.
-/// * `theme` supplies colors for the placeholder document surface.
-/// * `focus_handle` is the focus handle used to track and direct keyboard focus
-///   for the panel container element.
-/// * `app` is the weak app entity used by tab and split button callbacks.
-/// * `controls` contains persistent button and menu interaction state.
-/// * `cx` is the GPUI context used by action listeners and callbacks to update
-///   application state.
-///
-/// # Returns
-///
-/// A GPUI `Div` containing the placeholder opened-document view.
-fn render_opened_document_panels(
-  document_panels: &DocumentPanelState,
-  theme: UIThemes,
-  focus_handle: &FocusHandle,
-  app: WeakEntity<ChitinApp>,
-  controls: DocumentOptionsControls,
-  cx: &mut Context<ChitinApp>,
-) -> gpui::Div {
-  let activate_app = app.clone();
-  let on_activate_tab: Rc<PanelTabActivateHandler> =
-    Rc::new(move |panel_id: PanelId, tab_id, _: &mut Window, cx: &mut App| {
-      let _ = activate_app.update(cx, |app, cx| {
-        if app.activate_document_panel_tab(panel_id, tab_id) {
-          cx.notify();
-        }
-      });
-    });
-  let close_app = app.clone();
-  let on_close_tab: Rc<PanelTabCloseHandler> =
-    Rc::new(move |panel_id: PanelId, tab_id, _: &mut Window, cx: &mut App| {
-      let _ = close_app.update(cx, |app, cx| {
-        if app.close_document_panel_tab(panel_id, tab_id) {
-          cx.notify();
-        }
-      });
-    });
-  let render_tab_close_icon: Rc<PanelTabCloseIconRenderer> = Rc::new(move |theme| {
-    svg()
-      .path(TAB_CLOSE_ICON_PATH)
-      .size(TAB_CLOSE_ICON_SIZE)
-      .text_color(theme.text.primary)
-      .into_any_element()
-  });
-  let drag_start_app = app.clone();
-  let on_tab_drag_start: Rc<PanelTabDragStartHandler> = Rc::new(move |drag, _: &mut Window, cx: &mut App| {
-    let _ = drag_start_app.update(cx, |app, cx| {
-      if app.start_document_panel_tab_drag(drag) {
-        cx.notify();
-      }
-    });
-  });
-  let drag_target_app = app.clone();
-  let on_tab_drag_target: Rc<PanelTabDragTargetHandler> = Rc::new(move |target, _: &mut Window, cx: &mut App| {
-    let _ = drag_target_app.update(cx, |app, cx| {
-      if app.update_document_panel_tab_drag_target(target) {
-        cx.notify();
-      }
-    });
-  });
-  let drop_app = app.clone();
-  let on_tab_drop: Rc<PanelTabDropHandler> = Rc::new(move |drag, panel_id, _: &mut Window, cx: &mut App| {
-    let _ = drop_app.update(cx, |app, cx| {
-      app.drop_document_panel_tab(drag, panel_id);
-      cx.notify();
-    });
-  });
-  let tab_drag =
-    PanelTabDragConfig::new(on_tab_drag_start, on_tab_drag_target, on_tab_drop).state(document_panels.tab_drag.clone());
-
-  let actions_app = app.clone();
-  let panel_state = document_panels.clone();
-  let render_tab_strip_actions = Rc::new(move |panel_id| {
-    let document_options = panel_state
-      .active_representation_layers(panel_id)
-      .zip(panel_state.active_surface_backend(panel_id))
-      .map(|(representation, surface_backend)| MolecularDocumentOptions {
-        representation,
-        surface_backend,
-      });
-    let options_menu_open = panel_state.options_menu_panel_id == Some(panel_id);
-    let options_menu_anchor = options_menu_open.then_some(panel_state.options_menu_anchor).flatten();
-    render_panel_tab_strip_actions(
-      panel_id,
-      theme,
-      actions_app.clone(),
-      document_options,
-      options_menu_open,
-      options_menu_anchor,
-      controls.clone(),
-    )
-    .into_any_element()
-  });
-  let resize_app = app.clone();
-  let resize = PanelResizeConfig::new(move |path, axis, start_position, _, cx| {
-    let _ = resize_app.update(cx, |app, cx| {
-      if app.start_document_panel_resize(path, axis, start_position) {
-        cx.notify();
-      }
-    });
-  });
-  let now = Instant::now();
-  let panel_config = PanelContainerConfig::new()
-    .resize(resize)
-    .focused_panel_id(document_panels.focused_panel_id)
-    .on_activate_tab(on_activate_tab)
-    .on_close_tab(on_close_tab)
-    .render_tab_close_icon(render_tab_close_icon)
-    .render_tab_strip_actions(render_tab_strip_actions)
-    .tab_drag(tab_drag)
-    .tab_scroll(document_panels.tab_scroll.clone())
-    .now(now);
-
-  let mouse_focus_handle = focus_handle.clone();
-  let panel_container = render_panel_container(&document_panels.tree, theme, panel_config, &|tab| {
-    render_document_panel_content(&tab.payload, theme).into_any_element()
-  });
-  schedule_tab_scroll_indicator_hide(document_panels, now, cx);
-
   div()
     .flex()
     .flex_1()
@@ -474,36 +312,7 @@ fn render_opened_document_panels(
     .on_action(cx.listener(|this, _: &CloseTab, _, cx| {
       this.dispatch_command(PanelTabCommand::Close.into(), cx);
     }))
-    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-      window.focus(&mouse_focus_handle, cx);
-    })
-    .child(panel_container)
-}
-
-/// Schedules redraws for expiring tab-scroll indicators.
-///
-/// # Parameters
-///
-/// * `document_panels` owns the presentation-only scroll indicator state.
-/// * `now` is the current UI clock timestamp.
-/// * `cx` schedules the wake-up task and receives the redraw notification.
-///
-/// # Returns
-///
-/// This function has no return value.
-fn schedule_tab_scroll_indicator_hide(document_panels: &DocumentPanelState, now: Instant, cx: &mut Context<ChitinApp>) {
-  for expires_at in document_panels.tab_scroll.indicator_redraws_to_schedule(now) {
-    let delay = expires_at.saturating_duration_since(now);
-    cx.spawn(move |this: WeakEntity<ChitinApp>, async_cx: &mut AsyncApp| {
-      let mut async_cx = async_cx.clone();
-      async move {
-        let timer = async_cx.background_executor().timer(delay);
-        timer.await;
-        let _ = this.update(&mut async_cx, |_, cx| cx.notify());
-      }
-    })
-    .detach();
-  }
+    .child(area)
 }
 
 /// Renders split controls at the right end of one document panel tab strip.
@@ -518,23 +327,15 @@ fn schedule_tab_scroll_indicator_hide(document_panels: &DocumentPanelState, now:
 /// # Returns
 ///
 /// A GPUI element containing horizontal and vertical split buttons.
-fn render_panel_tab_strip_actions(
+pub(super) fn render_panel_tab_strip_actions(
   panel_id: PanelId,
-  theme: UIThemes,
+  theme: ThemeColor,
   app: WeakEntity<ChitinApp>,
   document_options: Option<MolecularDocumentOptions>,
   options_menu_open: bool,
-  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
   controls: DocumentOptionsControls,
 ) -> gpui::Div {
-  let mut actions = div()
-    .flex()
-    .items_center()
-    .h_full()
-    .flex_none()
-    .border_l_1()
-    .border_color(theme.border.primary)
-    .bg(theme.background.primary);
+  let mut actions = div().flex().items_center().h_full().flex_none().bg(theme.background);
   if let Some(document_options) = document_options {
     actions = actions.child(render_document_options_button(
       panel_id,
@@ -542,7 +343,6 @@ fn render_panel_tab_strip_actions(
       options_menu_open,
       theme,
       app.clone(),
-      options_menu_anchor,
       controls,
     ));
   }
@@ -563,214 +363,98 @@ fn render_panel_tab_strip_actions(
     ))
 }
 
-/// Renders the semantic molecular document menu trigger and its popup.
+/// Composes GPUI Kit's popover with the molecular document controls.
 ///
-/// The trigger is a [`Button`] so pointer and keyboard activation follow the
-/// shared primitive contract. The popup is backed by [`MenuState`] so its
-/// options remain focusable after the panel is redrawn.
+/// The framework owns anchoring, dismissal, nested overlays, and focus restoration;
+/// the desktop records which panel receives representation changes.
 fn render_document_options_button(
   panel_id: PanelId,
-  document_options: MolecularDocumentOptions,
-  open: bool,
-  theme: UIThemes,
-  app: WeakEntity<ChitinApp>,
-  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
-  controls: DocumentOptionsControls,
-) -> gpui::Div {
-  let trigger = Button::new(controls.more.clone())
-    .size(ButtonSize::Small)
-    .variant(ButtonVariant::Transparent)
-    .style(
-      ButtonStyle::new()
-        .width(px(30.0))
-        .height(px(30.0))
-        .horizontal_padding(px(0.0)),
-    )
-    .theme(theme)
-    .child(
-      svg()
-        .path(PANEL_MORE_ICON_PATH)
-        .size(PANEL_ACTION_ICON_SIZE)
-        .text_color(theme.text.secondary),
-    );
-
-  let anchor_app = app.clone();
-  div()
-    .relative()
-    .size(px(30.0))
-    .on_children_prepainted(move |children_bounds, _, cx| {
-      if let Some(bounds) = children_bounds.first().copied() {
-        let _ = anchor_app.update(cx, |app, cx| {
-          if app.document_panels.set_options_menu_anchor(panel_id, bounds) {
-            cx.notify();
-          }
-        });
-      }
-    })
-    .child(trigger)
-    // Wait for the trigger's window-space bounds before rendering the popup.
-    // Rendering the fallback local placement for one frame causes a visible
-    // jump when the deferred overlay is repositioned to its real anchor.
-    .when(open && options_menu_anchor.is_some(), |anchor| {
-      anchor.child(render_document_options_menu(
-        panel_id,
-        document_options,
-        theme,
-        app,
-        options_menu_anchor,
-        controls,
-      ))
-    })
-}
-
-/// Creates the deferred popup menu for one molecular document panel.
-///
-/// Rendering is deferred because the panel tab strip clips its children; the
-/// returned element contributes the popup backdrop and surface at the root
-/// overlay layer.
-fn render_document_options_menu(
-  panel_id: PanelId,
   options: MolecularDocumentOptions,
-  theme: UIThemes,
+  open: bool,
+  theme: ThemeColor,
   app: WeakEntity<ChitinApp>,
-  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
   controls: DocumentOptionsControls,
 ) -> DocumentOptionsMenu {
   DocumentOptionsMenu {
     panel_id,
     options,
+    open,
     theme,
     app,
-    options_menu_anchor,
     controls,
   }
 }
 
 impl RenderOnce for DocumentOptionsMenu {
-  fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-    sync_document_option_selectors(
-      &self.controls,
-      self.options.representation,
-      self.options.surface_backend,
-      cx,
-    );
-    let popover = build_document_options_popover(
-      self.panel_id,
-      self.theme,
-      self.app,
-      self.options_menu_anchor,
-      self.controls,
-    );
-    let viewport_size = window.viewport_size();
-    div()
-      .child(popover.deferred_backdrop(viewport_size))
-      .child(popover.deferred_content())
-  }
-}
-
-/// Builds the molecular document popover surface and dismissal interaction.
-///
-/// Selection is handled independently by each nested [`SelectInputState`].
-/// Keeping dismissal here lets the reusable grouped selector remain unaware of
-/// panel layout state.
-fn build_document_options_popover(
-  panel_id: PanelId,
-  theme: UIThemes,
-  app: WeakEntity<ChitinApp>,
-  options_menu_anchor: Option<gpui::Bounds<Pixels>>,
-  controls: DocumentOptionsControls,
-) -> Popover {
-  let representation_section = GroupedSelect::new()
-    .theme(theme)
-    .width(DOCUMENT_OPTIONS_MENU_WIDTH)
-    .group(GroupedSelectGroup::new(
-      "Atom style",
-      controls.atom,
-      representation_content([
-        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
-        SelectOptionSpec::new("stick", "Stick", STICK_ICON_PATH),
-        SelectOptionSpec::new("ball-and-stick", "Ball and stick", BALL_AND_STICK_ICON_PATH),
-        SelectOptionSpec::new("sphere", "Space filling", SPHERE_ICON_PATH),
-      ]),
-    ))
-    .group(GroupedSelectGroup::new(
-      "Polymer style",
-      controls.polymer,
-      representation_content([
-        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
-        SelectOptionSpec::new("cartoon", "Cartoon", CARTOON_ICON_PATH),
-      ]),
-    ))
-    .group(GroupedSelectGroup::new(
-      "Surface style",
-      controls.surface,
-      representation_content([
-        SelectOptionSpec::new("none", "None", REPRESENTATION_NONE_ICON_PATH),
-        SelectOptionSpec::new("solid", "Solid", SURFACE_SOLID_ICON_PATH),
-      ]),
-    ))
-    .group(GroupedSelectGroup::new(
-      "Surface backend",
-      controls.surface_backend,
-      representation_content([
-        SelectOptionSpec::new(
-          "implicit-scalar-field",
-          "Implicit scalar field",
-          IMPLICIT_SURFACE_ICON_PATH,
-        ),
-        SelectOptionSpec::new("msms", "MSMS", MSMS_SURFACE_ICON_PATH),
-      ]),
-    ));
-
-  let dismiss_app = app;
-  let mut popover = Popover::new(("document-options-menu", panel_id.value()), representation_section)
-    .anchor_size(size(px(30.0), px(30.0)))
-    .style(
-      PopoverStyle::new()
-        .width(DOCUMENT_OPTIONS_MENU_WIDTH)
-        .background(theme.background.secondary)
-        .border_color(theme.border.primary),
-    )
-    .theme(theme)
-    .on_dismiss(move |_, cx| {
-      let _ = dismiss_app.update(cx, |app, cx| {
-        if app.dismiss_document_options_menu() {
+  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    let panel_id = self.panel_id;
+    let app = self.app;
+    let focus = self.controls.atom.read(cx).focus_handle(cx);
+    let controls = self.controls;
+    let options = self.options;
+    let theme = self.theme;
+    Popover::new(("document-options-menu", panel_id.value()))
+      .anchor(gpui_kit::base::Anchor::TopRight)
+      .open(self.open)
+      .track_focus(&focus)
+      .trigger(
+        Button::new(format!("document-options-{}", panel_id.value()))
+          .with_variant(ButtonVariant::Ghost)
+          .w(px(30.0))
+          .h(px(30.0))
+          .px(px(0.0))
+          .child(
+            svg()
+              .path(PANEL_MORE_ICON_PATH)
+              .size(PANEL_ACTION_ICON_SIZE)
+              .text_color(theme.muted_foreground),
+          ),
+      )
+      .on_open_change(move |open, _, cx| {
+        let _ = app.update(cx, |app, cx| {
+          if *open {
+            if app.document_panels.options_menu_panel_id != Some(panel_id) {
+              app.toggle_document_options_menu(panel_id);
+            }
+          } else if app.document_panels.options_menu_panel_id == Some(panel_id) {
+            app.dismiss_document_options_menu();
+          }
           cx.notify();
-        }
-      });
-    });
-  if let Some(bounds) = options_menu_anchor {
-    popover = popover
-      .anchor_position(point(
-        bounds.origin.x + bounds.size.width,
-        bounds.origin.y + bounds.size.height,
-      ))
-      .offset(point(px(-240.0), px(0.0)));
-  } else {
-    popover = popover.placement(PopoverPlacement::Below);
+        });
+      })
+      .content(move |_, window, cx| {
+        sync_document_option_selectors(&controls, options.representation, options.surface_backend, window, cx);
+        GroupedSelect::new()
+          .theme(theme)
+          .width(DOCUMENT_OPTIONS_MENU_WIDTH)
+          .group(GroupedSelectGroup::new("Atom style", controls.atom.clone()))
+          .group(GroupedSelectGroup::new("Polymer style", controls.polymer.clone()))
+          .group(GroupedSelectGroup::new("Surface style", controls.surface.clone()))
+          .group(GroupedSelectGroup::new(
+            "Surface backend",
+            controls.surface_backend.clone(),
+          ))
+      })
   }
-  popover
-}
-
-/// Converts representation option descriptions into one grouped select popup.
-fn representation_content<const N: usize>(specs: [SelectOptionSpec; N]) -> SelectContent {
-  let group = specs.into_iter().fold(SelectGroup::new(), |group, spec| {
-    let item = SelectItem::new(spec.id, spec.label);
-    match spec.icon {
-      Some(icon) => group.item(item.icon(icon)),
-      None => group.item(item),
-    }
-  });
-  SelectContent::new()
-    .position(chitin_ui::primitive::input::select::SelectContentPosition::Popper)
-    .group(group)
 }
 
 /// Synchronizes representation and surface-backend selectors with the active view.
+///
+/// # Parameters
+///
+/// * `controls` contains the Kit selector states owned by this document panel.
+/// * `representation` and `surface_backend` supply the current renderer settings.
+/// * `window` and `cx` update selector state without emitting confirmation events.
+///
+/// # Returns
+///
+/// Nothing. Only differing selections are updated, preventing a render-time
+/// synchronization from dispatching another renderer command.
 fn sync_document_option_selectors(
   controls: &DocumentOptionsControls,
   representation: RepresentationLayers,
   surface_backend: MolecularSurfaceBackend,
+  window: &mut Window,
   cx: &mut App,
 ) {
   let atom_id = match representation.atom_style() {
@@ -800,7 +484,9 @@ fn sync_document_option_selectors(
     (&controls.surface_backend, surface_backend_id),
   ] {
     state.update(cx, |state, cx| {
-      state.select(id, cx);
+      if state.selected_value().map(|value| value.as_ref()) != Some(id) {
+        state.set_selected_value(&id.into(), window, cx);
+      }
     });
   }
 }
@@ -822,18 +508,14 @@ fn render_panel_split_button(
   panel_id: PanelId,
   axis: PanelSplitAxis,
   icon_path: &'static str,
-  theme: UIThemes,
+  theme: ThemeColor,
   app: WeakEntity<ChitinApp>,
-) -> gpui::Div {
-  div()
-    .flex()
-    .items_center()
-    .justify_center()
+) -> Button {
+  Button::new(format!("document-split-{}-{axis:?}", panel_id.value()))
+    .with_variant(ButtonVariant::Ghost)
     .size(px(30.0))
-    .cursor_pointer()
-    .text_color(theme.text.secondary)
-    .hover(move |style| style.bg(theme.background.hover).text_color(theme.text.primary))
-    .on_mouse_up(MouseButton::Left, move |_, window, cx| {
+    .px(px(0.0))
+    .on_click(move |_, window, cx| {
       let _ = app.update(cx, |app, cx| {
         if app.split_document_panel(panel_id, axis, window, cx) {
           cx.notify();
@@ -844,7 +526,7 @@ fn render_panel_split_button(
       svg()
         .path(icon_path)
         .size(PANEL_ACTION_ICON_SIZE)
-        .text_color(theme.text.secondary),
+        .text_color(theme.muted_foreground),
     )
 }
 
@@ -858,7 +540,7 @@ fn render_panel_split_button(
 /// # Returns
 ///
 /// A GPUI element for either a project document placeholder or WGPU viewport.
-fn render_document_panel_content(content: &DocumentPanelContent, theme: UIThemes) -> AnyElement {
+pub(super) fn render_document_panel_content(content: &DocumentPanelContent, theme: ThemeColor) -> AnyElement {
   match content {
     DocumentPanelContent::ProjectDocument(document) => render_opened_document_body(document, theme),
     DocumentPanelContent::WgpuInteractive { view, .. } => view.clone().into_any_element(),
@@ -875,7 +557,7 @@ fn render_document_panel_content(content: &DocumentPanelContent, theme: UIThemes
 /// # Returns
 ///
 /// A GPUI element containing placeholder document content.
-fn render_opened_document_body(document: &OpenedProjectDocument, theme: UIThemes) -> AnyElement {
+fn render_opened_document_body(document: &OpenedProjectDocument, theme: ThemeColor) -> AnyElement {
   div()
     .flex()
     .flex_col()
@@ -892,7 +574,7 @@ fn render_opened_document_body(document: &OpenedProjectDocument, theme: UIThemes
     .child(
       div()
         .text_sm()
-        .text_color(theme.text.secondary)
+        .text_color(theme.muted_foreground)
         .child(document.path.display().to_string()),
     )
     .into_any_element()

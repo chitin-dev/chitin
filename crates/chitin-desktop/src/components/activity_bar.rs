@@ -4,12 +4,10 @@
 //! `chitin-ui` activity bar component and wires item clicks into `ChitinApp`
 //! state.
 
-use chitin_ui::{
-  composite::activity_bar::{ActivityBar, ActivityBarItem},
-  primitive::{button::ButtonEvent, button::ButtonState},
-  themes::UIThemes,
-};
-use gpui::{AppContext, Context, Entity, IntoElement, Subscription, Window};
+use chitin_ui::composite::activity_bar::{ActivityBar, ActivityBarItem};
+use gpui_kit::component::theme::ThemeColor;
+
+use gpui::{IntoElement, SharedString, WeakEntity, Window};
 
 use chitin_command::WorkspaceCommand;
 
@@ -52,45 +50,19 @@ impl ActiveActivity {
       Self::Settings => "Settings",
     }
   }
-}
 
-/// Persistent primitive button states for desktop activity controls.
-#[derive(Clone)]
-pub(crate) struct ActivityBarControls {
-  workspace: Entity<ButtonState>,
-  search: Entity<ButtonState>,
-  jobs: Entity<ButtonState>,
-  agents: Entity<ButtonState>,
-  settings: Entity<ButtonState>,
-}
-
-impl ActivityBarControls {
-  /// Creates one button state for each desktop activity.
-  pub(crate) fn new(cx: &mut Context<ChitinApp>) -> Self {
-    Self {
-      workspace: cx.new(ButtonState::new),
-      search: cx.new(ButtonState::new),
-      jobs: cx.new(ButtonState::new),
-      agents: cx.new(ButtonState::new),
-      settings: cx.new(ButtonState::new),
-    }
-  }
-
-  /// Subscribes desktop routing to semantic primitive button events.
-  pub(crate) fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
-    subscribe_workspace_activity(&self.workspace, window, cx);
-    for (button, activity) in [
-      (&self.search, ActiveActivity::Search),
-      (&self.jobs, ActiveActivity::Jobs),
-      (&self.agents, ActiveActivity::Agents),
-      (&self.settings, ActiveActivity::Settings),
-    ] {
-      subscribe_activity(button, activity, window, cx);
-    }
+  /// Resolves the activity carrying `id`, as reported by the activity bar.
+  ///
+  /// This is the inverse of [`ActiveActivity::id`] and is what routes an item
+  /// activation back to the workbench area it represents.
+  pub fn from_id(id: &str) -> Option<Self> {
+    [Self::Workspace, Self::Search, Self::Jobs, Self::Agents, Self::Settings]
+      .into_iter()
+      .find(|activity| activity.id() == id)
   }
 }
 
-/// Builds one desktop activity bar item from a primitive button state.
+/// Builds one desktop activity bar item.
 ///
 /// # Parameters
 ///
@@ -99,44 +71,32 @@ impl ActivityBarControls {
 ///
 /// # Returns
 ///
-/// An [`ActivityBarItem`] configured for Chitin desktop state updates.
-fn activity_item(
-  activity: ActiveActivity,
-  icon_path: &'static str,
-  button_state: Entity<ButtonState>,
-) -> ActivityBarItem {
-  ActivityBarItem::new(activity.id(), activity.title(), icon_path, button_state)
+/// An [`ActivityBarItem`] carrying the activity's stable id.
+fn activity_item(activity: ActiveActivity, icon_path: &'static str) -> ActivityBarItem {
+  ActivityBarItem::new(activity.id(), activity.title(), icon_path)
 }
 
-/// Routes a non-workspace activity through the desktop workbench state.
-fn subscribe_activity(
-  button: &Entity<ButtonState>,
-  activity: ActiveActivity,
-  window: &mut Window,
-  cx: &mut Context<ChitinApp>,
-) {
-  let subscription: Subscription = cx.subscribe_in(button, window, move |this, _, event, window, cx| {
-    if matches!(event, ButtonEvent::Click) {
+/// Routes an activated activity item through the desktop workbench state.
+///
+/// The bar reports the item id, so the workbench area is resolved here rather
+/// than being captured per item.
+fn route_activity(id: &SharedString, window: &mut Window, cx: &mut gpui::App, app: &WeakEntity<ChitinApp>) {
+  let Some(activity) = ActiveActivity::from_id(id.as_ref()) else {
+    return;
+  };
+  let _ = app.update(cx, |this, cx| match activity {
+    ActiveActivity::Workspace => {
+      this.dispatch_command(WorkspaceCommand::ToggleWorkspace.into(), cx);
+      let focus = this.workspace_toggle_focus_target(cx);
+      window.focus(&focus, cx);
+    }
+    activity => {
       this.active_activity = activity;
       let focus = this.document_panel_focus(cx);
       window.focus(&focus, cx);
       cx.notify();
     }
   });
-  subscription.detach();
-}
-
-/// Routes the Workspace activity through the existing workspace command.
-///
-fn subscribe_workspace_activity(button: &Entity<ButtonState>, window: &mut Window, cx: &mut Context<ChitinApp>) {
-  let subscription: Subscription = cx.subscribe_in(button, window, move |this, _, event, window, cx| {
-    if matches!(event, ButtonEvent::Click) {
-      this.dispatch_command(WorkspaceCommand::ToggleWorkspace.into(), cx);
-      let focus = this.workspace_toggle_focus_target(cx);
-      window.focus(&focus, cx);
-    }
-  });
-  subscription.detach();
 }
 
 /// Renders the desktop activity bar and wires item clicks to app state.
@@ -145,41 +105,23 @@ fn subscribe_workspace_activity(button: &Entity<ButtonState>, window: &mut Windo
 ///
 /// * `active_activity` is the currently selected top-level workbench area.
 /// * `theme` supplies colors for the activity bar component.
+/// * `app` receives the routing caused by an item activation.
 ///
 /// # Returns
 ///
 /// A GPUI element containing the Chitin activity bar.
 pub fn render_activity_bar(
   active_activity: ActiveActivity,
-  theme: UIThemes,
-  controls: ActivityBarControls,
+  theme: ThemeColor,
+  app: WeakEntity<ChitinApp>,
 ) -> impl IntoElement {
   ActivityBar::new()
     .theme(theme)
     .active_item(active_activity.id())
-    .item(activity_item(
-      ActiveActivity::Workspace,
-      "icons/activity-workspace.svg",
-      controls.workspace,
-    ))
-    .item(activity_item(
-      ActiveActivity::Search,
-      "icons/activity-search.svg",
-      controls.search,
-    ))
-    .item(activity_item(
-      ActiveActivity::Jobs,
-      "icons/activity-jobs.svg",
-      controls.jobs,
-    ))
-    .item(activity_item(
-      ActiveActivity::Agents,
-      "icons/activity-agents.svg",
-      controls.agents,
-    ))
-    .bottom_item(activity_item(
-      ActiveActivity::Settings,
-      "icons/activity-settings.svg",
-      controls.settings,
-    ))
+    .on_item_click(move |id, window, cx| route_activity(id, window, cx, &app))
+    .item(activity_item(ActiveActivity::Workspace, "icons/activity-workspace.svg"))
+    .item(activity_item(ActiveActivity::Search, "icons/activity-search.svg"))
+    .item(activity_item(ActiveActivity::Jobs, "icons/activity-jobs.svg"))
+    .item(activity_item(ActiveActivity::Agents, "icons/activity-agents.svg"))
+    .bottom_item(activity_item(ActiveActivity::Settings, "icons/activity-settings.svg"))
 }

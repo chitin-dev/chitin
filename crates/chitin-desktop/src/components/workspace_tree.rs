@@ -1,21 +1,28 @@
 //! Desktop workspace tree renderer.
 //!
-//! The generic tree data model lives in `chitin-ui`, but this renderer is
-//! intentionally desktop-specific: it uses workspace SVG assets and dispatches
-//! row clicks into `ChitinApp` so directories can be loaded lazily.
+//! GPUI Kit owns virtualization, scroll state, and row controls. Desktop projects
+//! workspace-visible rows and routes activation to lazy loading or document opening.
 
-use std::path::{Path, PathBuf};
-
-use chitin_ui::{
-  primitive::tree::{
-    DEFAULT_TREE_INDENT, DEFAULT_TREE_ROW_HEIGHT, TreeItemRow, TreeMessageRow, TreeRow, virtual_tree_rows,
-  },
-  themes::{UIThemes, builtins},
+use std::{
+  fmt::Write as _,
+  path::{Path, PathBuf},
+  rc::Rc,
 };
+
+mod rows;
+use gpui_kit::base::A11yElementExt as _;
+use rows::{TreeItemRow, TreeMessageRow, TreeRow};
+
 use chitin_utils::workspace::{ProjectTreeEntry, ProjectTreeEntryKind, ProjectWorkspace, ProjectWorkspaceError};
+use gpui_kit::component::{
+  list::ListItem,
+  theme::ThemeColor,
+  tree::{Tree, TreeItem, TreeState},
+};
+
 use gpui::{
-  Context, InteractiveElement, IntoElement, MouseButton, ParentElement, ScrollStrategy, SharedString, Styled, Task,
-  WeakEntity, Window, div, prelude::*, px, svg,
+  AppContext, Context, Entity, IntoElement, ParentElement, ScrollStrategy, SharedString, Styled, Task, WeakEntity,
+  Window, div, prelude::*, px, svg,
 };
 
 use crate::{
@@ -25,7 +32,21 @@ use crate::{
   },
 };
 
+const DEFAULT_TREE_INDENT: f32 = 12.0;
+const DEFAULT_TREE_ROW_HEIGHT: gpui::Pixels = px(24.0);
 const TREE_ICON_SIZE_VALUE: f32 = 16.0;
+
+/// A persistent Kit mount and its last workspace projection.
+///
+/// Rows are compared before updating Kit, so unrelated animation frames cannot
+/// reset its items or queue another render. Workspace expansion remains the
+/// domain authority; Kit receives flat visible leaves, not a second hierarchy.
+#[derive(Clone, Debug)]
+pub(crate) struct WorkspaceTreeView {
+  state: Entity<TreeState>,
+  rows: Rc<Vec<TreeRow<WorkspaceEntryRow>>>,
+}
+
 const TREE_ICON_SIZE: gpui::Pixels = px(TREE_ICON_SIZE_VALUE);
 
 const FILE_ICON: &str = "icons/file.svg";
@@ -547,21 +568,120 @@ struct WorkspaceEntryRow {
 /// A virtualized GPUI tree element.
 pub fn render_workspace_tree(
   root: &ProjectTreeEntry,
-  state: &ProjectSidebarState,
-  theme: UIThemes,
+  state: &mut ProjectSidebarState,
+  theme: ThemeColor,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
   let app = cx.weak_entity();
-
-  virtual_tree_rows(
-    "project-workspace-tree-rows",
-    visible_workspace_tree_rows(root, state),
-    &state.tree,
-    move |row, _, _| render_workspace_row(row, theme, &app),
-  )
+  let rows = visible_workspace_tree_rows(root, state);
+  let view = state.tree_view.get_or_insert_with(|| WorkspaceTreeView {
+    state: cx.new(|cx| TreeState::new(cx)),
+    rows: Rc::new(Vec::new()),
+  });
+  let selected = rows
+    .iter()
+    .position(|row| matches!(row, TreeRow::Item(row) if row.data.selected));
+  if view.rows.as_ref() != &rows {
+    let items = (!same_kit_items(&view.rows, &rows)).then(|| project_kit_tree_items(&rows));
+    view.state.update(cx, |tree, cx| {
+      if let Some(items) = items {
+        tree.set_items(items, cx);
+      }
+      if tree.selected_index() != selected {
+        tree.set_selected_index(selected, cx);
+      } else {
+        // Focus outlines or empty-directory expansion can change without
+        // changing Kit's leaf identities or selection.
+        cx.notify();
+      }
+    });
+    view.rows = Rc::new(rows);
+  } else if view.state.read(cx).selected_index() != selected {
+    // Kit's pointer selection is transient; the active workspace document
+    // remains authoritative, including when a pointer activation is cancelled.
+    view.state.update(cx, |tree, cx| tree.set_selected_index(selected, cx));
+  }
+  let tree = view.state.clone();
+  let rows = view.rows.clone();
+  state.set_tree_scroll_handle(tree.read(cx).scroll_handle().clone());
+  Tree::new(&tree, move |index, _, _, _, _| {
+    // The renderer and Kit receive one immutable snapshot together. An
+    // asynchronous directory result cannot pair new indices with old paths.
+    match rows.get(index) {
+      Some(row) => render_workspace_row(row.clone(), theme, &app),
+      None => ListItem::new(("workspace-missing-row", index)).disabled(true),
+    }
+  })
+  .size_full()
 }
 
-/// Builds the flattened workspace rows consumed by `chitin-ui`.
+/// Checks whether two projections can share Kit's existing item allocation.
+///
+/// # Parameters
+///
+/// * `previous` and `next` are consecutive visible workspace snapshots.
+///
+/// # Returns
+///
+/// Whether item order, native paths, and labels are unchanged. Focus, document
+/// selection, indentation, and directory styling only require repainting rows,
+/// not reconstructing every Kit item on a keyboard movement.
+fn same_kit_items(previous: &[TreeRow<WorkspaceEntryRow>], next: &[TreeRow<WorkspaceEntryRow>]) -> bool {
+  previous.len() == next.len()
+    && previous
+      .iter()
+      .zip(next)
+      .all(|(previous, next)| match (previous, next) {
+        (TreeRow::Item(previous), TreeRow::Item(next)) => {
+          previous.data.path == next.data.path && previous.data.name == next.data.name
+        }
+        (TreeRow::Message(previous), TreeRow::Message(next)) => previous.label == next.label,
+        _ => false,
+      })
+}
+
+/// Projects visible rows into Kit leaves without duplicating expansion state.
+///
+/// # Parameters
+///
+/// * `rows` contains the workspace's visible entries and disabled loading rows.
+///
+/// # Returns
+///
+/// Flat Kit items with collision-free identities. Filesystem paths are encoded
+/// losslessly rather than converted to display strings; status rows have a
+/// separate identity namespace and cannot be selected by pointer input.
+fn project_kit_tree_items(rows: &[TreeRow<WorkspaceEntryRow>]) -> Vec<TreeItem> {
+  rows
+    .iter()
+    .enumerate()
+    .map(|(index, row)| match row {
+      TreeRow::Item(row) => TreeItem::new(workspace_path_id(&row.data.path), row.data.name.clone()),
+      TreeRow::Message(row) => TreeItem::new(format!("status:{index}"), row.label.clone()).disabled(true),
+    })
+    .collect()
+}
+
+/// Encodes a native path into an opaque, lossless Kit item identity.
+///
+/// # Parameters
+///
+/// * `path` is a native path, including any non-UTF-8 filename bytes.
+///
+/// # Returns
+///
+/// A hexadecimal identity scoped to workspace entries, independent of display names.
+fn workspace_path_id(path: &Path) -> String {
+  let bytes = path.as_os_str().as_encoded_bytes();
+  let mut id = String::with_capacity(6 + bytes.len() * 2);
+  id.push_str("entry:");
+  for byte in bytes {
+    let _ = write!(id, "{byte:02x}");
+  }
+  id
+}
+
+/// Builds the flattened workspace snapshot projected into Kit's tree.
 ///
 /// This adapts [`ProjectTreeEntry`] into generic [`TreeRow`] values while keeping
 /// filesystem-specific identity in [`WorkspaceEntryRow`].
@@ -693,7 +813,7 @@ fn collect_visible_workspace_tree_rows(
   depth: usize,
   rows: &mut Vec<TreeRow<WorkspaceEntryRow>>,
 ) {
-  // Expansion and loading state are owned by `ChitinApp`, not by `chitin-ui`.
+  // Expansion and loading state are owned by `ChitinApp`, not by Kit.
   let expanded = state.expanded_paths.contains(&entry.path);
   let loading = state.loading_paths.contains(&entry.path);
   let selected = state.selected_path.as_deref() == Some(entry.path.as_path());
@@ -738,8 +858,8 @@ fn collect_visible_workspace_tree_rows(
 ///
 /// # Returns
 ///
-/// A GPUI `Div` for the rendered row.
-fn render_workspace_row(row: TreeRow<WorkspaceEntryRow>, theme: UIThemes, app: &WeakEntity<ChitinApp>) -> gpui::Div {
+/// A Kit list item for the rendered row.
+fn render_workspace_row(row: TreeRow<WorkspaceEntryRow>, theme: ThemeColor, app: &WeakEntity<ChitinApp>) -> ListItem {
   match row {
     TreeRow::Item(row) => render_workspace_entry_row(row, theme, app),
     TreeRow::Message(TreeMessageRow { label, depth }) => render_workspace_tree_message(label, theme, depth),
@@ -759,13 +879,13 @@ fn render_workspace_row(row: TreeRow<WorkspaceEntryRow>, theme: UIThemes, app: &
 ///
 /// # Returns
 ///
-/// A GPUI `Div` containing icons, label, focus/selection styling, and click
+/// A Kit list item containing icons, label, focus/selection styling, and click
 /// handling.
 fn render_workspace_entry_row(
   row: TreeItemRow<WorkspaceEntryRow>,
-  theme: UIThemes,
+  theme: ThemeColor,
   app: &WeakEntity<ChitinApp>,
-) -> gpui::Div {
+) -> ListItem {
   let path = row.data.path;
   let name = row.data.name;
   let kind = row.data.kind;
@@ -782,7 +902,7 @@ fn render_workspace_entry_row(
   };
   let list_icon = if expanded { LIST_OPEN_ICON } else { LIST_CLOSED_ICON };
 
-  let mut row = div()
+  let row = div()
     .flex()
     .items_center()
     // Keep hover background and pointer hitbox full-width inside uniform_list.
@@ -792,19 +912,12 @@ fn render_workspace_entry_row(
     .pr_2()
     .gap_1()
     .border_2()
-    .border_color(builtins::TRANSPARENT)
-    .when(selected, |row| row.bg(theme.background.selection))
-    .when(focused, |row| row.border_color(theme.border.focus))
+    .border_color(gpui::transparent_black())
+    .when(selected, |row| row.bg(theme.list_active))
+    .when(focused, |row| row.border_color(theme.ring))
     .text_xs()
     .cursor_pointer()
-    .text_color(theme.text.secondary)
-    .hover(move |style| {
-      if selected {
-        style.bg(theme.background.selection).text_color(theme.text.primary)
-      } else {
-        style.bg(theme.background.hover).text_color(theme.text.primary)
-      }
-    })
+    .text_color(theme.muted_foreground)
     .child(
       div()
         .flex()
@@ -816,7 +929,7 @@ fn render_workspace_entry_row(
             svg()
               .path(list_icon)
               .size(TREE_ICON_SIZE)
-              .text_color(theme.text.secondary),
+              .text_color(theme.muted_foreground),
           )
         }),
     )
@@ -825,7 +938,7 @@ fn render_workspace_entry_row(
         svg()
           .path(item_icon)
           .size(TREE_ICON_SIZE)
-          .text_color(theme.text.secondary),
+          .text_color(theme.muted_foreground),
       ),
     )
     .child(
@@ -833,21 +946,31 @@ fn render_workspace_entry_row(
         .flex_1()
         .min_w_0()
         .truncate()
-        .text_color(theme.text.primary)
-        .child(name),
+        .text_color(theme.foreground)
+        .child(name.clone()),
     );
 
-  row = row.on_mouse_up(MouseButton::Left, {
-    let app = app.clone();
-    move |_, window, cx| {
-      let _ = app.update(cx, |this, cx| {
-        this.activate_project_tree_entry_with_window(&path, window, cx);
-        cx.notify();
-      });
-    }
-  });
-
-  row
+  ListItem::new(workspace_path_id(&path))
+    .accessibility_label(name)
+    .w_full()
+    .h(DEFAULT_TREE_ROW_HEIGHT)
+    .px_0()
+    .py_0()
+    .rounded_none()
+    .when(is_dir, |item| item.aria_expanded(expanded))
+    .child(row)
+    .on_click({
+      let app = app.clone();
+      move |_, window, cx| {
+        let _ = app.update(cx, |this, cx| {
+          // Workspace commands own keyboard navigation, not Kit's independent
+          // leaf selection. Clicking a row returns focus to that command boundary.
+          window.focus(&this.project_sidebar_focus(cx), cx);
+          this.activate_project_tree_entry_with_window(&path, window, cx);
+          cx.notify();
+        });
+      }
+    })
 }
 
 /// Renders one non-interactive status row in the virtual workspace tree.
@@ -863,9 +986,12 @@ fn render_workspace_entry_row(
 ///
 /// # Returns
 ///
-/// A GPUI `Div` for the non-interactive message row.
-fn render_workspace_tree_message(message: impl Into<SharedString>, theme: UIThemes, depth: usize) -> gpui::Div {
-  div()
+/// A disabled Kit list item for the non-interactive message row.
+fn render_workspace_tree_message(message: impl Into<SharedString>, theme: ThemeColor, depth: usize) -> ListItem {
+  ListItem::new(("workspace-status", depth))
+    .disabled(true)
+    .rounded_none()
+    .py_0()
     .flex()
     .items_center()
     // Match entry row width so status-row backgrounds align with tree rows.
@@ -874,7 +1000,7 @@ fn render_workspace_tree_message(message: impl Into<SharedString>, theme: UIThem
     .pl(px(depth as f32 * DEFAULT_TREE_INDENT + TREE_ICON_SIZE_VALUE * 2.0))
     .pr_2()
     .text_xs()
-    .text_color(theme.text.disabled)
+    .text_color(theme.muted_foreground)
     .child(message.into())
 }
 
@@ -889,6 +1015,71 @@ mod tests {
   };
 
   use super::*;
+
+  /// Builds a directory snapshot without filesystem I/O.
+  fn directory_row(path: &str) -> TreeRow<WorkspaceEntryRow> {
+    TreeRow::Item(TreeItemRow {
+      data: WorkspaceEntryRow {
+        path: PathBuf::from(path),
+        name: path.into(),
+        kind: ProjectTreeEntryKind::Directory,
+        selected: false,
+        focused: false,
+      },
+      expanded: false,
+      depth: 0,
+    })
+  }
+
+  #[test]
+  fn kit_items_are_reused_for_presentation_only_changes() {
+    let previous = vec![directory_row("root")];
+    let mut next = previous.clone();
+    if let TreeRow::Item(row) = &mut next[0] {
+      row.expanded = true;
+      row.depth = 2;
+      row.data.focused = true;
+      row.data.selected = true;
+    }
+    assert_ne!(previous, next);
+    assert!(same_kit_items(&previous, &next));
+    assert!(!same_kit_items(&previous, &[directory_row("other")]));
+  }
+
+  #[test]
+  fn kit_item_order_changes_require_a_new_projection() {
+    let previous = vec![directory_row("a"), directory_row("b")];
+    let next = vec![directory_row("b"), directory_row("a")];
+    assert!(!same_kit_items(&previous, &next));
+  }
+
+  #[test]
+  fn kit_projection_has_flat_directory_leaves_and_disabled_status_rows() {
+    let rows = vec![
+      directory_row("root"),
+      TreeRow::Message(TreeMessageRow {
+        label: "Loading...".into(),
+        depth: 1,
+      }),
+    ];
+    let items = project_kit_tree_items(&rows);
+    assert_eq!(items.len(), 2);
+    assert!(items[0].children.is_empty());
+    assert!(!items[0].is_disabled());
+    assert!(items[1].is_disabled());
+    assert_ne!(items[0].id, items[1].id);
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn kit_path_ids_distinguish_lossy_display_collisions() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let first = PathBuf::from(OsString::from_vec(b"file-\xFE".to_vec()));
+    let second = PathBuf::from(OsString::from_vec(b"file-\xFF".to_vec()));
+    assert_eq!(first.to_string_lossy(), second.to_string_lossy());
+    assert_ne!(workspace_path_id(&first), workspace_path_id(&second));
+  }
 
   /// Temporary filesystem project used by workspace tree tests.
   struct TestProject {

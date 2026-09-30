@@ -1,23 +1,21 @@
 //! GPUI rendering and input handling for a VT terminal session.
 
-use std::{ops::Range, sync::Arc};
+use std::{cell::Cell, ops::Range, rc::Rc, sync::Arc};
 
 use chitin_terminal::{
   TerminalCell, TerminalCellAttributes, TerminalColor, TerminalEvent, TerminalNamedColor, TerminalScroll,
   TerminalScrollState, TerminalSession, TerminalSessionError, TerminalSize, TerminalSnapshot,
 };
+use gpui_kit::component::theme::ThemeColor;
+
 use gpui::{
   AnyElement, App, AsyncApp, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
   EventEmitter, FocusHandle, Font, FontFallbacks, FontFeatures, FontWeight, GlobalElementId, Hsla, InspectorElementId,
   InteractiveElement, IntoElement, KeyDownEvent, Keystroke, LayoutId, MouseButton, ParentElement, Pixels, Point,
-  RenderOnce, ScrollDelta, ScrollWheelEvent, SharedString, Styled, Subscription, Task, TextRun, UTF16Selection,
-  WeakEntity, Window, div, font, point, prelude::*, px, rgb, size,
+  RenderOnce, ScrollDelta, ScrollWheelEvent, SharedString, Size, Styled, Task, TextRun, UTF16Selection, WeakEntity,
+  Window, div, font, point, prelude::*, px, rgb, size,
 };
-
-use crate::{
-  primitive::scrollbar::{Scrollbar, ScrollbarEvent, ScrollbarMetrics, ScrollbarState},
-  themes::{UIThemes, builtins},
-};
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarHandle, ScrollbarMode};
 
 const FONT_SIZE: f32 = 15.0;
 const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
@@ -54,8 +52,8 @@ pub struct TerminalEmulatorState {
   scroll_state: TerminalScrollState,
   /// Sub-line part of a pixel scroll, carried so a slow trackpad still moves.
   scroll_remainder: f32,
-  scrollbar: Entity<ScrollbarState>,
-  _scrollbar_subscription: Subscription,
+  /// The numbers the rendered scrollbar reads, and the offset it asks for back.
+  scrollbar: TerminalScrollbarHandle,
   _event_task: Task<()>,
 }
 
@@ -95,15 +93,8 @@ impl TerminalEmulatorState {
         }
       }
     });
-    let scrollbar = cx.new(ScrollbarState::new);
-    // The subscription is held for as long as the state lives: dropping it would
-    // silently disconnect the bar from the viewport it moves.
-    let scrollbar_subscription = cx.subscribe(&scrollbar, |state, _, event, cx| {
-      let ScrollbarEvent::Scrolled { offset } = *event;
-      state.scroll_to_scrollbar_offset(offset, cx);
-    });
     let scroll_state = session.scroll_state();
-    Self {
+    let this = Self {
       session,
       focus: cx.focus_handle(),
       size,
@@ -117,10 +108,24 @@ impl TerminalEmulatorState {
       preedit: None,
       scroll_state,
       scroll_remainder: 0.0,
-      scrollbar,
-      _scrollbar_subscription: scrollbar_subscription,
+      scrollbar: TerminalScrollbarHandle::default(),
       _event_task: event_task,
-    }
+    };
+    // The cell height is a placeholder until the first layout, but publishing here
+    // leaves the bar and the viewport describing the same position from the start.
+    this.publish_scrollbar_geometry();
+    this
+  }
+
+  /// Hands the bar the numbers it reads for this viewport position.
+  ///
+  /// gpui-kit reads a scrollbar handle through `&self` methods that take no
+  /// context, so the emulator pushes geometry into the shared cells instead of
+  /// the bar reaching back into this entity.
+  fn publish_scrollbar_geometry(&self) {
+    self
+      .scrollbar
+      .publish(scrollbar_geometry(self.scroll_state, self.metrics.cell_height));
   }
 
   /// Returns the terminal backend profile.
@@ -183,6 +188,9 @@ impl TerminalEmulatorState {
     // Kept so the input method can be pointed at the same cell geometry the grid is painted
     // with, which is finer than the whole-pixel cell size reported to the backend.
     self.metrics = metrics;
+    // The bar measures in cells, so a new cell height moves it even when the grid
+    // the backend was told about is unchanged.
+    self.publish_scrollbar_geometry();
     let next = terminal_size_for_bounds(bounds, metrics);
     // A stopped backend has no grid left to resize, and the failure it would report for
     // one would replace the exit status the surface is showing.
@@ -316,6 +324,7 @@ impl TerminalEmulatorState {
   /// time the viewport crossed a whole line.
   fn refresh_scroll_state(&mut self) {
     self.scroll_state = self.session.scroll_state();
+    self.publish_scrollbar_geometry();
   }
 }
 
@@ -445,7 +454,7 @@ impl EntityInputHandler for TerminalEmulatorState {
 #[derive(IntoElement)]
 pub struct TerminalEmulator {
   state: Entity<TerminalEmulatorState>,
-  theme: UIThemes,
+  theme: ThemeColor,
   font_family: SharedString,
 }
 
@@ -454,13 +463,13 @@ impl TerminalEmulator {
   pub fn new(state: Entity<TerminalEmulatorState>) -> Self {
     Self {
       state,
-      theme: builtins::dark(),
+      theme: *ThemeColor::dark(),
       font_family: "monospace".into(),
     }
   }
 
   /// Sets the semantic UI theme.
-  pub fn theme(mut self, theme: UIThemes) -> Self {
+  pub fn theme(mut self, theme: ThemeColor) -> Self {
     self.theme = theme;
     self
   }
@@ -486,7 +495,14 @@ impl RenderOnce for TerminalEmulator {
     }
     let focus = self.state.read(cx).focus.clone();
     let scrollbar = self.state.read(cx).scrollbar.clone();
-    let scrollbar_metrics = scrollbar_metrics(self.state.read(cx).scroll_state, metrics.cell_height);
+    // A drag or a track click on the bar leaves an offset behind rather than calling
+    // into this entity, because gpui-kit's handle is reached through `&self` methods
+    // that carry no context. The repaint the bar asks for is what brings it here.
+    if let Some(offset) = scrollbar.take_requested() {
+      self
+        .state
+        .update(cx, |state, cx| state.scroll_to_scrollbar_offset(offset, cx));
+    }
     let state_for_mouse = self.state.clone();
     let state_for_keys = self.state.clone();
     let state_for_layout = self.state.clone();
@@ -524,7 +540,7 @@ impl RenderOnce for TerminalEmulator {
         };
         state_for_layout.update(cx, |state, _| state.resize(bounds, metrics));
       })
-      .bg(theme.background.primary)
+      .bg(theme.background)
       .font(terminal_font(self.font_family))
       .text_size(metrics.font_size)
       .line_height(metrics.cell_height)
@@ -552,7 +568,13 @@ impl RenderOnce for TerminalEmulator {
           })
           // The bar is an overlay rather than a column of its own, so gaining and
           // losing scrollback cannot change the width the backend is laid out for.
-          .child(Scrollbar::new(scrollbar).metrics(scrollbar_metrics).theme(theme)),
+          // It takes the sibling container's bounds as the viewport it moves through,
+          // which is the same region the surface above paints into.
+          .child(
+            Scrollbar::vertical(&scrollbar)
+              .viewport_from_layout()
+              .mode(ScrollbarMode::Always),
+          ),
       )
       .when_some(status, move |surface, status| {
         surface.child(render_status(&status, metrics, theme, status_font))
@@ -564,7 +586,7 @@ impl RenderOnce for TerminalEmulator {
 fn render_status(
   status: &str,
   metrics: TerminalMetrics,
-  theme: UIThemes,
+  theme: ThemeColor,
   font_family: SharedString,
 ) -> impl IntoElement {
   div()
@@ -573,12 +595,12 @@ fn render_status(
     .h(metrics.cell_height)
     .px(metrics.cell_width)
     .border_t_1()
-    .border_color(theme.border.muted)
+    .border_color(theme.border)
     .whitespace_nowrap()
     .overflow_hidden()
     .font(terminal_font(font_family))
     .text_size(metrics.font_size)
-    .text_color(theme.text.secondary)
+    .text_color(theme.muted_foreground)
     .child(status.to_owned())
 }
 
@@ -668,15 +690,15 @@ impl Element for TerminalSurface {
 /// The composition is not part of the grid, so it covers the cells underneath instead of
 /// replacing them. It disappears the moment the input method commits, at which point the
 /// child program echoes the committed glyphs itself.
-fn render_preedit(preedit: &TerminalPreedit, metrics: TerminalMetrics, theme: UIThemes) -> Div {
+fn render_preedit(preedit: &TerminalPreedit, metrics: TerminalMetrics, theme: ThemeColor) -> Div {
   div()
     .absolute()
     .top_0()
     .left(metrics.cell_width * preedit.column as f32)
     .h(metrics.cell_height)
     .whitespace_nowrap()
-    .bg(theme.background.primary)
-    .text_color(theme.text.primary)
+    .bg(theme.background)
+    .text_color(theme.foreground)
     .underline()
     .child(preedit.text.clone())
 }
@@ -847,7 +869,7 @@ fn run_attributes(mut attributes: TerminalCellAttributes) -> TerminalCellAttribu
   attributes
 }
 
-fn render_run(run: TerminalRun, metrics: TerminalMetrics, theme: UIThemes) -> impl IntoElement {
+fn render_run(run: TerminalRun, metrics: TerminalMetrics, theme: ThemeColor) -> impl IntoElement {
   let (mut foreground, mut background) = (
     resolve_color(run.foreground, theme),
     resolve_color(run.background, theme),
@@ -873,14 +895,14 @@ fn render_run(run: TerminalRun, metrics: TerminalMetrics, theme: UIThemes) -> im
     .child(run.text)
 }
 
-fn resolve_color(color: TerminalColor, theme: UIThemes) -> Hsla {
+fn resolve_color(color: TerminalColor, theme: ThemeColor) -> Hsla {
   match color {
     TerminalColor::Rgb { red, green, blue } => {
       rgb((u32::from(red) << 16) | (u32::from(green) << 8) | u32::from(blue)).into()
     }
     TerminalColor::Indexed(index) => indexed_color(index),
-    TerminalColor::Named(TerminalNamedColor::Foreground) => theme.text.primary.into(),
-    TerminalColor::Named(TerminalNamedColor::Background) => theme.background.primary.into(),
+    TerminalColor::Named(TerminalNamedColor::Foreground) => theme.foreground,
+    TerminalColor::Named(TerminalNamedColor::Background) => theme.background,
     TerminalColor::Named(named) => named_color(named),
   }
 }
@@ -1008,12 +1030,74 @@ fn wheel_lines(delta: &ScrollDelta, cell_height: Pixels, remainder: &mut f32) ->
 ///
 /// The bar puts the oldest output at the top of the content and the live edge at the
 /// bottom, and it measures downward from zero the way GPUI scroll offsets do.
-fn scrollbar_metrics(scroll: TerminalScrollState, cell_height: Pixels) -> ScrollbarMetrics {
-  let viewport_height = cell_height * scroll.screen_lines as f32;
-  let content_height = cell_height * (scroll.screen_lines + scroll.history_size) as f32;
-  let offset = -(cell_height * scroll.lines_above() as f32);
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct TerminalScrollbarGeometry {
+  /// Total height of the retained scrollback plus the screen.
+  content_height: Pixels,
+  /// Height of the visible screen.
+  viewport_height: Pixels,
+  /// Distance from the top of the content to the top of the viewport, negative downward.
+  offset: Pixels,
+}
 
-  ScrollbarMetrics::new(content_height, viewport_height, offset)
+fn scrollbar_geometry(scroll: TerminalScrollState, cell_height: Pixels) -> TerminalScrollbarGeometry {
+  TerminalScrollbarGeometry {
+    viewport_height: cell_height * scroll.screen_lines as f32,
+    content_height: cell_height * (scroll.screen_lines + scroll.history_size) as f32,
+    offset: -(cell_height * scroll.lines_above() as f32),
+  }
+}
+
+/// The terminal's [`ScrollbarHandle`], shared between the emulator and the bar.
+///
+/// The bar is an element of its own: it reads its handle during prepaint and writes
+/// an offset back from a pointer handler, neither of which carries a context and so
+/// neither of which can reach the emulator's entity. Both directions therefore pass
+/// through the cells here, and the emulator empties the request on its next render.
+#[derive(Clone, Default)]
+struct TerminalScrollbarHandle {
+  geometry: Rc<Cell<TerminalScrollbarGeometry>>,
+  /// An offset the bar asked the viewport to move to, not yet applied.
+  requested: Rc<Cell<Option<Pixels>>>,
+}
+
+impl TerminalScrollbarHandle {
+  /// Publishes the geometry of the viewport the bar describes.
+  fn publish(&self, geometry: TerminalScrollbarGeometry) {
+    self.geometry.set(geometry);
+  }
+
+  /// Takes the pending viewport motion, if the bar requested one.
+  fn take_requested(&self) -> Option<Pixels> {
+    self.requested.take()
+  }
+}
+
+impl ScrollbarHandle for TerminalScrollbarHandle {
+  fn viewport_bounds(&self) -> Bounds<Pixels> {
+    let geometry = self.geometry.get();
+    // The bar sits in the same container as the surface it scrolls and takes that
+    // container's layout bounds, so only the height is ever read from here.
+    Bounds::new(point(px(0.0), px(0.0)), size(px(0.0), geometry.viewport_height))
+  }
+
+  fn offset(&self) -> Point<Pixels> {
+    point(px(0.0), self.geometry.get().offset)
+  }
+
+  fn set_offset(&self, offset: Point<Pixels>) {
+    // The local copy moves the thumb on the frame the pointer asked for it; the
+    // request is what the emulator reads to move the viewport itself.
+    let mut geometry = self.geometry.get();
+    geometry.offset = offset.y;
+    self.geometry.set(geometry);
+    self.requested.set(Some(offset.y));
+  }
+
+  fn content_size(&self) -> Size<Pixels> {
+    let geometry = self.geometry.get();
+    size(px(0.0), geometry.content_height)
+  }
 }
 
 /// Converts a position on the scrollbar back into a viewport display offset.
@@ -1287,30 +1371,50 @@ mod tests {
 
   #[test]
   fn the_scrollbar_should_measure_from_the_oldest_line_to_the_live_edge() {
-    let metrics = scrollbar_metrics(scroll_state(100, 0, 24), px(20.0));
+    let geometry = scrollbar_geometry(scroll_state(100, 0, 24), px(20.0));
 
     // At the live edge the viewport sits at the bottom of the content.
-    assert_eq!(metrics.viewport_height, px(480.0));
-    assert_eq!(metrics.content_height, px(2480.0));
-    assert_eq!(metrics.offset, px(-2000.0));
-    assert_eq!(metrics.thumb_top_fraction(), 1.0 - metrics.thumb_extent_fraction());
+    assert_eq!(geometry.viewport_height, px(480.0));
+    assert_eq!(geometry.content_height, px(2480.0));
+    assert_eq!(geometry.offset, px(-2000.0));
+    assert_eq!(geometry.offset, geometry.viewport_height - geometry.content_height);
   }
 
   #[test]
   fn the_scrollbar_should_sit_at_the_top_when_scrolled_all_the_way_back() {
-    let metrics = scrollbar_metrics(scroll_state(100, 100, 24), px(20.0));
+    let geometry = scrollbar_geometry(scroll_state(100, 100, 24), px(20.0));
 
-    assert_eq!(metrics.offset, Pixels::ZERO);
-    assert_eq!(metrics.thumb_top_fraction(), 0.0);
+    assert_eq!(geometry.offset, Pixels::ZERO);
+  }
+
+  #[test]
+  fn a_published_geometry_should_reach_the_bar_through_its_handle() {
+    let handle = TerminalScrollbarHandle::default();
+    handle.publish(scrollbar_geometry(scroll_state(100, 37, 24), px(20.0)));
+
+    assert_eq!(handle.offset().y, px(-1260.0));
+    assert_eq!(handle.content_size().height, px(2480.0));
+    assert_eq!(handle.viewport_bounds().size.height, px(480.0));
+  }
+
+  #[test]
+  fn an_offset_the_bar_asked_for_should_survive_until_it_is_taken() {
+    let handle = TerminalScrollbarHandle::default();
+
+    assert_eq!(handle.take_requested(), None);
+    handle.set_offset(point(px(0.0), px(-640.0)));
+    assert_eq!(handle.take_requested(), Some(px(-640.0)));
+    // Taking it clears it, so one drag lands as one motion rather than one per frame.
+    assert_eq!(handle.take_requested(), None);
   }
 
   #[test]
   fn a_scrollbar_offset_should_round_trip_through_the_display_offset() {
     for display_offset in [0, 1, 37, 100] {
-      let metrics = scrollbar_metrics(scroll_state(100, display_offset, 24), px(20.0));
+      let geometry = scrollbar_geometry(scroll_state(100, display_offset, 24), px(20.0));
 
       assert_eq!(
-        display_offset_for_scrollbar_offset(metrics.offset, px(20.0), 100),
+        display_offset_for_scrollbar_offset(geometry.offset, px(20.0), 100),
         display_offset,
       );
     }

@@ -2,71 +2,20 @@
 //!
 //! Run with `cargo run -p chitin-ui --example composite-showcase`.
 
-use std::{borrow::Cow, fs, io, path::PathBuf};
-
 use chitin_ui::{
+  assets::ChitinAssets,
   composite::toast::{Toast, ToastHost, ToastVariant, ToastViewport},
-  primitive::button::{Button, ButtonEvent, ButtonState, ButtonVariant},
-  themes::builtins,
 };
 use gpui::{
-  App, AppContext, Application, AssetSource, Bounds, Context, Entity, ParentElement, Render, Result, SharedString,
-  Subscription, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
+  App, AppContext, Application, Bounds, Context, Entity, ParentElement, Render, WeakEntity, Window, WindowBounds,
+  WindowOptions, div, prelude::*, px, size,
 };
+use gpui_kit::component::button::{Button, ButtonVariant, ButtonVariants as _};
 
-/// Filesystem-backed assets used by standalone composite examples.
-struct CompositeShowcaseAssets {
-  base: PathBuf,
-}
-
-impl AssetSource for CompositeShowcaseAssets {
-  /// Loads an asset from the workspace asset directory.
-  ///
-  /// # Parameters
-  ///
-  /// * `path` is the asset-relative path requested by a component.
-  ///
-  /// # Returns
-  ///
-  /// The asset bytes, `None` for a missing asset, or the original I/O error.
-  fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-    match fs::read(self.base.join(path)) {
-      Ok(data) => Ok(Some(Cow::Owned(data))),
-      Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-      Err(error) => Err(error.into()),
-    }
-  }
-
-  /// Lists direct child asset names under an asset-relative directory.
-  ///
-  /// # Parameters
-  ///
-  /// * `path` is the asset-relative directory requested by GPUI.
-  ///
-  /// # Returns
-  ///
-  /// UTF-8 child names, or the directory enumeration error.
-  fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-    fs::read_dir(self.base.join(path))
-      .map(|entries| {
-        entries
-          .filter_map(|entry| {
-            entry
-              .ok()
-              .and_then(|entry| entry.file_name().into_string().ok())
-              .map(SharedString::from)
-          })
-          .collect()
-      })
-      .map_err(Into::into)
-  }
-}
-
-/// One persistent button that creates a specific semantic Toast variant.
+/// One control that creates a specific semantic Toast variant.
 struct ToastVariantControl {
   label: &'static str,
   variant: ToastVariant,
-  button: Entity<ButtonState>,
 }
 
 /// Showcase state connecting variant controls to the Toast composite.
@@ -74,46 +23,38 @@ struct CompositeShowcase {
   toast_controls: Vec<ToastVariantControl>,
   toast_viewport: Entity<ToastViewport>,
   created_count: usize,
-  _subscriptions: Vec<Subscription>,
 }
 
 impl CompositeShowcase {
-  /// Creates the showcase controls and routes button activation into the queue.
+  /// Creates the showcase controls.
+  ///
+  /// Each control carries its own variant, so nothing has to be subscribed or
+  /// retained between frames.
   ///
   /// # Parameters
   ///
-  /// * `cx` creates the persistent button and Toast viewport entities.
+  /// * `cx` creates the Toast viewport entity.
   ///
   /// # Returns
   ///
   /// A showcase whose generated Toasts remain visible for stack inspection.
   fn new(cx: &mut Context<Self>) -> Self {
     let toast_viewport = cx.new(|_| ToastViewport::new());
-    let variants = [
+    let toast_controls = [
       ("Default", ToastVariant::Default),
       ("Success", ToastVariant::Success),
       ("Info", ToastVariant::Info),
       ("Warning", ToastVariant::Warning),
       ("Error", ToastVariant::Error),
-    ];
-    let mut toast_controls = Vec::with_capacity(variants.len());
-    let mut subscriptions = Vec::with_capacity(variants.len());
-
-    for (label, variant) in variants {
-      let button = cx.new(ButtonState::new);
-      subscriptions.push(cx.subscribe(&button, move |this, _, event, cx| {
-        if matches!(event, ButtonEvent::Click) {
-          this.push_toast(label, variant, cx);
-        }
-      }));
-      toast_controls.push(ToastVariantControl { label, variant, button });
-    }
+    ]
+    .into_iter()
+    .map(|(label, variant)| ToastVariantControl { label, variant })
+    .collect();
 
     Self {
       toast_controls,
       toast_viewport,
       created_count: 0,
-      _subscriptions: subscriptions,
     }
   }
 
@@ -143,16 +84,17 @@ impl CompositeShowcase {
 
 impl Render for CompositeShowcase {
   /// Renders the Toast trigger and window-root notification host.
-  fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl gpui::IntoElement {
-    let theme = builtins::dark();
+  fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+    let theme = gpui_kit::component::Theme::global(cx).colors;
+    let showcase: WeakEntity<Self> = cx.weak_entity();
     div()
       .relative()
       .flex()
       .size_full()
       .items_center()
       .justify_center()
-      .bg(theme.background.primary)
-      .text_color(theme.text.primary)
+      .bg(theme.background)
+      .text_color(theme.foreground)
       .child(
         div()
           .flex()
@@ -163,7 +105,7 @@ impl Render for CompositeShowcase {
           .child(
             div()
               .text_sm()
-              .text_color(theme.text.secondary)
+              .text_color(theme.muted_foreground)
               .child("Create each semantic variant, then hover the stack to inspect it."),
           )
           .child(
@@ -172,14 +114,19 @@ impl Render for CompositeShowcase {
               .items_center()
               .gap_2()
               .children(self.toast_controls.iter().map(|control| {
-                Button::new(control.button.clone())
-                  .theme(theme)
-                  .variant(if control.variant == ToastVariant::Default {
+                let showcase = showcase.clone();
+                let label = control.label;
+                let variant = control.variant;
+                Button::new(format!("showcase-toast-{label}"))
+                  .with_variant(if variant == ToastVariant::Default {
                     ButtonVariant::Primary
                   } else {
                     ButtonVariant::Secondary
                   })
-                  .child(control.label)
+                  .on_click(move |_, _, cx| {
+                    let _ = showcase.update(cx, |this, cx| this.push_toast(label, variant, cx));
+                  })
+                  .child(label)
               })),
           ),
       )
@@ -190,32 +137,34 @@ impl Render for CompositeShowcase {
 /// Opens the GPUI composite component gallery.
 fn main() {
   env_logger::init();
-  Application::new()
-    .with_assets(CompositeShowcaseAssets {
-      base: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets"),
-    })
-    .run(|cx: &mut App| {
-      let result = cx.open_window(
-        WindowOptions {
-          window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(900.0), px(600.0)),
-            cx,
-          ))),
-          app_id: Some("dev.chitin.CompositeShowcase".to_string()),
-          ..Default::default()
-        },
-        |window, cx| {
-          window.activate_window();
-          cx.new(CompositeShowcase::new)
-        },
-      );
+  Application::new().with_assets(ChitinAssets).run(|cx: &mut App| {
+    // Every layer this gallery draws from, and the theme global each of them
+    // reads. The controls are GPUI Kit buttons, so the global has to exist
+    // before the first one renders.
+    chitin_ui::init(cx);
 
-      if let Err(error) = result {
-        eprintln!("failed to open composite showcase: {error}");
-        cx.quit();
-        return;
-      }
-      cx.activate(true);
-    });
+    let result = gpui_kit::open_window(
+      WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+          None,
+          size(px(900.0), px(600.0)),
+          cx,
+        ))),
+        app_id: Some("dev.chitin.CompositeShowcase".to_string()),
+        ..Default::default()
+      },
+      cx,
+      |window, cx| {
+        window.activate_window();
+        cx.new(CompositeShowcase::new)
+      },
+    );
+
+    if let Err(error) = result {
+      eprintln!("failed to open composite showcase: {error}");
+      cx.quit();
+      return;
+    }
+    cx.activate(true);
+  });
 }

@@ -7,31 +7,28 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 use chitin_command::CommandExecutor;
 use chitin_databases::ClientConfig;
-use chitin_ui::{
-  composite::{
-    activity_bar::DEFAULT_ACTIVITY_BAR_WIDTH,
-    bottom_dock::BottomDockState,
-    panel::{PanelSplitAxis, PanelTabDrag},
-    toast::{Toast, ToastHost, ToastId, ToastViewport},
-    window_bar::DEFAULT_WINDOW_BAR_HEIGHT,
-  },
-  themes::builtins,
+use chitin_ui::composite::{
+  bottom_dock::BottomDockState,
+  toast::{Toast, ToastHost, ToastId, ToastViewport},
 };
 use chitin_utils::workspace::ProjectWorkspace;
-use gpui::{
-  Context, CursorStyle, Entity, FocusHandle, InteractiveElement, MouseButton, Render, Window, div, prelude::*,
-};
+use gpui::{Context, Entity, FocusHandle, InteractiveElement, Render, Window, div, prelude::*};
+use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 
 use crate::{
   builtin_shell::{DesktopShellHost, desktop_shell_context},
   components::{
-    activity_bar::{ActiveActivity, ActivityBarControls, render_activity_bar},
-    bottom_dock::BottomDockControls,
+    activity_bar::{ActiveActivity, render_activity_bar},
     command_panel::{CommandPanelController, render_command_panel},
-    document_area::{DocumentOptionsControls, DocumentPanelState, render_document_area, state::DocumentPanelContent},
-    project_sidebar::{ProjectSidebarState, render_project_sidebar},
+    document_area::{
+      DocumentOptionsControls, DocumentPanelState, dock::DocumentDock, render_document_area,
+      state::DocumentPanelContent,
+    },
+    project_sidebar::{
+      MAX_PROJECT_SIDEBAR_WIDTH, MIN_PROJECT_SIDEBAR_WIDTH, ProjectSidebarState, render_project_sidebar,
+    },
     terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_bottom_dock},
-    window_bar::{WindowBarControls, render_window_bar},
+    window_bar::render_window_bar,
   },
   keybindings::{ToggleCommandPanel, ToggleTerminal, ToggleWorkspace, WORKBENCH_KEY_CONTEXT},
   portable_command::DesktopPortableCommandRunner,
@@ -54,6 +51,8 @@ pub struct ChitinApp {
   pub(crate) document_panel_focus: Option<FocusHandle>,
   /// Document panel tree currently shown in the main document area.
   pub(crate) document_panels: DocumentPanelState,
+  /// Kit docking mount, separate from document command state.
+  pub(crate) document_dock: Option<DocumentDock>,
   /// Currently selected top-level workbench activity.
   pub(crate) active_activity: ActiveActivity,
   /// Whether the project workspace sidebar is visible when Workspace is active.
@@ -68,18 +67,12 @@ pub struct ChitinApp {
   pub(crate) builtin_shell: DesktopShellHost,
   /// Active tool and geometry of the workbench-level bottom dock.
   pub(crate) bottom_dock: BottomDockState,
-  /// Persistent controls shared by all bottom-dock tools.
-  pub(crate) bottom_dock_controls: Option<BottomDockControls>,
   /// Scrollback presentation, shell mapping, and focus state for the terminal.
   pub(crate) terminal_panel: TerminalPanelState,
   /// Persistent primitive controls for the bottom terminal.
   pub(crate) terminal_panel_controls: Option<TerminalPanelControls>,
   /// Structure paths currently being read and parsed off the UI thread.
   pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
-  /// Primitive button state for platform window actions.
-  pub(crate) window_bar_controls: Option<WindowBarControls>,
-  /// Primitive button state for activity-bar navigation controls.
-  pub(crate) activity_bar_controls: Option<ActivityBarControls>,
   /// Persistent semantic controls for molecular document options.
   pub(crate) document_options_controls: Option<DocumentOptionsControls>,
   /// Window-level transient notification queue.
@@ -152,6 +145,7 @@ impl ChitinApp {
       workbench_focus: None,
       document_panel_focus: None,
       document_panels: DocumentPanelState::empty(),
+      document_dock: None,
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
@@ -159,12 +153,9 @@ impl ChitinApp {
       portable_commands: DesktopPortableCommandRunner::new(command_executor),
       builtin_shell: DesktopShellHost::new(desktop_shell_context(shell_workspace_root)),
       bottom_dock: BottomDockState::new(),
-      bottom_dock_controls: None,
       terminal_panel: TerminalPanelState::new(),
       terminal_panel_controls: None,
       pending_structure_loads: BTreeSet::new(),
-      window_bar_controls: None,
-      activity_bar_controls: None,
       document_options_controls: None,
       toast_viewport: None,
     }
@@ -371,69 +362,13 @@ impl ChitinApp {
     }
   }
 
-  /// Calculates the current document panel root width.
-  ///
-  /// # Parameters
-  ///
-  /// * `window_width` is the full GPUI window width.
-  /// * `visible_sidebar_width` is the current width occupied by an open sidebar,
-  ///   or zero when no sidebar is visible.
-  ///
-  /// # Returns
-  ///
-  /// The approximate width available to the document panel root after removing
-  /// the activity bar and visible project sidebar.
-  fn document_panel_root_width(window_width: gpui::Pixels, visible_sidebar_width: gpui::Pixels) -> gpui::Pixels {
-    gpui::px(
-      (f32::from(window_width) - f32::from(DEFAULT_ACTIVITY_BAR_WIDTH) - f32::from(visible_sidebar_width)).max(0.0),
-    )
-  }
-
-  /// Calculates the current document panel root height.
-  ///
-  /// # Parameters
-  ///
-  /// * `window_height` is the full GPUI window height.
-  ///
-  /// # Returns
-  ///
-  /// The approximate height available to the document panel root after removing
-  /// the window bar.
-  pub(crate) fn document_panel_root_height(window_height: gpui::Pixels) -> gpui::Pixels {
-    gpui::px((f32::from(window_height) - f32::from(DEFAULT_WINDOW_BAR_HEIGHT)).max(0.0))
-  }
-
-  /// Returns persistent primitive button state for platform window controls.
-  fn window_bar_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> WindowBarControls {
-    if let Some(controls) = self.window_bar_controls.as_ref() {
-      return controls.clone();
-    }
-
-    let controls = WindowBarControls::new(cx);
-    controls.subscribe(window, cx);
-    self.window_bar_controls = Some(controls.clone());
-    controls
-  }
-
-  /// Returns persistent primitive button state for activity-bar controls.
-  fn activity_bar_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> ActivityBarControls {
-    if let Some(controls) = self.activity_bar_controls.as_ref() {
-      return controls.clone();
-    }
-
-    let controls = ActivityBarControls::new(cx);
-    controls.subscribe(window, cx);
-    self.activity_bar_controls = Some(controls.clone());
-    controls
-  }
-
   /// Returns persistent semantic controls for molecular document options.
   fn document_options_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> DocumentOptionsControls {
     if let Some(controls) = self.document_options_controls.as_ref() {
       return controls.clone();
     }
 
-    let controls = DocumentOptionsControls::new(cx);
+    let controls = DocumentOptionsControls::new(window, cx);
     controls.subscribe(window, cx);
     self.document_options_controls = Some(controls.clone());
     controls
@@ -458,9 +393,8 @@ impl Render for ChitinApp {
   /// Renders the root desktop workbench layout.
   ///
   /// The rendered layout contains the window bar, activity bar, optional
-  /// project sidebar, and main document area. It also owns top-level pointer
-  /// handling for resize and tab drags because pointer movement can occur
-  /// outside the originating component after dragging starts.
+  /// project sidebar, and main document area. Kit owns pointer tracking for
+  /// explorer resizing, document docking, and the independent bottom overlay.
   ///
   /// # Parameters
   ///
@@ -472,21 +406,13 @@ impl Render for ChitinApp {
   ///
   /// A GPUI element tree for the current Chitin desktop frame.
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
-    if !cx.has_active_drag() {
-      self.cancel_document_panel_tab_drag();
-    }
-
-    let theme = builtins::dark();
-    let window_bar_controls = self.window_bar_controls(window, cx);
-    let activity_bar_controls = self.activity_bar_controls(window, cx);
+    let theme = gpui_kit::component::Theme::global(cx).colors;
     let document_options_controls = self.document_options_controls(window, cx);
     let toast_viewport = self.toast_viewport(cx);
-    let command_panel_search_input = self.command_panel_search_input(window, cx);
+    let command_palette = self.command_panel.palette(window, cx);
     self.command_panel_rcsb_form(window, cx);
     let terminal_dock_controls = if self.bottom_dock.is_active(TERMINAL_DOCK_ITEM_ID) {
-      self
-        .terminal_panel_controls(window, cx)
-        .map(|controls| (controls, self.bottom_dock_controls(window, cx)))
+      self.terminal_panel_controls(window, cx)
     } else {
       None
     };
@@ -494,7 +420,7 @@ impl Render for ChitinApp {
       self.sync_terminal_output();
     }
     if self.terminal_panel.take_focus_request()
-      && let Some((controls, _)) = terminal_dock_controls.as_ref()
+      && let Some(controls) = terminal_dock_controls.as_ref()
       && let Some(focus) = controls.focus(cx)
     {
       window.focus(&focus, cx);
@@ -503,14 +429,60 @@ impl Render for ChitinApp {
     let workbench_focus = self.workbench_focus(cx);
     let project_sidebar_focus = self.project_sidebar_focus(cx);
     let document_panel_focus = self.document_panel_focus(cx);
-    let project_sidebar_is_resizing = self.project_sidebar_state.is_resizing();
-    let document_panel_resize_axis = self.document_panel_resize_axis();
-    let bottom_dock_is_resizing = self.bottom_dock.is_resizing();
+    let mut document_dock = self
+      .document_dock
+      .take()
+      .unwrap_or_else(|| DocumentDock::new(window, cx));
+    document_dock.sync(&self.document_panels, document_options_controls, window, cx);
+    let document_area = document_dock.area.clone();
+    self.document_dock = Some(document_dock);
     let bottom_dock_height = self.bottom_dock.height();
-    let visible_sidebar_width = if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
-      self.project_sidebar_state.resize.width()
+
+    let document_content = div()
+      .relative()
+      .flex()
+      .flex_col()
+      .size_full()
+      .min_w_0()
+      .min_h_0()
+      .child(render_document_area(document_area, &document_panel_focus, cx))
+      .when_some(terminal_dock_controls, |layout, controls| {
+        layout.child(render_terminal_bottom_dock(
+          controls,
+          bottom_dock_height,
+          theme,
+          app.clone(),
+        ))
+      });
+    let workbench_content = if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
+      let resize_app = app.clone();
+      h_resizable("workspace-explorer-split")
+        .child(
+          resizable_panel()
+            .size(self.project_sidebar_state.width())
+            .size_range(MIN_PROJECT_SIDEBAR_WIDTH..MAX_PROJECT_SIDEBAR_WIDTH)
+            .child(render_project_sidebar(
+              self.workspace.as_ref(),
+              &mut self.project_sidebar_state,
+              &project_sidebar_focus,
+              theme,
+              cx,
+            )),
+        )
+        .child(resizable_panel().child(document_content))
+        .on_resize(move |state, _, cx| {
+          let Some(width) = state.read(cx).sizes().first().copied() else {
+            return;
+          };
+          let _ = resize_app.update(cx, |app, cx| {
+            if app.project_sidebar_state.set_width(width) {
+              cx.notify();
+            }
+          });
+        })
+        .into_any_element()
     } else {
-      gpui::px(0.0)
+      document_content.into_any_element()
     };
 
     div()
@@ -520,8 +492,8 @@ impl Render for ChitinApp {
       .relative()
       .key_context(WORKBENCH_KEY_CONTEXT)
       .track_focus(&workbench_focus)
-      .bg(theme.background.primary)
-      .text_color(theme.text.primary)
+      .bg(theme.background)
+      .text_color(theme.foreground)
       .on_action(cx.listener(|this, _: &ToggleWorkspace, window, cx| {
         this.toggle_workspace_with_focus(window, cx);
       }))
@@ -541,130 +513,14 @@ impl Render for ChitinApp {
           });
         }
       })
-      .when(project_sidebar_is_resizing, |layout| {
-        layout.cursor(CursorStyle::ResizeLeftRight)
-      })
-      .when(
-        document_panel_resize_axis == Some(PanelSplitAxis::Horizontal),
-        |layout| layout.cursor(CursorStyle::ResizeLeftRight),
-      )
-      .when(document_panel_resize_axis == Some(PanelSplitAxis::Vertical), |layout| {
-        layout.cursor(CursorStyle::ResizeUpDown)
-      })
-      .when(bottom_dock_is_resizing, |layout| {
-        layout.cursor(CursorStyle::ResizeUpDown)
-      })
-      .on_mouse_move({
-        let app = app.clone();
-        move |event, window, cx| {
-          if !project_sidebar_is_resizing && document_panel_resize_axis.is_none() && !bottom_dock_is_resizing {
-            return;
-          }
-
-          if project_sidebar_is_resizing {
-            let _ = app.update(cx, |this, cx| {
-              if this.project_sidebar_state.drag_resize(event.position.x) {
-                cx.notify();
-              }
-            });
-          }
-
-          if let Some(axis) = document_panel_resize_axis {
-            let bounds = window.bounds();
-            let document_root_width = Self::document_panel_root_width(bounds.size.width, visible_sidebar_width);
-            let document_root_height = Self::document_panel_root_height(bounds.size.height);
-            let current_position = match axis {
-              PanelSplitAxis::Horizontal => event.position.x,
-              PanelSplitAxis::Vertical => event.position.y,
-            };
-
-            let _ = app.update(cx, |this, cx| {
-              if this.drag_document_panel_resize(current_position, document_root_width, document_root_height) {
-                cx.notify();
-              }
-            });
-          }
-
-          if bottom_dock_is_resizing {
-            let available_height = Self::document_panel_root_height(window.bounds().size.height);
-            let _ = app.update(cx, |this, cx| {
-              if this.bottom_dock.drag_resize(event.position.y, available_height) {
-                cx.notify();
-              }
-            });
-          }
-        }
-      })
-      .on_drag_move::<PanelTabDrag>({
-        let app = app.clone();
-        move |_, _, cx| {
-          let _ = app.update(cx, |this, cx| {
-            if this.clear_document_panel_tab_drag_target() {
-              cx.notify();
-            }
-          });
-        }
-      })
-      .on_mouse_up(MouseButton::Left, {
-        let app = app.clone();
-        move |_, _, cx| {
-          let _ = app.update(cx, |this, cx| {
-            let sidebar_stopped = this.project_sidebar_state.stop_resize();
-            let document_panel_stopped = this.stop_document_panel_resize();
-            let bottom_dock_stopped = this.bottom_dock.stop_resize();
-            let document_tab_drag_cancelled = this.cancel_document_panel_tab_drag();
-
-            if sidebar_stopped || document_panel_stopped || bottom_dock_stopped || document_tab_drag_cancelled {
-              cx.notify();
-            }
-          });
-        }
-      })
-      .child(render_window_bar(theme, window_bar_controls))
+      .child(render_window_bar(theme))
       .child(
         div()
           .flex()
           .flex_1()
           .min_h_0()
-          .child(render_activity_bar(self.active_activity, theme, activity_bar_controls))
-          .when(
-            self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible,
-            |layout| {
-              layout.child(render_project_sidebar(
-                self.workspace.as_ref(),
-                &self.project_sidebar_state,
-                &project_sidebar_focus,
-                theme,
-                cx,
-              ))
-            },
-          )
-          .child(
-            div()
-              .relative()
-              .flex()
-              .flex_col()
-              .flex_1()
-              .min_w_0()
-              .min_h_0()
-              .child(render_document_area(
-                &self.document_panels,
-                theme,
-                &document_panel_focus,
-                app.clone(),
-                document_options_controls,
-                cx,
-              ))
-              .when_some(terminal_dock_controls, |layout, (controls, dock_controls)| {
-                layout.child(render_terminal_bottom_dock(
-                  controls,
-                  dock_controls.close(),
-                  bottom_dock_height,
-                  theme,
-                  app.clone(),
-                ))
-              }),
-          ),
+          .child(render_activity_bar(self.active_activity, theme, app.clone()))
+          .child(workbench_content),
       )
       .when(self.command_panel.is_open(), |layout| {
         layout.child(render_command_panel(
@@ -672,7 +528,8 @@ impl Render for ChitinApp {
           theme,
           app,
           cx,
-          command_panel_search_input,
+          command_palette,
+          window,
         ))
       })
       .child(ToastHost::new(toast_viewport))
@@ -712,20 +569,5 @@ mod tests {
     let app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
 
     assert!(app.document_panels.active_document().is_none());
-  }
-
-  /// Verifies that document panel width excludes fixed workbench chrome.
-  #[test]
-  fn document_panel_root_width_should_exclude_activity_bar_and_sidebar() {
-    assert_eq!(
-      ChitinApp::document_panel_root_width(gpui::px(1000.0), gpui::px(260.0)),
-      gpui::px(1000.0 - 48.0 - 260.0)
-    );
-  }
-
-  /// Verifies that document panel height excludes the window bar.
-  #[test]
-  fn document_panel_root_height_should_exclude_window_bar() {
-    assert_eq!(ChitinApp::document_panel_root_height(gpui::px(760.0)), gpui::px(730.0));
   }
 }

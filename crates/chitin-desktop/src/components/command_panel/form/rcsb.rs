@@ -3,34 +3,33 @@
 use chitin_databases::providers::rcsb::StructureFormat;
 
 use chitin_ui::{
-  primitive::{
-    button::{Button, ButtonState, ButtonVariant},
-    input::{
-      select::{
-        Select, SelectContent, SelectContentPosition, SelectGroup, SelectInputState, SelectItem, SelectLabel,
-        SelectOption, SelectTrigger, SelectValue,
-      },
-      text::{TextInput, TextInputSize, TextInputState, TextInputVariant},
-    },
-    progress::{Progress, ProgressLabel},
-  },
-  themes::UIThemes,
+  composite::select_item::IconSelectItem,
+  primitive::progress::{Progress, ProgressLabel},
 };
+use gpui_kit::component::theme::ThemeColor;
+
 use gpui::{
-  AppContext, Context, Div, Entity, IntoElement, ParentElement, SharedString, Styled, div, prelude::FluentBuilder,
+  AppContext, Context, Div, Entity, IntoElement, ParentElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder,
+};
+use gpui_kit::component::{
+  Disableable as _, IndexPath,
+  button::{Button, ButtonVariant, ButtonVariants as _},
+  input::{Input, InputState},
+  select::{Select, SelectState},
 };
 
-use crate::tasks::{TaskSnapshot, TaskState};
+use crate::{
+  app::ChitinApp,
+  tasks::{TaskSnapshot, TaskState},
+};
 
 /// Persistent primitive state for the RCSB download form.
 #[derive(Clone)]
 pub(crate) struct RcsbFormPanel {
   /// PDB identifier input state.
-  pub(crate) pdb_id: Entity<TextInputState>,
+  pub(crate) pdb_id: Entity<InputState>,
   /// Structure format selector state.
-  pub(crate) format: Entity<SelectInputState>,
-  /// Download action button state.
-  pub(crate) submit: Entity<ButtonState>,
+  pub(crate) format: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Background-download status and progress.
   pub(crate) download: Entity<RcsbDownloadState>,
 }
@@ -250,56 +249,50 @@ fn download_progress_label(download: &RcsbDownloadState) -> String {
 
 impl RcsbFormPanel {
   /// Creates an empty RCSB form with PDB as the default format.
-  pub(crate) fn new(cx: &mut Context<crate::app::ChitinApp>) -> Self {
+  pub(crate) fn new(window: &mut Window, cx: &mut Context<crate::app::ChitinApp>) -> Self {
     let format = cx.new(|cx| {
-      let mut state = SelectInputState::new(
-        [
-          SelectOption::new(StructureFormat::Pdb.id(), StructureFormat::Pdb.label()),
-          SelectOption::new(StructureFormat::Mmcif.id(), StructureFormat::Mmcif.label()),
+      SelectState::new(
+        vec![
+          IconSelectItem::new(StructureFormat::Pdb.id(), StructureFormat::Pdb.label()),
+          IconSelectItem::new(StructureFormat::Mmcif.id(), StructureFormat::Mmcif.label()),
         ],
+        Some(IndexPath::default()),
+        window,
         cx,
-      );
-      state.select(StructureFormat::Pdb.id(), cx);
-      state
+      )
     });
 
     Self {
-      pdb_id: cx.new(TextInputState::new),
+      pdb_id: cx.new(|cx| InputState::new(window, cx).placeholder("Enter PDB IDs, e.g. 1YTH, 4HHB")),
       format,
-      submit: cx.new(ButtonState::new),
       download: cx.new(|_| RcsbDownloadState::default()),
     }
   }
 
   /// Resets form fields and progress before opening the singleton panel.
-  pub(crate) fn reset(&self, cx: &mut Context<crate::app::ChitinApp>) {
+  pub(crate) fn reset(&self, window: &mut Window, cx: &mut Context<crate::app::ChitinApp>) {
     if self.download.read(cx).active {
       return;
     }
-    self.pdb_id.update(cx, |state, cx| state.set_text("", cx));
+    self.pdb_id.update(cx, |state, cx| state.set_value("", window, cx));
     self.format.update(cx, |state, cx| {
-      state.select(StructureFormat::Pdb.id(), cx);
-      state.set_disabled(false, cx);
+      state.set_selected_index(Some(IndexPath::default()), window, cx);
     });
-    self.submit.update(cx, |state, cx| state.set_disabled(false, cx));
     self.download.update(cx, RcsbDownloadState::reset);
   }
 
   /// Returns the selected output format.
   pub(crate) fn selected_format(&self, cx: &gpui::App) -> StructureFormat {
-    match self.format.read(cx).selected_id() {
+    match self.format.read(cx).selected_value().map(|value| value.as_ref()) {
       Some("mmcif") => StructureFormat::Mmcif,
       _ => StructureFormat::Pdb,
     }
   }
 
   /// Renders the PDB ID input, format selector, progress, and submit action.
-  pub(crate) fn render(&self, theme: UIThemes, cx: &mut Context<crate::app::ChitinApp>) -> Div {
-    let selected_format = self
-      .format
-      .read(cx)
-      .selected_option()
-      .map(|option| SharedString::from(option.label()));
+  ///
+  /// `app` receives the download submission triggered by the submit button.
+  pub(crate) fn render(&self, theme: ThemeColor, app: WeakEntity<ChitinApp>, cx: &mut Context<ChitinApp>) -> Div {
     let download = self.download.read(cx);
     let progress_label = download_progress_label(download);
 
@@ -311,48 +304,26 @@ impl RcsbFormPanel {
       .child(
         div()
           .text_sm()
-          .text_color(theme.text.primary)
+          .text_color(theme.foreground)
           .child("Download RCSB Structure"),
       )
-      .child(div().text_xs().text_color(theme.text.secondary).child("PDB ID"))
+      .child(div().text_xs().text_color(theme.muted_foreground).child("PDB ID"))
+      .child(Input::new(&self.pdb_id).disabled(download.active).w_full())
+      .child(div().text_xs().text_color(theme.muted_foreground).child("Format"))
       .child(
-        TextInput::new(self.pdb_id.clone())
-          .theme(theme)
-          .size(TextInputSize::Medium)
-          .variant(TextInputVariant::Secondary)
-          .full_width(true)
-          .placeholder("Enter a PDB ID, e.g. 1YTH"),
-      )
-      .child(div().text_xs().text_color(theme.text.secondary).child("Format"))
-      .child(
-        Select::new(self.format.clone())
-          .theme(theme)
-          .full_width(true)
-          .trigger(
-            SelectTrigger::new().value(SelectValue::new().placeholder(selected_format.unwrap_or_else(|| "PDB".into()))),
-          )
-          .content(
-            SelectContent::new().position(SelectContentPosition::Popper).group(
-              SelectGroup::new()
-                .label(SelectLabel::new("RCSB structure format"))
-                .item(SelectItem::new(StructureFormat::Pdb.id(), StructureFormat::Pdb.label()))
-                .item(SelectItem::new(
-                  StructureFormat::Mmcif.id(),
-                  StructureFormat::Mmcif.label(),
-                )),
-            ),
-          ),
+        Select::new(&self.format)
+          .accessibility_label("RCSB structure format")
+          .disabled(download.active)
+          .w_full(),
       )
       .child(if download.indeterminate {
         Progress::new(download.progress)
-          .theme(theme)
           .animation_id(download.animation_id.clone())
           .indeterminate()
           .label(ProgressLabel::new(progress_label))
           .into_any_element()
       } else if download.finishing {
         Progress::new(download.progress)
-          .theme(theme)
           .animation_id(download.animation_id.clone())
           .finishing_from(download.finishing_from)
           .label(ProgressLabel::new(format!(
@@ -364,19 +335,21 @@ impl RcsbFormPanel {
           .into_any_element()
       } else {
         Progress::new(download.progress)
-          .theme(theme)
           .animation_id(download.animation_id.clone())
           .label(ProgressLabel::new(progress_label))
           .into_any_element()
       })
       .when_some(download.error.as_ref(), |element, error| {
-        element.child(div().text_xs().text_color(theme.text.error).child(error.clone()))
+        element.child(div().text_xs().text_color(theme.danger).child(error.clone()))
       })
       .child(
-        Button::new(self.submit.clone())
-          .theme(theme)
-          .variant(ButtonVariant::Primary)
-          .full_width(true)
+        Button::new("rcsb-submit")
+          .with_variant(ButtonVariant::Primary)
+          .disabled(download.active)
+          .w_full()
+          .on_click(move |_, window, cx| {
+            let _ = app.update(cx, |this, cx| this.submit_rcsb_form(window, cx));
+          })
           .child(if download.active { "Downloading…" } else { "Download" }),
       )
   }

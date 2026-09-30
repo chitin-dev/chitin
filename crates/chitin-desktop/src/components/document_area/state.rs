@@ -8,14 +8,10 @@ use std::{
 
 use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_molecule_renderer::RepresentationLayers;
-use chitin_ui::{
-  composite::panel::{
-    PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPath, PanelSplitPlacement, PanelTab, PanelTabDrag, PanelTabDragState,
-    PanelTabDropTarget, PanelTabId, PanelTabScrollState, PanelTree,
-  },
-  primitive::resize::ResizeGesture,
+use chitin_ui::composite::panel::{
+  PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPlacement, PanelTab, PanelTabId, PanelTree,
 };
-use gpui::{AnyView, App, Bounds, Pixels, Window};
+use gpui::{AnyView, App, Window};
 
 /// Callback that applies molecule representation layers to one WGPU document view.
 type RepresentationLayersChangeHandler = dyn Fn(RepresentationLayers, &mut App);
@@ -100,15 +96,6 @@ pub(crate) enum DocumentPanelContent {
   },
 }
 
-/// Resized document panel split target.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct DocumentPanelResizeAnchor {
-  /// Path to the split node being resized.
-  path: PanelSplitPath,
-  /// Axis of the split node being resized.
-  axis: PanelSplitAxis,
-}
-
 /// State for document panels rendered in the main workbench area.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DocumentPanelState {
@@ -120,16 +107,8 @@ pub(crate) struct DocumentPanelState {
   pub(super) next_panel_id: PanelId,
   /// Next tab identifier to allocate for newly opened document tabs.
   pub(super) next_tab_id: PanelTabId,
-  /// Active split resize drag, if the user is dragging a split handle.
-  pub(super) resize_drag: Option<ResizeGesture<DocumentPanelResizeAnchor, f32>>,
-  /// Temporary tab drag session kept separate from the persistent panel tree.
-  pub(super) tab_drag: Option<PanelTabDragState>,
-  /// Presentation-only scroll state for panel tab bars.
-  pub(super) tab_scroll: PanelTabScrollState,
   /// Panel whose document options popover is currently visible.
   pub(super) options_menu_panel_id: Option<PanelId>,
-  /// Last prepainted bounds of the options trigger in window coordinates.
-  pub(super) options_menu_anchor: Option<Bounds<Pixels>>,
 }
 
 impl OpenedProjectDocument {
@@ -430,7 +409,7 @@ impl DocumentPanelContent {
   }
 
   /// Returns the selected representation layers for molecular content.
-  fn representation_layers(&self) -> Option<RepresentationLayers> {
+  pub(super) fn representation_layers(&self) -> Option<RepresentationLayers> {
     match self {
       Self::WgpuInteractive {
         representation_layers: Some(control),
@@ -441,7 +420,7 @@ impl DocumentPanelContent {
   }
 
   /// Returns the selected molecular-surface backend for molecular content.
-  fn surface_backend(&self) -> Option<MolecularSurfaceBackend> {
+  pub(super) fn surface_backend(&self) -> Option<MolecularSurfaceBackend> {
     match self {
       Self::WgpuInteractive {
         surface_backend: Some(control),
@@ -530,11 +509,7 @@ impl DocumentPanelState {
       focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
-      resize_drag: None,
-      tab_drag: None,
-      tab_scroll: PanelTabScrollState::new(),
       options_menu_panel_id: None,
-      options_menu_anchor: None,
     }
   }
 
@@ -571,11 +546,7 @@ impl DocumentPanelState {
       focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
-      resize_drag: None,
-      tab_drag: None,
-      tab_scroll: PanelTabScrollState::new(),
       options_menu_panel_id: None,
-      options_menu_anchor: None,
     }
   }
 
@@ -663,7 +634,6 @@ impl DocumentPanelState {
     if self.tree.activate_tab(panel_id, tab_id) {
       self.focused_panel_id = panel_id;
       self.options_menu_panel_id = None;
-      self.options_menu_anchor = None;
       return true;
     }
     false
@@ -689,7 +659,6 @@ impl DocumentPanelState {
       return false;
     }
     self.options_menu_panel_id = None;
-    self.options_menu_anchor = None;
 
     let panel_is_empty = self
       .tree
@@ -762,11 +731,6 @@ impl DocumentPanelState {
     self.active_tab_payload(panel_id)?.representation_layers()
   }
 
-  /// Returns the active molecular-surface backend in one panel.
-  pub(crate) fn active_surface_backend(&self, panel_id: PanelId) -> Option<MolecularSurfaceBackend> {
-    self.active_tab_payload(panel_id)?.surface_backend()
-  }
-
   /// Changes the active molecular representation layers and returns its view callback.
   pub(crate) fn select_representation_layers(
     &mut self,
@@ -806,41 +770,12 @@ impl DocumentPanelState {
     }
     let opening = self.options_menu_panel_id != Some(panel_id);
     self.options_menu_panel_id = opening.then_some(panel_id);
-    if !opening {
-      self.options_menu_anchor = None;
-    }
-    true
-  }
-
-  /// Stores the latest trigger bounds used to anchor a deferred options popup.
-  ///
-  /// Bounds from triggers that do not own the open menu are ignored, so a
-  /// different panel cannot move the visible popup.
-  ///
-  /// # Parameters
-  ///
-  /// * `panel_id` identifies the panel whose trigger produced the bounds.
-  /// * `bounds` is the trigger's latest window-space rectangle.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the stored anchor changed.
-  pub(crate) fn set_options_menu_anchor(&mut self, panel_id: PanelId, bounds: Bounds<Pixels>) -> bool {
-    if self.options_menu_panel_id != Some(panel_id) {
-      return false;
-    }
-    if self.options_menu_anchor == Some(bounds) {
-      return false;
-    }
-    self.options_menu_anchor = Some(bounds);
     true
   }
 
   /// Dismisses the currently visible document options menu.
   pub(crate) fn dismiss_options_menu(&mut self) -> bool {
-    let was_open = self.options_menu_panel_id.take().is_some();
-    self.options_menu_anchor = None;
-    was_open
+    self.options_menu_panel_id.take().is_some()
   }
 
   /// Splits one document panel and copies its active tab to the new panel.
@@ -905,178 +840,6 @@ impl DocumentPanelState {
 
     split
   }
-
-  /// Starts a native GPUI tab drag and activates its source tab.
-  ///
-  /// # Parameters
-  ///
-  /// * `drag` contains stable source identifiers, the original index, and title.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the source panel and tab still match the payload; otherwise
-  /// `false`.
-  pub(crate) fn start_tab_drag(&mut self, drag: PanelTabDrag) -> bool {
-    let source_matches = self
-      .tree
-      .leaf(drag.source_panel_id)
-      .and_then(|leaf| leaf.tabs.get(drag.source_index))
-      .is_some_and(|tab| tab.id == drag.tab_id);
-    if !source_matches || !self.activate_tab(drag.source_panel_id, drag.tab_id) {
-      return false;
-    }
-
-    self.tab_drag = Some(PanelTabDragState {
-      drag,
-      drop_target: None,
-    });
-    true
-  }
-
-  /// Updates the proposed insertion target for an active tab drag.
-  ///
-  /// # Parameters
-  ///
-  /// * `target` identifies the panel and raw visual insertion position under the
-  ///   pointer.
-  ///
-  /// # Returns
-  ///
-  /// `true` when a valid target changed; otherwise `false`.
-  pub(crate) fn update_tab_drag_target(&mut self, target: PanelTabDropTarget) -> bool {
-    if self.tree.leaf(target.panel_id).is_none() {
-      return false;
-    }
-    let Some(tab_drag) = self.tab_drag.as_ref() else {
-      return false;
-    };
-    let source_exists = self
-      .tree
-      .find_tab(tab_drag.drag.source_panel_id, tab_drag.drag.tab_id)
-      .is_some();
-    if !source_exists || tab_drag.drop_target == Some(target) {
-      return false;
-    }
-
-    if let Some(tab_drag) = self.tab_drag.as_mut() {
-      tab_drag.drop_target = Some(target);
-    }
-    true
-  }
-
-  /// Clears the current insertion target while preserving the active drag.
-  pub(crate) fn clear_tab_drag_target(&mut self) -> bool {
-    let Some(tab_drag) = self.tab_drag.as_mut() else {
-      return false;
-    };
-
-    tab_drag.drop_target.take().is_some()
-  }
-
-  /// Commits an active tab drag through the panel model's atomic move API.
-  ///
-  /// The temporary drag state is always cleared before validation, so stale or
-  /// invalid payloads cannot leak feedback into a later interaction.
-  ///
-  /// # Parameters
-  ///
-  /// * `drag` is GPUI's stable payload for the released tab.
-  /// * `target_panel_id` identifies the tab strip that accepted the drop.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the payload and current target match and the model accepts the
-  /// move; otherwise `false`.
-  pub(crate) fn drop_tab(&mut self, drag: PanelTabDrag, target_panel_id: PanelId) -> bool {
-    let Some(tab_drag) = self.tab_drag.take() else {
-      return false;
-    };
-    let Some(target) = tab_drag.drop_target else {
-      return false;
-    };
-    if tab_drag.drag != drag || target.panel_id != target_panel_id {
-      return false;
-    }
-    if !self.tree.move_tab(drag.source_panel_id, drag.tab_id, target) {
-      return false;
-    }
-
-    self.focused_panel_id = target.panel_id;
-    true
-  }
-
-  /// Cancels the current tab drag without mutating the panel tree.
-  pub(crate) fn cancel_tab_drag(&mut self) -> bool {
-    self.tab_drag.take().is_some()
-  }
-
-  /// Starts resizing a document panel split.
-  ///
-  /// # Parameters
-  ///
-  /// * `path` identifies the split node whose handle was pressed.
-  /// * `axis` controls whether horizontal or vertical pointer movement is used.
-  /// * `start_position` is the cursor position on the resize axis where the drag
-  ///   began.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the split path exists and resize state was recorded;
-  /// otherwise `false`.
-  pub(crate) fn start_resize(&mut self, path: PanelSplitPath, axis: PanelSplitAxis, start_position: Pixels) -> bool {
-    let Some(start_ratio) = self.tree.split_ratio(&path) else {
-      return false;
-    };
-
-    self.resize_drag = Some(ResizeGesture::new(
-      DocumentPanelResizeAnchor { path, axis },
-      start_position,
-      start_ratio,
-    ));
-    true
-  }
-
-  /// Updates a document panel split from the current pointer position.
-  ///
-  /// # Parameters
-  ///
-  /// * `current_position` is the latest cursor position on the resize axis.
-  /// * `root_width` is the rendered width available to the document panel root.
-  /// * `root_height` is the rendered height available to the document panel root.
-  ///
-  /// # Returns
-  ///
-  /// `true` when an active drag changed a split ratio; otherwise `false`.
-  pub(crate) fn drag_resize(&mut self, current_position: Pixels, root_width: Pixels, root_height: Pixels) -> bool {
-    let Some(resize_drag) = &self.resize_drag else {
-      return false;
-    };
-    let Some(available_size) = self
-      .tree
-      .split_axis_size(&resize_drag.anchor().path, root_width, root_height)
-    else {
-      return false;
-    };
-    let available_size = f32::from(available_size);
-
-    if available_size <= 0.0 {
-      return false;
-    }
-
-    let ratio = resize_drag.start_value() + resize_drag.delta(current_position) / available_size;
-    self.tree.resize_split(&resize_drag.anchor().path, ratio)
-  }
-
-  /// Stops the active document panel split resize gesture.
-  pub(crate) fn stop_resize(&mut self) -> bool {
-    self.resize_drag.take().is_some()
-  }
-
-  /// Returns the active document panel resize axis.
-  pub(crate) fn resize_axis(&self) -> Option<PanelSplitAxis> {
-    self.resize_drag.as_ref().map(|resize_drag| resize_drag.anchor().axis)
-  }
-
   /// Allocates the next document panel identifier.
   fn allocate_panel_id(&mut self) -> PanelId {
     let panel_id = self.next_panel_id;

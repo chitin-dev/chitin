@@ -3,12 +3,12 @@
 
 //! Grouped single-selection controls.
 
-use gpui::{Entity, IntoElement, ParentElement, RenderOnce, SharedString, Styled, div, px};
+use gpui_kit::component::theme::ThemeColor;
 
-use crate::{
-  primitive::input::select::{Select, SelectContent, SelectInputState, SelectInputStyle, SelectInputVariant},
-  themes::{UIThemes, builtins},
-};
+use gpui::{Entity, IntoElement, ParentElement, RenderOnce, SharedString, Styled, div, prelude::FluentBuilder, px};
+use gpui_kit::component::select::{Select, SelectState};
+
+use crate::composite::select_item::IconSelectItem;
 
 /// One independently selectable group rendered by [`GroupedSelect`].
 #[derive(Clone)]
@@ -16,25 +16,22 @@ pub struct GroupedSelectGroup {
   /// Heading displayed above this group's selector.
   label: SharedString,
   /// Single-selection state owned by the caller.
-  state: Entity<SelectInputState>,
-  /// Select popup content and its selectable options.
-  content: SelectContent,
+  state: Entity<SelectState<Vec<IconSelectItem>>>,
 }
 
 impl GroupedSelectGroup {
-  /// Creates a group with its label, state, and popup content.
-  pub fn new(label: impl Into<SharedString>, state: Entity<SelectInputState>, content: SelectContent) -> Self {
+  /// Creates a group with its label and GPUI Kit selection state.
+  pub fn new(label: impl Into<SharedString>, state: Entity<SelectState<Vec<IconSelectItem>>>) -> Self {
     Self {
       label: label.into(),
       state,
-      content,
     }
   }
 }
 
 /// A vertical composition of independently single-selectable groups.
 ///
-/// Each group receives its own [`SelectInputState`]. Selecting an option in
+/// Each group receives its own [`SelectState`]. Selecting an option in
 /// one group therefore never clears the selection in another group, while
 /// every group retains the keyboard, focus, and accessibility behavior of the
 /// reusable select primitive.
@@ -43,7 +40,7 @@ pub struct GroupedSelect {
   /// Independently selectable groups in display order.
   groups: Vec<GroupedSelectGroup>,
   /// Semantic colors shared by all nested selectors.
-  theme: UIThemes,
+  theme: ThemeColor,
   /// Width applied to each nested selector.
   width: Option<gpui::Pixels>,
 }
@@ -53,7 +50,7 @@ impl GroupedSelect {
   pub fn new() -> Self {
     Self {
       groups: Vec::new(),
-      theme: builtins::dark(),
+      theme: *ThemeColor::dark(),
       width: None,
     }
   }
@@ -65,7 +62,7 @@ impl GroupedSelect {
   }
 
   /// Sets the theme used by labels and nested selectors.
-  pub fn theme(mut self, theme: UIThemes) -> Self {
+  pub fn theme(mut self, theme: ThemeColor) -> Self {
     self.theme = theme;
     self
   }
@@ -95,19 +92,16 @@ impl RenderOnce for GroupedSelect {
       // trigger and popup geometry.
       div().flex().flex_col().gap_2().p_2(),
       move |container, group| {
-        let mut select = Select::new(group.state)
-          .theme(theme)
-          .variant(SelectInputVariant::Secondary)
-          .content(group.content);
-        if let Some(width) = width {
-          select = select.style(SelectInputStyle::new().width(width));
-        }
+        let select = Select::new(&group.state)
+          .accessibility_label(group.label.clone())
+          .w_full()
+          .when_some(width, |select, width| select.w(width));
         container.child(
           div()
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().text_xs().text_color(theme.text.secondary).child(group.label))
+            .child(div().text_xs().text_color(theme.muted_foreground).child(group.label))
             .child(select),
         )
       },
