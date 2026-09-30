@@ -3,7 +3,7 @@
 use chitin_command::{ApplicationCommand, FrontendCommand, PanelTabCommand, WorkspaceCommand};
 use gpui::{Context, Window};
 
-use crate::{app::ChitinApp, components::workspace_tree::WorkspaceTreeNavigation};
+use crate::{app::ChitinApp, workbench::explorer::tree::WorkspaceTreeNavigation};
 
 trait WorkspaceCommandDesktopExt {
   /// Converts a workspace command into tree navigation when applicable.

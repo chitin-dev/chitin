@@ -12,7 +12,7 @@ application actions without exposing provider-specific behavior to the search
 list.
 
 The desktop implementation is assembled in
-#link(source-root + "/components/command_panel.rs")[`components/command_panel.rs`].
+#link(source-root + "/features/command_palette/mod.rs")[`features/command_palette/mod.rs`].
 The panel owns interaction state and command presentation; command providers
 own domain operations and background work.
 

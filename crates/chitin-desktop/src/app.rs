@@ -7,35 +7,35 @@ use std::{collections::BTreeSet, path::PathBuf};
 
 use chitin_command::CommandExecutor;
 use chitin_databases::ClientConfig;
-use chitin_ui::composite::{
-  bottom_dock::BottomDockState,
-  toast::{Toast, ToastHost, ToastId, ToastViewport},
+use chitin_ui::{
+  widgets::toast::{Toast, ToastHost, ToastId, ToastViewport},
+  workbench::{WorkbenchStyle, bottom_dock::BottomDockState, resize_handle_appearance},
 };
 use chitin_utils::workspace::ProjectWorkspace;
 use gpui::{Context, Entity, FocusHandle, InteractiveElement, Render, Window, div, prelude::*};
 use gpui_kit::component::resizable::{h_resizable, resizable_panel};
 
 use crate::{
-  builtin_shell::{DesktopShellHost, desktop_shell_context},
-  components::{
-    activity_bar::{ActiveActivity, render_activity_bar},
-    command_panel::{CommandPanelController, render_command_panel},
-    document_area::{
-      DocumentOptionsControls, DocumentPanelState, dock::DocumentDock, render_document_area,
-      state::DocumentPanelContent,
-    },
-    project_sidebar::{
-      MAX_PROJECT_SIDEBAR_WIDTH, MIN_PROJECT_SIDEBAR_WIDTH, ProjectSidebarState, render_project_sidebar,
-    },
+  commands::{
+    portable::DesktopPortableCommandRunner,
+    shell_host::{DesktopShellHost, desktop_shell_context},
+  },
+  features::{
+    command_palette::{CommandPanelController, render_command_panel},
+    molecule::options::DocumentOptionsControls,
     terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_bottom_dock},
-    window_bar::render_window_bar,
   },
   keybindings::{ToggleCommandPanel, ToggleTerminal, ToggleWorkspace, WORKBENCH_KEY_CONTEXT},
-  portable_command::DesktopPortableCommandRunner,
-  tasks::BackgroundTaskCenter,
+  services::tasks::BackgroundTaskCenter,
+  workbench::{
+    activity_bar::{ActiveActivity, render_activity_bar},
+    documents::{DocumentPanelState, dock::DocumentDock, render_document_area, state::DocumentPanelContent},
+    explorer::{MAX_PROJECT_SIDEBAR_WIDTH, MIN_PROJECT_SIDEBAR_WIDTH, ProjectSidebarState, render_project_sidebar},
+    window_bar::render_window_bar,
+  },
 };
 
-pub use crate::components::document_area::state::{WgpuDocumentView, WgpuDocumentViewFactory};
+pub use crate::workbench::documents::state::{WgpuDocumentView, WgpuDocumentViewFactory};
 
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
@@ -407,6 +407,7 @@ impl Render for ChitinApp {
   /// A GPUI element tree for the current Chitin desktop frame.
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
     let theme = gpui_kit::component::Theme::global(cx).colors;
+    let workbench_style = WorkbenchStyle::new(theme);
     let document_options_controls = self.document_options_controls(window, cx);
     let toast_viewport = self.toast_viewport(cx);
     let command_palette = self.command_panel.palette(window, cx);
@@ -457,6 +458,7 @@ impl Render for ChitinApp {
     let workbench_content = if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
       let resize_app = app.clone();
       h_resizable("workspace-explorer-split")
+        .with_handle_appearance(resize_handle_appearance())
         .child(
           resizable_panel()
             .size(self.project_sidebar_state.width())
@@ -520,7 +522,15 @@ impl Render for ChitinApp {
           .flex_1()
           .min_h_0()
           .child(render_activity_bar(self.active_activity, theme, app.clone()))
-          .child(workbench_content),
+          .child(
+            div()
+              .flex()
+              .flex_1()
+              .min_w_0()
+              .min_h_0()
+              .p(workbench_style.panel_gap * 0.5)
+              .child(workbench_content),
+          ),
       )
       .when(self.command_panel.is_open(), |layout| {
         layout.child(render_command_panel(
