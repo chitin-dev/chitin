@@ -96,11 +96,6 @@ impl WgpuPanelScene for ExampleMoleculeScene {
     )
   }
 
-  /// Returns the molecule-specific interaction hint.
-  fn interaction_hint(&self) -> &'static str {
-    "Atom representation | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-  }
-
   fn set_representation_layers(&mut self, representation: RepresentationLayers) -> bool {
     if self.representation == representation {
       return false;

@@ -353,11 +353,6 @@ impl WgpuPanelScene for SesDebugScene {
       slice_fraction,
     )
   }
-
-  /// Returns the mouse and keyboard interaction hint for this example.
-  fn interaction_hint(&self) -> &'static str {
-    "SES debug | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-  }
 }
 
 /// GPUI view combining the WGPU viewport and stage navigation controls.
@@ -996,49 +991,53 @@ pub(super) fn run() {
     }
   };
   let parameters = options.ses;
-  Application::new().run(move |cx: &mut App| {
-    let result = cx.open_window(
-      WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-          None,
-          size(px(1180.0), px(800.0)),
-          cx,
-        ))),
-        ..Default::default()
-      },
-      |window, cx| {
-        window.activate_window();
-        let root = cx.new(|_| SesDebugRoot::default());
-        let window_handle = window.window_handle();
-        match spawn_trace_worker(Arc::clone(&scene), parameters) {
-          Ok(receiver) => {
-            let root = root.downgrade();
-            cx.spawn(async move |async_cx: &mut AsyncApp| {
-              let result = receiver
-                .await
-                .unwrap_or_else(|error| Err(format!("SES trace worker stopped unexpectedly: {error}")));
-              let _ = async_cx.update_window(window_handle, |_, window, cx| {
-                let _ = root.update(cx, |root, cx| match result {
-                  Ok((scene, trace)) => root.install(scene, trace, parameters, window, cx),
-                  Err(error) => root.fail(error, cx),
+  Application::new()
+    .with_assets(chitin_ui::assets::ChitinAssets)
+    .run(move |cx: &mut App| {
+      chitin_ui::init(cx);
+      let result = gpui_kit::open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(1180.0), px(800.0)),
+            cx,
+          ))),
+          ..Default::default()
+        },
+        cx,
+        |window, cx| {
+          window.activate_window();
+          let root = cx.new(|_| SesDebugRoot::default());
+          let window_handle = window.window_handle();
+          match spawn_trace_worker(Arc::clone(&scene), parameters) {
+            Ok(receiver) => {
+              let root = root.downgrade();
+              cx.spawn(async move |async_cx: &mut AsyncApp| {
+                let result = receiver
+                  .await
+                  .unwrap_or_else(|error| Err(format!("SES trace worker stopped unexpectedly: {error}")));
+                let _ = async_cx.update_window(window_handle, |_, window, cx| {
+                  let _ = root.update(cx, |root, cx| match result {
+                    Ok((scene, trace)) => root.install(scene, trace, parameters, window, cx),
+                    Err(error) => root.fail(error, cx),
+                  });
                 });
-              });
-            })
-            .detach();
+              })
+              .detach();
+            }
+            Err(error) => {
+              root.update(cx, |root, cx| root.fail(error, cx));
+            }
           }
-          Err(error) => {
-            root.update(cx, |root, cx| root.fail(error, cx));
-          }
-        }
-        root
-      },
-    );
-    if let Err(error) = result {
-      eprintln!("failed to open SES debug window: {error}");
-      cx.quit();
-    }
-    cx.activate(true);
-  });
+          root
+        },
+      );
+      if let Err(error) = result {
+        eprintln!("failed to open SES debug window: {error}");
+        cx.quit();
+      }
+      cx.activate(true);
+    });
 }
 
 #[cfg(test)]

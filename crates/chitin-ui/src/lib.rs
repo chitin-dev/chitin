@@ -1,12 +1,17 @@
-//! Reusable GPUI components and visual themes for Chitin.
+//! Shared Chitin presentation components built on GPUI Kit.
 //!
-//! `chitin-ui` is intended to stay application- and domain-neutral. It provides
-//! composable controls, layout primitives, and theme data that can be reused by
-//! Chitin desktop and published independently.
+//! Kit owns general-purpose controls and theme colors. This crate contains
+//! shared workbench surfaces, specialized views, widgets, and bundled assets.
 
-/// Composite controls assembled from reusable primitives.
-pub mod composite;
-/// Low-level, application-neutral controls.
-pub mod primitive;
-/// Theme structures and built-in palettes.
-pub mod themes;
+/// Bundled Chitin assets and GPUI Kit asset fallback.
+pub mod assets;
+/// Shared initialization and theme policy.
+pub mod theme;
+/// Specialized stateful presentation views.
+pub mod views;
+/// Reusable widgets built on GPUI Kit controls.
+pub mod widgets;
+/// Workbench surfaces, docking chrome, and activity-bar composition.
+pub mod workbench;
+
+pub use theme::init;

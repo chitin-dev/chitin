@@ -91,10 +91,6 @@ impl WgpuPanelScene for ExampleCubeScene {
     renderer.render_mvp(frame.view, mvp)
   }
 
-  /// Returns the cube-specific interaction hint.
-  fn interaction_hint(&self) -> &'static str {
-    "Example cube | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-  }
 }
 
 /// Renderer for the example cube scene.

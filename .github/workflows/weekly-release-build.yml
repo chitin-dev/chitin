@@ -1,0 +1,146 @@
+name: Weekly release build
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Release build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+            archive: chitin-linux-x86_64
+            desktop_executable: chitin-desktop
+            cli_executable: chitin
+          - os: windows-latest
+            target: windows-x86_64
+            archive: chitin-windows-x86_64
+            desktop_executable: chitin-desktop.exe
+            cli_executable: chitin.exe
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libfontconfig1-dev \
+            libx11-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build desktop release
+        run: just build-desktop-release
+
+      - name: Build CLI release
+        run: just build-cli-release
+
+      - name: Package Linux executable
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/${{ matrix.archive }}
+          cp target/release/chitin-desktop dist/${{ matrix.archive }}/chitin-desktop
+          cp target/release/chitin dist/${{ matrix.archive }}/chitin
+          cp README.md LICENSE dist/${{ matrix.archive }}/
+          tar -C dist -czf dist/${{ matrix.archive }}.tar.gz ${{ matrix.archive }}
+          sha256sum dist/${{ matrix.archive }}.tar.gz > dist/${{ matrix.archive }}.sha256
+
+      - name: Package Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/${{ matrix.archive }}
+          Copy-Item target/release/chitin-desktop.exe dist/${{ matrix.archive }}/chitin-desktop.exe
+          Copy-Item target/release/chitin.exe dist/${{ matrix.archive }}/chitin.exe
+          Copy-Item README.md,LICENSE dist/${{ matrix.archive }}/
+          Compress-Archive -Path dist/${{ matrix.archive }} -DestinationPath dist/${{ matrix.archive }}.zip -Force
+          $hash = (Get-FileHash dist/${{ matrix.archive }}.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  ${{ matrix.archive }}.zip" | Out-File -Encoding ascii dist/${{ matrix.archive }}.sha256
+
+      - name: Upload release executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: chitin-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish weekly prerelease
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: weekly-release
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release executables
+        uses: actions/download-artifact@v4
+        with:
+          pattern: chitin-*
+          merge-multiple: true
+          path: release
+
+      - name: Update weekly tag
+        run: |
+          git tag --force weekly "$GITHUB_SHA"
+          git push origin --force refs/tags/weekly
+
+      - name: Publish weekly prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: weekly
+          name: Weekly build
+          prerelease: true
+          make_latest: false
+          body: |
+            Automated weekly build for commit ${{ github.sha }}.
+          files: |
+            release/chitin-linux-x86_64.tar.gz
+            release/chitin-linux-x86_64.sha256
+            release/chitin-windows-x86_64.zip
+            release/chitin-windows-x86_64.sha256
+          fail_on_unmatched_files: true

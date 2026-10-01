@@ -489,42 +489,46 @@ fn main() {
     .or_else(|| std::env::current_dir().ok())
     .unwrap_or_else(|| PathBuf::from("."));
 
-  Application::new().run(move |cx: &mut App| {
-    if let Err(error) = register_terminal_fonts(cx) {
-      eprintln!("failed to register bundled terminal fonts: {error}");
-      cx.quit();
-      return;
-    }
-    let result = cx.open_window(
-      WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-          None,
-          size(px(960.0), px(640.0)),
-          cx,
-        ))),
-        app_id: Some("dev.chitin.TerminalDebug".into()),
-        ..Default::default()
-      },
-      move |window, cx| {
-        window.activate_window();
-        let metrics = measure_terminal_metrics(window);
-        let terminal_size = terminal_size_for_window(window, metrics);
-        cx.new(
-          |cx| match TerminalDebugView::new(working_directory, terminal_size, cx) {
-            Ok(view) => view,
-            Err(error) => panic!("failed to start native terminal example: {error}"),
-          },
-        )
-      },
-    );
+  Application::new()
+    .with_assets(chitin_ui::assets::ChitinAssets)
+    .run(move |cx: &mut App| {
+      chitin_ui::init(cx);
+      if let Err(error) = register_terminal_fonts(cx) {
+        eprintln!("failed to register bundled terminal fonts: {error}");
+        cx.quit();
+        return;
+      }
+      let result = gpui_kit::open_window(
+        WindowOptions {
+          window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(960.0), px(640.0)),
+            cx,
+          ))),
+          app_id: Some("dev.chitin.TerminalDebug".into()),
+          ..Default::default()
+        },
+        cx,
+        move |window, cx| {
+          window.activate_window();
+          let metrics = measure_terminal_metrics(window);
+          let terminal_size = terminal_size_for_window(window, metrics);
+          cx.new(
+            |cx| match TerminalDebugView::new(working_directory, terminal_size, cx) {
+              Ok(view) => view,
+              Err(error) => panic!("failed to start native terminal example: {error}"),
+            },
+          )
+        },
+      );
 
-    if let Err(error) = result {
-      eprintln!("failed to open native terminal example: {error}");
-      cx.quit();
-      return;
-    }
-    cx.activate(true);
-  });
+      if let Err(error) = result {
+        eprintln!("failed to open native terminal example: {error}");
+        cx.quit();
+        return;
+      }
+      cx.activate(true);
+    });
 }
 
 #[cfg(test)]
