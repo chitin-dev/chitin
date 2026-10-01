@@ -19,6 +19,7 @@ pub fn init(cx: &mut App) {
   // the window title and outer workbench retain Kit's background color.
   Theme::update(cx, |theme| {
     theme.colors.tab_bar = theme.colors.muted;
+    theme.colors.tab_bar_segmented = theme.colors.muted;
     theme.colors.tab = theme.colors.muted;
     theme.colors.tab_active = theme.colors.muted;
   });

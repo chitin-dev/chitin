@@ -8,6 +8,7 @@ use gpui_kit::component::dock::{
   BasePanelView, DockArea, DockAreaRenderer, DockContext, DockSkin, DropIndicator, NodeId, PanelState, TabGroupContext,
   TabGroupRenderer,
 };
+use gpui_kit::component::tab::TabVariant;
 
 use super::{WorkbenchStyle, resize_handle_appearance, surface_slot};
 
@@ -27,6 +28,7 @@ pub fn dock_area(
     // Skin setters notify the area. Run them only after its construction lease ends.
     cx.defer(move |cx| {
       configure(&skin, cx);
+      skin.set_tab_variant(TabVariant::Segmented, cx);
       skin.set_tab_border_color(Some(gpui::transparent_black()), cx);
     });
     DockArea::new(id, None, window, cx).with_renderer(Rc::new(WorkbenchDockSkin { inner }))

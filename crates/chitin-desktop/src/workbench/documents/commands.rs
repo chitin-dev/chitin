@@ -140,7 +140,13 @@ impl ChitinApp {
 
   /// Toggles the active molecular document's options menu.
   pub(crate) fn toggle_document_options_menu(&mut self, panel_id: PanelId) -> bool {
-    self.document_panels.toggle_options_menu(panel_id)
+    let changed = self.document_panels.toggle_options_menu(panel_id);
+    if self.document_panels.options_menu_panel_id == Some(panel_id)
+      && let Some(controls) = &self.document_options_controls
+    {
+      controls.bind_panel(panel_id);
+    }
+    changed
   }
 
   /// Dismisses the open molecular document options menu.

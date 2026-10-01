@@ -148,5 +148,6 @@ fn new_terminal_select(profile_select: Entity<SelectState<Vec<IconSelectItem>>>)
     .appearance(false)
     .small()
     .w(px(28.0))
+    .px(px(4.0))
     .menu_width(px(180.0))
 }

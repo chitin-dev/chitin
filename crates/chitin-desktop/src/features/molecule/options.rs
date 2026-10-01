@@ -1,5 +1,7 @@
 //! Molecular representation and surface-backend options.
 
+use std::{cell::Cell, rc::Rc};
+
 use crate::{app::ChitinApp, workbench::documents::layout::PanelId};
 use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers, SurfaceStyle};
@@ -71,6 +73,8 @@ struct DocumentOptionsMenu {
 /// Persistent semantic controls used by molecular document panels.
 #[derive(Clone)]
 pub(crate) struct DocumentOptionsControls {
+  /// Retains command targeting when dismissal precedes a deferred confirmation.
+  target_panel: Rc<Cell<Option<PanelId>>>,
   /// Single-selection state for atom-layer styles.
   atom: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Single-selection state for polymer-layer styles.
@@ -172,11 +176,17 @@ impl DocumentOptionsControls {
       "implicit-scalar-field",
     );
     Self {
+      target_panel: Rc::new(Cell::new(None)),
       atom,
       polymer,
       surface,
       surface_backend,
     }
+  }
+
+  /// Binds the selectors to the panel opening the options menu.
+  pub(crate) fn bind_panel(&self, panel_id: PanelId) {
+    self.target_panel.set(Some(panel_id));
   }
 
   /// Subscribes representation-selector events to document-panel commands.
@@ -189,9 +199,10 @@ impl DocumentOptionsControls {
   /// * `window` supplies focus routing for the menu when it opens.
   /// * `cx` owns subscriptions and updates the application state.
   pub(crate) fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
+    let target_panel = Rc::clone(&self.target_panel);
     let subscription: Subscription = cx.subscribe_in(&self.atom, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+      let Some(panel_id) = target_panel.get() else {
         return;
       };
       let representation = app
@@ -210,9 +221,10 @@ impl DocumentOptionsControls {
     });
     subscription.detach();
 
+    let target_panel = Rc::clone(&self.target_panel);
     let subscription: Subscription = cx.subscribe_in(&self.polymer, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+      let Some(panel_id) = target_panel.get() else {
         return;
       };
       let Some(representation) = app.document_panels.active_representation_layers(panel_id) else {
@@ -228,9 +240,10 @@ impl DocumentOptionsControls {
     });
     subscription.detach();
 
+    let target_panel = Rc::clone(&self.target_panel);
     let subscription: Subscription = cx.subscribe_in(&self.surface, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+      let Some(panel_id) = target_panel.get() else {
         return;
       };
       let Some(representation) = app.document_panels.active_representation_layers(panel_id) else {
@@ -246,9 +259,10 @@ impl DocumentOptionsControls {
     });
     subscription.detach();
 
+    let target_panel = Rc::clone(&self.target_panel);
     let subscription: Subscription = cx.subscribe_in(&self.surface_backend, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = app.document_panels.options_menu_panel_id else {
+      let Some(panel_id) = target_panel.get() else {
         return;
       };
       let backend = match selected_id.as_deref() {
@@ -390,5 +404,59 @@ fn sync_document_option_selectors(
         state.set_selected_value(&id.into(), window, cx);
       }
     });
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::workbench::documents::state::{WgpuDocumentView, WgpuDocumentViewFactory};
+
+  struct SurfaceProbe;
+
+  impl gpui::Render for SurfaceProbe {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+      gpui::div()
+    }
+  }
+
+  #[gpui::test]
+  fn backend_confirmation_survives_options_menu_dismissal(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let selected_backend = Rc::new(Cell::new(MolecularSurfaceBackend::ImplicitScalarField));
+    let (app, cx) = cx.add_window_view({
+      let selected_backend = Rc::clone(&selected_backend);
+      move |_, cx| {
+        let view = WgpuDocumentView::with_representation_layers(
+          cx.new(|_| SurfaceProbe),
+          RepresentationLayers::empty(),
+          |_, _| {},
+        )
+        .with_surface_backend(MolecularSurfaceBackend::ImplicitScalarField, move |backend, _| {
+          selected_backend.set(backend)
+        });
+        ChitinApp::new_with_wgpu_document_panel(
+          Some(std::path::PathBuf::from("/tmp")),
+          cx.focus_handle(),
+          "surface-probe",
+          view,
+          WgpuDocumentViewFactory::new(|_, cx| WgpuDocumentView::new(cx.new(|_| SurfaceProbe))),
+        )
+      }
+    });
+    cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        let controls = DocumentOptionsControls::new(window, cx);
+        controls.subscribe(window, cx);
+        app.document_options_controls = Some(controls.clone());
+        assert!(app.toggle_document_options_menu(app.document_panels.focused_panel_id));
+        assert!(app.dismiss_document_options_menu());
+        controls.surface_backend.update(cx, |_, cx| {
+          cx.emit(SelectEvent::Confirm(Some("msms".into())));
+        });
+      });
+    });
+    cx.run_until_parked();
+    assert_eq!(selected_backend.get(), MolecularSurfaceBackend::Msms);
   }
 }
