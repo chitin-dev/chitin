@@ -13,7 +13,7 @@ use chitin_command::{
 use chitin_command::{CommandExecutionError, CommandExecutor, CommandOutcome};
 use chitin_databases::{CancellationToken, PersistedArtifact};
 
-use crate::{ShellEvent, ShellEventSink};
+use crate::{RenderingPanel, RenderingPanelCommand, ShellEvent, ShellEventSink};
 
 /// Monotonic identity assigned to one shell submission.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83,6 +83,8 @@ pub struct ShellExecutionRecord {
   pub source: ShellInvocationSource,
   /// Executor boundary selected for the command.
   pub target: ShellCommandTarget,
+  /// Rendering context captured when the request was submitted.
+  pub rendering_panel: Option<RenderingPanel>,
   /// Current lifecycle state.
   pub status: ShellExecutionStatus,
 }
@@ -133,6 +135,8 @@ pub struct ShellTranscriptEntry {
 pub struct BuiltinShellSnapshot {
   /// Directory used to resolve relative command paths.
   pub working_directory: PathBuf,
+  /// Host-validated molecular view selected for operations in this session.
+  pub rendering_panel: Option<RenderingPanel>,
   /// Currently executing command, when present.
   pub active: Option<ShellActiveCommand>,
   /// Accepted commands in submission order.
@@ -149,6 +153,7 @@ pub struct ShellSubmission {
   target: ShellCommandTarget,
   source: ShellInvocationSource,
   context: CommandExecutionContext,
+  rendering_panel: Option<Box<RenderingPanel>>,
 }
 
 /// Result of evaluating one textual built-in shell line.
@@ -156,17 +161,19 @@ pub struct ShellSubmission {
 pub enum ShellLineSubmission {
   /// A typed command was reserved for execution.
   Command(ShellSubmission),
-  /// The shell session applied a built-in command synchronously.
+  /// A session builtin produced a terminal effect or host navigation request.
   ShellBuiltin(ShellBuiltinEffect),
   /// Help text should be displayed without invoking an executor.
   Display(String),
 }
 
-/// Presentation effect produced by a command owned by the shell session.
+/// Terminal effect or host navigation request owned by the shell session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellBuiltinEffect {
   /// Remove visible command blocks while preserving navigable history.
   ClearScrollback,
+  /// Resolve a rendering-context request against the host's current views.
+  RenderingPanel(RenderingPanelCommand),
 }
 
 impl ShellLineSubmission {
@@ -204,6 +211,11 @@ impl ShellSubmission {
   /// Returns the resources prepared for this invocation.
   pub const fn context(&self) -> &CommandExecutionContext {
     &self.context
+  }
+
+  /// Returns the selected rendering view captured for this invocation.
+  pub fn rendering_panel(&self) -> Option<&RenderingPanel> {
+    self.rendering_panel.as_deref()
   }
 }
 
@@ -272,6 +284,7 @@ struct ActiveCommand {
 #[derive(Debug)]
 struct ShellState {
   context: CommandExecutionContext,
+  rendering_panel: Option<RenderingPanel>,
   next_id: u64,
   active: Option<ActiveCommand>,
   history: Vec<String>,
@@ -314,6 +327,7 @@ impl BuiltinShell {
     Self {
       state: Arc::new(Mutex::new(ShellState {
         context,
+        rendering_panel: None,
         next_id: 1,
         active: None,
         history: Vec::new(),
@@ -342,6 +356,34 @@ impl BuiltinShell {
   pub fn set_standard_input(&self, bytes: Option<Arc<[u8]>>) -> Result<(), BuiltinShellError> {
     self.lock_state()?.context.standard_input = bytes;
     Ok(())
+  }
+
+  /// Returns this session's selected rendering view without cloning its history.
+  pub fn rendering_panel(&self) -> Result<Option<RenderingPanel>, BuiltinShellError> {
+    Ok(self.lock_state()?.rendering_panel.clone())
+  }
+
+  /// Returns the directory used by this session without copying command history.
+  pub fn working_directory(&self) -> Result<PathBuf, BuiltinShellError> {
+    Ok(self.lock_state()?.context.working_directory.clone())
+  }
+
+  /// Sets a rendering target after the host validates that the view is open.
+  pub fn set_rendering_panel(&self, panel: Option<RenderingPanel>) -> Result<(), BuiltinShellError> {
+    self.lock_state()?.rendering_panel = panel;
+    Ok(())
+  }
+
+  /// Refreshes the title or clears a closed target; never substitutes another view.
+  pub fn reconcile_rendering_panel(&self, open: &[RenderingPanel]) -> Result<bool, BuiltinShellError> {
+    let mut state = self.lock_state()?;
+    let current = state.rendering_panel.as_ref();
+    let updated = current.and_then(|current| open.iter().find(|panel| panel.id() == current.id()));
+    if current == updated {
+      return Ok(false);
+    }
+    state.rendering_panel = updated.cloned();
+    Ok(true)
   }
 
   /// Parses a command line and reserves it as the active foreground command.
@@ -412,7 +454,7 @@ impl BuiltinShell {
   ///
   /// # Returns
   ///
-  /// A presentation effect for the host terminal to mirror.
+  /// A terminal effect or navigation request for the host to resolve.
   ///
   /// # Errors
   ///
@@ -431,6 +473,7 @@ impl BuiltinShell {
         state.transcript.clear();
         Ok(ShellBuiltinEffect::ClearScrollback)
       }
+      ShellBuiltin::RenderingPanel(command) => Ok(ShellBuiltinEffect::RenderingPanel(command)),
     }
   }
 
@@ -468,6 +511,7 @@ impl BuiltinShell {
       state.next_id = state.next_id.saturating_add(1);
       let command_id = command.id();
       let context = state.context.clone().with_cancellation(cancellation.clone());
+      let rendering_panel = state.rendering_panel.clone();
       let record = ShellExecutionRecord {
         id,
         input: input.clone(),
@@ -475,6 +519,7 @@ impl BuiltinShell {
         command_id,
         source: source.clone(),
         target,
+        rendering_panel: rendering_panel.clone(),
         status: ShellExecutionStatus::Running,
       };
       state.history.push(input.clone());
@@ -499,6 +544,7 @@ impl BuiltinShell {
           target,
           source,
           context,
+          rendering_panel: rendering_panel.map(Box::new),
         },
         record,
       )
@@ -722,6 +768,7 @@ impl BuiltinShell {
     let state = self.lock_state()?;
     Ok(BuiltinShellSnapshot {
       working_directory: state.context.working_directory.clone(),
+      rendering_panel: state.rendering_panel.clone(),
       active: state.active.as_ref().map(|active| ShellActiveCommand {
         id: active.id,
         command_id: active.command_id,
@@ -844,6 +891,64 @@ mod tests {
 
   use super::*;
 
+  #[test]
+  fn submission_should_capture_rendering_context_for_audit() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+    let target = RenderingPanel::new(2, "4HHB.cif");
+    shell.set_rendering_panel(Some(target.clone()))?;
+    let submission = shell.submit("tab.close")?.into_command()?;
+    shell.set_rendering_panel(None)?;
+    assert_eq!(submission.rendering_panel(), Some(&target));
+    assert_eq!(shell.snapshot()?.executions[0].rendering_panel.as_ref(), Some(&target));
+    shell.complete_frontend(submission.id())?;
+    Ok(())
+  }
+
+  #[test]
+  fn rendering_context_should_be_independent_between_sessions() -> Result<(), BuiltinShellError> {
+    let first = BuiltinShell::new(".");
+    let second = BuiltinShell::new(".");
+    first.set_rendering_panel(Some(RenderingPanel::new(2, "4HHB.cif")))?;
+    assert_eq!(
+      first.snapshot()?.rendering_panel,
+      Some(RenderingPanel::new(2, "4HHB.cif"))
+    );
+    assert_eq!(second.rendering_panel()?, None);
+    Ok(())
+  }
+
+  #[test]
+  fn reconciliation_should_refresh_title_without_changing_identity() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+    shell.set_rendering_panel(Some(RenderingPanel::new(2, "old title")))?;
+    assert!(shell.reconcile_rendering_panel(&[RenderingPanel::new(2, "4HHB.cif")])?);
+    assert_eq!(shell.rendering_panel()?, Some(RenderingPanel::new(2, "4HHB.cif")));
+    assert!(!shell.reconcile_rendering_panel(&[RenderingPanel::new(2, "4HHB.cif")])?);
+    Ok(())
+  }
+
+  #[test]
+  fn closing_target_should_clear_context_instead_of_selecting_another_view() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+    shell.set_rendering_panel(Some(RenderingPanel::new(2, "4HHB.cif")))?;
+    assert!(shell.reconcile_rendering_panel(&[RenderingPanel::new(3, "4HHB.cif")])?);
+    assert_eq!(shell.rendering_panel()?, None);
+    Ok(())
+  }
+
+  #[test]
+  fn panel_navigation_should_preserve_history_and_wait_for_host_validation() -> Result<(), BuiltinShellError> {
+    let shell = BuiltinShell::new(".");
+    assert!(matches!(
+      shell.submit("panel enter 2")?,
+      ShellLineSubmission::ShellBuiltin(ShellBuiltinEffect::RenderingPanel(RenderingPanelCommand::Enter {
+        id: 2
+      }))
+    ));
+    assert_eq!(shell.rendering_panel()?, None);
+    assert_eq!(shell.previous_history("")?, Some("panel enter 2".into()));
+    Ok(())
+  }
   #[test]
   fn submit_should_route_portable_and_frontend_commands() -> Result<(), BuiltinShellError> {
     let portable_shell = BuiltinShell::new(".");

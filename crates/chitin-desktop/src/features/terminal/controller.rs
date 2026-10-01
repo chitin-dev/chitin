@@ -13,6 +13,26 @@ use crate::{
 };
 
 impl ChitinApp {
+  /// Invalidates closed targets for all shell sessions, not only the visible one.
+  pub(crate) fn sync_shell_rendering_panels(&self) {
+    let panels = self.document_panels.rendering_panels();
+    if let Err(error) = self.builtin_shell().reconcile_rendering_panel(&panels) {
+      log::error!("failed to reconcile application shell rendering target: {error}");
+    }
+    if let Some(controls) = &self.terminal_panel_controls {
+      for session in &controls.sessions {
+        let Some(builtin) = &session.builtin else {
+          continue;
+        };
+        match builtin.host.session().reconcile_rendering_panel(&panels) {
+          Ok(true) => self.refresh_terminal_prompt(session.id),
+          Ok(false) => {}
+          Err(error) => log::error!("failed to reconcile terminal rendering target: {error}"),
+        }
+      }
+    }
+  }
+
   /// Drains byte-stream events produced by the in-process shell backend.
   pub(super) fn process_builtin_terminal_input(
     &mut self,
@@ -116,6 +136,12 @@ impl ChitinApp {
         effect: ShellBuiltinEffect::ClearScrollback,
       }) => self.clear_terminal_screen(session_id),
       Ok(DesktopShellDispatch::Frontend { .. }) => self.finish_terminal_command(session_id, ""),
+      Ok(DesktopShellDispatch::ShellBuiltin { effect }) => {
+        self.finish_terminal_command(
+          session_id,
+          &format!("\x1b[31merror: unhandled shell effect {effect:?}\x1b[0m"),
+        );
+      }
       Ok(DesktopShellDispatch::Portable(task)) => {
         let command_id = task.command_id();
         if let Some(session) = self
@@ -210,6 +236,7 @@ impl ChitinApp {
 
   /// Writes final command output and restores the shell prompt.
   fn finish_terminal_command(&mut self, session_id: TerminalSessionId, output: &str) {
+    self.refresh_terminal_prompt(session_id);
     if let Some(program) = self
       .terminal_panel_controls
       .as_ref()
@@ -232,6 +259,7 @@ impl ChitinApp {
 
   /// Clears the VT grid and resets the built-in line discipline.
   fn clear_terminal_screen(&mut self, session_id: TerminalSessionId) {
+    self.refresh_terminal_prompt(session_id);
     if let Some(program) = self
       .terminal_panel_controls
       .as_ref()
@@ -249,6 +277,28 @@ impl ChitinApp {
       .and_then(|controls| controls.session_mut(session_id))
     {
       session.finish_command();
+    }
+  }
+
+  /// Projects session context into the prompt without changing the editable line.
+  fn refresh_terminal_prompt(&self, session_id: TerminalSessionId) {
+    let Some(builtin) = self
+      .terminal_panel_controls
+      .as_ref()
+      .and_then(|controls| controls.session(session_id))
+      .and_then(|session| session.builtin.as_ref())
+    else {
+      return;
+    };
+    let shell = builtin.host.session();
+    let (Ok(directory), Ok(panel)) = (shell.working_directory(), shell.rendering_panel()) else {
+      log::error!("failed to read built-in shell prompt context");
+      return;
+    };
+    if let Ok(mut program) = builtin.program.lock()
+      && let Err(error) = program.set_prompt(super::presenter::terminal_prompt_ansi(&directory, panel.as_ref()))
+    {
+      log::error!("failed to update built-in shell prompt: {error}");
     }
   }
 

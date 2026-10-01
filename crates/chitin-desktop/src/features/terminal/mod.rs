@@ -222,7 +222,7 @@ impl TerminalPanelControls {
       DesktopTerminalProfile::Builtin => {
         // The prompt and relative-path execution must start in the same directory.
         shell_context.working_directory = working_directory.to_path_buf();
-        let prompt = presenter::terminal_prompt_ansi(working_directory);
+        let prompt = presenter::terminal_prompt_ansi(working_directory, None);
         let (session, program) = BuiltinTerminalProgram::connect(INITIAL_TERMINAL_SIZE, prompt)?;
         (
           session,

@@ -502,6 +502,34 @@ impl DocumentPanelContent {
 }
 
 impl DocumentPanelState {
+  /// Lists molecular tabs, including inactive tabs, in workbench order.
+  pub(crate) fn rendering_panels(&self) -> Vec<chitin_builtin_shell::RenderingPanel> {
+    self
+      .tree
+      .tabs_in_order()
+      .into_iter()
+      .filter_map(|(panel, tab)| {
+        let tab = self.tree.find_tab(panel, tab)?;
+        tab.payload.representation_layers()?;
+        Some(chitin_builtin_shell::RenderingPanel::new(
+          tab.id.value(),
+          tab.title.to_string(),
+        ))
+      })
+      .collect()
+  }
+
+  /// Finds the current dock leaf for a stable molecular tab identifier.
+  pub(crate) fn rendering_panel_location(&self, id: u64) -> Option<(PanelId, PanelTabId)> {
+    self.tree.tabs_in_order().into_iter().find(|&(panel, tab)| {
+      tab.value() == id
+        && self
+          .tree
+          .find_tab(panel, tab)
+          .is_some_and(|tab| tab.payload.representation_layers().is_some())
+    })
+  }
+
   /// Creates empty document panel state with one root panel.
   pub(crate) fn empty() -> Self {
     Self {

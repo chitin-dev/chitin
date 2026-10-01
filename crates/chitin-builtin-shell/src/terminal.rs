@@ -107,6 +107,19 @@ impl BuiltinTerminalProgram {
     self.redraw_line()
   }
 
+  /// Updates prompt context, preserving input and deferring display during execution.
+  pub fn set_prompt(&mut self, prompt: impl Into<String>) -> Result<(), TerminalSessionError> {
+    let prompt = prompt.into();
+    if self.prompt == prompt {
+      return Ok(());
+    }
+    self.prompt = prompt;
+    if !self.waiting_for_command {
+      self.redraw_line()?;
+    }
+    Ok(())
+  }
+
   /// Clears the VT screen and displays a fresh prompt.
   pub fn clear_screen(&mut self) -> Result<(), TerminalSessionError> {
     self.line.clear();
@@ -237,6 +250,32 @@ impl BuiltinTerminalProgram {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn changing_prompt_should_preserve_the_editable_command() -> Result<(), TerminalSessionError> {
+    let (session, mut program) = connected_program();
+    session.write(b"panel li")?;
+    program.poll()?;
+    program.set_prompt("chitin [panel #2 4HHB.cif] ❯ ")?;
+    assert_eq!(program.line(), "panel li");
+    let text: String = session.snapshot().cells.iter().map(|cell| cell.character).collect();
+    assert!(text.contains("[panel #2 4HHB.cif] ❯ panel li"));
+    Ok(())
+  }
+
+  #[test]
+  fn changing_prompt_during_execution_should_wait_for_completion() -> Result<(), TerminalSessionError> {
+    let (session, mut program) = connected_program();
+    session.write(b"panel enter 2\r")?;
+    program.poll()?;
+    program.set_prompt("chitin [panel #2 4HHB.cif] ❯ ")?;
+    let before: String = session.snapshot().cells.iter().map(|cell| cell.character).collect();
+    assert!(!before.contains("[panel #2"));
+    program.finish_command("Entered rendering panel #2")?;
+    let after: String = session.snapshot().cells.iter().map(|cell| cell.character).collect();
+    assert!(after.contains("[panel #2 4HHB.cif] ❯"));
+    Ok(())
+  }
 
   fn connected_program() -> (TerminalSession, BuiltinTerminalProgram) {
     let result = BuiltinTerminalProgram::connect(TerminalSize::new(80, 24, 8, 16), "chitin ❯ ");

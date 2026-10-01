@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use chitin_builtin_shell::{BuiltinShellSnapshot, ShellCommandId, ShellTranscriptContent};
+use chitin_builtin_shell::{BuiltinShellSnapshot, RenderingPanel, ShellCommandId, ShellTranscriptContent};
 use chitin_command::{
   CommandMessageLevel, CommandOutcome, CommandOutputTone, CommandReportStatus, render_outcome as render_command_outcome,
 };
@@ -10,10 +10,17 @@ use chitin_terminal::TerminalBlockStatus;
 use chitin_ui::views::terminal::{TerminalLine, TerminalSpan, TerminalTone};
 
 /// Builds an ANSI-colored prompt for the in-process terminal program.
-pub(super) fn terminal_prompt_ansi(working_directory: &Path) -> String {
+pub(super) fn terminal_prompt_ansi(working_directory: &Path, panel: Option<&RenderingPanel>) -> String {
+  let context = panel.map_or_else(String::new, |panel| {
+    format!(
+      " \x1b[35m[panel #{} {}]\x1b[0m",
+      panel.id(),
+      crate::commands::terminal_label(panel.title())
+    )
+  });
   format!(
-    "\x1b[38;2;0;145;220mchitin\x1b[0m \x1b[90m{}\x1b[0m \x1b[38;2;0;145;220m❯\x1b[0m ",
-    working_directory.display(),
+    "\x1b[38;2;0;145;220mchitin\x1b[0m \x1b[90m{}\x1b[0m{context} \x1b[38;2;0;145;220m❯\x1b[0m ",
+    crate::commands::terminal_label(&working_directory.to_string_lossy()),
   )
 }
 
@@ -136,6 +143,22 @@ fn tone_ansi(tone: TerminalTone) -> &'static str {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn prompt_should_show_selected_rendering_identity_and_title() {
+    let panel = RenderingPanel::new(7, "4HHB.cif");
+    let prompt = terminal_prompt_ansi(Path::new("."), Some(&panel));
+    assert!(prompt.contains("[panel #7 4HHB.cif]"));
+    assert!(!terminal_prompt_ansi(Path::new("."), None).contains("[panel"));
+  }
+
+  #[test]
+  fn prompt_metadata_should_not_inject_terminal_control_sequences() {
+    let panel = RenderingPanel::new(7, "file\x1b[2J\n.cif");
+    let prompt = terminal_prompt_ansi(Path::new("."), Some(&panel));
+    assert!(!prompt.contains("\x1b[2J"));
+    assert!(!prompt.contains('\n'));
+  }
 
   #[test]
   fn terminal_adapter_should_preserve_shared_report_text() {

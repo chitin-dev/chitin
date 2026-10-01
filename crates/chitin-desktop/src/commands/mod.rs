@@ -2,3 +2,5 @@
 
 pub mod portable;
 pub mod shell_host;
+mod shell_panels;
+pub(crate) use shell_panels::terminal_label;

@@ -408,6 +408,7 @@ impl Render for ChitinApp {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
     let theme = gpui_kit::component::Theme::global(cx).colors;
     let workbench_style = WorkbenchStyle::new(theme);
+    self.sync_shell_rendering_panels();
     let document_options_controls = self.document_options_controls(window, cx);
     let toast_viewport = self.toast_viewport(cx);
     let command_palette = self.command_panel.palette(window, cx);

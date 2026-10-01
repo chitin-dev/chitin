@@ -9,6 +9,8 @@ use chitin_command::{
 };
 use clap::{ColorChoice, CommandFactory, Parser, Subcommand, error::ErrorKind};
 
+use crate::RenderingPanelCommand;
+
 /// Result of parsing one built-in shell line.
 #[derive(Debug)]
 pub enum BuiltinCommandLine {
@@ -27,6 +29,8 @@ pub enum BuiltinCommandLine {
 pub enum ShellBuiltin {
   /// Clear visible scrollback without changing command history.
   Clear,
+  /// Navigate the host's rendering views within this shell session.
+  RenderingPanel(RenderingPanelCommand),
 }
 
 /// Failure while tokenizing or parsing built-in shell text.
@@ -81,6 +85,25 @@ enum BuiltinShellCommandArgs {
   Portable(PortableCommandArgs),
   /// Clear visible terminal scrollback.
   Clear,
+  /// List and enter open protein rendering views.
+  Panel {
+    #[command(subcommand)]
+    command: RenderingPanelArgs,
+  },
+}
+
+#[derive(Debug, Subcommand)]
+enum RenderingPanelArgs {
+  /// List open protein rendering views and their stable identifiers.
+  List,
+  /// Select a rendering view as this shell's operation context.
+  Enter {
+    /// Stable identifier shown by `panel list`.
+    #[arg(value_parser = clap::value_parser!(u64).range(1..))]
+    id: u64,
+  },
+  /// Leave the rendering context without closing the view.
+  Leave,
 }
 
 impl BuiltinShellCommandArgs {
@@ -89,6 +112,11 @@ impl BuiltinShellCommandArgs {
     let line = match self {
       Self::Portable(arguments) => BuiltinCommandLine::Portable(arguments.into_command()?),
       Self::Clear => BuiltinCommandLine::ShellBuiltin(ShellBuiltin::Clear),
+      Self::Panel { command } => BuiltinCommandLine::ShellBuiltin(ShellBuiltin::RenderingPanel(match command {
+        RenderingPanelArgs::List => RenderingPanelCommand::List,
+        RenderingPanelArgs::Enter { id } => RenderingPanelCommand::Enter { id },
+        RenderingPanelArgs::Leave => RenderingPanelCommand::Leave,
+      })),
     };
     Ok(line)
   }
@@ -363,6 +391,36 @@ mod tests {
   use chitin_databases::providers::rcsb::StructureFormat;
 
   use super::*;
+
+  #[test]
+  fn rendering_navigation_should_parse_as_session_commands() -> Result<(), CommandLineParseError> {
+    for (input, expected) in [
+      ("panel list", RenderingPanelCommand::List),
+      ("panel enter 42", RenderingPanelCommand::Enter { id: 42 }),
+      ("panel leave", RenderingPanelCommand::Leave),
+    ] {
+      assert!(matches!(parse_builtin_command_line(input)?,
+        BuiltinCommandLine::ShellBuiltin(ShellBuiltin::RenderingPanel(command)) if command == expected));
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn rendering_navigation_should_reject_invalid_identifiers() {
+    for input in ["panel enter", "panel enter 0", "panel enter -1", "panel enter protein"] {
+      assert!(parse_builtin_command_line(input).is_err(), "{input}");
+    }
+  }
+
+  #[test]
+  fn panel_help_and_completion_should_come_from_the_shell_grammar() -> Result<(), CommandLineParseError> {
+    assert!(
+      matches!(parse_builtin_command_line("panel")?, BuiltinCommandLine::Display(help)
+      if help.contains("list") && help.contains("enter") && help.contains("leave"))
+    );
+    assert_eq!(complete_builtin_shell_line("panel e"), vec!["panel enter"]);
+    Ok(())
+  }
 
   #[test]
   fn database_download_should_use_cli_defaults_and_short_options() -> Result<(), CommandLineParseError> {
