@@ -353,11 +353,6 @@ impl WgpuPanelScene for SesDebugScene {
       slice_fraction,
     )
   }
-
-  /// Returns the mouse and keyboard interaction hint for this example.
-  fn interaction_hint(&self) -> &'static str {
-    "SES debug | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-  }
 }
 
 /// GPUI view combining the WGPU viewport and stage navigation controls.

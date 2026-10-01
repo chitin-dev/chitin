@@ -18,9 +18,6 @@ use gpui_kit::component::{ElementExt, Theme};
 
 /// Default fps info postfix used in wgpu panel
 pub(crate) const DEFAULT_FPS_POSTFIX: &str = "fps";
-/// Default interaction hint showed at the bottom-right corner of wgpu panel
-pub(crate) const DEFAULT_INTERACTION_HINT: &str =
-  "L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom | Double-click reset";
 /// Default unavailable message show when wgpu backend is not supported
 pub(crate) const DEFAULT_UNAVAILABLE_MESSAGE: &str = "WGPU surface is not supported by this GPUI backend";
 
@@ -54,11 +51,6 @@ pub trait WgpuPanelScene {
   ///
   /// The queue submission index used by the panel for synchronized presentation.
   fn render_frame(&mut self, frame: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex;
-
-  /// Returns the viewport interaction hint displayed by the panel overlay.
-  fn interaction_hint(&self) -> &'static str {
-    DEFAULT_INTERACTION_HINT
-  }
 
   /// Applies molecule representation layers when the hosted scene is molecular.
   fn set_representation_layers(&mut self, _representation: RepresentationLayers) -> bool {

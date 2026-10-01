@@ -112,24 +112,6 @@ impl WgpuPanelScene for StructureMoleculeScene {
     )
   }
 
-  /// Returns the interaction hint displayed over a molecular viewport.
-  fn interaction_hint(&self) -> &'static str {
-    match (self.representation.atom_style(), self.representation.polymer_style()) {
-      (Some(AtomStyle::Stick), None) => "Atom style: Stick | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom",
-      (Some(AtomStyle::BallAndStick), None) => {
-        "Atom style: Ball and stick | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-      }
-      (Some(AtomStyle::Sphere), None) => "Atom style: Sphere | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom",
-      (Some(AtomStyle::Stick), Some(PolymerStyle::Cartoon)) => {
-        "Molecule representations: Stick + Cartoon | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-      }
-      (_, Some(PolymerStyle::Cartoon)) => {
-        "Molecule representation includes Cartoon | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-      }
-      (None, None) => "No molecule representation | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom",
-    }
-  }
-
   fn set_representation_layers(&mut self, representation: RepresentationLayers) -> bool {
     if self.representation == representation {
       return false;

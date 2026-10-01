@@ -257,11 +257,6 @@ impl WgpuPanelScene for MsmsDebugScene {
       frame.camera.projection_matrix(renderer.aspect()),
     )
   }
-
-  /// Returns the interaction hint rendered by the reusable WGPU panel.
-  fn interaction_hint(&self) -> &'static str {
-    "MSMS debug | L-drag rotate | Shift-L/M-drag pan | R-drag/wheel zoom"
-  }
 }
 
 /// Interactive viewport with previous/next construction-stage controls.
