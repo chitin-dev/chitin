@@ -1,8 +1,8 @@
-name: Nightly release build
+name: Weekly release build
 
 on:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "0 2 * * 0"
   workflow_dispatch:
   push:
     branches:
@@ -101,14 +101,14 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Publish nightly prerelease
+    name: Publish weekly prerelease
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     concurrency:
-      group: nightly-release
+      group: weekly-release
       cancel-in-progress: false
 
     steps:
@@ -124,20 +124,20 @@ jobs:
           merge-multiple: true
           path: release
 
-      - name: Update nightly tag
+      - name: Update weekly tag
         run: |
-          git tag --force nightly "$GITHUB_SHA"
-          git push origin --force refs/tags/nightly
+          git tag --force weekly "$GITHUB_SHA"
+          git push origin --force refs/tags/weekly
 
-      - name: Publish prerelease
+      - name: Publish weekly prerelease
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: nightly
-          name: Nightly build
+          tag_name: weekly
+          name: Weekly build
           prerelease: true
           make_latest: false
           body: |
-            Automated nightly build for commit ${{ github.sha }}.
+            Automated weekly build for commit ${{ github.sha }}.
           files: |
             release/chitin-linux-x86_64.tar.gz
             release/chitin-linux-x86_64.sha256
