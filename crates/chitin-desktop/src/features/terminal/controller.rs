@@ -135,7 +135,7 @@ impl ChitinApp {
       Ok(DesktopShellDispatch::ShellBuiltin {
         effect: ShellBuiltinEffect::ClearScrollback,
       }) => self.clear_terminal_screen(session_id),
-      Ok(DesktopShellDispatch::Frontend { .. }) => self.finish_terminal_command(session_id, ""),
+      Ok(DesktopShellDispatch::Frontend { output, .. }) => self.finish_terminal_command(session_id, &output),
       Ok(DesktopShellDispatch::ShellBuiltin { effect }) => {
         self.finish_terminal_command(
           session_id,

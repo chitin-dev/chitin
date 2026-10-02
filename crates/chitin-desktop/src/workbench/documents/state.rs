@@ -759,14 +759,28 @@ impl DocumentPanelState {
     self.active_tab_payload(panel_id)?.representation_layers()
   }
 
-  /// Changes the active molecular representation layers and returns its view callback.
+  /// Reads presentation state from a stable rendering tab, including inactive tabs.
+  pub(crate) fn rendering_settings(
+    &self,
+    id: u64,
+  ) -> Option<(String, RepresentationLayers, Option<MolecularSurfaceBackend>)> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    let tab = self.tree.leaf(panel)?.tabs.iter().find(|entry| entry.id == tab)?;
+    Some((
+      tab.title.to_string(),
+      tab.payload.representation_layers()?,
+      tab.payload.surface_backend(),
+    ))
+  }
+
+  /// Changes a stable molecular tab's layers and returns its view callback.
   pub(crate) fn select_representation_layers(
     &mut self,
-    panel_id: PanelId,
+    id: u64,
     representation: RepresentationLayers,
   ) -> Option<Rc<RepresentationLayersChangeHandler>> {
+    let (panel_id, active_tab_id) = self.rendering_panel_location(id)?;
     let leaf = self.tree.leaf_mut(panel_id)?;
-    let active_tab_id = leaf.active_tab?;
     let content = leaf
       .tabs
       .iter_mut()
@@ -775,14 +789,14 @@ impl DocumentPanelState {
     content.select_representation_layers(representation)
   }
 
-  /// Changes the active molecular-surface backend and returns its view callback.
+  /// Changes a stable molecular tab's backend and returns its view callback.
   pub(crate) fn select_surface_backend(
     &mut self,
-    panel_id: PanelId,
+    id: u64,
     backend: MolecularSurfaceBackend,
   ) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    let (panel_id, active_tab_id) = self.rendering_panel_location(id)?;
     let leaf = self.tree.leaf_mut(panel_id)?;
-    let active_tab_id = leaf.active_tab?;
     let content = leaf
       .tabs
       .iter_mut()

@@ -177,7 +177,7 @@ pub enum DesktopShellDispatch {
   /// The shell session synchronously produced a presentation effect.
   ShellBuiltin { effect: ShellBuiltinEffect },
   /// The command mutated desktop state synchronously.
-  Frontend { command_id: ShellCommandId },
+  Frontend { command_id: ShellCommandId, output: String },
   /// The command is running through the shared background executor.
   Portable(DesktopShellTask),
 }
@@ -185,6 +185,8 @@ pub enum DesktopShellDispatch {
 /// Failure while preparing or executing a desktop-hosted shell command.
 #[derive(Debug, thiserror::Error)]
 pub enum DesktopShellHostError {
+  #[error(transparent)]
+  Render(#[from] super::render::RenderCommandError),
   /// The frontend-independent shell rejected the request or execution.
   #[error(transparent)]
   Shell(#[from] BuiltinShellError),
@@ -321,12 +323,26 @@ impl ChitinApp {
           };
           self.document_panels.activate_tab(leaf, tab);
         }
-        self.dispatch_command_with_window(command.clone(), window, cx);
+        let output = if let FrontendCommand::Render(command) = command {
+          match self.dispatch_render_command(submission.rendering_panel().map(|panel| panel.id()), *command, cx) {
+            Ok(output) => output,
+            Err(error) => {
+              if matches!(error, super::render::RenderCommandError::Unavailable { .. }) {
+                host.session().set_rendering_panel(None)?;
+              }
+              host.fail_frontend(command_id, error.to_string())?;
+              return Err(error.into());
+            }
+          }
+        } else {
+          self.dispatch_command_with_window(command.clone(), window, cx);
+          String::new()
+        };
         host
           .session()
           .reconcile_rendering_panel(&self.document_panels.rendering_panels())?;
         host.complete_frontend(command_id)?;
-        Ok(DesktopShellDispatch::Frontend { command_id })
+        Ok(DesktopShellDispatch::Frontend { command_id, output })
       }
       ShellCommandTarget::Portable => {
         let running = host.submit_portable(submission, &self.tasks, &self.portable_commands)?;

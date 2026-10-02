@@ -52,8 +52,7 @@ pub enum CommandLineParseError {
   Grammar(String),
   /// A frontend grammar branch has no argument-free command to invoke.
   ///
-  /// This is unreachable while every frontend branch stays argument-free; it
-  /// exists so the conversion reports a typed failure instead of panicking.
+  /// Parameterized commands must use their composed grammar branch instead.
   #[error("command '{command}' has no argument-free frontend form")]
   MissingFrontendCommand {
     /// Stable identity of the frontend command without an invocation form.
@@ -85,6 +84,11 @@ enum BuiltinShellCommandArgs {
   Portable(PortableCommandArgs),
   /// Clear visible terminal scrollback.
   Clear,
+  /// Inspect or change presentation in the selected panel context.
+  Render {
+    #[command(subcommand)]
+    command: crate::render::RenderArgs,
+  },
   /// List and enter open protein rendering views.
   Panel {
     #[command(subcommand)]
@@ -112,6 +116,7 @@ impl BuiltinShellCommandArgs {
     let line = match self {
       Self::Portable(arguments) => BuiltinCommandLine::Portable(arguments.into_command()?),
       Self::Clear => BuiltinCommandLine::ShellBuiltin(ShellBuiltin::Clear),
+      Self::Render { command } => BuiltinCommandLine::Frontend(command.into_command().into()),
       Self::Panel { command } => BuiltinCommandLine::ShellBuiltin(ShellBuiltin::RenderingPanel(match command {
         RenderingPanelArgs::List => RenderingPanelCommand::List,
         RenderingPanelArgs::Enter { id } => RenderingPanelCommand::Enter { id },
@@ -186,6 +191,7 @@ pub fn complete_builtin_shell_line(input: &str) -> Vec<String> {
   let mut root = BuiltinShellGrammar::command();
   root.build();
   let mut command = &root;
+  let mut positional_count = 0;
   for token in &tokens {
     if token.starts_with('-') {
       continue;
@@ -194,6 +200,9 @@ pub fn complete_builtin_shell_line(input: &str) -> Vec<String> {
       subcommand.get_name() == token || subcommand.get_all_aliases().any(|alias| alias == token.as_str())
     }) {
       command = subcommand;
+      positional_count = 0;
+    } else {
+      positional_count += 1;
     }
   }
 
@@ -213,6 +222,14 @@ pub fn complete_builtin_shell_line(input: &str) -> Vec<String> {
       command
         .get_arguments()
         .filter_map(|argument| argument.get_short().map(|short| format!("-{short}"))),
+    )
+    .chain(
+      command
+        .get_positionals()
+        .nth(positional_count)
+        .into_iter()
+        .flat_map(|argument| argument.get_possible_values())
+        .map(|value| value.get_name().to_owned()),
     )
     .chain(
       tokens
@@ -393,6 +410,80 @@ mod tests {
   use super::*;
 
   #[test]
+  fn render_requests_should_be_typed_frontend_commands() -> Result<(), CommandLineParseError> {
+    use chitin_command::{
+      RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle,
+    };
+    for (input, expected) in [
+      ("render status", RenderCommand::Status),
+      (
+        "render atom style stick",
+        RenderCommand::AtomStyle(RenderAtomStyle::Stick),
+      ),
+      (
+        "render atom style sphere",
+        RenderCommand::AtomStyle(RenderAtomStyle::Sphere),
+      ),
+      (
+        "render atom style none",
+        RenderCommand::AtomStyle(RenderAtomStyle::None),
+      ),
+      (
+        "render atom style ball-and-stick",
+        RenderCommand::AtomStyle(RenderAtomStyle::BallAndStick),
+      ),
+      (
+        "render surface backend msms",
+        RenderCommand::SurfaceBackend(RenderSurfaceBackend::Msms),
+      ),
+      (
+        "render polymer style none",
+        RenderCommand::PolymerStyle(RenderPolymerStyle::None),
+      ),
+      (
+        "render polymer style cartoon",
+        RenderCommand::PolymerStyle(RenderPolymerStyle::Cartoon),
+      ),
+      (
+        "render surface style none",
+        RenderCommand::SurfaceStyle(RenderSurfaceStyle::None),
+      ),
+      (
+        "render surface style solid",
+        RenderCommand::SurfaceStyle(RenderSurfaceStyle::Solid),
+      ),
+      (
+        "render surface backend implicit-scalar-field",
+        RenderCommand::SurfaceBackend(RenderSurfaceBackend::ImplicitScalarField),
+      ),
+    ] {
+      assert!(
+        matches!(parse_builtin_command_line(input)?, BuiltinCommandLine::Frontend(FrontendCommand::Render(command)) if command == expected)
+      );
+    }
+    assert!(parse_builtin_command_line("render atom style invalid").is_err());
+    Ok(())
+  }
+
+  #[test]
+  fn render_help_and_value_completion_should_follow_clap() -> Result<(), CommandLineParseError> {
+    for input in ["render", "render atom", "render surface"] {
+      assert!(
+        matches!(parse_builtin_command_line(input)?, BuiltinCommandLine::Display(help) if help.contains("Usage:"))
+      );
+    }
+    assert_eq!(
+      complete_builtin_shell_line("render surface backend m"),
+      vec!["render surface backend msms"]
+    );
+    assert_eq!(
+      complete_builtin_shell_line("render atom style s"),
+      vec!["render atom style sphere", "render atom style stick"]
+    );
+    Ok(())
+  }
+
+  #[test]
   fn rendering_navigation_should_parse_as_session_commands() -> Result<(), CommandLineParseError> {
     for (input, expected) in [
       ("panel list", RenderingPanelCommand::List),
@@ -563,7 +654,7 @@ mod tests {
 
   #[test]
   fn frontend_catalog_names_should_round_trip_through_the_shell() -> Result<(), CommandLineParseError> {
-    for spec in frontend_specs() {
+    for spec in frontend_specs().filter(|spec| !spec.requires_arguments) {
       let parsed = parse_builtin_command_line(spec.name)?;
       assert!(matches!(parsed, BuiltinCommandLine::Frontend(command) if command.id() == spec.id));
     }

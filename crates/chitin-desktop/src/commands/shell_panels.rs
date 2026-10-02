@@ -163,6 +163,24 @@ mod tests {
           Some((second, tab))
         );
         app.document_panels.focused_panel_id = root;
+        let result = app.submit_shell_line_with_host(
+          &host,
+          "render atom style sphere",
+          ShellInvocationSource::Interactive,
+          window,
+          cx,
+        );
+        assert!(result.is_ok());
+        assert_eq!(
+          app.document_panels.focused_panel_id, root,
+          "render requests must not steal UI focus"
+        );
+        assert!(
+          app
+            .document_panels
+            .rendering_settings(target.id())
+            .is_some_and(|(_, layers, _)| layers.atom_style() == Some(chitin_molecule_renderer::AtomStyle::Sphere))
+        );
         assert!(
           app
             .submit_shell_line_with_host(&host, "tab.close", ShellInvocationSource::Interactive, window, cx)
@@ -170,6 +188,18 @@ mod tests {
         );
         assert!(app.document_panels.rendering_panel_location(target.id()).is_none());
         assert_eq!(host.session().rendering_panel().ok().flatten(), None);
+        host.session().set_rendering_panel(Some(target.clone())).ok();
+        assert!(
+          app
+            .submit_shell_line_with_host(&host, "render status", ShellInvocationSource::Interactive, window, cx)
+            .is_err()
+        );
+        assert!(
+          host
+            .session()
+            .snapshot()
+            .is_ok_and(|snapshot| snapshot.active.is_none())
+        );
         let snapshot = host.session().snapshot();
         assert!(snapshot.is_ok_and(|snapshot| {
           snapshot

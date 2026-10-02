@@ -4,7 +4,8 @@ use std::{cell::Cell, rc::Rc};
 
 use crate::{app::ChitinApp, workbench::documents::layout::PanelId};
 use chitin_bio::surface::MolecularSurfaceBackend;
-use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers, SurfaceStyle};
+use chitin_command::{RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle};
+use chitin_molecule_renderer::{AtomStyle, RepresentationLayers};
 use chitin_ui::widgets::{
   grouped_select::{GroupedSelect, GroupedSelectGroup},
   select_item::IconSelectItem,
@@ -74,7 +75,7 @@ struct DocumentOptionsMenu {
 #[derive(Clone)]
 pub(crate) struct DocumentOptionsControls {
   /// Retains command targeting when dismissal precedes a deferred confirmation.
-  target_panel: Rc<Cell<Option<PanelId>>>,
+  target_panel: Rc<Cell<Option<u64>>>,
   /// Single-selection state for atom-layer styles.
   atom: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Single-selection state for polymer-layer styles.
@@ -184,8 +185,8 @@ impl DocumentOptionsControls {
     }
   }
 
-  /// Binds the selectors to the panel opening the options menu.
-  pub(crate) fn bind_panel(&self, panel_id: PanelId) {
+  /// Binds selectors to the stable rendering tab opening the menu.
+  pub(crate) fn bind_panel(&self, panel_id: u64) {
     self.target_panel.set(Some(panel_id));
   }
 
@@ -205,18 +206,14 @@ impl DocumentOptionsControls {
       let Some(panel_id) = target_panel.get() else {
         return;
       };
-      let representation = app
-        .document_panels
-        .active_representation_layers(panel_id)
-        .unwrap_or_else(RepresentationLayers::empty);
-      let representation = match selected_id.as_deref() {
-        Some("none") => representation.without_atom(),
-        Some("stick") => representation.with_atom(AtomStyle::Stick),
-        Some("ball-and-stick") => representation.with_atom(AtomStyle::BallAndStick),
-        Some("sphere") => representation.with_atom(AtomStyle::Sphere),
+      let style = match selected_id.as_deref() {
+        Some("none") => RenderAtomStyle::None,
+        Some("stick") => RenderAtomStyle::Stick,
+        Some("ball-and-stick") => RenderAtomStyle::BallAndStick,
+        Some("sphere") => RenderAtomStyle::Sphere,
         _ => return,
       };
-      app.select_document_representation_layers(panel_id, representation, cx);
+      submit_menu_command(app, panel_id, RenderCommand::AtomStyle(style), cx);
       cx.notify();
     });
     subscription.detach();
@@ -227,15 +224,12 @@ impl DocumentOptionsControls {
       let Some(panel_id) = target_panel.get() else {
         return;
       };
-      let Some(representation) = app.document_panels.active_representation_layers(panel_id) else {
-        return;
-      };
-      let representation = match selected_id.as_deref() {
-        Some("none") => representation.without_polymer(),
-        Some("cartoon") => representation.with_polymer(PolymerStyle::Cartoon),
+      let style = match selected_id.as_deref() {
+        Some("none") => RenderPolymerStyle::None,
+        Some("cartoon") => RenderPolymerStyle::Cartoon,
         _ => return,
       };
-      app.select_document_representation_layers(panel_id, representation, cx);
+      submit_menu_command(app, panel_id, RenderCommand::PolymerStyle(style), cx);
       cx.notify();
     });
     subscription.detach();
@@ -246,15 +240,12 @@ impl DocumentOptionsControls {
       let Some(panel_id) = target_panel.get() else {
         return;
       };
-      let Some(representation) = app.document_panels.active_representation_layers(panel_id) else {
-        return;
-      };
-      let representation = match selected_id.as_deref() {
-        Some("none") => representation.without_surface(),
-        Some("solid") => representation.with_surface(SurfaceStyle::Solid),
+      let style = match selected_id.as_deref() {
+        Some("none") => RenderSurfaceStyle::None,
+        Some("solid") => RenderSurfaceStyle::Solid,
         _ => return,
       };
-      app.select_document_representation_layers(panel_id, representation, cx);
+      submit_menu_command(app, panel_id, RenderCommand::SurfaceStyle(style), cx);
       cx.notify();
     });
     subscription.detach();
@@ -266,17 +257,22 @@ impl DocumentOptionsControls {
         return;
       };
       let backend = match selected_id.as_deref() {
-        Some("implicit-scalar-field") => MolecularSurfaceBackend::ImplicitScalarField,
-        Some("msms") => MolecularSurfaceBackend::Msms,
+        Some("implicit-scalar-field") => RenderSurfaceBackend::ImplicitScalarField,
+        Some("msms") => RenderSurfaceBackend::Msms,
         _ => return,
       };
-      if app.select_document_surface_backend(panel_id, backend, cx) {
-        app.dismiss_document_options_menu();
-        cx.notify();
-      }
+      submit_menu_command(app, panel_id, RenderCommand::SurfaceBackend(backend), cx);
     });
     subscription.detach();
   }
+}
+
+fn submit_menu_command(app: &mut ChitinApp, target: u64, command: RenderCommand, cx: &mut Context<ChitinApp>) {
+  if let Err(error) = app.dispatch_render_command(Some(target), command, cx) {
+    log::error!("{error}");
+  }
+  app.dismiss_document_options_menu();
+  cx.notify();
 }
 
 /// Composes GPUI Kit's popover with the molecular document controls.
@@ -458,5 +454,78 @@ mod tests {
     });
     cx.run_until_parked();
     assert_eq!(selected_backend.get(), MolecularSurfaceBackend::Msms);
+  }
+
+  #[gpui::test]
+  fn menu_and_shell_share_targeted_render_updates_and_preserve_layers(cx: &mut gpui::TestAppContext) {
+    use crate::commands::shell_host::{DesktopShellDispatch, DesktopShellHost};
+    use chitin_builtin_shell::ShellInvocationSource;
+    use chitin_molecule_renderer::PolymerStyle;
+
+    cx.update(gpui_kit::init);
+    let updates = Rc::new(Cell::new(0));
+    let (app, cx) = cx.add_window_view({
+      let updates = updates.clone();
+      move |_, cx| {
+        let view = WgpuDocumentView::with_representation_layers(
+          cx.new(|_| SurfaceProbe),
+          RepresentationLayers::atom(AtomStyle::Stick).with_polymer(PolymerStyle::Cartoon),
+          move |_, _| updates.set(updates.get() + 1),
+        )
+        .with_surface_backend(MolecularSurfaceBackend::ImplicitScalarField, |_, _| {});
+        ChitinApp::new_with_wgpu_document_panel(
+          None,
+          cx.focus_handle(),
+          "probe",
+          view,
+          WgpuDocumentViewFactory::new(|_, cx| WgpuDocumentView::new(cx.new(|_| SurfaceProbe))),
+        )
+      }
+    });
+    cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        let host = DesktopShellHost::new(chitin_command::CommandExecutionContext::new("."));
+        let source = ShellInvocationSource::Interactive;
+        assert!(
+          app
+            .submit_shell_line_with_host(&host, "render status", source.clone(), window, cx)
+            .is_err()
+        );
+        assert!(
+          host
+            .session()
+            .snapshot()
+            .is_ok_and(|snapshot| snapshot.active.is_none())
+        );
+        assert!(
+          app
+            .submit_shell_line_with_host(&host, "panel enter 1", source.clone(), window, cx)
+            .is_ok()
+        );
+        let controls = DocumentOptionsControls::new(window, cx);
+        controls.subscribe(window, cx);
+        app.document_options_controls = Some(controls.clone());
+        assert!(app.toggle_document_options_menu(app.document_panels.focused_panel_id));
+        controls
+          .atom
+          .update(cx, |_, cx| cx.emit(SelectEvent::Confirm(Some("sphere".into()))));
+      });
+    });
+    cx.run_until_parked();
+    assert_eq!(updates.get(), 1);
+    cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        let host = DesktopShellHost::new(chitin_command::CommandExecutionContext::new("."));
+        let source = ShellInvocationSource::Interactive;
+        assert!(app.submit_shell_line_with_host(&host, "panel enter 1", source.clone(), window, cx).is_ok());
+        let result = app.submit_shell_line_with_host(&host, "render status", source.clone(), window, cx);
+        assert!(matches!(result, Ok(DesktopShellDispatch::Frontend { output, .. }) if output.contains("Atom style: sphere") && output.contains("Polymer style: cartoon")));
+        assert!(app.submit_shell_line_with_host(&host, "render atom style sphere", source.clone(), window, cx).is_ok());
+        assert_eq!(updates.get(), 1, "unchanged settings do not rebuild the renderer");
+        assert!(app.submit_shell_line_with_host(&host, "render surface backend msms", source.clone(), window, cx).is_ok());
+        let result = app.submit_shell_line_with_host(&host, "render status", source, window, cx);
+        assert!(matches!(result, Ok(DesktopShellDispatch::Frontend { output, .. }) if output.contains("Surface style: none") && output.contains("Surface backend: msms")));
+      });
+    });
   }
 }

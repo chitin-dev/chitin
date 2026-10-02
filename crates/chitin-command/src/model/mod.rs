@@ -4,6 +4,7 @@ mod application;
 mod catalog;
 mod database;
 mod panel_tab;
+mod render;
 mod structure;
 mod workspace;
 
@@ -11,6 +12,7 @@ pub use application::ApplicationCommand;
 pub use catalog::*;
 pub use database::{DatabaseCommand, RcsbDownloadArguments};
 pub use panel_tab::PanelTabCommand;
+pub use render::{RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle};
 pub use structure::{
   CommandOutputFormat, StructureCommand, StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };
@@ -42,6 +44,8 @@ pub enum FrontendCommand {
   Workspace(WorkspaceCommand),
   /// Application-shell commands.
   Application(ApplicationCommand),
+  /// Molecular presentation commands requiring an explicit rendering target.
+  Render(RenderCommand),
 }
 
 impl FrontendCommand {
@@ -50,6 +54,7 @@ impl FrontendCommand {
     match self {
       Self::Workspace(command) => command.id(),
       Self::Application(command) => command.id(),
+      Self::Render(command) => command.id(),
     }
   }
 }
@@ -81,6 +86,18 @@ impl ChitinCommand {
 impl From<WorkspaceCommand> for FrontendCommand {
   fn from(command: WorkspaceCommand) -> Self {
     Self::Workspace(command)
+  }
+}
+
+impl From<RenderCommand> for FrontendCommand {
+  fn from(command: RenderCommand) -> Self {
+    Self::Render(command)
+  }
+}
+
+impl From<RenderCommand> for ChitinCommand {
+  fn from(command: RenderCommand) -> Self {
+    FrontendCommand::from(command).into()
   }
 }
 

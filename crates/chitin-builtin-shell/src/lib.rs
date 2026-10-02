@@ -14,6 +14,7 @@
 mod event;
 mod grammar;
 mod panel;
+mod render;
 mod session;
 mod terminal;
 
