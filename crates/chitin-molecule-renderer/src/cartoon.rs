@@ -47,6 +47,7 @@ pub(crate) struct CartoonMesh {
   pub(crate) vertices: Vec<[f32; 9]>,
   /// Triangle-list indices into `vertices`.
   pub(crate) indices: Vec<u32>,
+  pub(crate) chains: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -140,6 +141,7 @@ fn append_trace_mesh(mesh: &mut CartoonMesh, trace: &PolymerTrace, color: [f32; 
         section.color[1],
         section.color[2],
       ]);
+      mesh.chains.push(trace.chain_id.index());
     }
   }
 

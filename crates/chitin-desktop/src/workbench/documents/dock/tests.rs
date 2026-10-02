@@ -308,6 +308,79 @@ fn two_documents() -> DocumentPanelState {
 }
 
 #[gpui::test]
+fn appearance_changes_do_not_remount_dock_groups_or_close_the_options_menu(cx: &mut gpui::TestAppContext) {
+  use chitin_command::{RenderCommand, RenderLayer, RenderOpacity};
+  use chitin_molecule_renderer::{AtomStyle, RepresentationLayers};
+
+  let measured = Rc::new(Cell::new(Size::default()));
+  let view = cx.new(|_| ViewportLayoutProbe(measured.clone()));
+  let content = DocumentPanelContent::wgpu_interactive(
+    None,
+    "Appearance probe",
+    WgpuDocumentView::with_representation_layers(view, RepresentationLayers::atom(AtomStyle::Stick), |_, _| {}),
+    WgpuDocumentViewFactory::new(move |_, cx| WgpuDocumentView::new(cx.new(|_| ViewportLayoutProbe(measured.clone())))),
+  );
+  let (app, cx) = mount(DocumentPanelState::with_content(content), cx);
+  cx.update(|_, cx| {
+    app.update(cx, |app, cx| {
+      app.toggle_document_options_menu(DEFAULT_DOCUMENT_PANEL_ID);
+      cx.notify();
+    });
+  });
+  cx.run_until_parked();
+  let groups = cx.update(|_, cx| {
+    let Some(dock) = app.read(cx).document_dock.as_ref() else {
+      panic!("dock must exist");
+    };
+    dock.leaf_ids.clone()
+  });
+  for value in [0.75, 0.5, 0.25, 1.0] {
+    cx.update(|_, cx| {
+      app.update(cx, |app, cx| {
+        let Ok(value) = RenderOpacity::new(value) else {
+          panic!("opacity must be valid");
+        };
+        assert!(
+          app
+            .dispatch_render_command(
+              Some(1),
+              RenderCommand::Opacity {
+                layer: RenderLayer::Atom,
+                value
+              },
+              cx
+            )
+            .is_ok()
+        );
+      });
+    });
+    cx.run_until_parked();
+    cx.update(|window, cx| {
+      window.draw(cx).clear();
+      app.update(cx, |app, cx| {
+        let Some(dock) = app.document_dock.as_mut() else {
+          panic!("dock must exist");
+        };
+        assert_eq!(dock.leaf_ids, groups, "appearance must not reinstall the dock layout");
+        assert_eq!(
+          app.document_panels.options_menu_panel_id,
+          Some(DEFAULT_DOCUMENT_PANEL_ID)
+        );
+        dock.read_layout(&mut app.document_panels, window, cx);
+        let Some((_, layers, _)) = app.document_panels.rendering_settings(1) else {
+          panic!("rendering tab must remain open");
+        };
+        assert_eq!(
+          layers.appearances()[0].opacity(),
+          value,
+          "Kit projection must preserve the latest appearance"
+        );
+      });
+    });
+  }
+}
+
+#[gpui::test]
 fn ordinary_redraws_do_not_remount_document_entities(cx: &mut gpui::TestAppContext) {
   let (app, cx) = mount(two_documents(), cx);
   let ids = cx.update(|_, cx| {

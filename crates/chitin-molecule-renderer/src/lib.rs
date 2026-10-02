@@ -9,11 +9,13 @@
 //! [`chitin_bio::structure::StructureScene`], select a
 //! [`RepresentationLayers`], and retain ownership of the target surface.
 
+pub mod appearance;
 pub mod camera;
 mod cartoon;
 pub mod molecule;
 pub mod representation;
 mod surface;
+mod transparency;
 
 pub use camera::{DragMode, ViewerCamera, ViewportDrag};
 pub use molecule::{

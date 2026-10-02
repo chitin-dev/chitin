@@ -291,7 +291,11 @@ impl DocumentDock {
         self.tabs.insert(tab.id, entity);
       }
     }
-    if self.projected.as_ref() != Some(&state.tree) {
+    if !self
+      .projected
+      .as_ref()
+      .is_some_and(|tree| same_dock_layout(&tree.root, &state.tree.root))
+    {
       let measured = self.area.read(cx).bounds().size;
       let viewport = window.bounds().size;
       let extent = Size {
@@ -328,7 +332,11 @@ impl DocumentDock {
   /// Whether the application layout changed. Events from an obsolete layout
   /// are ignored when a newer domain command has not yet been installed.
   fn read_layout(&mut self, state: &mut DocumentPanelState, window: &mut Window, cx: &App) -> bool {
-    if self.projected.as_ref() != Some(&state.tree) {
+    if !self
+      .projected
+      .as_ref()
+      .is_some_and(|tree| same_dock_layout(&tree.root, &state.tree.root))
+    {
       return false;
     }
     let area = self.area.read(cx);
@@ -395,6 +403,29 @@ impl DocumentDock {
     let mut ids = Vec::new();
     collect_leaf_ids(&tree.root, &mut ids);
     self.leaf_ids = groups.into_iter().zip(ids).collect();
+  }
+}
+
+/// Compares only Kit-owned layout, not document titles or rendering settings.
+fn same_dock_layout<T>(first: &PanelNode<T>, second: &PanelNode<T>) -> bool {
+  match (first, second) {
+    (PanelNode::Leaf(first), PanelNode::Leaf(second)) => {
+      first.id == second.id
+        && first.active_tab == second.active_tab
+        && first.tabs.len() == second.tabs.len()
+        && first
+          .tabs
+          .iter()
+          .zip(&second.tabs)
+          .all(|(first, second)| first.id == second.id)
+    }
+    (PanelNode::Split(first), PanelNode::Split(second)) => {
+      first.axis == second.axis
+        && first.ratio == second.ratio
+        && same_dock_layout(&first.first, &second.first)
+        && same_dock_layout(&first.second, &second.second)
+    }
+    _ => false,
   }
 }
 

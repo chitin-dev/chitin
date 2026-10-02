@@ -1,6 +1,9 @@
 //! Shell-only grammar for typed molecular presentation commands.
 
-use chitin_command::{RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle};
+use chitin_command::{
+  RenderAtomStyle, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle, RenderRgb,
+  RenderSurfaceBackend, RenderSurfaceStyle,
+};
 use clap::Subcommand;
 
 #[derive(Debug, Subcommand)]
@@ -26,6 +29,8 @@ pub(crate) enum RenderArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum AtomArgs {
+  #[command(flatten)]
+  Appearance(AppearanceArgs),
   /// Set the atom style, or disable the layer with none.
   Style {
     #[arg(value_enum)]
@@ -35,6 +40,8 @@ pub(crate) enum AtomArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PolymerArgs {
+  #[command(flatten)]
+  Appearance(AppearanceArgs),
   /// Set the polymer style, or disable the layer with none.
   Style {
     #[arg(value_enum)]
@@ -44,6 +51,8 @@ pub(crate) enum PolymerArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SurfaceArgs {
+  #[command(flatten)]
+  Appearance(AppearanceArgs),
   /// Set the surface style, or disable the layer with none.
   Style {
     #[arg(value_enum)]
@@ -56,9 +65,40 @@ pub(crate) enum SurfaceArgs {
   },
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum AppearanceArgs {
+  /// Set coloring; uniform accepts --value "#RRGGBB".
+  Color {
+    #[arg(value_enum)]
+    scheme: RenderColorScheme,
+    #[arg(long)]
+    value: Option<RenderRgb>,
+  },
+  /// Set opacity from 0 (transparent) to 1 (opaque).
+  Opacity { value: RenderOpacity },
+}
+
+impl AppearanceArgs {
+  fn into_command(self, layer: RenderLayer) -> RenderCommand {
+    match self {
+      Self::Color { scheme, value } => RenderCommand::Color { layer, scheme, value },
+      Self::Opacity { value } => RenderCommand::Opacity { layer, value },
+    }
+  }
+}
+
 impl RenderArgs {
   pub(crate) fn into_command(self) -> RenderCommand {
     match self {
+      Self::Atom {
+        command: AtomArgs::Appearance(args),
+      } => args.into_command(RenderLayer::Atom),
+      Self::Polymer {
+        command: PolymerArgs::Appearance(args),
+      } => args.into_command(RenderLayer::Polymer),
+      Self::Surface {
+        command: SurfaceArgs::Appearance(args),
+      } => args.into_command(RenderLayer::Surface),
       Self::Status => RenderCommand::Status,
       Self::Atom {
         command: AtomArgs::Style { style },

@@ -6,13 +6,10 @@ use crate::{app::ChitinApp, workbench::documents::layout::PanelId};
 use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_command::{RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle};
 use chitin_molecule_renderer::{AtomStyle, RepresentationLayers};
-use chitin_ui::widgets::{
-  grouped_select::{GroupedSelect, GroupedSelectGroup},
-  select_item::IconSelectItem,
-};
+use chitin_ui::widgets::select_item::IconSelectItem;
 use gpui::{
-  App, AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Subscription,
-  WeakEntity, Window, px, svg,
+  App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
+  StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, px, svg,
 };
 use gpui_kit::component::{
   IndexPath,
@@ -74,6 +71,7 @@ struct DocumentOptionsMenu {
 /// Persistent semantic controls used by molecular document panels.
 #[derive(Clone)]
 pub(crate) struct DocumentOptionsControls {
+  appearance: super::appearance::AppearanceControls,
   /// Retains command targeting when dismissal precedes a deferred confirmation.
   target_panel: Rc<Cell<Option<u64>>>,
   /// Single-selection state for atom-layer styles.
@@ -178,6 +176,7 @@ impl DocumentOptionsControls {
     );
     Self {
       target_panel: Rc::new(Cell::new(None)),
+      appearance: super::appearance::AppearanceControls::new(window, cx),
       atom,
       polymer,
       surface,
@@ -200,6 +199,7 @@ impl DocumentOptionsControls {
   /// * `window` supplies focus routing for the menu when it opens.
   /// * `cx` owns subscriptions and updates the application state.
   pub(crate) fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
+    self.appearance.subscribe(self.target_panel.clone(), window, cx);
     let target_panel = Rc::clone(&self.target_panel);
     let subscription: Subscription = cx.subscribe_in(&self.atom, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
@@ -336,15 +336,20 @@ impl RenderOnce for DocumentOptionsMenu {
       })
       .content(move |_, window, cx| {
         sync_document_option_selectors(&controls, options.representation, options.surface_backend, window, cx);
-        GroupedSelect::new()
-          .theme(theme)
-          .width(DOCUMENT_OPTIONS_MENU_WIDTH)
-          .group(GroupedSelectGroup::new("Atom style", controls.atom.clone()))
-          .group(GroupedSelectGroup::new("Polymer style", controls.polymer.clone()))
-          .group(GroupedSelectGroup::new("Surface style", controls.surface.clone()))
-          .group(GroupedSelectGroup::new(
-            "Surface backend",
-            controls.surface_backend.clone(),
+        gpui::div()
+          .id("molecule-appearance-options")
+          .flex()
+          .flex_col()
+          .w(DOCUMENT_OPTIONS_MENU_WIDTH)
+          .max_h(px(640.0))
+          .overflow_y_scroll()
+          .child(controls.appearance.render(
+            options.representation,
+            [&controls.atom, &controls.polymer, &controls.surface],
+            &controls.surface_backend,
+            theme,
+            window,
+            cx,
           ))
       })
   }

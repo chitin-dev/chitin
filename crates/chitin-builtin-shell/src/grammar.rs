@@ -410,6 +410,37 @@ mod tests {
   use super::*;
 
   #[test]
+  fn appearance_should_parse_typed_requests_and_complete_schemes() -> Result<(), CommandLineParseError> {
+    use chitin_command::{RenderColorScheme, RenderCommand, RenderLayer, RenderRgb};
+    assert!(matches!(
+      parse_builtin_command_line("render polymer color chain")?,
+      BuiltinCommandLine::Frontend(FrontendCommand::Render(RenderCommand::Color {
+        layer: RenderLayer::Polymer,
+        scheme: RenderColorScheme::Chain,
+        value: None
+      }))
+    ));
+    assert!(matches!(
+      parse_builtin_command_line("render atom color uniform --value \"#B8B8B8\"")?,
+      BuiltinCommandLine::Frontend(FrontendCommand::Render(RenderCommand::Color {
+        value: Some(RenderRgb([184, 184, 184])),
+        ..
+      }))
+    ));
+    assert!(
+      matches!(parse_builtin_command_line("render surface opacity 0.35")?, BuiltinCommandLine::Frontend(FrontendCommand::Render(RenderCommand::Opacity { layer: RenderLayer::Surface, value })) if value.value() == 0.35)
+    );
+    for value in ["NaN", "-1", "1.1"] {
+      assert!(parse_builtin_command_line(&format!("render surface opacity {value}")).is_err());
+    }
+    assert_eq!(
+      complete_builtin_shell_line("render polymer color c"),
+      vec!["render polymer color chain", "render polymer color chain-element"]
+    );
+    Ok(())
+  }
+
+  #[test]
   fn render_requests_should_be_typed_frontend_commands() -> Result<(), CommandLineParseError> {
     use chitin_command::{
       RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle,

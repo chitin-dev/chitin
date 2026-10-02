@@ -86,7 +86,7 @@ const METAL_VDW_RADIUS: f32 = 1.70;
 /// Fallback van der Waals radius for unclassified elements, in ångströms.
 const OTHER_VDW_RADIUS: f32 = 1.50;
 /// Byte size of the molecule uniform block shared by both pipelines.
-const UNIFORM_BUFFER_SIZE: u64 = 272;
+const UNIFORM_BUFFER_SIZE: u64 = 288;
 /// Byte offset at which the lighting and material vectors begin.
 const MATERIAL_UNIFORM_OFFSET: u64 = 192;
 /// Byte offset of the per-frame absolute depth-cue vector.
@@ -94,6 +94,7 @@ const DEPTH_CUE_UNIFORM_OFFSET: u64 = 240;
 
 /// Geometry-specific pipeline settings shared by atom and bond pipelines.
 struct PipelineConfig {
+  transparent: bool,
   /// Target color format.
   color_format: wgpu::TextureFormat,
   /// Mesh and instance vertex layout.
@@ -358,6 +359,12 @@ impl<'a> MoleculeRenderInput<'a> {
 /// scene's residue-level polymer traces, while all representations share camera,
 /// lighting, depth, and depth-cue resources.
 pub struct MoleculeRenderer {
+  transparent_atom: wgpu::RenderPipeline,
+  transparent_bond: wgpu::RenderPipeline,
+  transparent_cartoon: wgpu::RenderPipeline,
+  transparent_surface: wgpu::RenderPipeline,
+  transparency: Option<crate::transparency::Transparency>,
+  color_format: wgpu::TextureFormat,
   /// Pipeline for instanced atom spheres.
   atom_pipeline: wgpu::RenderPipeline,
   /// Pipeline for instanced bond cylinders.
@@ -426,6 +433,7 @@ pub struct MoleculeRenderer {
   layers: RepresentationLayers,
   /// Low-frequency numeric diagnostics for the current scene.
   diagnostics: MoleculeDiagnostics,
+  colors: crate::appearance::ColorCache,
 }
 
 impl MoleculeRenderer {
@@ -557,6 +565,7 @@ impl MoleculeRenderer {
       "chitin_molecule_atom_pipeline",
       "atom_vertex",
       PipelineConfig {
+        transparent: false,
         color_format,
         instance_layout: atom_instance_layout(),
         fragment_entry: "atom_fragment",
@@ -569,6 +578,7 @@ impl MoleculeRenderer {
       "chitin_molecule_bond_pipeline",
       "bond_vertex",
       PipelineConfig {
+        transparent: false,
         color_format,
         instance_layout: bond_instance_layout(),
         fragment_entry: "bond_fragment",
@@ -581,6 +591,7 @@ impl MoleculeRenderer {
       color_format,
       "chitin_cartoon_pipeline",
       None,
+      false,
     );
     let surface_pipeline = create_cartoon_pipeline(
       &device,
@@ -589,6 +600,51 @@ impl MoleculeRenderer {
       color_format,
       "chitin_ses_pipeline",
       Some(wgpu::Face::Back),
+      false,
+    );
+    let transparent_atom = create_pipeline(
+      &device,
+      &pipeline_layout,
+      &shader,
+      "chitin_atom_oit",
+      "atom_vertex",
+      PipelineConfig {
+        color_format,
+        instance_layout: atom_instance_layout(),
+        fragment_entry: "atom_transparent",
+        transparent: true,
+      },
+    );
+    let transparent_bond = create_pipeline(
+      &device,
+      &pipeline_layout,
+      &shader,
+      "chitin_bond_oit",
+      "bond_vertex",
+      PipelineConfig {
+        color_format,
+        instance_layout: bond_instance_layout(),
+        fragment_entry: "bond_transparent",
+        transparent: true,
+      },
+    );
+    let transparent_cartoon = create_cartoon_pipeline(
+      &device,
+      &pipeline_layout,
+      &cartoon_shader,
+      color_format,
+      "chitin_cartoon_oit",
+      None,
+      true,
+    );
+    let transparent_surface = create_cartoon_pipeline(
+      &device,
+      &pipeline_layout,
+      &cartoon_shader,
+      color_format,
+      "chitin_surface_oit",
+      Some(wgpu::Face::Back),
+      true,
     );
 
     let (quad_vertices, quad_indices) = billboard_quad_mesh();
@@ -720,7 +776,18 @@ impl MoleculeRenderer {
       style.depth_cue_strength,
     );
 
-    Self {
+    let mut colors = crate::appearance::ColorCache::new(scene);
+    colors.set_atoms(atom_buffer_data);
+    colors.set_bonds(bond_buffer_data);
+    colors.set_cartoon(cartoon_vertices, cartoon.chains);
+    colors.set_surface(surface_vertices, surface);
+    let mut renderer = Self {
+      transparent_atom,
+      transparent_bond,
+      transparent_cartoon,
+      transparent_surface,
+      transparency: None,
+      color_format,
       atom_pipeline,
       bond_pipeline,
       cartoon_pipeline,
@@ -760,7 +827,14 @@ impl MoleculeRenderer {
       debug_mode: MoleculeDebugMode::Final,
       layers,
       diagnostics,
+      colors,
+    };
+    for index in 0..3 {
+      if index != 2 || surface_fragments.is_empty() {
+        renderer.upload_colors(index, layers, style);
+      }
     }
+    renderer
   }
 
   /// Changes representation geometry without recreating shaders or pipelines.
@@ -774,6 +848,9 @@ impl MoleculeRenderer {
       return;
     }
 
+    let old_appearance = self.layers.appearances();
+    let appearance = layers.appearances();
+
     let MoleculeRenderInput {
       scene,
       surface,
@@ -781,10 +858,12 @@ impl MoleculeRenderer {
     } = input;
     if self.layers.atom_style() != layers.atom_style() || self.layers.polymer_style() != layers.polymer_style() {
       self.replace_atom_and_bond_buffers(scene, layers, style);
+      self.upload_colors(0, layers, style);
     }
 
     if layers.polymer_style().is_some() && !self.cartoon_geometry_ready {
       self.replace_cartoon_buffers(scene, style);
+      self.upload_colors(1, layers, style);
     }
     self.cartoon_index_count = if layers.polymer_style().is_some() {
       self.cartoon_mesh_index_count
@@ -798,6 +877,9 @@ impl MoleculeRenderer {
       } else if let Some(surface) = surface {
         self.replace_surface_buffers(surface, style);
       }
+      if surface_fragments.is_empty() {
+        self.upload_colors(2, layers, style);
+      }
     }
     self.surface_index_count = if layers.surface_style().is_some() {
       self.surface_mesh_index_count
@@ -805,9 +887,43 @@ impl MoleculeRenderer {
       0
     };
 
-    let surface_radius = representation_surface_radius(scene, style, layers);
-    (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
+    if self.layers.atom_style() != layers.atom_style()
+      || self.layers.polymer_style() != layers.polymer_style()
+      || self.layers.surface_style() != layers.surface_style()
+    {
+      let surface_radius = representation_surface_radius(scene, style, layers);
+      (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
+    }
     self.layers = layers;
+    for index in 0..3 {
+      if !old_appearance[index].same_coloring(appearance[index]) {
+        self.upload_colors(index, layers, style);
+      }
+    }
+  }
+
+  fn upload_colors(&mut self, index: usize, layers: RepresentationLayers, style: &BallAndStickStyle) {
+    self.colors.recolor(index, layers.appearances()[index], &style.palette);
+    match index {
+      0 => {
+        self
+          .queue
+          .write_buffer(&self.atom_instance_buffer, 0, bytemuck::cast_slice(&self.colors.atoms));
+        self
+          .queue
+          .write_buffer(&self.bond_instance_buffer, 0, bytemuck::cast_slice(&self.colors.bonds));
+      }
+      1 => self.queue.write_buffer(
+        &self.cartoon_vertex_buffer,
+        0,
+        bytemuck::cast_slice(&self.colors.cartoon),
+      ),
+      _ => self.queue.write_buffer(
+        &self.surface_vertex_buffer,
+        0,
+        bytemuck::cast_slice(&self.colors.surface),
+      ),
+    }
   }
 
   /// Uploads a newly computed scientific surface artifact into existing GPU resources.
@@ -818,6 +934,7 @@ impl MoleculeRenderer {
     style: &BallAndStickStyle,
   ) {
     self.replace_surface_buffers(surface, style);
+    self.upload_colors(2, self.layers, style);
     self.surface_index_count = if self.layers.surface_style().is_some() {
       self.surface_mesh_index_count
     } else {
@@ -861,6 +978,8 @@ impl MoleculeRenderer {
       &bond_buffer_data,
       wgpu::BufferUsages::VERTEX,
     );
+    self.colors.set_atoms(atom_buffer_data);
+    self.colors.set_bonds(bond_buffer_data);
   }
 
   /// Generates and uploads cartoon geometry once, retaining it across toggles.
@@ -890,22 +1009,28 @@ impl MoleculeRenderer {
       wgpu::BufferUsages::INDEX,
     );
     self.cartoon_geometry_ready = true;
+    self.colors.set_cartoon(vertices, cartoon.chains);
   }
 
   /// Packs and uploads a computed surface while retaining all pipeline state.
   fn replace_surface_buffers(&mut self, surface: &MolecularSurfaceArtifact, style: &BallAndStickStyle) {
     let (vertices, indices) = surface_mesh_vertices(Some(surface), style.palette.carbon.color);
-    self.replace_packed_surface_buffers(vertices, indices);
+    self.replace_packed_surface_buffers(vertices, indices, Some(surface));
   }
 
   /// Packs and uploads independently colored surface fragments.
   fn replace_surface_fragment_buffers(&mut self, fragments: &[SurfaceFragment<'_>]) {
     let (vertices, indices) = surface_fragment_vertices(fragments);
-    self.replace_packed_surface_buffers(vertices, indices);
+    self.replace_packed_surface_buffers(vertices, indices, None);
   }
 
   /// Uploads already packed surface vertices and indices.
-  fn replace_packed_surface_buffers(&mut self, vertices: Vec<[f32; 9]>, indices: Vec<u32>) {
+  fn replace_packed_surface_buffers(
+    &mut self,
+    vertices: Vec<[f32; 9]>,
+    indices: Vec<u32>,
+    artifact: Option<&MolecularSurfaceArtifact>,
+  ) {
     self.surface_mesh_index_count = indices.len() as u32;
     let vertices = if vertices.is_empty() { vec![[0.0; 9]] } else { vertices };
     let indices = if indices.is_empty() { vec![0_u32] } else { indices };
@@ -917,12 +1042,16 @@ impl MoleculeRenderer {
     );
     self.surface_index_buffer = create_buffer(&self.device, "chitin_ses_indices", &indices, wgpu::BufferUsages::INDEX);
     self.surface_geometry_ready = true;
+    self.colors.set_surface(vertices, artifact);
   }
 
   /// Recreates size-dependent depth resources when the target changes.
   pub fn resize_if_needed(&mut self, size: RenderTargetSize) {
     self.depth.resize_if_needed(&self.device, size);
     self.size = size;
+    if let Some(transparency) = &mut self.transparency {
+      transparency.resize(&self.device, size);
+    }
   }
 
   /// Returns the current render target aspect ratio.
@@ -960,6 +1089,12 @@ impl MoleculeRenderer {
     projection: glam::Mat4,
   ) -> wgpu::SubmissionIndex {
     let model_view = camera_view * self.fit_transform;
+    let opacity = self.layers.appearances().map(|appearance| appearance.opacity());
+    self.queue.write_buffer(
+      &self.uniform_buffer,
+      272,
+      bytemuck::cast_slice(&[opacity[0], opacity[1], opacity[2], 0.0]),
+    );
     let mvp_matrix = projection * model_view;
     let depth_cue = self.depth_cue_uniform(model_view);
     self.log_diagnostics(model_view, depth_cue);
@@ -1000,7 +1135,7 @@ impl MoleculeRenderer {
           view: self.depth.view(),
           depth_ops: Some(wgpu::Operations {
             load: wgpu::LoadOp::Clear(1.0),
-            store: wgpu::StoreOp::Discard,
+            store: wgpu::StoreOp::Store,
           }),
           stencil_ops: None,
         }),
@@ -1009,7 +1144,7 @@ impl MoleculeRenderer {
         multiview_mask: None,
       });
 
-      if self.surface_index_count > 0 {
+      if self.surface_index_count > 0 && opacity[2] == 1.0 {
         pass.set_pipeline(&self.surface_pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.surface_vertex_buffer.slice(..));
@@ -1017,7 +1152,7 @@ impl MoleculeRenderer {
         pass.draw_indexed(0..self.surface_index_count, 0, 0..1);
       }
 
-      if self.cartoon_index_count > 0 {
+      if self.cartoon_index_count > 0 && opacity[1] == 1.0 {
         pass.set_pipeline(&self.cartoon_pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.cartoon_vertex_buffer.slice(..));
@@ -1025,7 +1160,7 @@ impl MoleculeRenderer {
         pass.draw_indexed(0..self.cartoon_index_count, 0, 0..1);
       }
 
-      if self.bond_count > 0 {
+      if self.bond_count > 0 && opacity[0] == 1.0 {
         pass.set_pipeline(&self.bond_pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);
         pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
@@ -1039,7 +1174,76 @@ impl MoleculeRenderer {
       pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
       pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
       pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-      pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
+      if opacity[0] == 1.0 {
+        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
+      }
+    }
+
+    if opacity.iter().any(|value| *value > 0.0 && *value < 1.0) {
+      let transparency = self
+        .transparency
+        .get_or_insert_with(|| crate::transparency::Transparency::new(&self.device, self.size, self.color_format));
+      {
+        let attachments = [
+          Some(wgpu::RenderPassColorAttachment {
+            view: &transparency.accumulation,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+              load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+              store: wgpu::StoreOp::Store,
+            },
+          }),
+          Some(wgpu::RenderPassColorAttachment {
+            view: &transparency.revealage,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+              load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+              store: wgpu::StoreOp::Store,
+            },
+          }),
+        ];
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+          label: Some("chitin_transparent_pass"),
+          color_attachments: &attachments,
+          depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: self.depth.view(),
+            depth_ops: Some(wgpu::Operations {
+              load: wgpu::LoadOp::Load,
+              store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+          }),
+          timestamp_writes: None,
+          occlusion_query_set: None,
+          multiview_mask: None,
+        });
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        if opacity[2] > 0.0 && opacity[2] < 1.0 && self.surface_index_count > 0 {
+          pass.set_pipeline(&self.transparent_surface);
+          pass.set_vertex_buffer(0, self.surface_vertex_buffer.slice(..));
+          pass.set_index_buffer(self.surface_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+          pass.draw_indexed(0..self.surface_index_count, 0, 0..1);
+        }
+        if opacity[1] > 0.0 && opacity[1] < 1.0 && self.cartoon_index_count > 0 {
+          pass.set_pipeline(&self.transparent_cartoon);
+          pass.set_vertex_buffer(0, self.cartoon_vertex_buffer.slice(..));
+          pass.set_index_buffer(self.cartoon_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+          pass.draw_indexed(0..self.cartoon_index_count, 0, 0..1);
+        }
+        if opacity[0] > 0.0 && opacity[0] < 1.0 {
+          pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
+          pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+          pass.set_pipeline(&self.transparent_bond);
+          pass.set_vertex_buffer(1, self.bond_instance_buffer.slice(..));
+          pass.draw_indexed(0..self.quad_index_count, 0, 0..self.bond_count);
+          pass.set_pipeline(&self.transparent_atom);
+          pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
+          pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
+        }
+      }
+      transparency.composite(&mut encoder, view);
     }
 
     self.queue.submit(std::iter::once(encoder.finish()))
@@ -1171,6 +1375,15 @@ fn create_pipeline(
   vertex_entry: &'static str,
   config: PipelineConfig,
 ) -> wgpu::RenderPipeline {
+  let targets = if config.transparent {
+    crate::transparency::targets().to_vec()
+  } else {
+    vec![Some(wgpu::ColorTargetState {
+      format: config.color_format,
+      blend: None,
+      write_mask: wgpu::ColorWrites::ALL,
+    })]
+  };
   device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
     label: Some(label),
     layout: Some(layout),
@@ -1183,11 +1396,7 @@ fn create_pipeline(
     fragment: Some(wgpu::FragmentState {
       module: shader,
       entry_point: Some(config.fragment_entry),
-      targets: &[Some(wgpu::ColorTargetState {
-        format: config.color_format,
-        blend: None,
-        write_mask: wgpu::ColorWrites::ALL,
-      })],
+      targets: &targets,
       compilation_options: Default::default(),
     }),
     primitive: wgpu::PrimitiveState {
@@ -1198,7 +1407,7 @@ fn create_pipeline(
     },
     depth_stencil: Some(wgpu::DepthStencilState {
       format: wgpu::TextureFormat::Depth32Float,
-      depth_write_enabled: Some(true),
+      depth_write_enabled: Some(!config.transparent),
       depth_compare: Some(wgpu::CompareFunction::Less),
       stencil: Default::default(),
       bias: Default::default(),
@@ -1217,24 +1426,38 @@ fn create_cartoon_pipeline(
   color_format: wgpu::TextureFormat,
   label: &'static str,
   cull_mode: Option<wgpu::Face>,
+  transparent: bool,
 ) -> wgpu::RenderPipeline {
+  let targets = if transparent {
+    crate::transparency::targets().to_vec()
+  } else {
+    vec![Some(wgpu::ColorTargetState {
+      format: color_format,
+      blend: None,
+      write_mask: wgpu::ColorWrites::ALL,
+    })]
+  };
   device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
     label: Some(label),
     layout: Some(layout),
     vertex: wgpu::VertexState {
       module: shader,
-      entry_point: Some("cartoon_vertex"),
+      entry_point: Some(if cull_mode.is_some() {
+        "surface_vertex"
+      } else {
+        "cartoon_vertex"
+      }),
       buffers: &[Some(cartoon_vertex_layout())],
       compilation_options: Default::default(),
     },
     fragment: Some(wgpu::FragmentState {
       module: shader,
-      entry_point: Some("cartoon_fragment"),
-      targets: &[Some(wgpu::ColorTargetState {
-        format: color_format,
-        blend: None,
-        write_mask: wgpu::ColorWrites::ALL,
-      })],
+      entry_point: Some(if transparent {
+        "cartoon_transparent"
+      } else {
+        "cartoon_fragment"
+      }),
+      targets: &targets,
       compilation_options: Default::default(),
     }),
     primitive: wgpu::PrimitiveState {
@@ -1245,7 +1468,7 @@ fn create_cartoon_pipeline(
     },
     depth_stencil: Some(wgpu::DepthStencilState {
       format: wgpu::TextureFormat::Depth32Float,
-      depth_write_enabled: Some(true),
+      depth_write_enabled: Some(!transparent),
       depth_compare: Some(wgpu::CompareFunction::Less),
       stencil: Default::default(),
       bias: Default::default(),
@@ -1361,7 +1584,7 @@ fn create_buffer<T: bytemuck::NoUninit>(
   device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
     label: Some(label),
     contents: bytemuck::cast_slice(contents),
-    usage,
+    usage: usage | wgpu::BufferUsages::COPY_DST,
   })
 }
 
@@ -2044,5 +2267,133 @@ mod tests {
     validator
       .validate(&module)
       .unwrap_or_else(|error| panic!("cartoon shader should validate: {error}"));
+  }
+
+  #[test]
+  fn transparency_composite_shader_should_parse_and_validate() {
+    let module = wgpu::naga::front::wgsl::parse_str(include_str!("transparency.wgsl"))
+      .unwrap_or_else(|error| panic!("composite shader should parse: {error}"));
+    wgpu::naga::valid::Validator::new(
+      wgpu::naga::valid::ValidationFlags::all(),
+      wgpu::naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .unwrap_or_else(|error| panic!("composite shader should validate: {error}"));
+  }
+
+  #[cfg(not(target_arch = "wasm32"))]
+  #[test]
+  #[ignore = "requires a Vulkan adapter; run explicitly for GPU validation"]
+  fn appearance_gpu_paths_should_render_and_resize_without_validation_errors() -> Result<(), Box<dyn std::error::Error>>
+  {
+    use std::sync::Arc;
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+      backends: wgpu::Backends::VULKAN,
+      ..wgpu::InstanceDescriptor::new_without_display_handle()
+    });
+    let adapter = pollster::block_on(instance.request_adapter(&Default::default()))?;
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))?;
+    let errors = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let device = Arc::new(device);
+    let queue = Arc::new(queue);
+    let scene = cartoon_scene();
+    let surface = chitin_bio::surface::generate_implicit_surface(&scene, Default::default());
+    let style = BallAndStickStyle::default();
+    let input = || MoleculeRenderInput::new(&scene).with_surface(&surface);
+    let layers = RepresentationLayers::atom(AtomStyle::Stick)
+      .with_polymer(PolymerStyle::Cartoon)
+      .with_surface(crate::SurfaceStyle::Solid);
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    let size = RenderTargetSize::new(64, 64);
+    let mut renderer =
+      MoleculeRenderer::new_with_layers(device.clone(), queue.clone(), size, format, input(), layers, &style);
+    let camera = crate::ViewerCamera::default();
+    for (step, opacity) in [[1.0; 3], [0.4; 3], [1.0, 1.0, 0.35], [0.0; 3]].into_iter().enumerate() {
+      let size = RenderTargetSize::new(64 + step as u32 * 16, 64);
+      renderer.resize_if_needed(size);
+      let mut appearance = layers.appearances();
+      for index in 0..3 {
+        appearance[index] = appearance[index]
+          .with_opacity(opacity[index])
+          .ok_or("test opacity should be valid")?;
+      }
+      renderer.set_representation_layers(input(), layers.with_appearances(appearance), &style);
+      let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("appearance_test_target"),
+        size: wgpu::Extent3d {
+          width: size.width,
+          height: size.height,
+          depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+      });
+      renderer.render(
+        &texture.create_view(&Default::default()),
+        camera.view_matrix(),
+        camera.projection_matrix(renderer.aspect()),
+      );
+      device.poll(wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: Some(std::time::Duration::from_secs(10)),
+      })?;
+      assert!(renderer.surface_geometry_ready && renderer.cartoon_geometry_ready);
+    }
+    assert!(pollster::block_on(errors.pop()).is_none());
+    Ok(())
+  }
+
+  #[test]
+  fn default_cartoon_and_surface_should_keep_the_original_palette_even_when_opacity_changes() {
+    use crate::appearance::ColorCache;
+    let scene = cartoon_scene();
+    let mut cache = ColorCache::new(&scene);
+    let rows = vec![[0.0; 9]];
+    cache.set_cartoon(rows.clone(), vec![0]);
+    cache.set_surface(rows, None);
+    let layers = RepresentationLayers::default();
+    let mut palette = BallAndStickStyle::default().palette;
+    for color in [palette.carbon.color, [0.2, 0.4, 0.6]] {
+      palette.carbon.color = color;
+      for index in [1, 2] {
+        let appearance = layers.appearances()[index];
+        cache.recolor(index, appearance, &palette);
+        let rows = if index == 1 { &cache.cartoon } else { &cache.surface };
+        assert_eq!(&rows[0][6..9], &color);
+        let Some(translucent) = appearance.with_opacity(0.35) else {
+          panic!("valid opacity should be accepted");
+        };
+        cache.recolor(index, translucent, &palette);
+        let rows = if index == 1 { &cache.cartoon } else { &cache.surface };
+        assert_eq!(&rows[0][6..9], &color);
+        cache.recolor(index, appearance.with_color([255, 0, 0]), &palette);
+        let rows = if index == 1 { &cache.cartoon } else { &cache.surface };
+        assert_eq!(&rows[0][6..9], &[1.0, 0.0, 0.0]);
+      }
+    }
+  }
+
+  #[test]
+  fn coloring_should_preserve_positions_and_use_nearest_atom_for_unified_surfaces() {
+    use crate::appearance::{ColorCache, ColorScheme, LayerAppearance, chain_color};
+    let mut scene = bonded_scene("O");
+    scene.atoms[1].chain_id = cartoon_scene().atoms[5].chain_id;
+    let style = BallAndStickStyle::default();
+    let mut cache = ColorCache::new(&scene);
+    let rows = vec![
+      [0.1, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+      [1.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0],
+    ];
+    cache.set_surface(rows.clone(), None);
+    cache.recolor(2, LayerAppearance::new(ColorScheme::Chain), &style.palette);
+    assert_eq!(&cache.surface[0][6..9], &chain_color(0));
+    assert_eq!(&cache.surface[1][6..9], &chain_color(1));
+    assert_eq!(&cache.surface[0][..6], &rows[0][..6]);
+    cache.recolor(2, LayerAppearance::new(ColorScheme::Element), &style.palette);
+    assert_eq!(&cache.surface[1][6..9], &style.palette.oxygen.color);
   }
 }

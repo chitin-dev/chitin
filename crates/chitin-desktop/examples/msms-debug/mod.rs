@@ -640,6 +640,7 @@ mod tests {
   fn empty_surface() -> MolecularSurfaceArtifact {
     MolecularSurfaceArtifact {
       source: chitin_bio::surface::SurfaceGeometrySource::Msms {
+        atom_scope: Default::default(),
         probe_radius: 1.4,
         max_edge_length: 0.35,
       },

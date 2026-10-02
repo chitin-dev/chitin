@@ -171,6 +171,7 @@ fn append_tube(mesh: &mut SurfaceMesh, start: Vec3, end: Vec3, radius: f32, side
 pub(super) fn single_surface(mesh: SurfaceMesh, probe_radius: f64, max_edge_length: f64) -> MolecularSurfaceArtifact {
   MolecularSurfaceArtifact {
     source: SurfaceGeometrySource::Msms {
+      atom_scope: Default::default(),
       probe_radius,
       max_edge_length,
     },

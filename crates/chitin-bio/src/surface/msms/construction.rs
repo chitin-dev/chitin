@@ -141,6 +141,7 @@ pub fn generate_msms_surface(
     .collect::<Result<Vec<_>, MsmsTessellationError>>()?;
   Ok(MolecularSurfaceArtifact {
     source: SurfaceGeometrySource::Msms {
+      atom_scope: request.atom_scope,
       probe_radius: request.parameters.probe_radius(),
       max_edge_length: tessellation.max_edge_length(),
     },
@@ -761,6 +762,7 @@ END\n",
     assert_eq!(
       artifact.source,
       SurfaceGeometrySource::Msms {
+        atom_scope: MsmsRequest::default().atom_scope,
         probe_radius: MsmsParameters::default().probe_radius(),
         max_edge_length: MsmsTessellationParameters::default().max_edge_length(),
       }

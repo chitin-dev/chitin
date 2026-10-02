@@ -135,6 +135,18 @@ macro_rules! define_commands {
 }
 
 define_commands! {
+  /// Change Layer Coloring.
+  RenderColor {
+    name: "render.color", title: "Change Layer Coloring", category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend, requires_arguments: true,
+    keywords: &["render", "color"], shortcut: None, command_panel: false, frontend: []
+  },
+  /// Change Layer Opacity.
+  RenderOpacity {
+    name: "render.opacity", title: "Change Layer Opacity", category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend, requires_arguments: true,
+    keywords: &["render", "opacity"], shortcut: None, command_panel: false, frontend: []
+  },
   /// Inspect Rendering Settings.
   RenderStatus {
     name: "render.status",

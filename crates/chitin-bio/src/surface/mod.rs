@@ -22,7 +22,7 @@ pub enum MolecularSurfaceBackend {
   Msms,
 }
 
-pub use atoms::{SurfaceAtomScope, SurfacePartition};
+pub use atoms::{SurfaceAtomScope, SurfacePartition, select_surface_scene_atoms};
 pub use implicit::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
   ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceDomainArtifact, SurfaceGeometrySource,

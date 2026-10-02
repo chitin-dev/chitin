@@ -12,7 +12,10 @@ pub use application::ApplicationCommand;
 pub use catalog::*;
 pub use database::{DatabaseCommand, RcsbDownloadArguments};
 pub use panel_tab::PanelTabCommand;
-pub use render::{RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle};
+pub use render::{
+  RenderAtomStyle, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle, RenderRgb,
+  RenderSurfaceBackend, RenderSurfaceStyle,
+};
 pub use structure::{
   CommandOutputFormat, StructureCommand, StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };
