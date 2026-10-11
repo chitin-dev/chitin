@@ -82,6 +82,9 @@ impl SelectionIndex {
 }
 
 /// Validated ChimeraX-style hierarchical subset: `/chain:residue@atom`.
+/// Residue terms accept numbers, numeric ranges, and ASCII alphanumeric names.
+/// A number followed by one letter is an insertion-coded number (`42A`),
+/// while other names containing letters (`A2G`, `1PE`, `0G6`) select by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtomSpec(Box<SpecComponents>);
 
@@ -135,9 +138,6 @@ impl FromStr for AtomSpec {
 }
 
 fn parse_residue(value: &str) -> Result<ResidueTerm, String> {
-  if value.chars().all(|c| c.is_ascii_alphabetic()) {
-    return Ok(ResidueTerm::Name(value.to_ascii_uppercase()));
-  }
   // Skip a leading minus so negative author numbers are not mistaken for ranges.
   if let Some((offset, _)) = value.char_indices().skip(1).find(|(_, c)| *c == '-') {
     let start = value[..offset].parse::<i32>().map_err(|_| "invalid residue range")?;
@@ -155,16 +155,102 @@ fn parse_residue(value: &str) -> Result<ResidueTerm, String> {
   } else {
     value
   };
-  let number = number
-    .parse::<i32>()
-    .map_err(|_| "expected residue number, range, or name")?;
-  Ok(ResidueTerm::Number(number, insertion))
+  let digits = number
+    .strip_prefix('-')
+    .or_else(|| number.strip_prefix('+'))
+    .unwrap_or(number);
+  // Numeric syntax wins over names, including when its value overflows i32.
+  if !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()) {
+    let number = number.parse::<i32>().map_err(|_| "residue number is out of range")?;
+    return Ok(ResidueTerm::Number(number, insertion));
+  }
+  if value.bytes().all(|byte| byte.is_ascii_alphanumeric()) && value.bytes().any(|byte| byte.is_ascii_alphabetic()) {
+    return Ok(ResidueTerm::Name(value.to_ascii_uppercase()));
+  }
+  Err("expected residue number, range, or name".into())
 }
 
 #[cfg(test)]
 mod tests {
   use super::super::PdbParser;
   use super::*;
+
+  #[test]
+  fn residue_names_should_accept_digits_and_normalize_case() -> Result<(), String> {
+    for name in ["A2G", "5CM", "1PE", "0G6", "a2g", "1pe", "GLY"] {
+      assert_eq!(
+        parse_residue(name)?,
+        ResidueTerm::Name(name.to_ascii_uppercase()),
+        "{name}"
+      );
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn numeric_residue_syntax_should_take_priority_over_names() -> Result<(), String> {
+    for (value, term) in [
+      ("42", ResidueTerm::Number(42, None)),
+      ("42A", ResidueTerm::Number(42, Some('A'))),
+      ("5C", ResidueTerm::Number(5, Some('C'))),
+      ("-5A", ResidueTerm::Number(-5, Some('A'))),
+      ("+42A", ResidueTerm::Number(42, Some('A'))),
+      ("42-60", ResidueTerm::Range(42, 60)),
+      ("-5--1", ResidueTerm::Range(-5, -1)),
+      ("2147483647", ResidueTerm::Number(i32::MAX, None)),
+      ("-2147483648A", ResidueTerm::Number(i32::MIN, Some('A'))),
+    ] {
+      assert_eq!(parse_residue(value)?, term, "{value}");
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn invalid_residue_terms_should_not_fall_back_to_names() {
+    for value in [
+      "",
+      "A_2",
+      "A.2",
+      "5ＣM",
+      "-1PE",
+      "60-42",
+      "42-",
+      "A-2",
+      "42-60A",
+      "2147483648",
+      "2147483648A",
+      "-2147483649",
+      "1-2147483648",
+    ] {
+      assert!(parse_residue(value).is_err(), "{value}");
+    }
+  }
+
+  #[test]
+  fn alphanumeric_names_should_resolve_ligand_atoms_with_chain_and_atom_filters()
+  -> Result<(), Box<dyn std::error::Error>> {
+    let parsed = PdbParser::new().parse_bytes(b"HETATM    1  C1  A2G A   1       1.000   2.000   3.000  1.00 10.00           C  \nHETATM    2  C2  A2G A   1       2.000   2.000   3.000  1.00 10.00           C  \nHETATM    3  C1  5CM A   2       3.000   2.000   3.000  1.00 10.00           C  \nHETATM    4  C1  1PE B   3       4.000   2.000   3.000  1.00 10.00           C  \nHETATM    5  C1  0G6 B   4       5.000   2.000   3.000  1.00 10.00           C  \nEND\n")?;
+    let scene = StructureScene::from_first_model(&parsed.structure)?;
+    for (spec, expected) in [
+      (":A2G", vec![scene.atoms[0].atom_id, scene.atoms[1].atom_id]),
+      ("/A:a2g@C1", vec![scene.atoms[0].atom_id]),
+      (":5CM", vec![scene.atoms[2].atom_id]),
+      (":1pe", vec![scene.atoms[3].atom_id]),
+      ("/B:0G6@C1", vec![scene.atoms[4].atom_id]),
+      (
+        ":A2G,5CM,1PE,0G6",
+        scene.atoms.iter().map(|atom| atom.atom_id).collect(),
+      ),
+      ("/A:1PE", vec![]),
+    ] {
+      assert_eq!(
+        scene.selection.resolve(&spec.parse()?, &scene),
+        expected.into_iter().collect(),
+        "{spec}"
+      );
+    }
+    Ok(())
+  }
   #[test]
   fn author_specs_should_resolve_residues_and_atoms() -> Result<(), Box<dyn std::error::Error>> {
     let parsed = PdbParser::new().parse_bytes(b"ATOM      1  CA  GLY A  42       1.000   2.000   3.000  1.00 10.00           C  \nATOM      2  N   GLY A  42       0.000   2.000   3.000  1.00 10.00           N  \nEND\n")?;

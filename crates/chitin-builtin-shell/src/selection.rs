@@ -33,6 +33,47 @@ mod tests {
   use chitin_command::{ApplicationCommand, FrontendCommand};
 
   #[test]
+  fn selection_and_visibility_should_accept_alphanumeric_residue_names() -> Result<(), Box<dyn std::error::Error>> {
+    use chitin_command::{VisibilityCommand, VisibilityTarget};
+    for (line, command) in [
+      (
+        "select :A2G",
+        FrontendCommand::Selection(SelectionCommand::Match {
+          spec: ":A2G".parse()?,
+          mode: SelectionMode::Replace,
+        }),
+      ),
+      (
+        "select /A:5CM@C1",
+        FrontendCommand::Selection(SelectionCommand::Match {
+          spec: "/A:5CM@C1".parse()?,
+          mode: SelectionMode::Replace,
+        }),
+      ),
+      (
+        "hide :1PE",
+        FrontendCommand::Visibility(VisibilityCommand {
+          target: VisibilityTarget::Match(":1PE".parse()?),
+          visible: false,
+        }),
+      ),
+      (
+        "show :0G6",
+        FrontendCommand::Visibility(VisibilityCommand {
+          target: VisibilityTarget::Match(":0G6".parse()?),
+          visible: true,
+        }),
+      ),
+    ] {
+      assert!(
+        matches!(parse_builtin_command_line(line)?, BuiltinCommandLine::Frontend(actual) if actual == command),
+        "{line}"
+      );
+    }
+    Ok(())
+  }
+
+  #[test]
   fn visibility_should_parse_shared_targets_and_generate_help() -> Result<(), Box<dyn std::error::Error>> {
     use chitin_command::{VisibilityCommand, VisibilityTarget};
     for (line, target, visible) in [
