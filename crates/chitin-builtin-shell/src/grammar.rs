@@ -79,6 +79,18 @@ pub struct BuiltinShellGrammar {
 /// Top-level commands composed specifically for the built-in shell.
 #[derive(Debug, Subcommand)]
 enum BuiltinShellCommandArgs {
+  /// Hide objects in the current rendering panel without deleting them.
+  Hide {
+    /// `sel`, `all`, or an author atom specification such as /A:42-60.
+    #[arg(allow_hyphen_values = true)]
+    target: String,
+  },
+  /// Restore objects in the current rendering panel.
+  Show {
+    /// `sel`, `all`, or an author atom specification such as /A:42-60.
+    #[arg(allow_hyphen_values = true)]
+    target: String,
+  },
   /// Select molecular objects with /chain:residue@atom author identifiers.
   Select {
     #[arg(num_args = 1..=2, allow_hyphen_values = true)]
@@ -123,6 +135,8 @@ impl BuiltinShellCommandArgs {
   /// Converts the selected grammar branch into its execution-domain result.
   fn into_line(self) -> Result<BuiltinCommandLine, CommandLineParseError> {
     let line = match self {
+      Self::Hide { target } => visibility_line(&target, false)?,
+      Self::Show { target } => visibility_line(&target, true)?,
       Self::Select { specification } => BuiltinCommandLine::Frontend(
         crate::selection::parse(&specification)
           .map_err(CommandLineParseError::Grammar)?
@@ -141,6 +155,18 @@ impl BuiltinShellCommandArgs {
     };
     Ok(line)
   }
+}
+
+fn visibility_line(target: &str, visible: bool) -> Result<BuiltinCommandLine, CommandLineParseError> {
+  use chitin_command::{VisibilityCommand, VisibilityTarget};
+  let target = match target {
+    "sel" => VisibilityTarget::Selected,
+    "all" => VisibilityTarget::All,
+    spec => VisibilityTarget::Match(spec.parse().map_err(CommandLineParseError::Grammar)?),
+  };
+  Ok(BuiltinCommandLine::Frontend(
+    VisibilityCommand { target, visible }.into(),
+  ))
 }
 
 /// Resolves a stable identity into the argument-free frontend command to run.
@@ -250,6 +276,13 @@ pub fn complete_builtin_shell_line(input: &str) -> Vec<String> {
     .chain(
       (tokens.as_slice() == ["select"] && positional_count == 0)
         .then_some(["add", "subtract", "all", "clear", "status"])
+        .into_iter()
+        .flatten()
+        .map(str::to_owned),
+    )
+    .chain(
+      (matches!(tokens.as_slice(), [verb] if verb == "hide" || verb == "show") && positional_count == 0)
+        .then_some(["sel", "all"])
         .into_iter()
         .flatten()
         .map(str::to_owned),

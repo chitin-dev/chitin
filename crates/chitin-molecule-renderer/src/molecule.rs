@@ -359,6 +359,8 @@ impl<'a> MoleculeRenderInput<'a> {
 /// scene's residue-level polymer traces, while all representations share camera,
 /// lighting, depth, and depth-cue resources.
 pub struct MoleculeRenderer {
+  hidden: Arc<chitin_bio::structure::selection::AtomSelection>,
+  visible_draws: crate::visibility::VisibleDraws,
   selected: Arc<chitin_bio::structure::selection::AtomSelection>,
   selected_residues: HashSet<ResidueId>,
   selection_buffers: Option<[wgpu::Buffer; 4]>,
@@ -846,6 +848,8 @@ impl MoleculeRenderer {
       colors.set_surface_fragment_owners(surface_fragments);
     }
     let mut renderer = Self {
+      hidden: Arc::default(),
+      visible_draws: crate::visibility::VisibleDraws::default(),
       selected: Arc::default(),
       selected_residues: HashSet::new(),
       selection_buffers: None,
@@ -920,6 +924,7 @@ impl MoleculeRenderer {
         renderer.upload_colors(index, layers, style);
       }
     }
+    renderer.refresh_visible_draws();
     renderer.refresh_selection_buffers();
     renderer
   }
@@ -986,6 +991,9 @@ impl MoleculeRenderer {
       (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
     }
     self.layers = layers;
+    if geometry_changed {
+      self.refresh_visible_draws();
+    }
     if geometry_changed || old_surface_visible != self.surface_selection_visible() {
       self.selection_lookup = None;
       self.refresh_selection_buffers();
@@ -1038,6 +1046,7 @@ impl MoleculeRenderer {
     let surface_radius = representation_surface_radius(scene, style, self.layers);
     (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
     self.selection_lookup = None;
+    self.refresh_visible_draws();
     self.refresh_selection_buffers();
   }
 
@@ -1170,24 +1179,87 @@ impl MoleculeRenderer {
     self.selection_scale = scale;
   }
 
+  /// Hides source atoms and their display fragments without rebuilding scientific geometry.
+  pub fn set_hidden(&mut self, atoms: Arc<chitin_bio::structure::selection::AtomSelection>) {
+    if self.hidden == atoms {
+      return;
+    }
+    self.hidden = atoms;
+    Arc::make_mut(&mut self.picking).visibility = Arc::new(crate::visibility::VisibilityMask::new(
+      &self.picking.atom_residues,
+      &self.hidden,
+    ));
+    self.refresh_visible_draws();
+    self.refresh_selected_residues();
+    self.selection_lookup = None;
+    self.refresh_selection_buffers();
+  }
+
+  fn refresh_visible_draws(&mut self) {
+    let mut draws = crate::visibility::VisibleDraws::new(&self.picking, &self.colors);
+    self.cartoon_mesh_index_count = draws.cartoon.len() as u32;
+    self.surface_mesh_index_count = draws.surface.len() as u32;
+    self.cartoon_index_count = if self.layers.polymer_style().is_some() {
+      self.cartoon_mesh_index_count
+    } else {
+      0
+    };
+    self.surface_index_count = if self.layers.surface_style().is_some() {
+      self.surface_mesh_index_count
+    } else {
+      0
+    };
+    for (buffer, indices, label) in [
+      (
+        &mut self.cartoon_index_buffer,
+        &mut draws.cartoon,
+        "chitin_visible_cartoon_indices",
+      ),
+      (
+        &mut self.surface_index_buffer,
+        &mut draws.surface,
+        "chitin_visible_surface_indices",
+      ),
+    ] {
+      let indices = std::mem::take(indices);
+      let data = if indices.is_empty() {
+        &[0_u32][..]
+      } else {
+        indices.as_slice()
+      };
+      *buffer = create_buffer(&self.device, label, data, wgpu::BufferUsages::INDEX);
+    }
+    self.visible_draws = draws;
+    self.selection_mask_key = None;
+  }
+
   /// Updates selection flags independently of color buffers and material settings.
-  pub fn set_selection(&mut self, scene: &StructureScene, atoms: Arc<chitin_bio::structure::selection::AtomSelection>) {
+  pub fn set_selection(
+    &mut self,
+    _scene: &StructureScene,
+    atoms: Arc<chitin_bio::structure::selection::AtomSelection>,
+  ) {
     if self.selected == atoms {
       return;
     }
     self.selected = atoms;
-    self.selected_residues = scene
-      .atoms
+    self.refresh_selected_residues();
+    self.refresh_selection_buffers();
+  }
+
+  fn refresh_selected_residues(&mut self) {
+    self.selected_residues = self
+      .picking
+      .atom_residues
       .iter()
-      .filter(|atom| self.selected.contains(&atom.atom_id))
-      .map(|atom| atom.residue_id)
+      .filter(|(atom, _)| self.selected.contains(atom) && self.picking.visibility.atom(**atom))
+      .map(|(_, residue)| *residue)
       .collect();
-    for atom in &scene.atoms {
-      if !self.selected.contains(&atom.atom_id) {
-        self.selected_residues.remove(&atom.residue_id);
+    for (atom, residue) in &self.picking.atom_residues {
+      if self.picking.visibility.atom(*atom) && !self.selected.contains(atom) {
+        self.selected_residues.remove(residue);
       }
     }
-    self.refresh_selection_buffers();
   }
 
   fn refresh_selection_buffers(&mut self) {
@@ -1266,7 +1338,7 @@ impl MoleculeRenderer {
     scene
       .atoms
       .iter()
-      .filter(|atom| residues.contains(&atom.residue_id))
+      .filter(|atom| residues.contains(&atom.residue_id) && self.picking.visibility.atom(atom.atom_id))
       .map(|atom| atom.atom_id)
       .collect()
   }
@@ -1410,7 +1482,9 @@ impl MoleculeRenderer {
         pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
         pass.set_vertex_buffer(1, self.bond_instance_buffer.slice(..));
         pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.bond_count);
+        for range in &self.visible_draws.bonds {
+          pass.draw_indexed(0..self.quad_index_count, 0, range.clone());
+        }
       }
 
       pass.set_pipeline(&self.atom_pipeline);
@@ -1419,7 +1493,9 @@ impl MoleculeRenderer {
       pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
       pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
       if opacity[0] == 1.0 {
-        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
+        for range in &self.visible_draws.atoms {
+          pass.draw_indexed(0..self.quad_index_count, 0, range.clone());
+        }
       }
     }
 
@@ -1481,10 +1557,14 @@ impl MoleculeRenderer {
           pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
           pass.set_pipeline(&self.transparent_bond);
           pass.set_vertex_buffer(1, self.bond_instance_buffer.slice(..));
-          pass.draw_indexed(0..self.quad_index_count, 0, 0..self.bond_count);
+          for range in &self.visible_draws.bonds {
+            pass.draw_indexed(0..self.quad_index_count, 0, range.clone());
+          }
           pass.set_pipeline(&self.transparent_atom);
           pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
-          pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
+          for range in &self.visible_draws.atoms {
+            pass.draw_indexed(0..self.quad_index_count, 0, range.clone());
+          }
         }
       }
       transparency.composite(&mut encoder, view);
@@ -1564,11 +1644,15 @@ impl MoleculeRenderer {
         pass.set_bind_group(1, selection_group, &[]);
         pass.set_vertex_buffer(1, self.bond_instance_buffer.slice(..));
         pass.set_vertex_buffer(2, bonds.slice(..));
-        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.bond_count);
+        for range in &self.visible_draws.bonds {
+          pass.draw_indexed(0..self.quad_index_count, 0, range.clone());
+        }
         pass.set_pipeline(&self.selection_pipelines[0]);
         pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
         pass.set_vertex_buffer(2, atoms.slice(..));
-        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
+        for range in &self.visible_draws.atoms {
+          pass.draw_indexed(0..self.quad_index_count, 0, range.clone());
+        }
       }
       self.selection_mask_key = Some(key);
     }
@@ -2729,6 +2813,13 @@ mod tests {
           .ok_or("test opacity should be valid")?;
       }
       renderer.set_representation_layers(input(), layers.with_appearances(appearance), &style);
+      renderer.set_hidden(Arc::new(if step == 2 {
+        scene.atoms.iter().map(|atom| atom.atom_id).collect()
+      } else if step == 3 {
+        Default::default()
+      } else {
+        [scene.atoms[0].atom_id].into()
+      }));
       let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("appearance_test_target"),
         size: wgpu::Extent3d {

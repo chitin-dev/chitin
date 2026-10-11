@@ -21,6 +21,7 @@ pub(crate) struct ViewSnapshot {
   layers: RepresentationLayers,
   backend: Option<MolecularSurfaceBackend>,
   selection: Option<Arc<AtomSelection>>,
+  hidden: Option<Arc<AtomSelection>>,
 }
 impl ViewSnapshot {
   pub(crate) fn read(state: &DocumentPanelState, target: u64) -> Option<Self> {
@@ -30,6 +31,7 @@ impl ViewSnapshot {
       layers,
       backend,
       selection: state.selection_control(target).map(|control| control.atoms.clone()),
+      hidden: state.selection_control(target).map(|control| control.hidden.clone()),
     })
   }
 }
@@ -47,10 +49,10 @@ impl ViewEdit {
       + [&self.before, &self.after]
         .iter()
         .map(|snapshot| {
-          snapshot
-            .selection
-            .as_ref()
-            .map_or(0, |atoms| atoms.len().saturating_mul(64))
+          [&snapshot.selection, &snapshot.hidden]
+            .iter()
+            .map(|atoms| atoms.as_ref().map_or(0, |atoms| atoms.len().saturating_mul(64)))
+            .sum::<usize>()
         })
         .sum::<usize>()
   }
@@ -159,6 +161,9 @@ impl ChitinApp {
     if let Some(atoms) = &snapshot.selection {
       self.document_panels.select_atoms(change.target, atoms.clone(), cx);
     }
+    if let Some(hidden) = &snapshot.hidden {
+      self.document_panels.hide_atoms(change.target, hidden.clone(), cx);
+    }
     if redo {
       self.edit_history.timeline.did_redo();
     } else {
@@ -205,6 +210,7 @@ mod tests {
     )
     .with_surface_backend(MolecularSurfaceBackend::ImplicitScalarField, |_, _| {})
     .with_selection(Arc::new(scene), |_, _| {}, |_, _| {})
+    .with_visibility(|_, _| {})
   }
 
   fn mount(cx: &mut gpui::TestAppContext) -> (gpui::Entity<ChitinApp>, &mut gpui::VisualTestContext) {
@@ -225,6 +231,124 @@ mod tests {
       .document_panels
       .selection_control(id)
       .map_or(0, |control| control.atoms.len())
+  }
+
+  #[gpui::test]
+  fn visibility_should_be_undoable_independent_and_resolve_hidden_objects(cx: &mut gpui::TestAppContext) {
+    use chitin_command::{VisibilityCommand, VisibilityTarget};
+    let (app, cx) = mount(cx);
+    cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        assert!(
+          app
+            .dispatch_visibility_command(
+              None,
+              VisibilityCommand {
+                target: VisibilityTarget::All,
+                visible: false
+              },
+              cx
+            )
+            .is_err()
+        );
+        assert!(
+          app
+            .dispatch_selection_command(Some(1), SelectionCommand::All, cx)
+            .is_ok()
+        );
+        assert!(
+          app
+            .dispatch_visibility_command(
+              Some(1),
+              VisibilityCommand {
+                target: VisibilityTarget::Selected,
+                visible: false
+              },
+              cx
+            )
+            .is_ok()
+        );
+        assert_eq!(
+          app
+            .document_panels
+            .selection_control(1)
+            .map(|control| control.hidden.len()),
+          Some(2)
+        );
+        assert_eq!(selection(app, 1), 2);
+        let panel = app.document_panels.focused_panel_id;
+        let content = app
+          .document_panels
+          .tree
+          .leaf(panel)
+          .and_then(|leaf| leaf.active_tab())
+          .map(|tab| tab.payload.clone_for_split(window, cx));
+        assert!(
+          app
+            .document_panels
+            .split_panel_with_content(panel, PanelSplitAxis::Horizontal, content)
+            .is_some()
+        );
+        let Some(clone) = app
+          .document_panels
+          .rendering_panels()
+          .into_iter()
+          .find(|panel| panel.id() != 1)
+        else {
+          panic!("clone exists");
+        };
+        assert_eq!(
+          app
+            .document_panels
+            .selection_control(clone.id())
+            .map(|control| control.hidden.len()),
+          Some(2)
+        );
+        assert!(
+          app
+            .dispatch_visibility_command(
+              Some(1),
+              VisibilityCommand {
+                target: VisibilityTarget::Match("/A:42".parse().unwrap_or_else(|_| panic!("valid spec"))),
+                visible: true
+              },
+              cx
+            )
+            .is_ok()
+        );
+        assert_eq!(
+          app
+            .document_panels
+            .selection_control(1)
+            .map(|control| control.hidden.len()),
+          Some(0)
+        );
+        assert_eq!(
+          app
+            .document_panels
+            .selection_control(clone.id())
+            .map(|control| control.hidden.len()),
+          Some(2)
+        );
+        assert!(app.dispatch_history_command(false, cx).is_ok());
+        assert_eq!(
+          app
+            .document_panels
+            .selection_control(1)
+            .map(|control| control.hidden.len()),
+          Some(2)
+        );
+        assert!(app.dispatch_history_command(true, cx).is_ok());
+        assert_eq!(
+          app
+            .document_panels
+            .selection_control(1)
+            .map(|control| control.hidden.len()),
+          Some(0)
+        );
+        assert_eq!(selection(app, 1), 2);
+      });
+    });
   }
 
   #[gpui::test]

@@ -63,6 +63,10 @@ pub trait WgpuPanelScene {
   fn set_selection(&mut self, _atoms: Arc<AtomSelection>) -> bool {
     false
   }
+  /// Applies object visibility independently of selection and representation layers.
+  fn set_hidden(&mut self, _atoms: Arc<AtomSelection>) -> bool {
+    false
+  }
 
   /// Picks the visible residue using viewport-relative normalized coordinates.
   fn pick(&self, _ndc: [f32; 2], _camera: &ViewerCamera) -> MolecularPick {
@@ -177,6 +181,12 @@ impl ChitinWgpuDocumentPanel {
     self.cancel_selection_query();
     self.selected = Arc::clone(&atoms);
     self.scene.set_selection(atoms)
+  }
+
+  /// Changes the hosted molecular scene representation when supported.
+  pub(crate) fn set_hidden(&mut self, atoms: Arc<AtomSelection>) -> bool {
+    self.cancel_selection_query();
+    self.scene.set_hidden(atoms)
   }
 
   /// Changes the hosted molecular scene representation when supported.

@@ -7,6 +7,7 @@ mod panel_tab;
 mod render;
 mod selection;
 mod structure;
+mod visibility;
 mod workspace;
 
 pub use application::ApplicationCommand;
@@ -21,6 +22,7 @@ pub use selection::{AtomSpec, SelectionCommand, SelectionMode};
 pub use structure::{
   CommandOutputFormat, StructureCommand, StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };
+pub use visibility::{VisibilityCommand, VisibilityTarget};
 pub use workspace::WorkspaceCommand;
 
 /// Commands executable without application or window state.
@@ -53,6 +55,8 @@ pub enum FrontendCommand {
   Render(RenderCommand),
   /// Model-scoped scientific selection operations.
   Selection(SelectionCommand),
+  /// Model-scoped object visibility operations.
+  Visibility(VisibilityCommand),
 }
 
 impl FrontendCommand {
@@ -63,6 +67,7 @@ impl FrontendCommand {
       Self::Application(command) => command.id(),
       Self::Render(command) => command.id(),
       Self::Selection(command) => command.id(),
+      Self::Visibility(command) => command.id(),
     }
   }
 }
@@ -106,6 +111,18 @@ impl From<RenderCommand> for FrontendCommand {
 impl From<SelectionCommand> for FrontendCommand {
   fn from(command: SelectionCommand) -> Self {
     Self::Selection(command)
+  }
+}
+
+impl From<VisibilityCommand> for FrontendCommand {
+  fn from(command: VisibilityCommand) -> Self {
+    Self::Visibility(command)
+  }
+}
+
+impl From<VisibilityCommand> for ChitinCommand {
+  fn from(command: VisibilityCommand) -> Self {
+    FrontendCommand::from(command).into()
   }
 }
 

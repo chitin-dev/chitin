@@ -61,6 +61,7 @@ impl SurfaceGenerationState {
 /// Molecular scene backed by one parsed structure and a selectable representation.
 pub(crate) struct StructureMoleculeScene {
   selected: Arc<chitin_bio::structure::selection::AtomSelection>,
+  hidden: Arc<chitin_bio::structure::selection::AtomSelection>,
   /// Renderer-neutral structure data shared by split-panel clones.
   scene: Arc<StructureScene>,
   /// GPU resources created lazily after a surface device is available.
@@ -78,6 +79,7 @@ impl StructureMoleculeScene {
   pub(crate) fn new(scene: Arc<StructureScene>, representation: RepresentationLayers) -> Self {
     Self {
       selected: Arc::default(),
+      hidden: Arc::default(),
       scene,
       renderer: None,
       surface: None,
@@ -88,6 +90,16 @@ impl StructureMoleculeScene {
 }
 
 impl WgpuPanelScene for StructureMoleculeScene {
+  fn set_hidden(&mut self, atoms: Arc<chitin_bio::structure::selection::AtomSelection>) -> bool {
+    if self.hidden == atoms {
+      return false;
+    }
+    self.hidden = atoms;
+    if let Some(renderer) = &mut self.renderer {
+      renderer.set_hidden(Arc::clone(&self.hidden));
+    }
+    true
+  }
   fn box_selection_task(
     &self,
     min: [f32; 2],
@@ -131,7 +143,13 @@ impl WgpuPanelScene for StructureMoleculeScene {
     &self,
     residue: chitin_bio::structure::ResidueId,
   ) -> chitin_bio::structure::selection::AtomSelection {
-    self.scene.selection.residue_atoms(&self.scene, residue)
+    self
+      .scene
+      .selection
+      .residue_atoms(&self.scene, residue)
+      .difference(&self.hidden)
+      .copied()
+      .collect()
   }
   fn select_in_rect(
     &self,
@@ -167,6 +185,7 @@ impl WgpuPanelScene for StructureMoleculeScene {
       )
     });
     renderer.set_selection(&self.scene, Arc::clone(&self.selected));
+    renderer.set_hidden(Arc::clone(&self.hidden));
     renderer.set_selection_scale(frame.scale_factor);
     renderer.resize_if_needed(frame.size);
     renderer.set_debug_mode(self.debug_mode);
@@ -276,20 +295,29 @@ pub(crate) fn build_structure_view_from_scene(
   );
 
   let selection_panel = panel.clone();
+  let visibility_panel = panel.clone();
   let input_panel = panel.clone();
-  let view = view.with_selection(
-    Arc::clone(&scene),
-    move |atoms, cx| {
-      selection_panel.update(cx, |panel, cx| {
-        if panel.set_selection(atoms) {
+  let view = view
+    .with_selection(
+      Arc::clone(&scene),
+      move |atoms, cx| {
+        selection_panel.update(cx, |panel, cx| {
+          if panel.set_selection(atoms) {
+            cx.notify();
+          }
+        });
+      },
+      move |handler, cx| {
+        input_panel.update(cx, |panel, _| panel.bind_selection_input(handler));
+      },
+    )
+    .with_visibility(move |atoms, cx| {
+      visibility_panel.update(cx, |panel, cx| {
+        if panel.set_hidden(atoms) {
           cx.notify();
         }
       });
-    },
-    move |handler, cx| {
-      input_panel.update(cx, |panel, _| panel.bind_selection_input(handler));
-    },
-  );
+    });
   let backend_scene = Arc::clone(&scene);
   let backend_toasts = toast_viewport;
   let backend_state = generation_state;

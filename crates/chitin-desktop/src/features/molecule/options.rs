@@ -305,6 +305,7 @@ impl RenderOnce for DocumentOptionsMenu {
     let controls = self.controls;
     let options = self.options;
     let theme = self.theme;
+    let visibility_app = app.clone();
     Popover::new(("document-options-menu", panel_id.value()))
       .anchor(gpui_kit::base::Anchor::TopRight)
       .open(self.open)
@@ -351,6 +352,38 @@ impl RenderOnce for DocumentOptionsMenu {
             window,
             cx,
           ))
+          .children(
+            [
+              (
+                "hide-selected",
+                "Hide selected",
+                chitin_command::VisibilityTarget::Selected,
+                false,
+              ),
+              ("show-all", "Show all", chitin_command::VisibilityTarget::All, true),
+            ]
+            .map(|(id, label, target, visible)| {
+              let app = visibility_app.clone();
+              let panel = controls.target_panel.clone();
+              Button::new(id)
+                .with_variant(ButtonVariant::Ghost)
+                .label(label)
+                .on_click(move |_, _, cx| {
+                  let _ = app.update(cx, |app, cx| {
+                    if let Err(error) = app.dispatch_visibility_command(
+                      panel.get(),
+                      chitin_command::VisibilityCommand {
+                        target: target.clone(),
+                        visible,
+                      },
+                      cx,
+                    ) {
+                      log::warn!("Visibility failed: {error}");
+                    }
+                  });
+                })
+            }),
+          )
       })
   }
 }

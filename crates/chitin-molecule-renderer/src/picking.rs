@@ -40,7 +40,9 @@ impl BoxSelectionQuery {
       .geometry
       .atom_residues
       .iter()
-      .filter_map(|(&atom, residue)| residues.contains(residue).then_some(atom))
+      .filter_map(|(&atom, residue)| {
+        (residues.contains(residue) && self.geometry.visibility.atom(atom)).then_some(atom)
+      })
       .collect()
   }
 }
@@ -152,6 +154,7 @@ impl BoxHits {
 
 #[derive(Clone, Default)]
 pub(crate) struct PickingGeometry {
+  pub visibility: Arc<crate::visibility::VisibilityMask>,
   pub(crate) atom_boxes: crate::box_selection::BoxSelectionIndex,
   pub(crate) bond_boxes: crate::box_selection::BoxSelectionIndex,
   pub(crate) surface_boxes: crate::box_selection::BoxSelectionIndex,
@@ -230,6 +233,9 @@ impl PickingGeometry {
       nearest = self
         .surface_boxes
         .visit_ray(origin, direction, nearest, |indices, mut nearest| {
+          if !self.visibility.surface(indices, colors) {
+            return nearest;
+          }
           let rows = indices.map(|index| Vec3::from_slice(&colors.surface[index as usize][..3]));
           if let Some((distance, barycentric)) = triangle(origin, direction, rows, true)
             && distance < nearest
@@ -259,6 +265,9 @@ impl PickingGeometry {
           let index = indices[0] as usize / 2;
           let row = &colors.atoms[index];
           let id = self.atoms[index];
+          if !self.visibility.atom(id) {
+            return nearest;
+          }
           if let Some(distance) = sphere(origin, direction, Vec3::from_slice(&row[..3]), row[3])
             && distance < nearest
             && let Some(id) = residue(id)
@@ -274,6 +283,9 @@ impl PickingGeometry {
           let index = indices[0] as usize / 2;
           let row = &colors.bonds[index];
           let ids = self.bonds[index];
+          if !self.visibility.bond(ids) {
+            return nearest;
+          }
           let a = Vec3::from_slice(&row[..3]);
           let b = Vec3::from_slice(&row[4..7]);
           if let Some((distance, fraction)) = cylinder(origin, direction, a, b, row[3])
@@ -290,6 +302,9 @@ impl PickingGeometry {
       nearest = self
         .cartoon_boxes
         .visit_ray(origin, direction, nearest, |indices, mut nearest| {
+          if !self.visibility.cartoon(indices, &self.cartoon_residues) {
+            return nearest;
+          }
           let rows = indices.map(|index| Vec3::from_slice(&colors.cartoon[index as usize][..3]));
           if let Some((distance, barycentric)) = triangle(origin, direction, rows, false)
             && distance < nearest
@@ -368,6 +383,9 @@ impl PickingGeometry {
     let mut hits = BoxHits::new(window);
     if surface_visible {
       self.surface_boxes.visit(mvp, min, max, |indices, _contained| {
+        if !self.visibility.surface(indices, colors) {
+          return;
+        }
         let owners = indices.map(|index| colors.surface_owner(index as usize).map(|(_, residue)| residue));
         let vertices = indices.map(|index| Vec3::from_slice(&colors.surface[index as usize][..3]));
         let lower = vertices
@@ -383,6 +401,9 @@ impl PickingGeometry {
     }
     if layers.polymer_style().is_some() && opacity[1] > 0. {
       self.cartoon_boxes.visit(mvp, min, max, |indices, _contained| {
+        if !self.visibility.cartoon(indices, &self.cartoon_residues) {
+          return;
+        }
         let owners = indices.map(|index| {
           self
             .cartoon_residues
@@ -405,6 +426,9 @@ impl PickingGeometry {
     }
     if layers.atom_style().is_some() && opacity[0] > 0. {
       for (row, atom) in colors.atoms.iter().zip(&self.atoms) {
+        if !self.visibility.atom(*atom) {
+          continue;
+        }
         if let Some(residue) = self.atom_residues.get(atom)
           && !surface_residues.contains(residue)
           && hits.needs_probe([Some(*residue); 3], hits.depth(Vec3::from_slice(&row[..3])) - row[3])
@@ -804,6 +828,60 @@ mod tests {
   fn two_residue_scene() -> Result<StructureScene, Box<dyn std::error::Error>> {
     let parsed = chitin_bio::structure::PdbParser::new().parse_bytes(b"ATOM      1  CA  GLY A  42       0.000   0.000   0.500  1.00 10.00           C  \nATOM      2  CA  GLY B  43       0.000   0.000   0.800  1.00 10.00           C  \nEND\n")?;
     Ok(StructureScene::from_first_model(&parsed.structure)?)
+  }
+
+  #[test]
+  fn hidden_atoms_should_not_occlude_or_enter_mouse_selection() -> Result<(), Box<dyn std::error::Error>> {
+    let scene = two_residue_scene()?;
+    let a = scene.atoms[0];
+    let b = scene.atoms[1];
+    let mut colors = ColorCache::new(&scene);
+    colors.set_atoms(vec![
+      [0., 0., 0.5, 0.1, 1., 1., 1., 1.],
+      [0., 0., 0.8, 0.1, 1., 1., 1., 1.],
+    ]);
+    let mut geometry = PickingGeometry {
+      atoms: vec![a.atom_id, b.atom_id],
+      atom_residues: [(a.atom_id, a.residue_id), (b.atom_id, b.residue_id)].into(),
+      ..Default::default()
+    };
+    geometry.rebuild_atom_boxes(&colors);
+    let layers = RepresentationLayers::atom(crate::AtomStyle::Sphere);
+    assert_eq!(
+      geometry.pick([0., 0.], Mat4::IDENTITY, &colors, &scene, layers),
+      MolecularPick::Residue(a.residue_id)
+    );
+    geometry.visibility = Arc::new(crate::visibility::VisibilityMask::new(
+      &geometry.atom_residues,
+      &[a.atom_id].into(),
+    ));
+    assert_eq!(
+      geometry.pick([0., 0.], Mat4::IDENTITY, &colors, &scene, layers),
+      MolecularPick::Residue(b.residue_id)
+    );
+    let query = BoxSelectionQuery {
+      geometry: Arc::new(geometry),
+      colors: Arc::new(colors),
+      model_view: Mat4::IDENTITY,
+      projection: Mat4::IDENTITY,
+      layers,
+    };
+    assert_eq!(
+      query.select([-0.2, -0.2], [0.2, 0.2], Default::default()),
+      [b.atom_id].into()
+    );
+    let mut restored = query.geometry.as_ref().clone();
+    restored.visibility = Arc::default();
+    assert_eq!(
+      restored.pick([0., 0.], Mat4::IDENTITY, &query.colors, &scene, layers),
+      MolecularPick::Residue(a.residue_id)
+    );
+    // An in-flight query retains its original visibility snapshot.
+    assert_eq!(
+      query.select([-0.2, -0.2], [0.2, 0.2], Default::default()),
+      [b.atom_id].into()
+    );
+    Ok(())
   }
 
   #[test]
@@ -1222,6 +1300,21 @@ mod tests {
     assert_eq!(
       geometry.residues_in_rect([-0.2, -0.2], [0.2, 0.2], Mat4::IDENTITY, &colors, layers),
       [b.residue_id].into()
+    );
+    let mut hidden_front = geometry.clone();
+    hidden_front.visibility = Arc::new(crate::visibility::VisibilityMask::new(
+      &geometry.atom_residues,
+      &[b.atom_id].into(),
+    ));
+    let draws = crate::visibility::VisibleDraws::new(&hidden_front, &colors);
+    assert_eq!(draws.surface, vec![3, 4, 5], "only the rear mesh remains drawable");
+    assert_eq!(
+      hidden_front.pick([0., 0.], Mat4::IDENTITY, &colors, &scene, layers),
+      MolecularPick::Residue(a.residue_id)
+    );
+    assert_eq!(
+      hidden_front.residues_in_rect([-0.2, -0.2], [0.2, 0.2], Mat4::IDENTITY, &colors, layers),
+      [a.residue_id].into()
     );
     // A residue covered by a surface is not selected through its inner atom.
     let covered = PickingGeometry {

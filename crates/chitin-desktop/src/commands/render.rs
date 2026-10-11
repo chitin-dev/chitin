@@ -12,9 +12,11 @@ use crate::app::ChitinApp;
 /// A presentation request could not resolve its explicit target.
 #[derive(Debug, thiserror::Error)]
 pub enum RenderCommandError {
+  #[error("rendering panel #{id} does not support object visibility")]
+  UnsupportedVisibility { id: u64 },
   #[error("rendering panel #{id} does not support scientific selection")]
   UnsupportedSelection { id: u64 },
-  #[error("selection did not match any coordinate-bearing atoms; current selection is unchanged")]
+  #[error("specification did not match any coordinate-bearing atoms; panel state is unchanged")]
   NoMatches,
   #[error("--value is only valid with the uniform coloring scheme")]
   UnexpectedColor,

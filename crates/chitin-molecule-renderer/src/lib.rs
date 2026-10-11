@@ -19,6 +19,7 @@ pub mod representation;
 mod selection;
 mod surface;
 mod transparency;
+mod visibility;
 
 pub use camera::{DragMode, ViewerCamera, ViewportDrag};
 pub use molecule::{

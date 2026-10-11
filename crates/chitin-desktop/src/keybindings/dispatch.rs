@@ -69,6 +69,11 @@ impl ChitinApp {
           log::error!("{error}");
         }
       }
+      FrontendCommand::Visibility(command) => {
+        if let Err(error) = self.dispatch_visibility_command(None, command, cx) {
+          log::error!("{error}");
+        }
+      }
     }
   }
 

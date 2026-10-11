@@ -135,6 +135,12 @@ macro_rules! define_commands {
 }
 
 define_commands! {
+  Visibility {
+    name: "visibility", title: "Change Molecular Object Visibility",
+    category: CommandCategory::Structure, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true, keywords: &["hide", "show", "visibility"], shortcut: None,
+    command_panel: false, frontend: []
+  },
   Selection {
     name: "selection", title: "Select Molecular Objects",
     category: CommandCategory::Structure, domain: CommandExecutionDomain::Frontend,

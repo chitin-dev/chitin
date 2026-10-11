@@ -332,6 +332,11 @@ impl ChitinApp {
             command.clone(),
             cx,
           ),
+          FrontendCommand::Visibility(command) => self.dispatch_visibility_command(
+            submission.rendering_panel().map(|panel| panel.id()),
+            command.clone(),
+            cx,
+          ),
           FrontendCommand::Application(chitin_command::ApplicationCommand::Undo) => {
             self.dispatch_history_command(false, cx)
           }

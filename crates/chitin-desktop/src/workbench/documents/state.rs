@@ -40,6 +40,8 @@ pub struct WgpuDocumentView {
 pub(crate) struct WgpuSelectionControl {
   pub(crate) scene: Arc<StructureScene>,
   pub(crate) atoms: Arc<AtomSelection>,
+  pub(crate) hidden: Arc<AtomSelection>,
+  on_visibility_change: Option<Rc<SelectionChangeHandler>>,
   on_change: Rc<SelectionChangeHandler>,
   pub(crate) bind_input: Rc<SelectionInputBinder>,
 }
@@ -47,15 +49,25 @@ impl fmt::Debug for WgpuSelectionControl {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("WgpuSelectionControl")
       .field("atoms", &self.atoms)
+      .field("hidden", &self.hidden)
       .finish_non_exhaustive()
   }
 }
 impl PartialEq for WgpuSelectionControl {
   fn eq(&self, other: &Self) -> bool {
-    Arc::ptr_eq(&self.scene, &other.scene) && self.atoms == other.atoms && Rc::ptr_eq(&self.on_change, &other.on_change)
+    Arc::ptr_eq(&self.scene, &other.scene)
+      && self.atoms == other.atoms
+      && self.hidden == other.hidden
+      && Rc::ptr_eq(&self.on_change, &other.on_change)
   }
 }
 impl Eq for WgpuSelectionControl {}
+
+impl WgpuSelectionControl {
+  pub(crate) fn supports_visibility(&self) -> bool {
+    self.on_visibility_change.is_some()
+  }
+}
 
 /// Mutable representation-layer state and its view update callback.
 #[derive(Clone)]
@@ -110,7 +122,7 @@ pub(crate) enum DocumentPanelContent {
   /// Experimental WGPU viewport hosted as a document-area panel.
   #[allow(dead_code)]
   WgpuInteractive {
-    selection: Option<WgpuSelectionControl>,
+    selection: Option<Box<WgpuSelectionControl>>,
     /// Filesystem path represented by this structure viewport, when available.
     path: Option<PathBuf>,
     /// Display title shown in the document tab strip.
@@ -201,9 +213,19 @@ impl WgpuDocumentView {
     self.selection = Some(WgpuSelectionControl {
       scene,
       atoms: Arc::new(AtomSelection::new()),
+      hidden: Arc::default(),
+      on_visibility_change: None,
       on_change: Rc::new(on_change),
       bind_input: Rc::new(bind_input),
     });
+    self
+  }
+
+  /// Adds object visibility updates after `with_selection` installs scientific state.
+  pub fn with_visibility(mut self, on_change: impl Fn(Arc<AtomSelection>, &mut App) + 'static) -> Self {
+    if let Some(control) = &mut self.selection {
+      control.on_visibility_change = Some(Rc::new(on_change));
+    }
     self
   }
 
@@ -410,7 +432,7 @@ impl DocumentPanelContent {
     clone_view: WgpuDocumentViewFactory,
   ) -> Self {
     Self::WgpuInteractive {
-      selection: document_view.selection,
+      selection: document_view.selection.map(Box::new),
       path,
       title: title.into(),
       view: document_view.view,
@@ -541,9 +563,13 @@ impl DocumentPanelContent {
         if let (Some(source), Some(destination)) = (selection, document_view.selection.as_mut()) {
           destination.atoms = source.atoms.clone();
           (destination.on_change)(destination.atoms.clone(), cx);
+          destination.hidden = source.hidden.clone();
+          if let Some(callback) = &destination.on_visibility_change {
+            callback(destination.hidden.clone(), cx);
+          }
         }
         Self::WgpuInteractive {
-          selection: document_view.selection,
+          selection: document_view.selection.map(Box::new),
           path: path.clone(),
           title: title.clone(),
           view: document_view.view,
@@ -843,7 +869,7 @@ impl DocumentPanelState {
     let (panel, tab) = self.rendering_panel_location(id)?;
     let entry = self.tree.leaf(panel)?.tabs.iter().find(|entry| entry.id == tab)?;
     match &entry.payload {
-      DocumentPanelContent::WgpuInteractive { selection, .. } => selection.as_ref(),
+      DocumentPanelContent::WgpuInteractive { selection, .. } => selection.as_deref(),
       _ => None,
     }
   }
@@ -872,6 +898,36 @@ impl DocumentPanelState {
     }
     control.atoms = atoms.clone();
     (control.on_change)(atoms, cx);
+    true
+  }
+
+  /// Updates hidden atom identities independently of scientific selection.
+  pub(crate) fn hide_atoms(&mut self, id: u64, atoms: Arc<AtomSelection>, cx: &mut App) -> bool {
+    let Some((panel, tab)) = self.rendering_panel_location(id) else {
+      return false;
+    };
+    let Some(entry) = self
+      .tree
+      .leaf_mut(panel)
+      .and_then(|leaf| leaf.tabs.iter_mut().find(|entry| entry.id == tab))
+    else {
+      return false;
+    };
+    let DocumentPanelContent::WgpuInteractive {
+      selection: Some(control),
+      ..
+    } = &mut entry.payload
+    else {
+      return false;
+    };
+    if control.hidden == atoms {
+      return false;
+    }
+    let Some(callback) = &control.on_visibility_change else {
+      return false;
+    };
+    control.hidden = atoms.clone();
+    callback(atoms, cx);
     true
   }
 

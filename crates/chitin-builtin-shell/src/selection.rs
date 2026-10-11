@@ -33,6 +33,29 @@ mod tests {
   use chitin_command::{ApplicationCommand, FrontendCommand};
 
   #[test]
+  fn visibility_should_parse_shared_targets_and_generate_help() -> Result<(), Box<dyn std::error::Error>> {
+    use chitin_command::{VisibilityCommand, VisibilityTarget};
+    for (line, target, visible) in [
+      ("hide sel", VisibilityTarget::Selected, false),
+      ("show all", VisibilityTarget::All, true),
+      ("hide /A:42-60", VisibilityTarget::Match("/A:42-60".parse()?), false),
+      ("show /A", VisibilityTarget::Match("/A".parse()?), true),
+    ] {
+      assert!(
+        matches!(parse_builtin_command_line(line)?, BuiltinCommandLine::Frontend(FrontendCommand::Visibility(actual)) if actual == VisibilityCommand { target, visible })
+      );
+    }
+    assert_eq!(complete_builtin_shell_line("hide s"), ["hide sel"]);
+    assert_eq!(complete_builtin_shell_line("show a"), ["show all"]);
+    assert!(
+      matches!(parse_builtin_command_line("hide --help")?, BuiltinCommandLine::Display(text) if text.contains("/A:42-60"))
+    );
+    assert!(parse_builtin_command_line("hide").is_err());
+    assert!(parse_builtin_command_line("hide #1/A").is_err());
+    Ok(())
+  }
+
+  #[test]
   fn selection_and_history_should_use_typed_frontend_requests() -> Result<(), Box<dyn std::error::Error>> {
     for (line, mode) in [
       ("select /AA:-5--1@CA", SelectionMode::Replace),

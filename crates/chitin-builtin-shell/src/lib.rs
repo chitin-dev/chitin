@@ -10,6 +10,10 @@
 //! for open molecular views, `panel enter <ID>` selects one, and `panel leave`
 //! clears the selection without closing it. The host reconciles closed views
 //! and updated titles; submissions retain their original target for audit.
+//!
+//! Within that context, `hide sel`, `hide /A:42-60`, `show /A`, and `show all`
+//! change object visibility without deleting structural data or changing selection.
+//! Visibility is independent of layer styles and shares their undo/redo timeline.
 
 mod event;
 mod grammar;
