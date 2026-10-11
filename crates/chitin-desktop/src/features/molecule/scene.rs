@@ -88,6 +88,16 @@ impl StructureMoleculeScene {
 }
 
 impl WgpuPanelScene for StructureMoleculeScene {
+  fn box_selection_task(
+    &self,
+    min: [f32; 2],
+    max: [f32; 2],
+    camera: &chitin_molecule_renderer::ViewerCamera,
+  ) -> Option<super::viewport::BoxSelectionTask> {
+    let renderer = self.renderer.as_ref()?;
+    let query = renderer.box_selection_query(camera.view_matrix(), camera.projection_matrix(renderer.aspect()));
+    Some(Box::new(move || query.select(min, max, Default::default())))
+  }
   fn set_selection(&mut self, atoms: Arc<chitin_bio::structure::selection::AtomSelection>) -> bool {
     if self.selected == atoms {
       return false;

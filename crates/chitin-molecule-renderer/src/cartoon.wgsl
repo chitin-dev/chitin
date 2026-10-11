@@ -45,14 +45,15 @@ fn mesh_vertex(vertex: CartoonVertex, opacity: f32) -> VertexOutput {
 
 @vertex fn cartoon_vertex(vertex: CartoonVertex) -> VertexOutput { return mesh_vertex(vertex, uniforms.opacity.y); }
 @vertex fn surface_vertex(vertex: CartoonVertex) -> VertexOutput { return mesh_vertex(vertex, uniforms.opacity.z); }
-@vertex fn cartoon_selection_vertex(vertex: CartoonVertex, @location(3) selected: f32) -> VertexOutput {
+@group(1) @binding(0) var<storage, read> selection_flags: array<f32>;
+@vertex fn cartoon_selection_vertex(vertex: CartoonVertex, @location(3) owner: u32) -> VertexOutput {
   var out = mesh_vertex(vertex, uniforms.opacity.y);
-  out.color = vec3<f32>(selected, 0.0, 0.0);
+  out.color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
   return out;
 }
-@vertex fn surface_selection_vertex(vertex: CartoonVertex, @location(3) selected: f32) -> VertexOutput {
+@vertex fn surface_selection_vertex(vertex: CartoonVertex, @location(3) owner: u32) -> VertexOutput {
   var out = mesh_vertex(vertex, uniforms.opacity.z);
-  out.color = vec3<f32>(selected, 0.0, 0.0);
+  out.color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
   return out;
 }
 

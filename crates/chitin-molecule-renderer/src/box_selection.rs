@@ -1,8 +1,9 @@
-//! Geometry-lifetime broad phase for precise through-box selection.
+//! Geometry-lifetime broad phase for rectangle and visibility queries.
 
 use glam::{Mat4, Vec3, Vec4};
 use std::ops::Range;
 
+#[derive(Clone)]
 struct Node {
   min: Vec3,
   max: Vec3,
@@ -10,13 +11,76 @@ struct Node {
   children: Option<[usize; 2]>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct BoxSelectionIndex {
   triangles: Vec<[u32; 3]>,
   nodes: Vec<Node>,
 }
 
 impl BoxSelectionIndex {
+  /// Traverses near nodes first; the visitor returns the updated closest distance.
+  pub fn visit_ray(
+    &self,
+    origin: Vec3,
+    direction: Vec3,
+    nearest: f32,
+    mut visitor: impl FnMut([u32; 3], f32) -> f32,
+  ) -> f32 {
+    if self.nodes.is_empty() {
+      return nearest;
+    }
+    self.visit_ray_node(0, origin, direction, nearest, &mut visitor)
+  }
+
+  fn ray_entry(node: &Node, origin: Vec3, direction: Vec3, nearest: f32) -> Option<f32> {
+    let mut entry: f32 = 0.;
+    let mut exit = nearest;
+    for axis in 0..3 {
+      if direction[axis].abs() < 1.0e-12 {
+        if origin[axis] < node.min[axis] || origin[axis] > node.max[axis] {
+          return None;
+        }
+      } else {
+        let a = (node.min[axis] - origin[axis]) / direction[axis];
+        let b = (node.max[axis] - origin[axis]) / direction[axis];
+        entry = entry.max(a.min(b));
+        exit = exit.min(a.max(b));
+      }
+      if entry > exit {
+        return None;
+      }
+    }
+    Some(entry)
+  }
+
+  fn visit_ray_node(
+    &self,
+    id: usize,
+    origin: Vec3,
+    direction: Vec3,
+    mut nearest: f32,
+    visitor: &mut impl FnMut([u32; 3], f32) -> f32,
+  ) -> f32 {
+    let node = &self.nodes[id];
+    if Self::ray_entry(node, origin, direction, nearest).is_none() {
+      return nearest;
+    }
+    if let Some(mut children) = node.children {
+      let entry = |id| Self::ray_entry(&self.nodes[id], origin, direction, nearest).unwrap_or(f32::INFINITY);
+      if entry(children[1]) < entry(children[0]) {
+        children.swap(0, 1);
+      }
+      for child in children {
+        nearest = self.visit_ray_node(child, origin, direction, nearest, visitor);
+      }
+    } else {
+      for &indices in &self.triangles[node.triangles.clone()] {
+        nearest = visitor(indices, nearest);
+      }
+    }
+    nearest
+  }
+
   pub fn new(indices: &[u32], vertices: &[[f32; 9]]) -> Self {
     let mut triangles = indices
       .as_chunks::<3>()
@@ -33,13 +97,31 @@ impl BoxSelectionIndex {
       .collect::<Vec<_>>();
     let mut nodes = Vec::new();
     if !triangles.is_empty() {
-      Self::build(&mut triangles, vertices, 0, &mut nodes);
+      Self::build(
+        &mut triangles,
+        &|index| Vec3::from_slice(&vertices[index as usize][..3]),
+        0,
+        &mut nodes,
+      );
     }
     Self { triangles, nodes }
   }
 
-  fn build(triangles: &mut [[u32; 3]], vertices: &[[f32; 9]], start: usize, nodes: &mut Vec<Node>) -> usize {
-    let position = |index: u32| Vec3::from_slice(&vertices[index as usize][..3]);
+  /// Bounds-only primitives use two corner indices; divide a visited index by two for its primitive ID.
+  pub fn from_bounds(bounds: impl IntoIterator<Item = [Vec3; 2]>) -> Self {
+    let corners = bounds.into_iter().flatten().collect::<Vec<_>>();
+    let mut triangles = (0..corners.len() / 2)
+      .filter(|&i| corners[2 * i].is_finite() && corners[2 * i + 1].is_finite())
+      .map(|i| [2 * i as u32, 2 * i as u32 + 1, 2 * i as u32 + 1])
+      .collect::<Vec<_>>();
+    let mut nodes = Vec::new();
+    if !triangles.is_empty() {
+      Self::build(&mut triangles, &|index| corners[index as usize], 0, &mut nodes);
+    }
+    Self { triangles, nodes }
+  }
+
+  fn build(triangles: &mut [[u32; 3]], position: &impl Fn(u32) -> Vec3, start: usize, nodes: &mut Vec<Node>) -> usize {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     for indices in triangles.iter() {
@@ -70,8 +152,8 @@ impl BoxSelectionIndex {
       triangles.select_nth_unstable_by(middle, |a, b| center(a).total_cmp(&center(b)));
       let (left, right) = triangles.split_at_mut(middle);
       nodes[id].children = Some([
-        Self::build(left, vertices, start, nodes),
-        Self::build(right, vertices, start + middle, nodes),
+        Self::build(left, position, start, nodes),
+        Self::build(right, position, start + middle, nodes),
       ]);
     }
     id
@@ -132,6 +214,26 @@ impl BoxSelectionIndex {
 #[cfg(test)]
 mod tests {
   use super::*;
+  #[test]
+  fn ray_queries_should_prune_and_visit_the_nearest_bounds_first() {
+    let tree = BoxSelectionIndex::from_bounds((0..100_000).map(|i| {
+      let z = i as f32 + 1.;
+      [Vec3::new(-1., -1., z), Vec3::new(1., 1., z + 0.5)]
+    }));
+    let mut visited = 0;
+    let nearest = tree.visit_ray(Vec3::ZERO, Vec3::Z, 200_000., |indices, nearest| {
+      visited += 1;
+      nearest.min(indices[0] as f32 / 2. + 1.)
+    });
+    assert_eq!(nearest, 1.);
+    assert!(visited <= 32);
+    let mut visited = 0;
+    tree.visit_ray(Vec3::new(2., 0., 0.), Vec3::Z, 200_000., |_, nearest| {
+      visited += 1;
+      nearest
+    });
+    assert_eq!(visited, 0);
+  }
   fn mesh(count: usize) -> (Vec<[f32; 9]>, Vec<u32>) {
     let vertices = (0..count)
       .flat_map(|i| {

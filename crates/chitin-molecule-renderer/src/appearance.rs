@@ -85,6 +85,7 @@ use chitin_bio::structure::{AtomId, AtomSceneInstance, ElementCategory, ResidueI
 use chitin_bio::surface::{MolecularSurfaceArtifact, surface_vertex_atom_ids};
 use std::collections::{HashMap, HashSet};
 
+#[derive(Clone)]
 struct Node {
   atom: AtomSceneInstance,
   axis: usize,
@@ -111,6 +112,7 @@ impl From<AtomSceneInstance> for ColorOwner {
 }
 
 /// Spatial ownership is cached when geometry changes, not on every recoloring.
+#[derive(Clone)]
 pub(crate) struct ColorCache {
   nodes: Vec<Node>,
   root: Option<usize>,

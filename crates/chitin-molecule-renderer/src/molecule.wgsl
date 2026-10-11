@@ -254,14 +254,15 @@ fn bond_hit(in: VertexOutput) -> FragmentOutput {
 
 @vertex fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput { return atom_vertex_output(vertex, instance); }
 @vertex fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput { return bond_vertex_output(vertex, instance); }
-@vertex fn atom_selection_vertex(vertex: MeshVertex, instance: AtomInstance, @location(6) selected: f32) -> VertexOutput {
+@group(1) @binding(0) var<storage, read> selection_flags: array<f32>;
+@vertex fn atom_selection_vertex(vertex: MeshVertex, instance: AtomInstance, @location(6) owner: u32) -> VertexOutput {
   var out = atom_vertex_output(vertex, instance);
-  out.start_color = vec3<f32>(selected, 0.0, 0.0);
+  out.start_color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
   return out;
 }
-@vertex fn bond_selection_vertex(vertex: MeshVertex, instance: BondInstance, @location(6) selected: f32) -> VertexOutput {
+@vertex fn bond_selection_vertex(vertex: MeshVertex, instance: BondInstance, @location(6) owner: u32) -> VertexOutput {
   var out = bond_vertex_output(vertex, instance);
-  out.start_color = vec3<f32>(selected, 0.0, 0.0);
+  out.start_color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
   return out;
 }
 @fragment fn atom_fragment(in: VertexOutput) -> FragmentOutput { return atom_hit(in); }
