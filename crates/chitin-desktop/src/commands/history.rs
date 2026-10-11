@@ -182,11 +182,12 @@ impl ChitinApp {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::commands::render::RenderCommandError;
   use crate::workbench::documents::{
     layout::PanelSplitAxis,
     state::{WgpuDocumentView, WgpuDocumentViewFactory},
   };
-  use chitin_bio::structure::{AtomId, PdbParser, StructureScene};
+  use chitin_bio::structure::{PdbParser, StructureScene};
   use chitin_command::{RenderAtomStyle, RenderCommand, RenderOpacity, SelectionCommand, SelectionMode};
   use chitin_molecule_renderer::AtomStyle;
   use gpui::{App, AppContext, IntoElement, Render, Window};
@@ -451,16 +452,27 @@ mod tests {
             .dispatch_selection_command(Some(1), SelectionCommand::All, cx)
             .is_ok()
         );
-        let error = app
-          .dispatch_selection_command(
-            Some(1),
-            SelectionCommand::Atoms {
-              atoms: [AtomId::from_index(999)].into(),
-              mode: SelectionMode::Replace,
-            },
-            cx,
-          )
-          .expect_err("an atom from another scene must be rejected");
+        let Ok(parsed) = PdbParser::new().parse_bytes(
+          b"ATOM      1  CA  GLY A  42       1.000   2.000   3.000  1.00 10.00           C  \n\
+ATOM      2  N   GLY A  42       0.000   2.000   3.000  1.00 10.00           N  \n\
+ATOM      3  O   GLY A  42       0.000   1.000   3.000  1.00 10.00           O  \nEND\n",
+        ) else {
+          panic!("fixture must parse");
+        };
+        let Ok(other_scene) = StructureScene::from_first_model(&parsed.structure) else {
+          panic!("fixture must produce a scene");
+        };
+        let unknown_atom = other_scene.atoms[2].atom_id;
+        let Err(error) = app.dispatch_selection_command(
+          Some(1),
+          SelectionCommand::Atoms {
+            atoms: [unknown_atom].into(),
+            mode: SelectionMode::Replace,
+          },
+          cx,
+        ) else {
+          panic!("an atom from another scene must be rejected");
+        };
         assert!(matches!(error, RenderCommandError::UnknownAtoms { id: 1 }));
         assert_eq!(selection(app, 1), 2);
       });
