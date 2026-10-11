@@ -16,6 +16,8 @@ pub enum RenderCommandError {
   UnsupportedVisibility { id: u64 },
   #[error("rendering panel #{id} does not support scientific selection")]
   UnsupportedSelection { id: u64 },
+  #[error("selection contains atom identities that do not belong to rendering panel #{id}")]
+  UnknownAtoms { id: u64 },
   #[error("specification did not match any coordinate-bearing atoms; panel state is unchanged")]
   NoMatches,
   #[error("--value is only valid with the uniform coloring scheme")]

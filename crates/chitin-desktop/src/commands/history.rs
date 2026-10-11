@@ -186,7 +186,7 @@ mod tests {
     layout::PanelSplitAxis,
     state::{WgpuDocumentView, WgpuDocumentViewFactory},
   };
-  use chitin_bio::structure::{PdbParser, StructureScene};
+  use chitin_bio::structure::{AtomId, PdbParser, StructureScene};
   use chitin_command::{RenderAtomStyle, RenderCommand, RenderOpacity, SelectionCommand, SelectionMode};
   use chitin_molecule_renderer::AtomStyle;
   use gpui::{App, AppContext, IntoElement, Render, Window};
@@ -438,6 +438,32 @@ mod tests {
         assert!(app.dispatch_history_command(true, cx).is_ok());
         assert_eq!(selection(app, 1), 2, "noops and queries did not clear redo");
       })
+    });
+  }
+
+  #[gpui::test]
+  fn unknown_atom_ids_should_return_a_specific_error_without_changing_selection(cx: &mut gpui::TestAppContext) {
+    let (app, cx) = mount(cx);
+    cx.update(|_, cx| {
+      app.update(cx, |app, cx| {
+        assert!(
+          app
+            .dispatch_selection_command(Some(1), SelectionCommand::All, cx)
+            .is_ok()
+        );
+        let error = app
+          .dispatch_selection_command(
+            Some(1),
+            SelectionCommand::Atoms {
+              atoms: [AtomId::from_index(999)].into(),
+              mode: SelectionMode::Replace,
+            },
+            cx,
+          )
+          .expect_err("an atom from another scene must be rejected");
+        assert!(matches!(error, RenderCommandError::UnknownAtoms { id: 1 }));
+        assert_eq!(selection(app, 1), 2);
+      });
     });
   }
 

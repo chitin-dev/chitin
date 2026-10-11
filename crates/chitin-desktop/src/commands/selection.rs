@@ -39,7 +39,7 @@ impl ChitinApp {
       SelectionCommand::Atoms { atoms, mode } => {
         let valid = scene.atoms.iter().map(|atom| atom.atom_id).collect::<AtomSelection>();
         if !atoms.is_subset(&valid) {
-          return Err(RenderCommandError::UnsupportedSelection { id });
+          return Err(RenderCommandError::UnknownAtoms { id });
         }
         apply_mode(&control.atoms, atoms, mode)
       }
