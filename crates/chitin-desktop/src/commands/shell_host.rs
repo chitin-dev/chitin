@@ -323,20 +323,35 @@ impl ChitinApp {
           };
           self.document_panels.activate_tab(leaf, tab);
         }
-        let output = if let FrontendCommand::Render(command) = command {
-          match self.dispatch_render_command(submission.rendering_panel().map(|panel| panel.id()), *command, cx) {
-            Ok(output) => output,
-            Err(error) => {
-              if matches!(error, super::render::RenderCommandError::Unavailable { .. }) {
-                host.session().set_rendering_panel(None)?;
-              }
-              host.fail_frontend(command_id, error.to_string())?;
-              return Err(error.into());
-            }
+        let result = match command {
+          FrontendCommand::Render(command) => {
+            self.dispatch_render_command(submission.rendering_panel().map(|panel| panel.id()), *command, cx)
           }
-        } else {
-          self.dispatch_command_with_window(command.clone(), window, cx);
-          String::new()
+          FrontendCommand::Selection(command) => self.dispatch_selection_command(
+            submission.rendering_panel().map(|panel| panel.id()),
+            command.clone(),
+            cx,
+          ),
+          FrontendCommand::Application(chitin_command::ApplicationCommand::Undo) => {
+            self.dispatch_history_command(false, cx)
+          }
+          FrontendCommand::Application(chitin_command::ApplicationCommand::Redo) => {
+            self.dispatch_history_command(true, cx)
+          }
+          _ => {
+            self.dispatch_command_with_window(command.clone(), window, cx);
+            Ok(String::new())
+          }
+        };
+        let output = match result {
+          Ok(output) => output,
+          Err(error) => {
+            if matches!(error, super::render::RenderCommandError::Unavailable { .. }) {
+              host.session().set_rendering_panel(None)?;
+            }
+            host.fail_frontend(command_id, error.to_string())?;
+            return Err(error.into());
+          }
         };
         host
           .session()

@@ -241,6 +241,45 @@ impl DocumentDock {
     let retained: HashSet<_> = entries.iter().map(|(_, tab)| tab.id).collect();
     let last_document = retained.len() == 1;
     for (panel_id, tab) in entries {
+      let view_changed =
+        self
+          .tabs
+          .get(&tab.id)
+          .is_none_or(|entity| match (&entity.read(cx).tab.payload, &tab.payload) {
+            (
+              DocumentPanelContent::WgpuInteractive { view: old, .. },
+              DocumentPanelContent::WgpuInteractive { view: new, .. },
+            ) => old.entity_id() != new.entity_id(),
+            _ => true,
+          });
+      if view_changed
+        && let DocumentPanelContent::WgpuInteractive {
+          selection: Some(control),
+          view,
+          ..
+        } = &tab.payload
+      {
+        let app = cx.weak_entity();
+        let id = tab.id.value();
+        let revision = view.entity_id();
+        (control.bind_input)(
+          std::rc::Rc::new(move |command, cx| {
+            let app = app.clone();
+            // The emitting viewport is still being updated. Apply through the bus
+            // after it releases its entity borrow, and reject obsolete views.
+            cx.defer(move |cx| {
+              let _ = app.update(cx, |app, cx| {
+                if app.document_panels.rendering_view_id(id) == Some(revision)
+                  && let Err(error) = app.dispatch_selection_command(Some(id), command, cx)
+                {
+                  log::warn!("Selection failed: {error}");
+                }
+              });
+            });
+          }),
+          cx,
+        );
+      }
       if let Some(entity) = self.tabs.get(&tab.id) {
         entity.update(cx, |panel, cx| {
           let changed = panel.tab != *tab

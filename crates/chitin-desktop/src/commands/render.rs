@@ -12,6 +12,10 @@ use crate::app::ChitinApp;
 /// A presentation request could not resolve its explicit target.
 #[derive(Debug, thiserror::Error)]
 pub enum RenderCommandError {
+  #[error("rendering panel #{id} does not support scientific selection")]
+  UnsupportedSelection { id: u64 },
+  #[error("selection did not match any coordinate-bearing atoms; current selection is unchanged")]
+  NoMatches,
   #[error("--value is only valid with the uniform coloring scheme")]
   UnexpectedColor,
   #[error("no rendering panel context; use 'panel list' and 'panel enter <ID>' first")]
@@ -25,6 +29,40 @@ pub enum RenderCommandError {
 impl ChitinApp {
   /// Applies one presentation request to a stable tab without changing UI focus.
   pub(crate) fn dispatch_render_command(
+    &mut self,
+    target: Option<u64>,
+    command: RenderCommand,
+    cx: &mut Context<Self>,
+  ) -> Result<String, RenderCommandError> {
+    self.dispatch_render_edit(target, command, super::history::EditPhase::Commit, cx)
+  }
+
+  pub(crate) fn dispatch_render_edit(
+    &mut self,
+    target: Option<u64>,
+    command: RenderCommand,
+    phase: super::history::EditPhase,
+    cx: &mut Context<Self>,
+  ) -> Result<String, RenderCommandError> {
+    let id = target.ok_or(RenderCommandError::MissingContext)?;
+    let before =
+      super::history::ViewSnapshot::read(&self.document_panels, id).ok_or(RenderCommandError::Unavailable { id })?;
+    let output = self.apply_render_command(target, command, cx)?;
+    if command != RenderCommand::Status
+      && let Some(after) = super::history::ViewSnapshot::read(&self.document_panels, id)
+    {
+      let layer = match command {
+        RenderCommand::Color { layer, .. } | RenderCommand::Opacity { layer, .. } => Some(layer),
+        _ => None,
+      };
+      self
+        .edit_history
+        .changed(id, (command.id(), layer), before, after, phase);
+    }
+    Ok(output)
+  }
+
+  fn apply_render_command(
     &mut self,
     target: Option<u64>,
     command: RenderCommand,

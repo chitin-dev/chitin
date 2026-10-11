@@ -45,6 +45,16 @@ fn mesh_vertex(vertex: CartoonVertex, opacity: f32) -> VertexOutput {
 
 @vertex fn cartoon_vertex(vertex: CartoonVertex) -> VertexOutput { return mesh_vertex(vertex, uniforms.opacity.y); }
 @vertex fn surface_vertex(vertex: CartoonVertex) -> VertexOutput { return mesh_vertex(vertex, uniforms.opacity.z); }
+@vertex fn cartoon_selection_vertex(vertex: CartoonVertex, @location(3) selected: f32) -> VertexOutput {
+  var out = mesh_vertex(vertex, uniforms.opacity.y);
+  out.color = vec3<f32>(selected, 0.0, 0.0);
+  return out;
+}
+@vertex fn surface_selection_vertex(vertex: CartoonVertex, @location(3) selected: f32) -> VertexOutput {
+  var out = mesh_vertex(vertex, uniforms.opacity.z);
+  out.color = vec3<f32>(selected, 0.0, 0.0);
+  return out;
+}
 
 // Wrapped diffuse lighting keeps the relatively flat cartoon sections legible
 // when their normals turn away from either directional light.
@@ -90,6 +100,7 @@ fn shade_cartoon(in: VertexOutput) -> vec4<f32> {
 }
 
 @fragment fn cartoon_fragment(in: VertexOutput) -> @location(0) vec4<f32> { return shade_cartoon(in); }
+@fragment fn cartoon_selection(in: VertexOutput) -> @location(0) vec4<f32> { return vec4<f32>(select(0.0, 1.0, in.color.r >= 0.5), 0.0, 0.0, 1.0); }
 struct TransparentOutput {
   @location(0) accumulation: vec4<f32>,
   @location(1) revealage: f32,

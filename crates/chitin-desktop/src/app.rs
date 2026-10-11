@@ -25,7 +25,9 @@ use crate::{
     molecule::options::DocumentOptionsControls,
     terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_bottom_dock},
   },
-  keybindings::{ToggleCommandPanel, ToggleTerminal, ToggleWorkspace, WORKBENCH_KEY_CONTEXT},
+  keybindings::{
+    RedoWorkbenchEdit, ToggleCommandPanel, ToggleTerminal, ToggleWorkspace, UndoWorkbenchEdit, WORKBENCH_KEY_CONTEXT,
+  },
   services::tasks::BackgroundTaskCenter,
   workbench::{
     activity_bar::{ActiveActivity, render_activity_bar},
@@ -39,6 +41,7 @@ pub use crate::workbench::documents::state::{WgpuDocumentView, WgpuDocumentViewF
 
 /// Root state object rendered into the main GPUI window.
 pub struct ChitinApp {
+  pub(crate) edit_history: crate::commands::history::WorkbenchHistory,
   /// Currently opened project workspace, if a path was accepted.
   pub(crate) workspace: Option<ProjectWorkspace>,
   /// Project workspace sidebar state owned by the app.
@@ -145,6 +148,7 @@ impl ChitinApp {
       workbench_focus: None,
       document_panel_focus: None,
       document_panels: DocumentPanelState::empty(),
+      edit_history: Default::default(),
       document_dock: None,
       active_activity: ActiveActivity::Workspace,
       project_sidebar_visible: true,
@@ -436,6 +440,7 @@ impl Render for ChitinApp {
       .take()
       .unwrap_or_else(|| DocumentDock::new(window, cx));
     document_dock.sync(&self.document_panels, document_options_controls, window, cx);
+    self.edit_history.prune(&self.document_panels);
     let document_area = document_dock.area.clone();
     self.document_dock = Some(document_dock);
     let bottom_dock_height = self.bottom_dock.height();
@@ -507,6 +512,16 @@ impl Render for ChitinApp {
       }))
       .on_action(cx.listener(|this, _: &ToggleTerminal, _, cx| {
         this.toggle_terminal(cx);
+      }))
+      .on_action(cx.listener(|this, _: &UndoWorkbenchEdit, _, cx| {
+        if let Err(error) = this.dispatch_history_command(false, cx) {
+          log::error!("{error}");
+        }
+      }))
+      .on_action(cx.listener(|this, _: &RedoWorkbenchEdit, _, cx| {
+        if let Err(error) = this.dispatch_history_command(true, cx) {
+          log::error!("{error}");
+        }
       }))
       .capture_key_down({
         let app = app.clone();

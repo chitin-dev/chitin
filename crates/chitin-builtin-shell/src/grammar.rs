@@ -79,6 +79,15 @@ pub struct BuiltinShellGrammar {
 /// Top-level commands composed specifically for the built-in shell.
 #[derive(Debug, Subcommand)]
 enum BuiltinShellCommandArgs {
+  /// Select molecular objects with /chain:residue@atom author identifiers.
+  Select {
+    #[arg(num_args = 1..=2, allow_hyphen_values = true)]
+    specification: Vec<String>,
+  },
+  /// Undo the previous committed workbench edit.
+  Undo,
+  /// Redo the previous undone workbench edit.
+  Redo,
   /// Execute a command shared with non-GUI frontends.
   #[command(flatten)]
   Portable(PortableCommandArgs),
@@ -114,6 +123,13 @@ impl BuiltinShellCommandArgs {
   /// Converts the selected grammar branch into its execution-domain result.
   fn into_line(self) -> Result<BuiltinCommandLine, CommandLineParseError> {
     let line = match self {
+      Self::Select { specification } => BuiltinCommandLine::Frontend(
+        crate::selection::parse(&specification)
+          .map_err(CommandLineParseError::Grammar)?
+          .into(),
+      ),
+      Self::Undo => BuiltinCommandLine::Frontend(chitin_command::ApplicationCommand::Undo.into()),
+      Self::Redo => BuiltinCommandLine::Frontend(chitin_command::ApplicationCommand::Redo.into()),
       Self::Portable(arguments) => BuiltinCommandLine::Portable(arguments.into_command()?),
       Self::Clear => BuiltinCommandLine::ShellBuiltin(ShellBuiltin::Clear),
       Self::Render { command } => BuiltinCommandLine::Frontend(command.into_command().into()),
@@ -230,6 +246,13 @@ pub fn complete_builtin_shell_line(input: &str) -> Vec<String> {
         .into_iter()
         .flat_map(|argument| argument.get_possible_values())
         .map(|value| value.get_name().to_owned()),
+    )
+    .chain(
+      (tokens.as_slice() == ["select"] && positional_count == 0)
+        .then_some(["add", "subtract", "all", "clear", "status"])
+        .into_iter()
+        .flatten()
+        .map(str::to_owned),
     )
     .chain(
       tokens

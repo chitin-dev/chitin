@@ -10,10 +10,13 @@
 //! [`RepresentationLayers`], and retain ownership of the target surface.
 
 pub mod appearance;
+mod box_selection;
 pub mod camera;
 mod cartoon;
 pub mod molecule;
+pub mod picking;
 pub mod representation;
+mod selection;
 mod surface;
 mod transparency;
 

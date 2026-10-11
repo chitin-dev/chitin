@@ -8,6 +8,7 @@
 
 pub mod execution;
 pub mod grammar;
+pub mod history;
 pub mod model;
 pub mod output;
 

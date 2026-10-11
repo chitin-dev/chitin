@@ -76,8 +76,7 @@ fn view_ray_anchor(ndc: vec2<f32>, view_depth: f32) -> vec3<f32> {
   );
 }
 
-@vertex
-fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
+fn atom_vertex_output(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
   var out: VertexOutput;
   let center = (uniforms.model_view * vec4<f32>(instance.position_radius.xyz, 1.0)).xyz;
   let radius = view_radius(instance.position_radius.w);
@@ -97,8 +96,7 @@ fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
   return out;
 }
 
-@vertex
-fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput {
+fn bond_vertex_output(vertex: MeshVertex, instance: BondInstance) -> VertexOutput {
   var out: VertexOutput;
   let start = (uniforms.model_view * vec4<f32>(instance.start_radius.xyz, 1.0)).xyz;
   let end = (uniforms.model_view * vec4<f32>(instance.end_padding.xyz, 1.0)).xyz;
@@ -254,8 +252,31 @@ fn bond_hit(in: VertexOutput) -> FragmentOutput {
   return out;
 }
 
+@vertex fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput { return atom_vertex_output(vertex, instance); }
+@vertex fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput { return bond_vertex_output(vertex, instance); }
+@vertex fn atom_selection_vertex(vertex: MeshVertex, instance: AtomInstance, @location(6) selected: f32) -> VertexOutput {
+  var out = atom_vertex_output(vertex, instance);
+  out.start_color = vec3<f32>(selected, 0.0, 0.0);
+  return out;
+}
+@vertex fn bond_selection_vertex(vertex: MeshVertex, instance: BondInstance, @location(6) selected: f32) -> VertexOutput {
+  var out = bond_vertex_output(vertex, instance);
+  out.start_color = vec3<f32>(selected, 0.0, 0.0);
+  return out;
+}
 @fragment fn atom_fragment(in: VertexOutput) -> FragmentOutput { return atom_hit(in); }
 @fragment fn bond_fragment(in: VertexOutput) -> FragmentOutput { return bond_hit(in); }
+
+@fragment fn atom_selection(in: VertexOutput) -> FragmentOutput {
+  var out = atom_hit(in);
+  out.color = vec4<f32>(in.start_color.r, 0.0, 0.0, 1.0);
+  return out;
+}
+@fragment fn bond_selection(in: VertexOutput) -> FragmentOutput {
+  var out = bond_hit(in);
+  out.color = vec4<f32>(in.start_color.r, 0.0, 0.0, 1.0);
+  return out;
+}
 
 struct TransparentOutput {
   @location(0) accumulation: vec4<f32>,

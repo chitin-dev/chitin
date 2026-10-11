@@ -81,8 +81,9 @@ pub(crate) fn chain_color(chain: usize) -> [f32; 3] {
 }
 
 use crate::BallAndStickPalette;
-use chitin_bio::structure::{AtomSceneInstance, ElementCategory, StructureScene};
-use chitin_bio::surface::{MolecularSurfaceArtifact, SurfaceGeometrySource, select_surface_scene_atoms};
+use chitin_bio::structure::{AtomId, AtomSceneInstance, ElementCategory, ResidueId, StructureScene};
+use chitin_bio::surface::{MolecularSurfaceArtifact, surface_vertex_atom_ids};
+use std::collections::{HashMap, HashSet};
 
 struct Node {
   atom: AtomSceneInstance,
@@ -93,12 +94,16 @@ struct Node {
 
 #[derive(Clone, Copy)]
 struct ColorOwner {
+  atom: AtomId,
+  residue: ResidueId,
   chain: u32,
   element: ElementCategory,
 }
 impl From<AtomSceneInstance> for ColorOwner {
   fn from(atom: AtomSceneInstance) -> Self {
     Self {
+      atom: atom.atom_id,
+      residue: atom.residue_id,
       chain: atom.chain_id.index() as u32,
       element: atom.element,
     }
@@ -118,6 +123,8 @@ pub(crate) struct ColorCache {
   bond_element_colors: Vec<[[f32; 3]; 2]>,
   cartoon_owners: Vec<Option<ColorOwner>>,
   surface_owners: Vec<Option<ColorOwner>>,
+  surface_mapped: bool,
+  surface_residue_ids: HashSet<ResidueId>,
   cartoon_chains: Vec<usize>,
 }
 
@@ -138,6 +145,8 @@ impl ColorCache {
       bond_element_colors: vec![],
       cartoon_owners: vec![],
       surface_owners: vec![],
+      surface_mapped: false,
+      surface_residue_ids: HashSet::new(),
       cartoon_chains: vec![],
     };
     cache.root = cache.build(&mut atoms, 0);
@@ -231,30 +240,17 @@ impl ColorCache {
     self.cartoon_chains = chains;
   }
   pub fn set_surface(&mut self, rows: Vec<[f32; 9]>, artifact: Option<&MolecularSurfaceArtifact>) {
+    self.surface_mapped = artifact.is_some();
     self.surface_owners = if let Some(artifact) = artifact {
-      let scope = match artifact.source {
-        SurfaceGeometrySource::ImplicitGrid(request) => request.atom_scope,
-        SurfaceGeometrySource::Msms { atom_scope, .. } => atom_scope,
-      };
       let atoms = self.nodes.iter().map(|node| node.atom).collect::<Vec<_>>();
-      let eligible = select_surface_scene_atoms(&atoms, scope).copied().collect::<Vec<_>>();
-      let mut owners = Vec::with_capacity(rows.len());
-      for domain in &artifact.domains {
-        // A per-chain mesh must never inherit an overlapping neighbor's chain.
-        let tree = Self::from_atoms(
-          eligible
-            .iter()
-            .filter(|atom| domain.chain_id.is_none_or(|chain| atom.chain_id == chain))
-            .copied()
-            .collect(),
-        );
-        let end = owners.len() + domain.mesh.vertices.len();
-        owners.extend(
-          rows[owners.len()..end]
-            .iter()
-            .map(|row| tree.nearest([row[0], row[1], row[2]]).map(ColorOwner::from)),
-        );
-      }
+      let lookup = atoms
+        .iter()
+        .map(|atom| (atom.atom_id, ColorOwner::from(*atom)))
+        .collect::<HashMap<_, _>>();
+      let mut owners = surface_vertex_atom_ids(&atoms, artifact)
+        .into_iter()
+        .map(|id| id.and_then(|id| lookup.get(&id).copied()))
+        .collect::<Vec<_>>();
       owners.resize(rows.len(), None);
       owners
     } else {
@@ -264,6 +260,45 @@ impl ColorCache {
         .collect()
     };
     self.surface = rows;
+    self.cache_surface_residues();
+  }
+  pub fn surface_owner(&self, vertex: usize) -> Option<(AtomId, ResidueId)> {
+    self
+      .surface_mapped
+      .then(|| self.surface_owners.get(vertex).copied().flatten())
+      .flatten()
+      .map(|owner| (owner.atom, owner.residue))
+  }
+  pub fn set_surface_fragment_owners(&mut self, fragments: &[crate::surface::SurfaceFragment<'_>]) {
+    let atoms = self.nodes.iter().map(|node| node.atom).collect::<Vec<_>>();
+    let lookup = atoms
+      .iter()
+      .map(|atom| (atom.atom_id, ColorOwner::from(*atom)))
+      .collect::<HashMap<_, _>>();
+    self.surface_owners = fragments
+      .iter()
+      .flat_map(|fragment| surface_vertex_atom_ids(&atoms, fragment.surface))
+      .map(|id| id.and_then(|id| lookup.get(&id).copied()))
+      .collect();
+    self.surface_owners.resize(self.surface.len(), None);
+    self.surface_mapped = true;
+    self.cache_surface_residues();
+  }
+  fn cache_surface_residues(&mut self) {
+    self.surface_residue_ids = self
+      .surface_owners
+      .iter()
+      .filter_map(|owner| {
+        self
+          .surface_mapped
+          .then_some(*owner)
+          .flatten()
+          .map(|owner| owner.residue)
+      })
+      .collect();
+  }
+  pub fn surface_residues(&self) -> impl Iterator<Item = ResidueId> + '_ {
+    self.surface_residue_ids.iter().copied()
   }
   pub fn recolor(&mut self, index: usize, appearance: LayerAppearance, palette: &BallAndStickPalette) {
     fn color(

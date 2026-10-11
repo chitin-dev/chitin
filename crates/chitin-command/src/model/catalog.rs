@@ -135,6 +135,24 @@ macro_rules! define_commands {
 }
 
 define_commands! {
+  Selection {
+    name: "selection", title: "Select Molecular Objects",
+    category: CommandCategory::Structure, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true, keywords: &["select", "residue", "atom"], shortcut: None,
+    command_panel: false, frontend: []
+  },
+  ApplicationUndo {
+    name: "application.undo", title: "Undo Workbench Edit",
+    category: CommandCategory::Application, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: false, keywords: &["undo", "history"], shortcut: Some("Ctrl+Z"),
+    command_panel: true, frontend: [ApplicationCommand::Undo]
+  },
+  ApplicationRedo {
+    name: "application.redo", title: "Redo Workbench Edit",
+    category: CommandCategory::Application, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: false, keywords: &["redo", "history"], shortcut: Some("Ctrl+Shift+Z"),
+    command_panel: true, frontend: [ApplicationCommand::Redo]
+  },
   /// Change Layer Coloring.
   RenderColor {
     name: "render.color", title: "Change Layer Coloring", category: CommandCategory::Structure,

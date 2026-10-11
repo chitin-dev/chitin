@@ -1,6 +1,6 @@
 //! Instanced atom, bond, and polymer-cartoon rendering for molecular scenes.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use chitin_bio::{
   structure::{AtomId, BondSource, ElementCategory, ResidueId, StructureScene},
@@ -359,6 +359,13 @@ impl<'a> MoleculeRenderInput<'a> {
 /// scene's residue-level polymer traces, while all representations share camera,
 /// lighting, depth, and depth-cue resources.
 pub struct MoleculeRenderer {
+  selected: Arc<chitin_bio::structure::selection::AtomSelection>,
+  selected_residues: HashSet<ResidueId>,
+  selection_buffers: Option<[wgpu::Buffer; 4]>,
+  selection_pipelines: [wgpu::RenderPipeline; 4],
+  selection_mask: Option<crate::selection::SelectionMask>,
+  selection_scale: f32,
+  picking: crate::picking::PickingGeometry,
   transparent_atom: wgpu::RenderPipeline,
   transparent_bond: wgpu::RenderPipeline,
   transparent_cartoon: wgpu::RenderPipeline,
@@ -646,10 +653,54 @@ impl MoleculeRenderer {
       Some(wgpu::Face::Back),
       true,
     );
+    let selection_atom = create_pipeline(
+      &device,
+      &pipeline_layout,
+      &shader,
+      "chitin_atom_selection",
+      "atom_selection_vertex",
+      PipelineConfig {
+        color_format: wgpu::TextureFormat::Rgba8Unorm,
+        instance_layout: atom_instance_layout(),
+        fragment_entry: "atom_selection",
+        transparent: false,
+      },
+    );
+    let selection_bond = create_pipeline(
+      &device,
+      &pipeline_layout,
+      &shader,
+      "chitin_bond_selection",
+      "bond_selection_vertex",
+      PipelineConfig {
+        color_format: wgpu::TextureFormat::Rgba8Unorm,
+        instance_layout: bond_instance_layout(),
+        fragment_entry: "bond_selection",
+        transparent: false,
+      },
+    );
+    let selection_cartoon = create_mesh_pipeline(
+      &device,
+      &pipeline_layout,
+      &cartoon_shader,
+      wgpu::TextureFormat::Rgba8Unorm,
+      "chitin_cartoon_selection",
+      None,
+      MeshPass::Selection,
+    );
+    let selection_surface = create_mesh_pipeline(
+      &device,
+      &pipeline_layout,
+      &cartoon_shader,
+      wgpu::TextureFormat::Rgba8Unorm,
+      "chitin_surface_selection",
+      Some(wgpu::Face::Back),
+      MeshPass::Selection,
+    );
 
     let (quad_vertices, quad_indices) = billboard_quad_mesh();
     let atom_instances = atom_instances(scene, style, layers);
-    let bond_instances = bond_instances(scene, style, layers);
+    let (bond_instances, bond_ids) = bond_instances_with_ids(scene, style, layers);
     let cartoon = match layers.polymer_style() {
       Some(PolymerStyle::Cartoon) => cartoon_mesh(scene, style.palette.carbon.color),
       None => Default::default(),
@@ -781,7 +832,25 @@ impl MoleculeRenderer {
     colors.set_bonds(bond_buffer_data);
     colors.set_cartoon(cartoon_vertices, cartoon.chains);
     colors.set_surface(surface_vertices, surface);
+    if !surface_fragments.is_empty() {
+      colors.set_surface_fragment_owners(surface_fragments);
+    }
     let mut renderer = Self {
+      selected: Arc::default(),
+      selected_residues: HashSet::new(),
+      selection_buffers: None,
+      selection_pipelines: [selection_atom, selection_bond, selection_cartoon, selection_surface],
+      selection_mask: None,
+      selection_scale: 1.,
+      picking: crate::picking::PickingGeometry {
+        atom_residues: scene.atoms.iter().map(|atom| (atom.atom_id, atom.residue_id)).collect(),
+        atoms: visible_atom_ids(scene, layers),
+        bonds: bond_ids,
+        cartoon_indices: cartoon_indices.clone(),
+        cartoon_residues: cartoon.residues,
+        surface_indices: surface_indices.clone(),
+        ..Default::default()
+      },
       transparent_atom,
       transparent_bond,
       transparent_cartoon,
@@ -829,6 +898,8 @@ impl MoleculeRenderer {
       diagnostics,
       colors,
     };
+    renderer.picking.rebuild_surface_boxes(&renderer.colors);
+    renderer.picking.rebuild_cartoon_boxes(&renderer.colors);
     for index in 0..3 {
       if index != 2 || surface_fragments.is_empty() {
         renderer.upload_colors(index, layers, style);
@@ -849,6 +920,10 @@ impl MoleculeRenderer {
     }
 
     let old_appearance = self.layers.appearances();
+    let old_surface_visible = self.surface_selection_visible();
+    let geometry_changed = self.layers.atom_style() != layers.atom_style()
+      || self.layers.polymer_style() != layers.polymer_style()
+      || self.layers.surface_style() != layers.surface_style();
     let appearance = layers.appearances();
 
     let MoleculeRenderInput {
@@ -895,6 +970,9 @@ impl MoleculeRenderer {
       (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
     }
     self.layers = layers;
+    if geometry_changed || old_surface_visible != self.surface_selection_visible() {
+      self.refresh_selection_buffers();
+    }
     for index in 0..3 {
       if !old_appearance[index].same_coloring(appearance[index]) {
         self.upload_colors(index, layers, style);
@@ -942,6 +1020,7 @@ impl MoleculeRenderer {
     };
     let surface_radius = representation_surface_radius(scene, style, self.layers);
     (self.fit_transform, self.scene_center, self.fitted_radius) = fit_geometry(scene, surface_radius);
+    self.refresh_selection_buffers();
   }
 
   /// Rebuilds atom and bond instance buffers for the selected layers.
@@ -952,6 +1031,7 @@ impl MoleculeRenderer {
     style: &BallAndStickStyle,
   ) {
     let atom_instances = atom_instances(scene, style, layers);
+    self.picking.atoms = visible_atom_ids(scene, layers);
     self.atom_count = atom_instances.len() as u32;
     let atom_buffer_data = if atom_instances.is_empty() {
       vec![[0.0; 8]]
@@ -965,7 +1045,8 @@ impl MoleculeRenderer {
       wgpu::BufferUsages::VERTEX,
     );
 
-    let bond_instances = bond_instances(scene, style, layers);
+    let (bond_instances, bond_ids) = bond_instances_with_ids(scene, style, layers);
+    self.picking.bonds = bond_ids;
     self.bond_count = bond_instances.len() as u32;
     let bond_buffer_data = if bond_instances.is_empty() {
       vec![[0.0; 16]]
@@ -985,6 +1066,8 @@ impl MoleculeRenderer {
   /// Generates and uploads cartoon geometry once, retaining it across toggles.
   fn replace_cartoon_buffers(&mut self, scene: &StructureScene, style: &BallAndStickStyle) {
     let cartoon = cartoon_mesh(scene, style.palette.carbon.color);
+    self.picking.cartoon_indices = cartoon.indices.clone();
+    self.picking.cartoon_residues = cartoon.residues;
     self.cartoon_mesh_index_count = cartoon.indices.len() as u32;
     let vertices = if cartoon.vertices.is_empty() {
       vec![[0.0; 9]]
@@ -1010,6 +1093,7 @@ impl MoleculeRenderer {
     );
     self.cartoon_geometry_ready = true;
     self.colors.set_cartoon(vertices, cartoon.chains);
+    self.picking.rebuild_cartoon_boxes(&self.colors);
   }
 
   /// Packs and uploads a computed surface while retaining all pipeline state.
@@ -1022,6 +1106,7 @@ impl MoleculeRenderer {
   fn replace_surface_fragment_buffers(&mut self, fragments: &[SurfaceFragment<'_>]) {
     let (vertices, indices) = surface_fragment_vertices(fragments);
     self.replace_packed_surface_buffers(vertices, indices, None);
+    self.colors.set_surface_fragment_owners(fragments);
   }
 
   /// Uploads already packed surface vertices and indices.
@@ -1032,6 +1117,7 @@ impl MoleculeRenderer {
     artifact: Option<&MolecularSurfaceArtifact>,
   ) {
     self.surface_mesh_index_count = indices.len() as u32;
+    self.picking.surface_indices = indices.clone();
     let vertices = if vertices.is_empty() { vec![[0.0; 9]] } else { vertices };
     let indices = if indices.is_empty() { vec![0_u32] } else { indices };
     self.surface_vertex_buffer = create_buffer(
@@ -1043,6 +1129,7 @@ impl MoleculeRenderer {
     self.surface_index_buffer = create_buffer(&self.device, "chitin_ses_indices", &indices, wgpu::BufferUsages::INDEX);
     self.surface_geometry_ready = true;
     self.colors.set_surface(vertices, artifact);
+    self.picking.rebuild_surface_boxes(&self.colors);
   }
 
   /// Recreates size-dependent depth resources when the target changes.
@@ -1057,6 +1144,156 @@ impl MoleculeRenderer {
   /// Returns the current render target aspect ratio.
   pub fn aspect(&self) -> f32 {
     self.size.aspect()
+  }
+
+  /// Sets the logical-to-physical scale for the two-logical-pixel selection outline.
+  pub fn set_selection_scale(&mut self, scale: f32) {
+    self.selection_scale = scale;
+  }
+
+  /// Updates selection flags independently of color buffers and material settings.
+  pub fn set_selection(&mut self, scene: &StructureScene, atoms: Arc<chitin_bio::structure::selection::AtomSelection>) {
+    if self.selected == atoms {
+      return;
+    }
+    self.selected = atoms;
+    self.selected_residues = scene
+      .atoms
+      .iter()
+      .filter(|atom| self.selected.contains(&atom.atom_id))
+      .map(|atom| atom.residue_id)
+      .collect();
+    for atom in &scene.atoms {
+      if !self.selected.contains(&atom.atom_id) {
+        self.selected_residues.remove(&atom.residue_id);
+      }
+    }
+    self.refresh_selection_buffers();
+  }
+
+  fn refresh_selection_buffers(&mut self) {
+    if self.selected.is_empty() {
+      return;
+    }
+    let surface_residues = if self.surface_selection_visible() {
+      self.colors.surface_residues().collect::<HashSet<_>>()
+    } else {
+      HashSet::new()
+    };
+    let selected = self.selected.iter().copied().collect::<HashSet<_>>();
+    let selected_atom = |id: &chitin_bio::structure::AtomId| {
+      selected.contains(id)
+        && !self
+          .picking
+          .atom_residues
+          .get(id)
+          .is_some_and(|residue| surface_residues.contains(residue))
+    };
+    let mut atoms = self
+      .picking
+      .atoms
+      .iter()
+      .map(|id| f32::from(selected_atom(id)))
+      .collect::<Vec<_>>();
+    let mut bonds = self
+      .picking
+      .bonds
+      .iter()
+      .map(|ids| f32::from(ids.iter().all(selected_atom)))
+      .collect::<Vec<_>>();
+    let mut cartoon = self
+      .picking
+      .cartoon_residues
+      .iter()
+      .map(|id| f32::from(id.is_some_and(|id| self.selected_residues.contains(&id) && !surface_residues.contains(&id))))
+      .collect::<Vec<_>>();
+    let mut surface = (0..self.colors.surface.len())
+      .map(|index| {
+        f32::from(
+          self
+            .colors
+            .surface_owner(index)
+            .is_some_and(|(atom, _)| selected.contains(&atom)),
+        )
+      })
+      .collect::<Vec<_>>();
+    for flags in [&mut atoms, &mut bonds, &mut cartoon, &mut surface] {
+      if flags.is_empty() {
+        flags.push(0.);
+      }
+    }
+    let rows: [&[u8]; 4] = [
+      bytemuck::cast_slice(&atoms),
+      bytemuck::cast_slice(&bonds),
+      bytemuck::cast_slice(&cartoon),
+      bytemuck::cast_slice(&surface),
+    ];
+    // Live selection updates reuse allocations. Only geometry-size changes need
+    // new buffers; color and opacity edits do not rebuild selection geometry.
+    if let Some(buffers) = &self.selection_buffers
+      && buffers
+        .iter()
+        .zip(rows)
+        .all(|(buffer, bytes)| buffer.size() == bytes.len() as u64)
+    {
+      for (buffer, bytes) in buffers.iter().zip(rows) {
+        self.queue.write_buffer(buffer, 0, bytes);
+      }
+    } else {
+      self.selection_buffers = Some(rows.map(|bytes| {
+        create_buffer(
+          &self.device,
+          "chitin_selection_vertices",
+          bytes,
+          wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        )
+      }));
+    }
+  }
+
+  fn surface_selection_visible(&self) -> bool {
+    self.surface_index_count > 0 && self.layers.surface_style().is_some() && self.layers.appearances()[2].opacity() > 0.
+  }
+
+  /// Expands a viewport box's visible representation owners to whole residues.
+  pub fn select_in_rect(
+    &self,
+    scene: &StructureScene,
+    min: [f32; 2],
+    max: [f32; 2],
+    camera_view: glam::Mat4,
+    projection: glam::Mat4,
+  ) -> chitin_bio::structure::selection::AtomSelection {
+    let residues = self.picking.residues_in_rect(
+      min,
+      max,
+      projection * camera_view * self.fit_transform,
+      &self.colors,
+      self.layers,
+    );
+    scene
+      .atoms
+      .iter()
+      .filter(|atom| residues.contains(&atom.residue_id))
+      .map(|atom| atom.atom_id)
+      .collect()
+  }
+
+  /// Intersects a viewport-relative NDC ray with the currently visible geometry.
+  pub fn pick(
+    &self,
+    scene: &StructureScene,
+    ndc: [f32; 2],
+    camera_view: glam::Mat4,
+    projection: glam::Mat4,
+  ) -> crate::picking::MolecularPick {
+    self.picking.pick(
+      ndc,
+      projection * camera_view * self.fit_transform,
+      &self.colors,
+      scene,
+      self.layers,
+    )
   }
 
   /// Selects the shader output used for molecule diagnostics.
@@ -1246,7 +1483,74 @@ impl MoleculeRenderer {
       transparency.composite(&mut encoder, view);
     }
 
+    self.render_selection(&mut encoder, view, opacity);
     self.queue.submit(std::iter::once(encoder.finish()))
+  }
+
+  fn render_selection(&mut self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, opacity: [f32; 3]) {
+    if self.selected.is_empty() {
+      return;
+    }
+    let Some([atoms, bonds, cartoon, surface]) = &self.selection_buffers else {
+      return;
+    };
+    let mask = self
+      .selection_mask
+      .get_or_insert_with(|| crate::selection::SelectionMask::new(&self.device, self.size, self.color_format));
+    mask.resize(&self.device, self.size);
+    {
+      let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label: Some("chitin_selection_mask_pass"),
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+          view: &mask.mask,
+          resolve_target: None,
+          depth_slice: None,
+          ops: wgpu::Operations {
+            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+            store: wgpu::StoreOp::Store,
+          },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+          view: &mask.depth,
+          depth_ops: Some(wgpu::Operations {
+            load: wgpu::LoadOp::Clear(1.),
+            store: wgpu::StoreOp::Store,
+          }),
+          stencil_ops: None,
+        }),
+        timestamp_writes: None,
+        occlusion_query_set: None,
+        multiview_mask: None,
+      });
+      pass.set_bind_group(0, &self.bind_group, &[]);
+      if opacity[2] > 0. && self.surface_index_count > 0 {
+        pass.set_pipeline(&self.selection_pipelines[3]);
+        pass.set_vertex_buffer(0, self.surface_vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, surface.slice(..));
+        pass.set_index_buffer(self.surface_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.surface_index_count, 0, 0..1);
+      }
+      if opacity[1] > 0. && self.cartoon_index_count > 0 {
+        pass.set_pipeline(&self.selection_pipelines[2]);
+        pass.set_vertex_buffer(0, self.cartoon_vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, cartoon.slice(..));
+        pass.set_index_buffer(self.cartoon_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..self.cartoon_index_count, 0, 0..1);
+      }
+      if opacity[0] > 0. {
+        pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
+        pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.set_pipeline(&self.selection_pipelines[1]);
+        pass.set_vertex_buffer(1, self.bond_instance_buffer.slice(..));
+        pass.set_vertex_buffer(2, bonds.slice(..));
+        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.bond_count);
+        pass.set_pipeline(&self.selection_pipelines[0]);
+        pass.set_vertex_buffer(1, self.atom_instance_buffer.slice(..));
+        pass.set_vertex_buffer(2, atoms.slice(..));
+        pass.draw_indexed(0..self.quad_index_count, 0, 0..self.atom_count);
+      }
+    }
+    mask.composite(encoder, view, &self.queue, self.selection_scale);
   }
 
   /// Returns the absolute camera-space interval used by the depth cue.
@@ -1375,6 +1679,10 @@ fn create_pipeline(
   vertex_entry: &'static str,
   config: PipelineConfig,
 ) -> wgpu::RenderPipeline {
+  let mut buffers = vec![Some(mesh_vertex_layout()), Some(config.instance_layout)];
+  if matches!(config.fragment_entry, "atom_selection" | "bond_selection") {
+    buffers.push(Some(selection_flag_layout(wgpu::VertexStepMode::Instance)));
+  }
   let targets = if config.transparent {
     crate::transparency::targets().to_vec()
   } else {
@@ -1390,7 +1698,7 @@ fn create_pipeline(
     vertex: wgpu::VertexState {
       module: shader,
       entry_point: Some(vertex_entry),
-      buffers: &[Some(mesh_vertex_layout()), Some(config.instance_layout)],
+      buffers: &buffers,
       compilation_options: Default::default(),
     },
     fragment: Some(wgpu::FragmentState {
@@ -1428,6 +1736,42 @@ fn create_cartoon_pipeline(
   cull_mode: Option<wgpu::Face>,
   transparent: bool,
 ) -> wgpu::RenderPipeline {
+  create_mesh_pipeline(
+    device,
+    layout,
+    shader,
+    color_format,
+    label,
+    cull_mode,
+    if transparent {
+      MeshPass::Transparent
+    } else {
+      MeshPass::Opaque
+    },
+  )
+}
+
+enum MeshPass {
+  Opaque,
+  Transparent,
+  Selection,
+}
+
+fn create_mesh_pipeline(
+  device: &wgpu::Device,
+  layout: &wgpu::PipelineLayout,
+  shader: &wgpu::ShaderModule,
+  color_format: wgpu::TextureFormat,
+  label: &'static str,
+  cull_mode: Option<wgpu::Face>,
+  mode: MeshPass,
+) -> wgpu::RenderPipeline {
+  let transparent = matches!(mode, MeshPass::Transparent);
+  let selection = matches!(mode, MeshPass::Selection);
+  let mut buffers = vec![Some(cartoon_vertex_layout())];
+  if selection {
+    buffers.push(Some(selection_flag_layout(wgpu::VertexStepMode::Vertex)));
+  }
   let targets = if transparent {
     crate::transparency::targets().to_vec()
   } else {
@@ -1442,20 +1786,24 @@ fn create_cartoon_pipeline(
     layout: Some(layout),
     vertex: wgpu::VertexState {
       module: shader,
-      entry_point: Some(if cull_mode.is_some() {
+      entry_point: Some(if selection && cull_mode.is_some() {
+        "surface_selection_vertex"
+      } else if selection {
+        "cartoon_selection_vertex"
+      } else if cull_mode.is_some() {
         "surface_vertex"
       } else {
         "cartoon_vertex"
       }),
-      buffers: &[Some(cartoon_vertex_layout())],
+      buffers: &buffers,
       compilation_options: Default::default(),
     },
     fragment: Some(wgpu::FragmentState {
       module: shader,
-      entry_point: Some(if transparent {
-        "cartoon_transparent"
-      } else {
-        "cartoon_fragment"
+      entry_point: Some(match mode {
+        MeshPass::Opaque => "cartoon_fragment",
+        MeshPass::Transparent => "cartoon_transparent",
+        MeshPass::Selection => "cartoon_selection",
       }),
       targets: &targets,
       compilation_options: Default::default(),
@@ -1480,6 +1828,20 @@ fn create_cartoon_pipeline(
 }
 
 /// Returns the source position, normal, and color layout of cartoon vertices.
+fn selection_flag_layout(step_mode: wgpu::VertexStepMode) -> wgpu::VertexBufferLayout<'static> {
+  const MESH: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![3 => Float32];
+  const INSTANCE: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![6 => Float32];
+  wgpu::VertexBufferLayout {
+    array_stride: 4,
+    step_mode,
+    attributes: if step_mode == wgpu::VertexStepMode::Vertex {
+      &MESH
+    } else {
+      &INSTANCE
+    },
+  }
+}
+
 fn cartoon_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
   wgpu::VertexBufferLayout {
     array_stride: 36,
@@ -1650,6 +2012,19 @@ fn atom_instances(scene: &StructureScene, style: &BallAndStickStyle, layers: Rep
     .collect()
 }
 
+fn visible_atom_ids(scene: &StructureScene, layers: RepresentationLayers) -> Vec<AtomId> {
+  if layers.atom_style().is_none() {
+    return Vec::new();
+  }
+  let complement = layers.polymer_style().map(|_| polymer_complement_atom_ids(scene));
+  scene
+    .atoms
+    .iter()
+    .filter(|atom| complement.as_ref().is_none_or(|ids| ids.contains(&atom.atom_id)))
+    .map(|atom| atom.atom_id)
+    .collect()
+}
+
 /// Converts bonds into continuous cylinders with endpoint element colors.
 ///
 /// # Parameters
@@ -1664,12 +2039,21 @@ fn atom_instances(scene: &StructureScene, style: &BallAndStickStyle, layers: Rep
 /// is enabled, ordinary backbone bonds covered by its mesh are omitted. Bonds
 /// touching visible side chains or non-polymer residues remain visible, as do
 /// recognized special relationships crossing the polymer boundary.
+#[cfg(test)]
 fn bond_instances(scene: &StructureScene, style: &BallAndStickStyle, layers: RepresentationLayers) -> Vec<[f32; 16]> {
+  bond_instances_with_ids(scene, style, layers).0
+}
+
+fn bond_instances_with_ids(
+  scene: &StructureScene,
+  style: &BallAndStickStyle,
+  layers: RepresentationLayers,
+) -> (Vec<[f32; 16]>, Vec<[AtomId; 2]>) {
   let Some(atom_style) = layers.atom_style() else {
-    return Vec::new();
+    return Default::default();
   };
   if atom_style == AtomStyle::Sphere {
-    return Vec::new();
+    return Default::default();
   }
   let table_len = scene
     .atoms
@@ -1684,6 +2068,7 @@ fn bond_instances(scene: &StructureScene, style: &BallAndStickStyle, layers: Rep
   }
 
   let mut instances = Vec::with_capacity(scene.bonds.len());
+  let mut ids = Vec::with_capacity(scene.bonds.len());
   for bond in &scene.bonds {
     if complement_atom_ids.as_ref().is_some_and(|atom_ids| {
       !is_special_bond(bond.source) && !bond.atom_ids.into_iter().any(|atom_id| atom_ids.contains(&atom_id))
@@ -1704,6 +2089,7 @@ fn bond_instances(scene: &StructureScene, style: &BallAndStickStyle, layers: Rep
       .unwrap_or(ElementCategory::Other);
     let start_color = style.palette.for_element(start_element).color;
     let end_color = style.palette.for_element(end_element).color;
+    let previous_len = instances.len();
     if let Some((radius, dash_color, dash_length, gap_length)) = special_bond_style(bond.source, style.bond_radius) {
       let length = glam::Vec3::from_array(start).distance(glam::Vec3::from_array(end));
       if !length.is_finite() || length > MAX_SPECIAL_BOND_LENGTH {
@@ -1717,8 +2103,9 @@ fn bond_instances(scene: &StructureScene, style: &BallAndStickStyle, layers: Rep
     } else {
       instances.push(bond_instance(start, end, style.bond_radius, start_color, end_color));
     }
+    ids.extend(std::iter::repeat_n(bond.atom_ids, instances.len() - previous_len));
   }
-  instances
+  (instances, ids)
 }
 
 /// Returns residues represented by at least one complete cartoon control point.
@@ -2307,6 +2694,8 @@ mod tests {
     let size = RenderTargetSize::new(64, 64);
     let mut renderer =
       MoleculeRenderer::new_with_layers(device.clone(), queue.clone(), size, format, input(), layers, &style);
+    renderer.set_selection(&scene, Arc::new(scene.atoms.iter().map(|atom| atom.atom_id).collect()));
+    renderer.set_selection_scale(1.5);
     let camera = crate::ViewerCamera::default();
     for (step, opacity) in [[1.0; 3], [0.4; 3], [1.0, 1.0, 0.35], [0.0; 3]].into_iter().enumerate() {
       let size = RenderTargetSize::new(64 + step as u32 * 16, 64);
@@ -2345,6 +2734,45 @@ mod tests {
     }
     assert!(pollster::block_on(errors.pop()).is_none());
     Ok(())
+  }
+
+  #[test]
+  fn picking_owners_should_follow_filtered_instances_and_cartoon_vertices() {
+    let scene = cartoon_scene();
+    let style = BallAndStickStyle::default();
+    for atom_style in [AtomStyle::Stick, AtomStyle::Sphere, AtomStyle::BallAndStick] {
+      for polymer in [false, true] {
+        let mut layers = RepresentationLayers::atom(atom_style);
+        if polymer {
+          layers = layers.with_polymer(PolymerStyle::Cartoon);
+        }
+        let atoms = atom_instances(&scene, &style, layers);
+        let owners = visible_atom_ids(&scene, layers);
+        assert_eq!(owners.len(), atoms.len());
+        for (row, id) in atoms.iter().zip(owners) {
+          let Some(atom) = scene.atoms.iter().find(|atom| atom.atom_id == id) else {
+            panic!("owner exists");
+          };
+          assert_eq!(&row[..3], &atom.position);
+        }
+        let (bonds, owners) = bond_instances_with_ids(&scene, &style, layers);
+        assert_eq!(bonds.len(), owners.len());
+        assert!(
+          owners
+            .iter()
+            .flatten()
+            .all(|id| scene.atoms.iter().any(|atom| atom.atom_id == *id))
+        );
+      }
+    }
+    let mesh = cartoon_mesh(&scene, style.palette.carbon.color);
+    assert_eq!(mesh.vertices.len(), mesh.residues.len());
+    assert!(mesh.residues.iter().all(|owner| owner.is_some_and(|id| {
+      scene
+        .polymer_traces
+        .iter()
+        .any(|trace| trace.points.iter().any(|point| point.residue_id == id))
+    })));
   }
 
   #[test]

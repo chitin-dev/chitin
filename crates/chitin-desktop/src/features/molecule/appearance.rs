@@ -158,14 +158,21 @@ impl AppearanceControls {
         let command = RenderCommand::Opacity { layer, value };
         if matches!(event, SliderEvent::Release(_)) {
           pending.take();
-          dispatch(app, target, command, cx);
+          if let Err(error) =
+            app.dispatch_render_edit(Some(target), command, crate::commands::history::EditPhase::Finish, cx)
+          {
+            log::error!("{error}");
+          }
           return;
         }
         if pending.replace(Some((target, command))).is_none() {
           let pending = pending.clone();
           cx.on_next_frame(window, move |app, _, cx| {
-            if let Some((target, command)) = pending.take() {
-              dispatch(app, target, command, cx);
+            if let Some((target, command)) = pending.take()
+              && let Err(error) =
+                app.dispatch_render_edit(Some(target), command, crate::commands::history::EditPhase::Preview, cx)
+            {
+              log::error!("{error}");
             }
           });
         }

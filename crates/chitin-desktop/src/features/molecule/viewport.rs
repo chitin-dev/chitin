@@ -6,7 +6,11 @@ use std::{
   time::{Duration, Instant},
 };
 
+use crate::workbench::documents::state::SelectionInputHandler;
+use chitin_bio::structure::selection::AtomSelection;
 use chitin_bio::surface::MolecularSurfaceArtifact;
+use chitin_command::{SelectionCommand, SelectionMode};
+use chitin_molecule_renderer::picking::MolecularPick;
 use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportDrag};
 use chitin_ui::workbench::{WorkbenchStyle, viewport_container, viewport_position};
 use chitin_wgpu::RenderTargetSize;
@@ -15,6 +19,7 @@ use gpui::{
   ScrollWheelEvent, WgpuSurfaceHandle, Window, div, prelude::*, px, wgpu_surface,
 };
 use gpui_kit::component::{ElementExt, Theme};
+use std::sync::Arc;
 
 /// Default fps info postfix used in wgpu panel
 pub(crate) const DEFAULT_FPS_POSTFIX: &str = "fps";
@@ -23,6 +28,8 @@ pub(crate) const DEFAULT_UNAVAILABLE_MESSAGE: &str = "WGPU surface is not suppor
 
 /// Per-frame data passed from the GPUI panel host into a WGPU scene.
 pub struct WgpuPanelFrame<'a> {
+  /// Logical-to-physical pixel scale for viewport overlays.
+  pub scale_factor: f32,
   /// WGPU device cloned from the GPUI surface owner.
   pub device: &'a wgpu::Device,
   /// WGPU queue cloned from the GPUI surface owner.
@@ -41,6 +48,24 @@ pub struct WgpuPanelFrame<'a> {
 
 /// Minimal drawing contract for content hosted inside `ChitinWgpuDocumentPanel`.
 pub trait WgpuPanelScene {
+  /// Selects residues whose displayed geometry lies inside a viewport-relative box.
+  fn select_in_rect(&self, _min: [f32; 2], _max: [f32; 2], _camera: &ViewerCamera) -> AtomSelection {
+    AtomSelection::new()
+  }
+  /// Applies canonical atom identities without changing representation appearance.
+  fn set_selection(&mut self, _atoms: Arc<AtomSelection>) -> bool {
+    false
+  }
+
+  /// Picks the visible residue using viewport-relative normalized coordinates.
+  fn pick(&self, _ndc: [f32; 2], _camera: &ViewerCamera) -> MolecularPick {
+    MolecularPick::Miss
+  }
+
+  /// Expands a picked residue to coordinate-bearing atoms in this scene.
+  fn residue_atoms(&self, _residue: chitin_bio::structure::ResidueId) -> AtomSelection {
+    AtomSelection::new()
+  }
   /// Renders one frame into the provided target.
   ///
   /// # Parameters
@@ -70,6 +95,9 @@ pub trait WgpuPanelScene {
 
 /// Experimental interactive WGPU panel suitable for a document-area tab.
 pub struct ChitinWgpuDocumentPanel {
+  selected: Arc<AtomSelection>,
+  selection_input: Option<SelectionInputHandler>,
+  selection_gesture: Option<SelectionGesture>,
   /// GPUI surface handle, absent only if the backend cannot create WGPU surfaces.
   surface: Option<WgpuSurfaceHandle>,
   /// Scene renderer hosted by the GPUI panel.
@@ -90,6 +118,15 @@ pub struct ChitinWgpuDocumentPanel {
   viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
+struct SelectionGesture {
+  origin: gpui::Point<Pixels>,
+  mode: SelectionMode,
+  moved: bool,
+  current: gpui::Point<Pixels>,
+  baseline: Arc<AtomSelection>,
+  preview_dirty: bool,
+}
+
 impl ChitinWgpuDocumentPanel {
   /// Creates an interactive WGPU document panel with a custom scene.
   ///
@@ -104,6 +141,9 @@ impl ChitinWgpuDocumentPanel {
   /// A panel ready to host the supplied scene in the document area.
   pub fn new_with_scene(surface: Option<WgpuSurfaceHandle>, scene: impl WgpuPanelScene + 'static) -> Self {
     Self {
+      selected: Arc::default(),
+      selection_input: None,
+      selection_gesture: None,
       surface,
       scene: Box::new(scene),
       frame_count: 0,
@@ -114,6 +154,16 @@ impl ChitinWgpuDocumentPanel {
       started_at: Instant::now(),
       viewport_bounds: Rc::new(Cell::new(Bounds::default())),
     }
+  }
+
+  pub(crate) fn bind_selection_input(&mut self, handler: SelectionInputHandler) {
+    self.selection_input = Some(handler);
+  }
+
+  pub(crate) fn set_selection(&mut self, atoms: Arc<AtomSelection>) -> bool {
+    self.selected = Arc::clone(&atoms);
+    self.selection_gesture = None;
+    self.scene.set_selection(atoms)
   }
 
   /// Changes the hosted molecular scene representation when supported.
@@ -132,7 +182,7 @@ impl ChitinWgpuDocumentPanel {
   }
 
   /// Renders one frame into the surface back buffer when available.
-  fn render_surface(&mut self) {
+  fn render_surface(&mut self, scale_factor: f32) {
     let Some(surface) = self.surface.as_ref() else {
       return;
     };
@@ -144,6 +194,7 @@ impl ChitinWgpuDocumentPanel {
     };
     let size = RenderTargetSize::new(width, height);
     let frame = WgpuPanelFrame {
+      scale_factor,
       device: surface.device(),
       queue: surface.queue(),
       format: surface.format(),
@@ -182,7 +233,24 @@ impl ChitinWgpuDocumentPanel {
     let Some(position) = viewport_position(bounds, WorkbenchStyle::global(cx).viewport_radius, event.position) else {
       return;
     };
-    if event.click_count >= 2 && event.button == MouseButton::Left {
+    if event.button == MouseButton::Left && event.modifiers.control && self.selection_input.is_some() {
+      self.selection_gesture = Some(SelectionGesture {
+        origin: event.position,
+        mode: if event.modifiers.shift {
+          SelectionMode::Toggle
+        } else {
+          SelectionMode::Replace
+        },
+        moved: false,
+        current: event.position,
+        baseline: Arc::clone(&self.selected),
+        preview_dirty: false,
+      });
+      self.active_drag = None;
+      cx.notify();
+      return;
+    }
+    if event.click_count >= 2 && event.button == MouseButton::Left && event.modifiers == gpui::Modifiers::default() {
       self.camera.reset();
       self.active_drag = None;
       cx.notify();
@@ -215,6 +283,19 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// This function returns `()` after applying any camera delta.
   fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(gesture) = &mut self.selection_gesture {
+      let delta = event.position - gesture.origin;
+      gesture.moved |= pixels_to_f32(delta.x).hypot(pixels_to_f32(delta.y)) > 4.0;
+      gesture.current = event.position;
+      if event.pressed_button.is_none() {
+        self.selection_gesture = None;
+        self.scene.set_selection(Arc::clone(&self.selected));
+      } else if gesture.moved {
+        gesture.preview_dirty = true;
+      }
+      cx.notify();
+      return;
+    }
     let Some(mut drag) = self.active_drag else {
       return;
     };
@@ -240,6 +321,21 @@ impl ChitinWgpuDocumentPanel {
     cx.notify();
   }
 
+  fn update_selection_preview(&mut self) {
+    let Some(gesture) = self.selection_gesture.as_mut().filter(|gesture| gesture.preview_dirty) else {
+      return;
+    };
+    gesture.preview_dirty = false;
+    let (origin, current, mode, baseline) = (
+      gesture.origin,
+      gesture.current,
+      gesture.mode,
+      Arc::clone(&gesture.baseline),
+    );
+    let matched = self.box_matches(origin, current);
+    self.scene.set_selection(Arc::new(mode.apply(&baseline, matched)));
+  }
+
   /// Ends the current viewport drag gesture.
   ///
   /// # Parameters
@@ -249,9 +345,70 @@ impl ChitinWgpuDocumentPanel {
   /// # Returns
   ///
   /// This function returns `()` after clearing drag state.
-  fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+  fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    if let Some(gesture) = self.selection_gesture.take() {
+      let bounds = self.viewport_bounds.get();
+      let delta = event.position - gesture.origin;
+      let moved = gesture.moved || pixels_to_f32(delta.x).hypot(pixels_to_f32(delta.y)) > 4.0;
+      // Restore authoritative state before the deferred bus commit. Preview never
+      // enters command history; one mouse-up produces at most one undo entry.
+      self.scene.set_selection(Arc::clone(&self.selected));
+      if event.button == MouseButton::Left && moved {
+        let command = SelectionCommand::Atoms {
+          atoms: self.box_matches(gesture.origin, event.position),
+          mode: gesture.mode,
+        };
+        if let Some(handler) = &self.selection_input {
+          handler(command, cx);
+        }
+      } else if event.button == MouseButton::Left
+        && !gesture.moved
+        && pixels_to_f32(delta.x).hypot(pixels_to_f32(delta.y)) <= 4.0
+        && let Some(position) = viewport_position(bounds, WorkbenchStyle::global(cx).viewport_radius, event.position)
+        && bounds.size.width > px(0.)
+        && bounds.size.height > px(0.)
+      {
+        let ndc = [
+          2. * pixels_to_f32(position.x) / pixels_to_f32(bounds.size.width) - 1.,
+          1. - 2. * pixels_to_f32(position.y) / pixels_to_f32(bounds.size.height),
+        ];
+        let command = match self.scene.pick(ndc, &self.camera) {
+          MolecularPick::Residue(id) => Some(SelectionCommand::Atoms {
+            atoms: self.scene.residue_atoms(id),
+            mode: gesture.mode,
+          }),
+          MolecularPick::Miss if gesture.mode == SelectionMode::Replace => Some(SelectionCommand::Clear),
+          MolecularPick::Miss | MolecularPick::UnmappedSurface => None,
+        };
+        if let Some(command) = command
+          && let Some(handler) = &self.selection_input
+        {
+          handler(command, cx);
+        }
+      }
+    }
     self.active_drag = None;
     cx.notify();
+  }
+
+  fn box_matches(&self, origin: gpui::Point<Pixels>, current: gpui::Point<Pixels>) -> AtomSelection {
+    let bounds = self.viewport_bounds.get();
+    if bounds.size.width <= px(0.) || bounds.size.height <= px(0.) {
+      return AtomSelection::new();
+    }
+    let ndc = |point: gpui::Point<Pixels>| {
+      [
+        (2. * f32::from(point.x - bounds.origin.x) / f32::from(bounds.size.width) - 1.).clamp(-1., 1.),
+        (1. - 2. * f32::from(point.y - bounds.origin.y) / f32::from(bounds.size.height)).clamp(-1., 1.),
+      ]
+    };
+    let a = ndc(origin);
+    let b = ndc(current);
+    self.scene.select_in_rect(
+      [a[0].min(b[0]), a[1].min(b[1])],
+      [a[0].max(b[0]), a[1].max(b[1])],
+      &self.camera,
+    )
   }
 
   /// Applies scroll-wheel zoom to the viewport camera.
@@ -293,8 +450,23 @@ impl Render for ChitinWgpuDocumentPanel {
     let theme = Theme::global(cx).colors;
     let style = WorkbenchStyle::new(theme);
     let viewport_bounds = self.viewport_bounds.clone();
+    if self.selection_gesture.is_some() {
+      let panel = cx.weak_entity();
+      // Element mouse-move listeners only fire while hovered. Continue a box
+      // gesture outside the viewport, clamping its visual/query bounds inside.
+      window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        if phase == gpui::DispatchPhase::Bubble {
+          let _ = panel.update(cx, |panel, cx| {
+            if panel.selection_gesture.is_some() && !panel.viewport_bounds.get().contains(&event.position) {
+              panel.on_mouse_move(event, window, cx);
+            }
+          });
+        }
+      });
+    }
     if self.surface.is_some() {
-      self.render_surface();
+      self.update_selection_preview();
+      self.render_surface(window.scale_factor());
       window.request_animation_frame();
       cx.notify();
     }
@@ -308,6 +480,7 @@ impl Render for ChitinWgpuDocumentPanel {
         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_mouse_down))
         .on_mouse_move(cx.listener(Self::on_mouse_move))
         .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+        .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
         .on_mouse_up(MouseButton::Middle, cx.listener(Self::on_mouse_up))
         .on_mouse_up(MouseButton::Right, cx.listener(Self::on_mouse_up))
         .on_scroll_wheel({
@@ -337,6 +510,29 @@ impl Render for ChitinWgpuDocumentPanel {
             .text_xs()
             .text_color(theme.popover_foreground)
             .child(format!("{:.0} {}", self.display_fps, DEFAULT_FPS_POSTFIX)),
+        )
+        .when_some(
+          self.selection_gesture.as_ref().filter(|gesture| gesture.moved),
+          |viewport, gesture| {
+            let bounds = self.viewport_bounds.get();
+            let a = gesture.origin - bounds.origin;
+            let b = gesture.current - bounds.origin;
+            let left = a.x.min(b.x).max(px(0.));
+            let top = a.y.min(b.y).max(px(0.));
+            let right = a.x.max(b.x).min(bounds.size.width);
+            let bottom = a.y.max(b.y).min(bounds.size.height);
+            viewport.child(
+              div()
+                .absolute()
+                .left(left)
+                .top(top)
+                .w((right - left).max(px(0.)))
+                .h((bottom - top).max(px(0.)))
+                .border_1()
+                .border_color(gpui::rgb(0x40d980))
+                .bg(gpui::rgba(0x40d98018)),
+            )
+          },
         ),
       None => div()
         .id("chitin-wgpu-document-unavailable")
@@ -359,15 +555,229 @@ impl Render for ChitinWgpuDocumentPanel {
   }
 }
 
-/// Converts GPUI logical pixels to plain `f32` values.
-///
-/// # Parameters
-///
-/// * `pixels` is a GPUI pixel value from an input event.
-///
-/// # Returns
-///
-/// The underlying scalar value.
+/// Converts GPUI pixels into scalar camera deltas.
 fn pixels_to_f32(pixels: Pixels) -> f32 {
   f32::from(pixels)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use chitin_bio::structure::{PdbParser, ResidueId, StructureScene};
+  use std::cell::RefCell;
+
+  struct PickingProbe(Rc<Cell<[f32; 2]>>, StructureScene);
+  impl WgpuPanelScene for PickingProbe {
+    fn render_frame(&mut self, _: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex {
+      panic!("probe has no GPU surface");
+    }
+    fn pick(&self, ndc: [f32; 2], _: &ViewerCamera) -> MolecularPick {
+      self.0.set(ndc);
+      self
+        .1
+        .atoms
+        .first()
+        .map_or(MolecularPick::Miss, |atom| MolecularPick::Residue(atom.residue_id))
+    }
+    fn residue_atoms(&self, id: ResidueId) -> AtomSelection {
+      self.1.selection.residue_atoms(&self.1, id)
+    }
+  }
+
+  struct BoxProbe(Rc<RefCell<Arc<AtomSelection>>>, AtomSelection, Rc<Cell<usize>>);
+  impl WgpuPanelScene for BoxProbe {
+    fn render_frame(&mut self, _: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex {
+      panic!("no GPU in probe");
+    }
+    fn set_selection(&mut self, atoms: Arc<AtomSelection>) -> bool {
+      *self.0.borrow_mut() = atoms;
+      true
+    }
+    fn select_in_rect(&self, min: [f32; 2], max: [f32; 2], _: &ViewerCamera) -> AtomSelection {
+      self.2.set(self.2.get() + 1);
+      assert!(min[0] <= max[0] && min[1] <= max[1]);
+      self.1.clone()
+    }
+  }
+
+  #[gpui::test]
+  fn box_drag_should_preview_against_baseline_and_commit_only_once(cx: &mut gpui::TestAppContext) {
+    cx.update(chitin_ui::init);
+    let Ok(parsed) = PdbParser::new()
+      .parse_bytes(b"ATOM      1  CA  GLY A  42       1.000   2.000   3.000  1.00 10.00           C  \nEND\n")
+    else {
+      panic!("fixture");
+    };
+    let Ok(scene) = StructureScene::from_first_model(&parsed.structure) else {
+      panic!("scene");
+    };
+    let baseline: AtomSelection = scene.atoms.iter().map(|atom| atom.atom_id).collect();
+    let displayed = Rc::new(RefCell::new(Arc::new(baseline.clone())));
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let queries = Rc::new(Cell::new(0));
+    let (panel, cx) = cx.add_window_view(|_, _| {
+      let mut panel =
+        ChitinWgpuDocumentPanel::new_with_scene(None, BoxProbe(displayed.clone(), baseline.clone(), queries.clone()));
+      panel.selected = Arc::new(baseline.clone());
+      panel.viewport_bounds.set(Bounds {
+        origin: gpui::point(px(80.), px(100.)),
+        size: gpui::size(px(200.), px(100.)),
+      });
+      let requests = requests.clone();
+      panel.bind_selection_input(Rc::new(move |command, _| requests.borrow_mut().push(command)));
+      panel
+    });
+    cx.update(|window,cx| panel.update(cx, |panel,cx| {
+      let origin = gpui::point(px(130.),px(125.));
+      panel.on_mouse_down(&MouseDownEvent { position: origin, modifiers: gpui::Modifiers { control: true, shift: true, ..Default::default() }, ..Default::default() },window,cx);
+      for offset in [20.,40.,30.] {
+        panel.on_mouse_move(&MouseMoveEvent { position: origin + gpui::point(px(offset),px(20.)), pressed_button: Some(MouseButton::Left), ..Default::default() },window,cx);
+        assert_eq!(**displayed.borrow(),baseline);
+        assert!(requests.borrow().is_empty());
+        assert!(panel.selection_gesture.as_ref().is_some_and(|gesture| gesture.moved));
+      }
+      assert_eq!(queries.get(),0);
+      panel.update_selection_preview();
+      assert!(displayed.borrow().is_empty());
+      assert_eq!(queries.get(),1);
+      panel.update_selection_preview();
+      assert_eq!(queries.get(),1);
+      panel.on_mouse_up(&MouseUpEvent { position: origin + gpui::point(px(30.),px(20.)), ..Default::default() },window,cx);
+      assert_eq!(requests.borrow().len(),1);
+      assert_eq!(**displayed.borrow(),baseline);
+      assert!(panel.selection_gesture.is_none());
+      assert!(matches!(&requests.borrow()[0],SelectionCommand::Atoms { atoms, mode: SelectionMode::Toggle } if *atoms == baseline));
+      // A lost button cancels a preview rather than leaving stale GPU flags.
+      panel.on_mouse_down(&MouseDownEvent { position: origin, modifiers: gpui::Modifiers { control: true, ..Default::default() }, ..Default::default() },window,cx);
+      panel.on_mouse_move(&MouseMoveEvent { position: origin + gpui::point(px(30.),px(20.)), ..Default::default() },window,cx);
+      assert!(panel.selection_gesture.is_none());
+      assert_eq!(**displayed.borrow(),baseline);
+      assert_eq!(requests.borrow().len(),1);
+    }));
+  }
+
+  #[gpui::test]
+  fn selection_clicks_should_use_inset_bounds_and_lock_modifiers_on_press(cx: &mut gpui::TestAppContext) {
+    cx.update(chitin_ui::init);
+    let ndc = Rc::new(Cell::new([0.; 2]));
+    let requests = Rc::new(RefCell::new(Vec::new()));
+    let output = requests.clone();
+    let Ok(parsed) = PdbParser::new()
+      .parse_bytes(b"ATOM      1  CA  GLY A  42       1.000   2.000   3.000  1.00 10.00           C  \nEND\n")
+    else {
+      panic!("fixture parses");
+    };
+    let Ok(scene) = StructureScene::from_first_model(&parsed.structure) else {
+      panic!("fixture scene");
+    };
+    let (panel, cx) = cx.add_window_view(|_, _| {
+      let mut panel = ChitinWgpuDocumentPanel::new_with_scene(None, PickingProbe(ndc.clone(), scene));
+      panel.viewport_bounds.set(Bounds {
+        origin: gpui::point(px(80.), px(100.)),
+        size: gpui::size(px(200.), px(100.)),
+      });
+      panel.bind_selection_input(Rc::new(move |command, _| output.borrow_mut().push(command)));
+      panel
+    });
+    cx.update(|window, cx| {
+      panel.update(cx, |panel, cx| {
+        let original = panel.camera.view_matrix();
+        let position = gpui::point(px(130.), px(125.));
+        panel.on_mouse_down(
+          &MouseDownEvent {
+            position,
+            modifiers: gpui::Modifiers {
+              control: true,
+              shift: true,
+              ..Default::default()
+            },
+            click_count: 2,
+            ..Default::default()
+          },
+          window,
+          cx,
+        );
+        panel.on_mouse_up(
+          &MouseUpEvent {
+            position,
+            ..Default::default()
+          },
+          window,
+          cx,
+        );
+        assert_eq!(panel.camera.view_matrix(), original);
+        assert_eq!(ndc.get(), [-0.5, 0.5]);
+        assert!(matches!(
+          requests.borrow().as_slice(),
+          [SelectionCommand::Atoms {
+            mode: SelectionMode::Toggle,
+            ..
+          }]
+        ));
+        // Crossing the threshold then returning to the start is still a drag.
+        panel.on_mouse_down(
+          &MouseDownEvent {
+            position,
+            modifiers: gpui::Modifiers {
+              control: true,
+              ..Default::default()
+            },
+            ..Default::default()
+          },
+          window,
+          cx,
+        );
+        panel.on_mouse_move(
+          &MouseMoveEvent {
+            position: position + gpui::point(px(10.), px(0.)),
+            pressed_button: Some(MouseButton::Left),
+            ..Default::default()
+          },
+          window,
+          cx,
+        );
+        panel.on_mouse_up(
+          &MouseUpEvent {
+            position,
+            ..Default::default()
+          },
+          window,
+          cx,
+        );
+        assert_eq!(requests.borrow().len(), 2);
+        assert_eq!(panel.camera.view_matrix(), original);
+        // Ctrl pressed after an ordinary drag began does not change its purpose.
+        panel.on_mouse_down(
+          &MouseDownEvent {
+            position,
+            ..Default::default()
+          },
+          window,
+          cx,
+        );
+        panel.on_mouse_move(
+          &MouseMoveEvent {
+            position: position + gpui::point(px(10.), px(0.)),
+            modifiers: gpui::Modifiers {
+              control: true,
+              ..Default::default()
+            },
+            pressed_button: Some(MouseButton::Left),
+          },
+          window,
+          cx,
+        );
+        panel.on_mouse_up(
+          &MouseUpEvent {
+            position,
+            ..Default::default()
+          },
+          window,
+          cx,
+        );
+        assert_ne!(panel.camera.view_matrix(), original);
+        assert_eq!(requests.borrow().len(), 2);
+      })
+    });
+  }
 }
