@@ -15,6 +15,7 @@ pub mod camera;
 mod cartoon;
 pub mod molecule;
 pub mod picking;
+mod picking_volume;
 pub mod representation;
 mod selection;
 mod surface;

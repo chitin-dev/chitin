@@ -364,14 +364,6 @@ impl PickingGeometry {
     layers: RepresentationLayers,
     window: Option<ForegroundDepthWindow>,
   ) -> HashSet<ResidueId> {
-    let inside = |position: &[f32]| {
-      let p = mvp * Vec3::from_slice(&position[..3]).extend(1.);
-      if !p.is_finite() || p.w <= 0. {
-        return false;
-      }
-      let p = p.truncate() / p.w;
-      p.z >= 0. && p.z <= 1. && p.x >= min[0] && p.x <= max[0] && p.y >= min[1] && p.y <= max[1]
-    };
     let opacity = layers.appearances().map(|a| a.opacity());
     let inverse = mvp.inverse();
     let surface_visible = layers.surface_style().is_some() && opacity[2] > 0. && !self.surface_indices.is_empty();
@@ -424,22 +416,60 @@ impl PickingGeometry {
         }
       });
     }
-    if layers.atom_style().is_some() && opacity[0] > 0. {
-      for (row, atom) in colors.atoms.iter().zip(&self.atoms) {
-        if !self.visibility.atom(*atom) {
-          continue;
+    if layers.atom_style().is_some()
+      && opacity[0] > 0.
+      && let Some(volume) = crate::picking_volume::SelectionVolume::new(mvp, min, max)
+    {
+      let owner = |atom| {
+        self
+          .atom_residues
+          .get(&atom)
+          .copied()
+          .filter(|residue| !surface_residues.contains(residue))
+      };
+      self.atom_boxes.visit(mvp, min, max, |indices, _| {
+        let index = indices[0] as usize / 2;
+        let atom = self.atoms[index];
+        if !self.visibility.atom(atom) {
+          return;
         }
-        if let Some(residue) = self.atom_residues.get(atom)
-          && !surface_residues.contains(residue)
-          && hits.needs_probe([Some(*residue); 3], hits.depth(Vec3::from_slice(&row[..3])) - row[3])
-          && inside(row)
-        {
-          let p = mvp.project_point3(Vec3::from_slice(&row[..3]));
-          if let Some(hit) = self.hit_with_inverse([p.x, p.y], inverse, colors, layers) {
-            hits.record(hit, [Some(*residue); 3]);
+        let row = colors.atoms[index];
+        let center = Vec3::from_slice(&row[..3]);
+        let owners = [owner(atom); 3];
+        let lower = hits.depth(center) - row[3];
+        if owners.iter().all(Option::is_none) || !hits.needs_probe(owners, lower) {
+          return;
+        }
+        volume.sphere(center, row[3], |ndc| {
+          if hits.needs_probe(owners, lower)
+            && let Some(hit) = self.hit_with_inverse(ndc, inverse, colors, layers)
+          {
+            hits.record(hit, owners);
           }
+        });
+      });
+      self.bond_boxes.visit(mvp, min, max, |indices, _| {
+        let index = indices[0] as usize / 2;
+        let atoms = self.bonds[index];
+        if !self.visibility.bond(atoms) {
+          return;
         }
-      }
+        let row = colors.bonds[index];
+        let a = Vec3::from_slice(&row[..3]);
+        let b = Vec3::from_slice(&row[4..7]);
+        let owners = [owner(atoms[0]), owner(atoms[1]), None];
+        let lower = hits.depth(a).min(hits.depth(b)) - row[3];
+        if owners.iter().all(Option::is_none) || !hits.needs_probe(owners, lower) {
+          return;
+        }
+        volume.cylinder(a, b, row[3], |ndc| {
+          if hits.needs_probe(owners, lower)
+            && let Some(hit) = self.hit_with_inverse(ndc, inverse, colors, layers)
+          {
+            hits.record(hit, owners);
+          }
+        });
+      });
     }
     hits.finish()
   }
@@ -1021,6 +1051,144 @@ mod tests {
   }
 
   #[test]
+  fn box_should_select_sphere_edges_without_centers_and_reject_bounds_only_overlap()
+  -> Result<(), Box<dyn std::error::Error>> {
+    let scene = two_residue_scene()?;
+    let atom = scene.atoms[0];
+    let mut colors = ColorCache::new(&scene);
+    colors.set_atoms(vec![[0., 0., 0.5, 0.3, 1., 1., 1., 1.]]);
+    let mut geometry = PickingGeometry {
+      atoms: vec![atom.atom_id],
+      atom_residues: [(atom.atom_id, atom.residue_id)].into(),
+      ..Default::default()
+    };
+    geometry.rebuild_atom_boxes(&colors);
+    let layers = RepresentationLayers::atom(crate::AtomStyle::Sphere);
+    for (min, max, expected) in [
+      ([0.28, -0.04], [0.32, 0.04], true),
+      ([0.298, -0.001], [0.31, 0.001], true),
+      ([0.28, 0.28], [0.32, 0.32], false),
+      ([0.4, -0.01], [0.5, 0.01], false),
+    ] {
+      assert_eq!(
+        !geometry
+          .residues_in_rect(min, max, Mat4::IDENTITY, &colors, layers)
+          .is_empty(),
+        expected
+      );
+    }
+    let perspective =
+      glam::camera::rh::proj::directx::perspective(1., 1., 0.1, 10.) * Mat4::from_translation(Vec3::new(0., 0., -2.));
+    let edge = perspective.project_point3(Vec3::new(0.28, 0., 0.5));
+    assert_eq!(
+      geometry.residues_in_rect([edge.x, -0.01], [edge.x + 0.04, 0.01], perspective, &colors, layers),
+      [atom.residue_id].into()
+    );
+    geometry.visibility = Arc::new(crate::visibility::VisibilityMask::new(
+      &geometry.atom_residues,
+      &[atom.atom_id].into(),
+    ));
+    assert!(
+      geometry
+        .residues_in_rect([0.28, -0.04], [0.32, 0.04], Mat4::IDENTITY, &colors, layers)
+        .is_empty()
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn box_should_select_stick_middles_and_respect_occlusion_and_hidden_bonds() -> Result<(), Box<dyn std::error::Error>>
+  {
+    let scene = two_residue_scene()?;
+    let a = scene.atoms[0];
+    let b = scene.atoms[1];
+    let mut colors = ColorCache::new(&scene);
+    colors.set_atoms(vec![
+      [-0.8, 0., 0.5, 0.03, 1., 1., 1., 1.],
+      [0.8, 0., 0.5, 0.03, 1., 1., 1., 1.],
+    ]);
+    let mut bond = [1.; 16];
+    bond[..4].copy_from_slice(&[-0.8, 0., 0.5, 0.03]);
+    bond[4..7].copy_from_slice(&[0.8, 0., 0.5]);
+    colors.set_bonds(vec![bond]);
+    let mut geometry = PickingGeometry {
+      atoms: vec![a.atom_id, b.atom_id],
+      bonds: vec![[a.atom_id, b.atom_id]],
+      atom_residues: [(a.atom_id, a.residue_id), (b.atom_id, b.residue_id)].into(),
+      ..Default::default()
+    };
+    geometry.rebuild_atom_boxes(&colors);
+    let layers = RepresentationLayers::atom(crate::AtomStyle::Stick);
+    let min = [-0.02, 0.025];
+    let max = [0.02, 0.04];
+    assert_eq!(
+      geometry.residues_in_rect(min, max, Mat4::IDENTITY, &colors, layers),
+      [a.residue_id, b.residue_id].into()
+    );
+    let perspective =
+      glam::camera::rh::proj::directx::perspective(1., 1., 0.1, 10.) * Mat4::from_translation(Vec3::new(0., 0., -2.));
+    let projected_min = perspective.project_point3(Vec3::new(min[0], min[1], 0.5));
+    let projected_max = perspective.project_point3(Vec3::new(max[0], max[1], 0.5));
+    assert_eq!(
+      geometry.residues_in_rect(
+        [projected_min.x, projected_min.y],
+        [projected_max.x, projected_max.y],
+        perspective,
+        &colors,
+        layers
+      ),
+      [a.residue_id, b.residue_id].into()
+    );
+    assert!(
+      geometry
+        .residues_in_rect([-0.02, 0.04], [0.02, 0.05], Mat4::IDENTITY, &colors, layers)
+        .is_empty()
+    );
+    let bond_only = PickingGeometry {
+      atom_boxes: Default::default(),
+      ..geometry.clone()
+    };
+    assert!(
+      bond_only
+        .residues_in_rect([0.81, 0.025], [0.82, 0.04], Mat4::IDENTITY, &colors, layers)
+        .is_empty(),
+      "flat-ended cylinder must not gain spherical caps"
+    );
+    colors.set_surface(
+      vec![
+        [-1., -1., 0.1, 0., 0., -1., 1., 1., 1.],
+        [-1., 1., 0.1, 0., 0., -1., 1., 1., 1.],
+        [1., -1., 0.1, 0., 0., -1., 1., 1., 1.],
+        [1., 1., 0.1, 0., 0., -1., 1., 1., 1.],
+      ],
+      None,
+    );
+    geometry.surface_indices = vec![0, 1, 2, 2, 1, 3];
+    geometry.rebuild_surface_boxes(&colors);
+    assert!(
+      geometry
+        .residues_in_rect(
+          min,
+          max,
+          Mat4::IDENTITY,
+          &colors,
+          layers.with_surface(crate::SurfaceStyle::Solid)
+        )
+        .is_empty()
+    );
+    geometry.visibility = Arc::new(crate::visibility::VisibilityMask::new(
+      &geometry.atom_residues,
+      &[a.atom_id].into(),
+    ));
+    assert!(
+      geometry
+        .residues_in_rect(min, max, Mat4::IDENTITY, &colors, layers)
+        .is_empty()
+    );
+    Ok(())
+  }
+
+  #[test]
   fn atom_box_should_not_select_hidden_atoms() -> Result<(), Box<dyn std::error::Error>> {
     let scene = two_residue_scene()?;
     let mut colors = ColorCache::new(&scene);
@@ -1186,13 +1354,14 @@ mod tests {
         [-1., -1., 0.2, 0., 0., -1., 1., 1., 1.],
         [-1., 1., 0.2, 0., 0., -1., 1., 1., 1.],
         [1., -1., 0.2, 0., 0., -1., 1., 1., 1.],
+        [1., 1., 0.2, 0., 0., -1., 1., 1., 1.],
       ],
       None,
     );
     let mut geometry = PickingGeometry {
       atoms: vec![atom.atom_id],
       atom_residues: [(atom.atom_id, atom.residue_id)].into(),
-      surface_indices: vec![0, 1, 2],
+      surface_indices: vec![0, 1, 2, 2, 1, 3],
       ..Default::default()
     };
     geometry.rebuild_atom_boxes(&colors);
