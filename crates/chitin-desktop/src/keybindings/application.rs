@@ -26,12 +26,12 @@ actions!(
 pub(super) fn default_key_bindings() -> [KeyBinding; 4] {
   [
     KeyBinding::new(
-      "ctrl-z",
+      "secondary-z",
       UndoWorkbenchEdit,
       Some("Workbench && !Input && !CommandTerminal"),
     ),
     KeyBinding::new(
-      "ctrl-shift-z",
+      "secondary-shift-z",
       RedoWorkbenchEdit,
       Some("Workbench && !Input && !CommandTerminal"),
     ),
