@@ -10,3 +10,4 @@ docs/superpowers
 .cargo/
 .codex/
 .agents/
+.commandcode/
