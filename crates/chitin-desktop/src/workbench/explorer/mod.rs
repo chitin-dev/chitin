@@ -11,7 +11,6 @@ use std::{
 };
 
 use chitin_command::WorkspaceCommand;
-use chitin_ui::workbench::{WorkbenchStyle, panel_surface};
 use chitin_utils::workspace::ProjectWorkspace;
 use gpui_kit::component::{sidebar::SidebarHeader, theme::ThemeColor};
 
@@ -26,11 +25,11 @@ use crate::{
 };
 
 /// Default title shown at the top of the project workspace sidebar.
-pub const DEFAULT_PROJECT_WORKSPACE_TITLE: &str = "File Explorer";
+pub const DEFAULT_PROJECT_WORKSPACE_TITLE: &str = "Project files";
 /// Initial width of the explorer pane.
-pub const DEFAULT_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(200.0);
+pub const DEFAULT_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(280.0);
 /// Minimum explorer width supported by the workbench.
-pub const MIN_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(180.0);
+pub const MIN_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(240.0);
 /// Maximum explorer width supported by the workbench.
 pub const MAX_PROJECT_SIDEBAR_WIDTH: Pixels = gpui::px(480.0);
 
@@ -194,7 +193,13 @@ pub fn render_project_sidebar(
   theme: ThemeColor,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
-  panel_surface(WorkbenchStyle::new(theme))
+  div()
+    .flex()
+    .flex_col()
+    .flex_1()
+    .w_full()
+    .min_w_0()
+    .min_h_0()
     .track_focus(focus_handle)
     .key_context(PROJECT_TREE_KEY_CONTEXT)
     .on_action(cx.listener(|this, _: &FocusPreviousEntry, _, cx| {

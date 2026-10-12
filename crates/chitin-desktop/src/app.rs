@@ -1,6 +1,6 @@
 //! Root GPUI application state and rendering.
 //!
-//! `ChitinApp` owns desktop-level state such as the active activity, currently
+//! `ChitinApp` owns desktop-level state such as the primary sidebar view, currently
 //! opened project workspace, and project sidebar state.
 
 use std::{collections::BTreeSet, path::PathBuf};
@@ -30,9 +30,10 @@ use crate::{
   },
   services::tasks::BackgroundTaskCenter,
   workbench::{
-    activity_bar::{ActiveActivity, render_activity_bar},
     documents::{DocumentPanelState, dock::DocumentDock, render_document_area, state::DocumentPanelContent},
-    explorer::{MAX_PROJECT_SIDEBAR_WIDTH, MIN_PROJECT_SIDEBAR_WIDTH, ProjectSidebarState, render_project_sidebar},
+    explorer::{MAX_PROJECT_SIDEBAR_WIDTH, MIN_PROJECT_SIDEBAR_WIDTH, ProjectSidebarState},
+    sidebar::{SidebarView, render_primary_sidebar},
+    welcome::render_welcome,
     window_bar::render_window_bar,
   },
 };
@@ -56,9 +57,13 @@ pub struct ChitinApp {
   pub(crate) document_panels: DocumentPanelState,
   /// Kit docking mount, separate from document command state.
   pub(crate) document_dock: Option<DocumentDock>,
-  /// Currently selected top-level workbench activity.
-  pub(crate) active_activity: ActiveActivity,
-  /// Whether the project workspace sidebar is visible when Workspace is active.
+  /// Content selected by the primary sidebar's navigation.
+  pub(crate) sidebar_view: SidebarView,
+  /// Remembered expansion of the Functions sidebar's database category.
+  pub(crate) database_functions_expanded: bool,
+  /// Scientific entry caches, selection inputs, and view-scoped bookmarks.
+  pub(crate) entries_sidebar: crate::workbench::entries::EntriesSidebarState,
+  /// Whether the primary sidebar is visible, independently of its selected view.
   pub(crate) project_sidebar_visible: bool,
   /// Searchable command panel state, metadata, and focus ownership.
   pub(crate) command_panel: CommandPanelController,
@@ -150,7 +155,9 @@ impl ChitinApp {
       document_panels: DocumentPanelState::empty(),
       edit_history: Default::default(),
       document_dock: None,
-      active_activity: ActiveActivity::Workspace,
+      sidebar_view: SidebarView::Project,
+      database_functions_expanded: true,
+      entries_sidebar: Default::default(),
       project_sidebar_visible: true,
       command_panel: CommandPanelController::new(),
       tasks: BackgroundTaskCenter::new(),
@@ -349,7 +356,7 @@ impl ChitinApp {
   ///
   /// A [`FocusHandle`] for either the project sidebar or document panel.
   pub(crate) fn workspace_toggle_focus_target(&mut self, cx: &mut Context<Self>) -> FocusHandle {
-    if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
+    if self.sidebar_view == SidebarView::Project && self.project_sidebar_visible {
       self.project_sidebar_focus(cx)
     } else {
       self.document_panel_focus(cx)
@@ -358,10 +365,10 @@ impl ChitinApp {
 
   /// Applies the workspace-sidebar toggle state transition.
   fn toggle_workspace_state(&mut self) {
-    if self.active_activity == ActiveActivity::Workspace {
+    if self.sidebar_view == SidebarView::Project {
       self.project_sidebar_visible = !self.project_sidebar_visible;
     } else {
-      self.active_activity = ActiveActivity::Workspace;
+      self.sidebar_view = SidebarView::Project;
       self.project_sidebar_visible = true;
     }
   }
@@ -396,8 +403,8 @@ impl ChitinApp {
 impl Render for ChitinApp {
   /// Renders the root desktop workbench layout.
   ///
-  /// The rendered layout contains the window bar, activity bar, optional
-  /// project sidebar, and main document area. Kit owns pointer tracking for
+  /// The rendered layout contains the window bar, optional primary
+  /// sidebar, and main document area. Kit owns pointer tracking for
   /// explorer resizing, document docking, and the independent bottom overlay.
   ///
   /// # Parameters
@@ -433,7 +440,6 @@ impl Render for ChitinApp {
     }
     let app = cx.weak_entity();
     let workbench_focus = self.workbench_focus(cx);
-    let project_sidebar_focus = self.project_sidebar_focus(cx);
     let document_panel_focus = self.document_panel_focus(cx);
     let mut document_dock = self
       .document_dock
@@ -441,10 +447,16 @@ impl Render for ChitinApp {
       .unwrap_or_else(|| DocumentDock::new(window, cx));
     document_dock.sync(&self.document_panels, document_options_controls, window, cx);
     self.edit_history.prune(&self.document_panels);
+    self.entries_sidebar.prune(&self.document_panels);
     let document_area = document_dock.area.clone();
     self.document_dock = Some(document_dock);
     let bottom_dock_height = self.bottom_dock.height();
 
+    let document_body = if self.document_panels.tree.tabs_in_order().is_empty() {
+      render_welcome(self, theme, cx).into_any_element()
+    } else {
+      document_area.into_any_element()
+    };
     let document_content = div()
       .relative()
       .flex()
@@ -452,7 +464,7 @@ impl Render for ChitinApp {
       .size_full()
       .min_w_0()
       .min_h_0()
-      .child(render_document_area(document_area, &document_panel_focus, cx))
+      .child(render_document_area(document_body, &document_panel_focus, cx))
       .when_some(terminal_dock_controls, |layout, controls| {
         layout.child(render_terminal_bottom_dock(
           controls,
@@ -461,7 +473,7 @@ impl Render for ChitinApp {
           app.clone(),
         ))
       });
-    let workbench_content = if self.active_activity == ActiveActivity::Workspace && self.project_sidebar_visible {
+    let workbench_content = if self.project_sidebar_visible {
       let resize_app = app.clone();
       h_resizable("workspace-explorer-split")
         .with_handle_appearance(resize_handle_appearance())
@@ -469,13 +481,7 @@ impl Render for ChitinApp {
           resizable_panel()
             .size(self.project_sidebar_state.width())
             .size_range(MIN_PROJECT_SIDEBAR_WIDTH..MAX_PROJECT_SIDEBAR_WIDTH)
-            .child(render_project_sidebar(
-              self.workspace.as_ref(),
-              &mut self.project_sidebar_state,
-              &project_sidebar_focus,
-              theme,
-              cx,
-            )),
+            .child(render_primary_sidebar(self, theme, window, cx)),
         )
         .child(resizable_panel().child(document_content))
         .on_resize(move |state, _, cx| {
@@ -500,7 +506,8 @@ impl Render for ChitinApp {
       .relative()
       .key_context(WORKBENCH_KEY_CONTEXT)
       .track_focus(&workbench_focus)
-      .bg(theme.background)
+      .bg(workbench_style.background)
+      .text_sm()
       .text_color(theme.foreground)
       .on_action(cx.listener(|this, _: &ToggleWorkspace, window, cx| {
         this.toggle_workspace_with_focus(window, cx);
@@ -531,22 +538,17 @@ impl Render for ChitinApp {
           });
         }
       })
-      .child(render_window_bar(theme))
+      .child(render_window_bar(theme, app.clone()))
       .child(
-        div()
-          .flex()
-          .flex_1()
-          .min_h_0()
-          .child(render_activity_bar(self.active_activity, theme, app.clone()))
-          .child(
-            div()
-              .flex()
-              .flex_1()
-              .min_w_0()
-              .min_h_0()
-              .p(workbench_style.panel_gap * 0.5)
-              .child(workbench_content),
-          ),
+        div().flex().flex_1().min_h_0().child(
+          div()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .p(workbench_style.panel_gap * 0.5)
+            .child(workbench_content),
+        ),
       )
       .when(self.command_panel.is_open(), |layout| {
         layout.child(render_command_panel(
@@ -572,7 +574,7 @@ mod tests {
 
     app.toggle_workspace_state();
 
-    assert_eq!(app.active_activity, ActiveActivity::Workspace);
+    assert_eq!(app.sidebar_view, SidebarView::Project);
     assert!(!app.project_sidebar_visible);
   }
 
@@ -580,12 +582,12 @@ mod tests {
   #[test]
   fn toggle_workspace_state_should_show_workspace_from_other_activity() {
     let mut app = ChitinApp::new(Some(PathBuf::from("/chitin-test-missing-workspace")));
-    app.active_activity = ActiveActivity::Search;
+    app.sidebar_view = SidebarView::Functions;
     app.project_sidebar_visible = false;
 
     app.toggle_workspace_state();
 
-    assert_eq!(app.active_activity, ActiveActivity::Workspace);
+    assert_eq!(app.sidebar_view, SidebarView::Project);
     assert!(app.project_sidebar_visible);
   }
 

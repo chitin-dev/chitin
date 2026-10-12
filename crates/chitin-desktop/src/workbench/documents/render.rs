@@ -11,12 +11,11 @@ use crate::{
 };
 use chitin_command::PanelTabCommand;
 use gpui::{
-  AnyElement, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Styled,
+  AnyElement, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Styled,
   WeakEntity, div, px, svg,
 };
 use gpui_kit::component::{
   button::{Button, ButtonVariant, ButtonVariants as _},
-  dock::DockArea,
   theme::ThemeColor,
 };
 
@@ -36,7 +35,7 @@ const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
 ///
 /// A full-size document region; Kit owns its tabs and split interactions.
 pub fn render_document_area(
-  area: Entity<DockArea>,
+  area: impl IntoElement,
   focus_handle: &FocusHandle,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {

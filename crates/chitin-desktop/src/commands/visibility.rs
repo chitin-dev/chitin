@@ -26,6 +26,15 @@ impl ChitinApp {
       return Err(RenderCommandError::UnsupportedVisibility { id });
     }
     let matched = match command.target {
+      VisibilityTarget::Atoms(atoms) => {
+        // Sidebar/bookmark IDs belong to one scene; reject stale or foreign IDs
+        // before changing visibility through the shared command/undo path.
+        let valid = control.scene.atoms.iter().map(|atom| atom.atom_id).collect();
+        if !atoms.is_subset(&valid) {
+          return Err(RenderCommandError::UnknownAtoms { id });
+        }
+        atoms
+      }
       VisibilityTarget::Selected => control.atoms.as_ref().clone(),
       VisibilityTarget::All => control.scene.atoms.iter().map(|atom| atom.atom_id).collect(),
       VisibilityTarget::Match(spec) => {
