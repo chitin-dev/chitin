@@ -1,6 +1,6 @@
 //! CPU tessellation of smooth polymer cartoon ribbons.
 
-use chitin_bio::structure::{PolymerTrace, PolymerTraceKind, StructureScene};
+use chitin_bio::structure::{PolymerTrace, PolymerTraceKind, ResidueId, StructureScene};
 
 /// Default number of interpolated rings per residue.
 const SAMPLES_PER_RESIDUE: usize = 20;
@@ -47,10 +47,13 @@ pub(crate) struct CartoonMesh {
   pub(crate) vertices: Vec<[f32; 9]>,
   /// Triangle-list indices into `vertices`.
   pub(crate) indices: Vec<u32>,
+  pub(crate) chains: Vec<usize>,
+  pub(crate) residues: Vec<Option<ResidueId>>,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct TraceSample {
+  residue: Option<ResidueId>,
   /// Interpolated position on the polymer centerline.
   position: glam::Vec3,
   /// Interpolated backbone guide used when a frame becomes degenerate.
@@ -140,6 +143,8 @@ fn append_trace_mesh(mesh: &mut CartoonMesh, trace: &PolymerTrace, color: [f32; 
         section.color[1],
         section.color[2],
       ]);
+      mesh.chains.push(trace.chain_id.index());
+      mesh.residues.push(sample.residue);
     }
   }
 
@@ -183,6 +188,11 @@ fn sample_trace(trace: &PolymerTrace) -> Vec<TraceSample> {
         points[index + 1].kind
       };
       samples.push(TraceSample {
+        residue: Some(if t < 0.5 {
+          points[index].residue_id
+        } else {
+          points[index + 1].residue_id
+        }),
         position: catmull_rom(p0, p1, p2, p3, t),
         guide: catmull_rom(g0, g1, g2, g3, t),
         kind,
@@ -196,6 +206,7 @@ fn sample_trace(trace: &PolymerTrace) -> Vec<TraceSample> {
   }
   let last = points[points.len() - 1];
   samples.push(TraceSample {
+    residue: Some(last.residue_id),
     position: glam::Vec3::from_array(last.position),
     guide: glam::Vec3::from_array(last.guide),
     kind: last.kind,
@@ -538,6 +549,7 @@ mod tests {
   #[test]
   fn default_sections_should_match_default_dimensions() {
     let sample = TraceSample {
+      residue: None,
       position: glam::Vec3::ZERO,
       guide: glam::Vec3::Y,
       kind: PolymerTraceKind::Coil,
@@ -580,6 +592,7 @@ mod tests {
   #[test]
   fn default_sections_should_use_default_profiles() {
     let sample = TraceSample {
+      residue: None,
       position: glam::Vec3::ZERO,
       guide: glam::Vec3::Y,
       kind: PolymerTraceKind::Helix,

@@ -59,6 +59,21 @@ impl ChitinApp {
     match command {
       FrontendCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
       FrontendCommand::Application(command) => self.dispatch_application_command(command, cx),
+      FrontendCommand::Render(command) => {
+        if let Err(error) = self.dispatch_render_command(None, command, cx) {
+          log::error!("Cannot dispatch {} without an explicit target: {error}", command.id());
+        }
+      }
+      FrontendCommand::Selection(command) => {
+        if let Err(error) = self.dispatch_selection_command(None, command, cx) {
+          log::error!("{error}");
+        }
+      }
+      FrontendCommand::Visibility(command) => {
+        if let Err(error) = self.dispatch_visibility_command(None, command, cx) {
+          log::error!("{error}");
+        }
+      }
     }
   }
 
@@ -74,6 +89,11 @@ impl ChitinApp {
   /// This function returns `()` after applying the application action.
   pub(crate) fn dispatch_application_command(&mut self, command: ApplicationCommand, cx: &mut Context<Self>) {
     match command {
+      ApplicationCommand::Undo | ApplicationCommand::Redo => {
+        if let Err(error) = self.dispatch_history_command(command == ApplicationCommand::Redo, cx) {
+          log::error!("{error}");
+        }
+      }
       ApplicationCommand::ToggleCommandPanel => self.toggle_command_panel(cx),
       ApplicationCommand::ToggleTerminal => self.toggle_terminal(cx),
     }

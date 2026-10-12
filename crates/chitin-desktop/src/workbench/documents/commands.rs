@@ -3,8 +3,6 @@
 use std::sync::Arc;
 
 use crate::workbench::documents::layout::{PanelId, PanelSplitAxis};
-use chitin_bio::surface::MolecularSurfaceBackend;
-use chitin_molecule_renderer::RepresentationLayers;
 use chitin_ui::widgets::toast::ToastViewport;
 use gpui::{App, AppContext, AsyncApp, Context, Entity, WeakEntity, Window};
 
@@ -143,8 +141,13 @@ impl ChitinApp {
     let changed = self.document_panels.toggle_options_menu(panel_id);
     if self.document_panels.options_menu_panel_id == Some(panel_id)
       && let Some(controls) = &self.document_options_controls
+      && let Some(tab) = self
+        .document_panels
+        .tree
+        .leaf(panel_id)
+        .and_then(|leaf| leaf.active_tab)
     {
-      controls.bind_panel(panel_id);
+      controls.bind_panel(tab.value());
     }
     changed
   }
@@ -152,49 +155,6 @@ impl ChitinApp {
   /// Dismisses the open molecular document options menu.
   pub(crate) fn dismiss_document_options_menu(&mut self) -> bool {
     self.document_panels.dismiss_options_menu()
-  }
-
-  /// Applies representation layers to the active molecular document.
-  pub(crate) fn select_document_representation_layers(
-    &mut self,
-    panel_id: PanelId,
-    representation: RepresentationLayers,
-    cx: &mut Context<Self>,
-  ) -> bool {
-    let Some(on_change) = self
-      .document_panels
-      .select_representation_layers(panel_id, representation)
-    else {
-      self.document_panels.dismiss_options_menu();
-      return false;
-    };
-    self.document_panels.dismiss_options_menu();
-    on_change(representation, cx);
-    true
-  }
-
-  /// Applies a surface-generation backend to the active molecular document.
-  ///
-  /// # Parameters
-  ///
-  /// * `panel_id` identifies the panel whose active molecular document changes.
-  /// * `backend` is the newly selected surface-generation algorithm.
-  /// * `cx` invokes the document view callback and schedules UI updates.
-  ///
-  /// # Returns
-  ///
-  /// `true` when the active document accepted a changed backend.
-  pub(crate) fn select_document_surface_backend(
-    &mut self,
-    panel_id: PanelId,
-    backend: MolecularSurfaceBackend,
-    cx: &mut Context<Self>,
-  ) -> bool {
-    let Some(on_change) = self.document_panels.select_surface_backend(panel_id, backend) else {
-      return false;
-    };
-    on_change(backend, cx);
-    true
   }
 
   /// Focuses the previous tab in the focused document panel.

@@ -65,6 +65,7 @@ pub struct RepresentationLayers {
   atom: Option<AtomStyle>,
   polymer: Option<PolymerStyle>,
   surface: Option<SurfaceStyle>,
+  appearance: [crate::appearance::LayerAppearance; 3],
 }
 
 impl RepresentationLayers {
@@ -74,6 +75,11 @@ impl RepresentationLayers {
       atom: None,
       polymer: None,
       surface: None,
+      appearance: [
+        crate::appearance::LayerAppearance::new(crate::appearance::ColorScheme::Element),
+        crate::appearance::LayerAppearance::new(crate::appearance::ColorScheme::Uniform),
+        crate::appearance::LayerAppearance::new(crate::appearance::ColorScheme::Uniform),
+      ],
     }
   }
 
@@ -85,6 +91,17 @@ impl RepresentationLayers {
   /// Returns the enabled atom style.
   pub const fn atom_style(self) -> Option<AtomStyle> {
     self.atom
+  }
+
+  /// Returns appearance in atom, polymer, surface order.
+  pub const fn appearances(self) -> [crate::appearance::LayerAppearance; 3] {
+    self.appearance
+  }
+
+  /// Replaces appearance without modifying layer visibility.
+  pub const fn with_appearances(mut self, appearance: [crate::appearance::LayerAppearance; 3]) -> Self {
+    self.appearance = appearance;
+    self
   }
 
   /// Returns the enabled polymer style.

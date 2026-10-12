@@ -904,6 +904,7 @@ dependencies = [
  "chitin-wgpu",
  "glam",
  "log",
+ "pollster 0.4.0",
  "wgpu",
 ]
 

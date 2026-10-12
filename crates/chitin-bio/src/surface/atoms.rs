@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::structure::{ChainId, ElementCategory, ResidueKind, StructureScene};
+use crate::structure::{AtomSceneInstance, ChainId, ElementCategory, ResidueKind, StructureScene};
 
 /// Atom-selection policy used before molecular-surface domains are partitioned.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +22,21 @@ pub enum SurfacePartition {
   /// Calculate one independent surface for each chain.
   #[default]
   ByChain,
+}
+
+/// Selects the scene atoms participating in either surface backend or its coloring.
+pub fn select_surface_scene_atoms(
+  atoms: &[AtomSceneInstance],
+  atom_scope: SurfaceAtomScope,
+) -> impl Iterator<Item = &AtomSceneInstance> {
+  let contains_polymer = atoms.iter().any(|atom| atom.residue_kind == ResidueKind::Polymer);
+  atoms.iter().filter(move |atom| {
+    !atom.is_solvent
+      && match atom_scope {
+        SurfaceAtomScope::BiopolymerOrNonSolvent => !contains_polymer || atom.residue_kind == ResidueKind::Polymer,
+        SurfaceAtomScope::AllNonSolvent => true,
+      }
+  })
 }
 
 /// One selected atom shared by numerical and analytical surface backends.
@@ -57,15 +72,8 @@ pub(crate) fn surface_atom_groups(
   atom_scope: SurfaceAtomScope,
   partition: SurfacePartition,
 ) -> BTreeMap<Option<ChainId>, Vec<SurfaceAtom>> {
-  let contains_polymer = scene.atoms.iter().any(|atom| atom.residue_kind == ResidueKind::Polymer);
   let mut groups = BTreeMap::new();
-  for atom in scene.atoms.iter().filter(|atom| {
-    !atom.is_solvent
-      && match atom_scope {
-        SurfaceAtomScope::BiopolymerOrNonSolvent => !contains_polymer || atom.residue_kind == ResidueKind::Polymer,
-        SurfaceAtomScope::AllNonSolvent => true,
-      }
-  }) {
+  for atom in select_surface_scene_atoms(&scene.atoms, atom_scope) {
     let domain = match partition {
       SurfacePartition::Unified => None,
       SurfacePartition::ByChain => Some(atom.chain_id),

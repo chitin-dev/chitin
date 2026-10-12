@@ -4,16 +4,25 @@ mod application;
 mod catalog;
 mod database;
 mod panel_tab;
+mod render;
+mod selection;
 mod structure;
+mod visibility;
 mod workspace;
 
 pub use application::ApplicationCommand;
 pub use catalog::*;
 pub use database::{DatabaseCommand, RcsbDownloadArguments};
 pub use panel_tab::PanelTabCommand;
+pub use render::{
+  RenderAtomStyle, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle, RenderRgb,
+  RenderSurfaceBackend, RenderSurfaceStyle,
+};
+pub use selection::{AtomSpec, SelectionCommand, SelectionMode};
 pub use structure::{
   CommandOutputFormat, StructureCommand, StructureInputArguments, StructureInspectArguments, StructureValidateArguments,
 };
+pub use visibility::{VisibilityCommand, VisibilityTarget};
 pub use workspace::WorkspaceCommand;
 
 /// Commands executable without application or window state.
@@ -42,6 +51,12 @@ pub enum FrontendCommand {
   Workspace(WorkspaceCommand),
   /// Application-shell commands.
   Application(ApplicationCommand),
+  /// Molecular presentation commands requiring an explicit rendering target.
+  Render(RenderCommand),
+  /// Model-scoped scientific selection operations.
+  Selection(SelectionCommand),
+  /// Model-scoped object visibility operations.
+  Visibility(VisibilityCommand),
 }
 
 impl FrontendCommand {
@@ -50,6 +65,9 @@ impl FrontendCommand {
     match self {
       Self::Workspace(command) => command.id(),
       Self::Application(command) => command.id(),
+      Self::Render(command) => command.id(),
+      Self::Selection(command) => command.id(),
+      Self::Visibility(command) => command.id(),
     }
   }
 }
@@ -81,6 +99,42 @@ impl ChitinCommand {
 impl From<WorkspaceCommand> for FrontendCommand {
   fn from(command: WorkspaceCommand) -> Self {
     Self::Workspace(command)
+  }
+}
+
+impl From<RenderCommand> for FrontendCommand {
+  fn from(command: RenderCommand) -> Self {
+    Self::Render(command)
+  }
+}
+
+impl From<SelectionCommand> for FrontendCommand {
+  fn from(command: SelectionCommand) -> Self {
+    Self::Selection(command)
+  }
+}
+
+impl From<VisibilityCommand> for FrontendCommand {
+  fn from(command: VisibilityCommand) -> Self {
+    Self::Visibility(command)
+  }
+}
+
+impl From<VisibilityCommand> for ChitinCommand {
+  fn from(command: VisibilityCommand) -> Self {
+    FrontendCommand::from(command).into()
+  }
+}
+
+impl From<SelectionCommand> for ChitinCommand {
+  fn from(command: SelectionCommand) -> Self {
+    FrontendCommand::from(command).into()
+  }
+}
+
+impl From<RenderCommand> for ChitinCommand {
+  fn from(command: RenderCommand) -> Self {
+    FrontendCommand::from(command).into()
   }
 }
 
@@ -183,6 +237,14 @@ mod tests {
     let command = ChitinCommand::from(WorkspaceCommand::ToggleWorkspace);
 
     assert_eq!(command.execution_domain(), CommandExecutionDomain::Frontend);
+  }
+
+  #[test]
+  fn selection_commands_should_use_the_frontend_execution_domain() {
+    let command = ChitinCommand::from(SelectionCommand::Clear);
+    assert_eq!(command.execution_domain(), CommandExecutionDomain::Frontend);
+    assert_eq!(command.id(), CommandId::Selection);
+    assert_eq!(CommandId::Selection.frontend_command_without_arguments(), None);
   }
 
   #[test]

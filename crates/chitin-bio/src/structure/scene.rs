@@ -192,6 +192,8 @@ impl Default for StructureSceneOptions {
 /// responsibility of a renderer crate.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructureScene {
+  /// Author identifiers and atom names used by model-scoped selection queries.
+  pub selection: std::sync::Arc<super::selection::SelectionIndex>,
   /// Model represented by this scene.
   pub model_id: ModelId,
   /// Atoms with finite coordinates in the selected model.
@@ -370,6 +372,7 @@ impl StructureScene {
     let polymer_traces = extract_polymer_traces(structure, model, coordinates);
 
     Ok(Self {
+      selection: std::sync::Arc::new(super::selection::SelectionIndex::from_structure(structure)),
       model_id,
       atoms,
       bonds,

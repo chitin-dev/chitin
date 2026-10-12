@@ -10,6 +10,7 @@ struct Uniforms {
   material: vec4<f32>,
   depth_cue: vec4<f32>,
   background: vec4<f32>,
+  opacity: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -28,16 +29,31 @@ struct VertexOutput {
   @location(0) view_position: vec3<f32>,
   @location(1) view_normal: vec3<f32>,
   @location(2) color: vec3<f32>,
+  @location(3) opacity: f32,
 }
 
-@vertex
-fn cartoon_vertex(vertex: CartoonVertex) -> VertexOutput {
+fn mesh_vertex(vertex: CartoonVertex, opacity: f32) -> VertexOutput {
   var out: VertexOutput;
   let view_position = uniforms.model_view * vec4<f32>(vertex.position, 1.0);
   out.clip_position = uniforms.projection * view_position;
   out.view_position = view_position.xyz;
   out.view_normal = normalize((uniforms.model_view * vec4<f32>(vertex.normal, 0.0)).xyz);
   out.color = vertex.color;
+  out.opacity = opacity;
+  return out;
+}
+
+@vertex fn cartoon_vertex(vertex: CartoonVertex) -> VertexOutput { return mesh_vertex(vertex, uniforms.opacity.y); }
+@vertex fn surface_vertex(vertex: CartoonVertex) -> VertexOutput { return mesh_vertex(vertex, uniforms.opacity.z); }
+@group(1) @binding(0) var<storage, read> selection_flags: array<f32>;
+@vertex fn cartoon_selection_vertex(vertex: CartoonVertex, @location(3) owner: u32) -> VertexOutput {
+  var out = mesh_vertex(vertex, uniforms.opacity.y);
+  out.color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
+  return out;
+}
+@vertex fn surface_selection_vertex(vertex: CartoonVertex, @location(3) owner: u32) -> VertexOutput {
+  var out = mesh_vertex(vertex, uniforms.opacity.z);
+  out.color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
   return out;
 }
 
@@ -49,8 +65,7 @@ fn wrapped_diffuse(normal: vec3<f32>, light_direction: vec3<f32>, strength: f32)
   return ((facing + wrap) / (1.0 + wrap)) * strength;
 }
 
-@fragment
-fn cartoon_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
+fn shade_cartoon(in: VertexOutput) -> vec4<f32> {
   let normal = normalize(in.view_normal);
   let key_direction = normalize(uniforms.key_light.xyz);
   let fill_direction = normalize(uniforms.fill_light.xyz);
@@ -83,4 +98,18 @@ fn cartoon_fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(in.color, 1.0);
   }
   return vec4<f32>(mix(lit_color, uniforms.background.rgb, cue), 1.0);
+}
+
+@fragment fn cartoon_fragment(in: VertexOutput) -> @location(0) vec4<f32> { return shade_cartoon(in); }
+@fragment fn cartoon_selection(in: VertexOutput) -> @location(0) vec4<f32> { return vec4<f32>(select(0.0, 1.0, in.color.r >= 0.5), 0.0, 0.0, 1.0); }
+struct TransparentOutput {
+  @location(0) accumulation: vec4<f32>,
+  @location(1) revealage: f32,
+}
+@fragment fn cartoon_transparent(in: VertexOutput) -> TransparentOutput {
+  let weight = clamp(pow(1.0 - in.clip_position.z * 0.9, 3.0) * 100.0, 0.01, 100.0);
+  var out: TransparentOutput;
+  out.accumulation = vec4<f32>(shade_cartoon(in).rgb * in.opacity, in.opacity) * weight;
+  out.revealage = in.opacity;
+  return out;
 }

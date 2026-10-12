@@ -10,6 +10,7 @@ struct Uniforms {
   material: vec4<f32>,
   depth_cue: vec4<f32>,
   background: vec4<f32>,
+  opacity: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -75,8 +76,7 @@ fn view_ray_anchor(ndc: vec2<f32>, view_depth: f32) -> vec3<f32> {
   );
 }
 
-@vertex
-fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
+fn atom_vertex_output(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
   var out: VertexOutput;
   let center = (uniforms.model_view * vec4<f32>(instance.position_radius.xyz, 1.0)).xyz;
   let radius = view_radius(instance.position_radius.w);
@@ -96,8 +96,7 @@ fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput {
   return out;
 }
 
-@vertex
-fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput {
+fn bond_vertex_output(vertex: MeshVertex, instance: BondInstance) -> VertexOutput {
   var out: VertexOutput;
   let start = (uniforms.model_view * vec4<f32>(instance.start_radius.xyz, 1.0)).xyz;
   let end = (uniforms.model_view * vec4<f32>(instance.end_padding.xyz, 1.0)).xyz;
@@ -187,8 +186,7 @@ fn fragment_depth(view_position: vec3<f32>) -> f32 {
   return clip_position.z / clip_position.w;
 }
 
-@fragment
-fn atom_fragment(in: VertexOutput) -> FragmentOutput {
+fn atom_hit(in: VertexOutput) -> FragmentOutput {
   let ray_direction = normalize(in.ray_anchor);
   let center = in.surface_start_radius.xyz;
   let radius = in.surface_start_radius.w;
@@ -212,8 +210,7 @@ fn atom_fragment(in: VertexOutput) -> FragmentOutput {
   return out;
 }
 
-@fragment
-fn bond_fragment(in: VertexOutput) -> FragmentOutput {
+fn bond_hit(in: VertexOutput) -> FragmentOutput {
   let ray_direction = normalize(in.ray_anchor);
   let start = in.surface_start_radius.xyz;
   let end = in.surface_end;
@@ -254,3 +251,47 @@ fn bond_fragment(in: VertexOutput) -> FragmentOutput {
   out.depth = fragment_depth(view_position);
   return out;
 }
+
+@vertex fn atom_vertex(vertex: MeshVertex, instance: AtomInstance) -> VertexOutput { return atom_vertex_output(vertex, instance); }
+@vertex fn bond_vertex(vertex: MeshVertex, instance: BondInstance) -> VertexOutput { return bond_vertex_output(vertex, instance); }
+@group(1) @binding(0) var<storage, read> selection_flags: array<f32>;
+@vertex fn atom_selection_vertex(vertex: MeshVertex, instance: AtomInstance, @location(6) owner: u32) -> VertexOutput {
+  var out = atom_vertex_output(vertex, instance);
+  out.start_color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
+  return out;
+}
+@vertex fn bond_selection_vertex(vertex: MeshVertex, instance: BondInstance, @location(6) owner: u32) -> VertexOutput {
+  var out = bond_vertex_output(vertex, instance);
+  out.start_color = vec3<f32>(selection_flags[owner], 0.0, 0.0);
+  return out;
+}
+@fragment fn atom_fragment(in: VertexOutput) -> FragmentOutput { return atom_hit(in); }
+@fragment fn bond_fragment(in: VertexOutput) -> FragmentOutput { return bond_hit(in); }
+
+@fragment fn atom_selection(in: VertexOutput) -> FragmentOutput {
+  var out = atom_hit(in);
+  out.color = vec4<f32>(in.start_color.r, 0.0, 0.0, 1.0);
+  return out;
+}
+@fragment fn bond_selection(in: VertexOutput) -> FragmentOutput {
+  var out = bond_hit(in);
+  out.color = vec4<f32>(in.start_color.r, 0.0, 0.0, 1.0);
+  return out;
+}
+
+struct TransparentOutput {
+  @location(0) accumulation: vec4<f32>,
+  @location(1) revealage: f32,
+  @builtin(frag_depth) depth: f32,
+}
+fn transparent_hit(hit: FragmentOutput) -> TransparentOutput {
+  let alpha = uniforms.opacity.x;
+  let weight = clamp(pow(1.0 - hit.depth * 0.9, 3.0) * 100.0, 0.01, 100.0);
+  var out: TransparentOutput;
+  out.accumulation = vec4<f32>(hit.color.rgb * alpha, alpha) * weight;
+  out.revealage = alpha;
+  out.depth = hit.depth;
+  return out;
+}
+@fragment fn atom_transparent(in: VertexOutput) -> TransparentOutput { return transparent_hit(atom_hit(in)); }
+@fragment fn bond_transparent(in: VertexOutput) -> TransparentOutput { return transparent_hit(bond_hit(in)); }

@@ -241,6 +241,45 @@ impl DocumentDock {
     let retained: HashSet<_> = entries.iter().map(|(_, tab)| tab.id).collect();
     let last_document = retained.len() == 1;
     for (panel_id, tab) in entries {
+      let view_changed =
+        self
+          .tabs
+          .get(&tab.id)
+          .is_none_or(|entity| match (&entity.read(cx).tab.payload, &tab.payload) {
+            (
+              DocumentPanelContent::WgpuInteractive { view: old, .. },
+              DocumentPanelContent::WgpuInteractive { view: new, .. },
+            ) => old.entity_id() != new.entity_id(),
+            _ => true,
+          });
+      if view_changed
+        && let DocumentPanelContent::WgpuInteractive {
+          selection: Some(control),
+          view,
+          ..
+        } = &tab.payload
+      {
+        let app = cx.weak_entity();
+        let id = tab.id.value();
+        let revision = view.entity_id();
+        (control.bind_input)(
+          std::rc::Rc::new(move |command, cx| {
+            let app = app.clone();
+            // The emitting viewport is still being updated. Apply through the bus
+            // after it releases its entity borrow, and reject obsolete views.
+            cx.defer(move |cx| {
+              let _ = app.update(cx, |app, cx| {
+                if app.document_panels.rendering_view_id(id) == Some(revision)
+                  && let Err(error) = app.dispatch_selection_command(Some(id), command, cx)
+                {
+                  log::warn!("Selection failed: {error}");
+                }
+              });
+            });
+          }),
+          cx,
+        );
+      }
       if let Some(entity) = self.tabs.get(&tab.id) {
         entity.update(cx, |panel, cx| {
           let changed = panel.tab != *tab
@@ -291,7 +330,11 @@ impl DocumentDock {
         self.tabs.insert(tab.id, entity);
       }
     }
-    if self.projected.as_ref() != Some(&state.tree) {
+    if !self
+      .projected
+      .as_ref()
+      .is_some_and(|tree| same_dock_layout(&tree.root, &state.tree.root))
+    {
       let measured = self.area.read(cx).bounds().size;
       let viewport = window.bounds().size;
       let extent = Size {
@@ -328,7 +371,11 @@ impl DocumentDock {
   /// Whether the application layout changed. Events from an obsolete layout
   /// are ignored when a newer domain command has not yet been installed.
   fn read_layout(&mut self, state: &mut DocumentPanelState, window: &mut Window, cx: &App) -> bool {
-    if self.projected.as_ref() != Some(&state.tree) {
+    if !self
+      .projected
+      .as_ref()
+      .is_some_and(|tree| same_dock_layout(&tree.root, &state.tree.root))
+    {
       return false;
     }
     let area = self.area.read(cx);
@@ -395,6 +442,29 @@ impl DocumentDock {
     let mut ids = Vec::new();
     collect_leaf_ids(&tree.root, &mut ids);
     self.leaf_ids = groups.into_iter().zip(ids).collect();
+  }
+}
+
+/// Compares only Kit-owned layout, not document titles or rendering settings.
+fn same_dock_layout<T>(first: &PanelNode<T>, second: &PanelNode<T>) -> bool {
+  match (first, second) {
+    (PanelNode::Leaf(first), PanelNode::Leaf(second)) => {
+      first.id == second.id
+        && first.active_tab == second.active_tab
+        && first.tabs.len() == second.tabs.len()
+        && first
+          .tabs
+          .iter()
+          .zip(&second.tabs)
+          .all(|(first, second)| first.id == second.id)
+    }
+    (PanelNode::Split(first), PanelNode::Split(second)) => {
+      first.axis == second.axis
+        && first.ratio == second.ratio
+        && same_dock_layout(&first.first, &second.first)
+        && same_dock_layout(&first.second, &second.second)
+    }
+    _ => false,
   }
 }
 

@@ -11,6 +11,7 @@ mod atoms;
 pub mod implicit;
 mod mesh;
 pub mod msms;
+mod ownership;
 
 /// Algorithm used to construct renderer-neutral molecular-surface geometry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -22,7 +23,7 @@ pub enum MolecularSurfaceBackend {
   Msms,
 }
 
-pub use atoms::{SurfaceAtomScope, SurfacePartition};
+pub use atoms::{SurfaceAtomScope, SurfacePartition, select_surface_scene_atoms};
 pub use implicit::{
   MolecularSurfaceArtifact, MolecularSurfaceParameterError, MolecularSurfaceRequest, MolecularSurfaceTrace,
   ScalarFieldGrid, SesDomainTrace, SesGridBudget, SesParameters, SurfaceDomainArtifact, SurfaceGeometrySource,
@@ -31,3 +32,4 @@ pub use implicit::{
 #[cfg(feature = "surface-profiling")]
 pub use implicit::{MolecularSurfaceProfile, MolecularSurfaceTimings, profile_molecular_surface};
 pub use mesh::SurfaceMesh;
+pub use ownership::surface_vertex_atom_ids;

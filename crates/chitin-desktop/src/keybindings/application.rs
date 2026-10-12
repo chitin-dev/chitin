@@ -16,11 +16,25 @@ actions!(
     ToggleCommandPanel,
     /// Show or hide the built-in terminal panel.
     ToggleTerminal,
+    /// Undo a committed workbench edit.
+    UndoWorkbenchEdit,
+    /// Redo an undone workbench edit.
+    RedoWorkbenchEdit,
   ]
 );
 
-pub(super) fn default_key_bindings() -> [KeyBinding; 2] {
+pub(super) fn default_key_bindings() -> [KeyBinding; 4] {
   [
+    KeyBinding::new(
+      "secondary-z",
+      UndoWorkbenchEdit,
+      Some("Workbench && !Input && !CommandTerminal"),
+    ),
+    KeyBinding::new(
+      "secondary-shift-z",
+      RedoWorkbenchEdit,
+      Some("Workbench && !Input && !CommandTerminal"),
+    ),
     TOGGLE_COMMAND_PANEL_SHORTCUTS[0].binding(ToggleCommandPanel),
     TOGGLE_TERMINAL_SHORTCUTS[0].binding(ToggleTerminal),
   ]

@@ -60,6 +60,8 @@ impl SurfaceGenerationState {
 
 /// Molecular scene backed by one parsed structure and a selectable representation.
 pub(crate) struct StructureMoleculeScene {
+  selected: Arc<chitin_bio::structure::selection::AtomSelection>,
+  hidden: Arc<chitin_bio::structure::selection::AtomSelection>,
   /// Renderer-neutral structure data shared by split-panel clones.
   scene: Arc<StructureScene>,
   /// GPU resources created lazily after a surface device is available.
@@ -76,6 +78,8 @@ impl StructureMoleculeScene {
   /// Creates a lazy molecular scene with the selected representation layers.
   pub(crate) fn new(scene: Arc<StructureScene>, representation: RepresentationLayers) -> Self {
     Self {
+      selected: Arc::default(),
+      hidden: Arc::default(),
       scene,
       renderer: None,
       surface: None,
@@ -86,6 +90,83 @@ impl StructureMoleculeScene {
 }
 
 impl WgpuPanelScene for StructureMoleculeScene {
+  fn set_hidden(&mut self, atoms: Arc<chitin_bio::structure::selection::AtomSelection>) -> bool {
+    if self.hidden == atoms {
+      return false;
+    }
+    self.hidden = atoms;
+    if let Some(renderer) = &mut self.renderer {
+      renderer.set_hidden(Arc::clone(&self.hidden));
+    }
+    true
+  }
+  fn box_selection_task(
+    &self,
+    min: [f32; 2],
+    max: [f32; 2],
+    camera: &chitin_molecule_renderer::ViewerCamera,
+  ) -> Option<super::viewport::BoxSelectionTask> {
+    let renderer = self.renderer.as_ref()?;
+    let query = renderer.box_selection_query(camera.view_matrix(), camera.projection_matrix(renderer.aspect()));
+    Some(Box::new(move || query.select(min, max, Default::default())))
+  }
+  fn set_selection(&mut self, atoms: Arc<chitin_bio::structure::selection::AtomSelection>) -> bool {
+    if self.selected == atoms {
+      return false;
+    }
+    self.selected = atoms;
+    if let Some(renderer) = &mut self.renderer {
+      renderer.set_selection(&self.scene, Arc::clone(&self.selected));
+    }
+    true
+  }
+
+  fn pick(
+    &self,
+    ndc: [f32; 2],
+    camera: &chitin_molecule_renderer::ViewerCamera,
+  ) -> chitin_molecule_renderer::picking::MolecularPick {
+    self
+      .renderer
+      .as_ref()
+      .map_or(chitin_molecule_renderer::picking::MolecularPick::Miss, |renderer| {
+        renderer.pick(
+          &self.scene,
+          ndc,
+          camera.view_matrix(),
+          camera.projection_matrix(renderer.aspect()),
+        )
+      })
+  }
+
+  fn residue_atoms(
+    &self,
+    residue: chitin_bio::structure::ResidueId,
+  ) -> chitin_bio::structure::selection::AtomSelection {
+    self
+      .scene
+      .selection
+      .residue_atoms(&self.scene, residue)
+      .difference(&self.hidden)
+      .copied()
+      .collect()
+  }
+  fn select_in_rect(
+    &self,
+    min: [f32; 2],
+    max: [f32; 2],
+    camera: &chitin_molecule_renderer::ViewerCamera,
+  ) -> chitin_bio::structure::selection::AtomSelection {
+    self.renderer.as_ref().map_or_else(Default::default, |renderer| {
+      renderer.select_in_rect(
+        &self.scene,
+        min,
+        max,
+        camera.view_matrix(),
+        camera.projection_matrix(renderer.aspect()),
+      )
+    })
+  }
   /// Renders one fitted molecular frame into the GPUI-owned surface.
   fn render_frame(&mut self, frame: WgpuPanelFrame<'_>) -> wgpu::SubmissionIndex {
     let renderer = self.renderer.get_or_insert_with(|| {
@@ -103,6 +184,9 @@ impl WgpuPanelScene for StructureMoleculeScene {
         &BallAndStickStyle::default(),
       )
     });
+    renderer.set_selection(&self.scene, Arc::clone(&self.selected));
+    renderer.set_hidden(Arc::clone(&self.hidden));
+    renderer.set_selection_scale(frame.scale_factor);
     renderer.resize_if_needed(frame.size);
     renderer.set_debug_mode(self.debug_mode);
     renderer.render(
@@ -210,6 +294,30 @@ pub(crate) fn build_structure_view_from_scene(
     },
   );
 
+  let selection_panel = panel.clone();
+  let visibility_panel = panel.clone();
+  let input_panel = panel.clone();
+  let view = view
+    .with_selection(
+      Arc::clone(&scene),
+      move |atoms, cx| {
+        selection_panel.update(cx, |panel, cx| {
+          if panel.set_selection(atoms) {
+            cx.notify();
+          }
+        });
+      },
+      move |handler, cx| {
+        input_panel.update(cx, |panel, _| panel.bind_selection_input(handler));
+      },
+    )
+    .with_visibility(move |atoms, cx| {
+      visibility_panel.update(cx, |panel, cx| {
+        if panel.set_hidden(atoms) {
+          cx.notify();
+        }
+      });
+    });
   let backend_scene = Arc::clone(&scene);
   let backend_toasts = toast_viewport;
   let backend_state = generation_state;

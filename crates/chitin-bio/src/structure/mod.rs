@@ -12,6 +12,7 @@ mod model;
 mod pdb;
 pub(crate) mod projection;
 mod scene;
+pub mod selection;
 
 pub use error::{Diagnostic, DiagnosticSeverity, MmcifParseError, PdbParseError, StructureParseResult};
 pub use mmcif::MmcifParser;

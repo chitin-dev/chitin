@@ -4,11 +4,13 @@ use std::{
   fmt,
   path::{Path, PathBuf},
   rc::Rc,
+  sync::Arc,
 };
 
 use crate::workbench::documents::layout::{
   PanelId, PanelLeaf, PanelSplitAxis, PanelSplitPlacement, PanelTab, PanelTabId, PanelTree,
 };
+use chitin_bio::structure::{StructureScene, selection::AtomSelection};
 use chitin_bio::surface::MolecularSurfaceBackend;
 use chitin_molecule_renderer::RepresentationLayers;
 use gpui::{AnyView, App, Window};
@@ -18,14 +20,53 @@ type RepresentationLayersChangeHandler = dyn Fn(RepresentationLayers, &mut App);
 /// Callback that rebuilds a molecular surface with a newly selected algorithm.
 type SurfaceBackendChangeHandler = dyn Fn(MolecularSurfaceBackend, &mut App);
 
+pub(crate) type SelectionInputHandler = Rc<dyn Fn(chitin_command::SelectionCommand, &mut App)>;
+type SelectionInputBinder = dyn Fn(SelectionInputHandler, &mut App);
+type SelectionChangeHandler = dyn Fn(Arc<AtomSelection>, &mut App);
+
 /// Result produced when a WGPU document factory creates a fresh view.
 pub struct WgpuDocumentView {
+  selection: Option<WgpuSelectionControl>,
   /// Type-erased GPUI view rendered inside the panel body.
   view: AnyView,
   /// Optional molecule-specific representation controller.
   representation_layers: Option<WgpuRepresentationLayersControl>,
   /// Optional molecule-specific surface backend controller.
   surface_backend: Option<WgpuSurfaceBackendControl>,
+}
+
+/// Scientific selection state and its renderer callback, scoped to one view.
+#[derive(Clone)]
+pub(crate) struct WgpuSelectionControl {
+  pub(crate) scene: Arc<StructureScene>,
+  pub(crate) atoms: Arc<AtomSelection>,
+  pub(crate) hidden: Arc<AtomSelection>,
+  on_visibility_change: Option<Rc<SelectionChangeHandler>>,
+  on_change: Rc<SelectionChangeHandler>,
+  pub(crate) bind_input: Rc<SelectionInputBinder>,
+}
+impl fmt::Debug for WgpuSelectionControl {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("WgpuSelectionControl")
+      .field("atoms", &self.atoms)
+      .field("hidden", &self.hidden)
+      .finish_non_exhaustive()
+  }
+}
+impl PartialEq for WgpuSelectionControl {
+  fn eq(&self, other: &Self) -> bool {
+    Arc::ptr_eq(&self.scene, &other.scene)
+      && self.atoms == other.atoms
+      && self.hidden == other.hidden
+      && Rc::ptr_eq(&self.on_change, &other.on_change)
+  }
+}
+impl Eq for WgpuSelectionControl {}
+
+impl WgpuSelectionControl {
+  pub(crate) fn supports_visibility(&self) -> bool {
+    self.on_visibility_change.is_some()
+  }
 }
 
 /// Mutable representation-layer state and its view update callback.
@@ -81,6 +122,7 @@ pub(crate) enum DocumentPanelContent {
   /// Experimental WGPU viewport hosted as a document-area panel.
   #[allow(dead_code)]
   WgpuInteractive {
+    selection: Option<Box<WgpuSelectionControl>>,
     /// Filesystem path represented by this structure viewport, when available.
     path: Option<PathBuf>,
     /// Display title shown in the document tab strip.
@@ -137,6 +179,7 @@ impl WgpuDocumentView {
   /// Creates a WGPU document view without molecule-specific controls.
   pub fn new(view: impl Into<AnyView>) -> Self {
     Self {
+      selection: None,
       view: view.into(),
       representation_layers: None,
       surface_backend: None,
@@ -150,6 +193,7 @@ impl WgpuDocumentView {
     on_change: impl Fn(RepresentationLayers, &mut App) + 'static,
   ) -> Self {
     Self {
+      selection: None,
       view: view.into(),
       representation_layers: Some(WgpuRepresentationLayersControl {
         representation,
@@ -157,6 +201,32 @@ impl WgpuDocumentView {
       }),
       surface_backend: None,
     }
+  }
+
+  /// Adds independent scientific selection and routes viewport requests through the host.
+  pub fn with_selection(
+    mut self,
+    scene: Arc<StructureScene>,
+    on_change: impl Fn(Arc<AtomSelection>, &mut App) + 'static,
+    bind_input: impl Fn(SelectionInputHandler, &mut App) + 'static,
+  ) -> Self {
+    self.selection = Some(WgpuSelectionControl {
+      scene,
+      atoms: Arc::new(AtomSelection::new()),
+      hidden: Arc::default(),
+      on_visibility_change: None,
+      on_change: Rc::new(on_change),
+      bind_input: Rc::new(bind_input),
+    });
+    self
+  }
+
+  /// Adds object visibility updates after `with_selection` installs scientific state.
+  pub fn with_visibility(mut self, on_change: impl Fn(Arc<AtomSelection>, &mut App) + 'static) -> Self {
+    if let Some(control) = &mut self.selection {
+      control.on_visibility_change = Some(Rc::new(on_change));
+    }
+    self
   }
 
   /// Adds independently mutable molecular-surface backend selection.
@@ -362,6 +432,7 @@ impl DocumentPanelContent {
     clone_view: WgpuDocumentViewFactory,
   ) -> Self {
     Self::WgpuInteractive {
+      selection: document_view.selection.map(Box::new),
       path,
       title: title.into(),
       view: document_view.view,
@@ -473,6 +544,7 @@ impl DocumentPanelContent {
       Self::WgpuInteractive {
         path,
         title,
+        selection,
         representation_layers,
         surface_backend,
         clone_view,
@@ -488,7 +560,16 @@ impl DocumentPanelContent {
         if let Some(control) = representation_layers {
           document_view.select_representation_layers(control.representation, cx);
         }
+        if let (Some(source), Some(destination)) = (selection, document_view.selection.as_mut()) {
+          destination.atoms = source.atoms.clone();
+          (destination.on_change)(destination.atoms.clone(), cx);
+          destination.hidden = source.hidden.clone();
+          if let Some(callback) = &destination.on_visibility_change {
+            callback(destination.hidden.clone(), cx);
+          }
+        }
         Self::WgpuInteractive {
+          selection: document_view.selection.map(Box::new),
           path: path.clone(),
           title: title.clone(),
           view: document_view.view,
@@ -502,6 +583,34 @@ impl DocumentPanelContent {
 }
 
 impl DocumentPanelState {
+  /// Lists molecular tabs, including inactive tabs, in workbench order.
+  pub(crate) fn rendering_panels(&self) -> Vec<chitin_builtin_shell::RenderingPanel> {
+    self
+      .tree
+      .tabs_in_order()
+      .into_iter()
+      .filter_map(|(panel, tab)| {
+        let tab = self.tree.find_tab(panel, tab)?;
+        tab.payload.representation_layers()?;
+        Some(chitin_builtin_shell::RenderingPanel::new(
+          tab.id.value(),
+          tab.title.to_string(),
+        ))
+      })
+      .collect()
+  }
+
+  /// Finds the current dock leaf for a stable molecular tab identifier.
+  pub(crate) fn rendering_panel_location(&self, id: u64) -> Option<(PanelId, PanelTabId)> {
+    self.tree.tabs_in_order().into_iter().find(|&(panel, tab)| {
+      tab.value() == id
+        && self
+          .tree
+          .find_tab(panel, tab)
+          .is_some_and(|tab| tab.payload.representation_layers().is_some())
+    })
+  }
+
   /// Creates empty document panel state with one root panel.
   pub(crate) fn empty() -> Self {
     Self {
@@ -731,14 +840,105 @@ impl DocumentPanelState {
     self.active_tab_payload(panel_id)?.representation_layers()
   }
 
-  /// Changes the active molecular representation layers and returns its view callback.
+  /// Reads presentation state from a stable rendering tab, including inactive tabs.
+  pub(crate) fn rendering_settings(
+    &self,
+    id: u64,
+  ) -> Option<(String, RepresentationLayers, Option<MolecularSurfaceBackend>)> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    let tab = self.tree.leaf(panel)?.tabs.iter().find(|entry| entry.id == tab)?;
+    Some((
+      tab.title.to_string(),
+      tab.payload.representation_layers()?,
+      tab.payload.surface_backend(),
+    ))
+  }
+
+  /// Returns the entity identity that scopes edits to one live view revision.
+  pub(crate) fn rendering_view_id(&self, id: u64) -> Option<gpui::EntityId> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    let entry = self.tree.leaf(panel)?.tabs.iter().find(|entry| entry.id == tab)?;
+    match &entry.payload {
+      DocumentPanelContent::WgpuInteractive { view, .. } => Some(view.entity_id()),
+      _ => None,
+    }
+  }
+
+  /// Reads the selected atoms and source metadata of a stable rendering tab.
+  pub(crate) fn selection_control(&self, id: u64) -> Option<&WgpuSelectionControl> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    let entry = self.tree.leaf(panel)?.tabs.iter().find(|entry| entry.id == tab)?;
+    match &entry.payload {
+      DocumentPanelContent::WgpuInteractive { selection, .. } => selection.as_deref(),
+      _ => None,
+    }
+  }
+
+  /// Applies selection through the same renderer callback for shell and mouse commands.
+  pub(crate) fn select_atoms(&mut self, id: u64, atoms: Arc<AtomSelection>, cx: &mut App) -> bool {
+    let Some((panel, tab)) = self.rendering_panel_location(id) else {
+      return false;
+    };
+    let Some(entry) = self
+      .tree
+      .leaf_mut(panel)
+      .and_then(|leaf| leaf.tabs.iter_mut().find(|entry| entry.id == tab))
+    else {
+      return false;
+    };
+    let DocumentPanelContent::WgpuInteractive {
+      selection: Some(control),
+      ..
+    } = &mut entry.payload
+    else {
+      return false;
+    };
+    if control.atoms == atoms {
+      return false;
+    }
+    control.atoms = atoms.clone();
+    (control.on_change)(atoms, cx);
+    true
+  }
+
+  /// Updates hidden atom identities independently of scientific selection.
+  pub(crate) fn hide_atoms(&mut self, id: u64, atoms: Arc<AtomSelection>, cx: &mut App) -> bool {
+    let Some((panel, tab)) = self.rendering_panel_location(id) else {
+      return false;
+    };
+    let Some(entry) = self
+      .tree
+      .leaf_mut(panel)
+      .and_then(|leaf| leaf.tabs.iter_mut().find(|entry| entry.id == tab))
+    else {
+      return false;
+    };
+    let DocumentPanelContent::WgpuInteractive {
+      selection: Some(control),
+      ..
+    } = &mut entry.payload
+    else {
+      return false;
+    };
+    if control.hidden == atoms {
+      return false;
+    }
+    let Some(callback) = &control.on_visibility_change else {
+      return false;
+    };
+    control.hidden = atoms.clone();
+    callback(atoms, cx);
+    true
+  }
+
+  /// Changes a stable molecular tab's layers and returns its view callback.
   pub(crate) fn select_representation_layers(
     &mut self,
-    panel_id: PanelId,
+    id: u64,
     representation: RepresentationLayers,
   ) -> Option<Rc<RepresentationLayersChangeHandler>> {
+    let (panel_id, active_tab_id) = self.rendering_panel_location(id)?;
     let leaf = self.tree.leaf_mut(panel_id)?;
-    let active_tab_id = leaf.active_tab?;
     let content = leaf
       .tabs
       .iter_mut()
@@ -747,14 +947,14 @@ impl DocumentPanelState {
     content.select_representation_layers(representation)
   }
 
-  /// Changes the active molecular-surface backend and returns its view callback.
+  /// Changes a stable molecular tab's backend and returns its view callback.
   pub(crate) fn select_surface_backend(
     &mut self,
-    panel_id: PanelId,
+    id: u64,
     backend: MolecularSurfaceBackend,
   ) -> Option<Rc<SurfaceBackendChangeHandler>> {
+    let (panel_id, active_tab_id) = self.rendering_panel_location(id)?;
     let leaf = self.tree.leaf_mut(panel_id)?;
-    let active_tab_id = leaf.active_tab?;
     let content = leaf
       .tabs
       .iter_mut()

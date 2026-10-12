@@ -164,6 +164,8 @@ pub enum SurfaceGeometrySource {
   ImplicitGrid(MolecularSurfaceRequest),
   /// Analytical MSMS patches tessellated at the given vertex density.
   Msms {
+    /// Atom-selection provenance used for ownership-based display coloring.
+    atom_scope: SurfaceAtomScope,
     /// Rolling solvent-probe radius in ångströms.
     probe_radius: f64,
     /// Requested upper bound for display-mesh edge lengths in ångströms.

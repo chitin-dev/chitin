@@ -135,6 +135,102 @@ macro_rules! define_commands {
 }
 
 define_commands! {
+  Visibility {
+    name: "visibility", title: "Change Molecular Object Visibility",
+    category: CommandCategory::Structure, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true, keywords: &["hide", "show", "visibility"], shortcut: None,
+    command_panel: false, frontend: []
+  },
+  Selection {
+    name: "selection", title: "Select Molecular Objects",
+    category: CommandCategory::Structure, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true, keywords: &["select", "residue", "atom"], shortcut: None,
+    command_panel: false, frontend: []
+  },
+  ApplicationUndo {
+    name: "application.undo", title: "Undo Workbench Edit",
+    category: CommandCategory::Application, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: false, keywords: &["undo", "history"], shortcut: Some("Ctrl+Z"),
+    command_panel: true, frontend: [ApplicationCommand::Undo]
+  },
+  ApplicationRedo {
+    name: "application.redo", title: "Redo Workbench Edit",
+    category: CommandCategory::Application, domain: CommandExecutionDomain::Frontend,
+    requires_arguments: false, keywords: &["redo", "history"], shortcut: Some("Ctrl+Shift+Z"),
+    command_panel: true, frontend: [ApplicationCommand::Redo]
+  },
+  /// Change Layer Coloring.
+  RenderColor {
+    name: "render.color", title: "Change Layer Coloring", category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend, requires_arguments: true,
+    keywords: &["render", "color"], shortcut: None, command_panel: false, frontend: []
+  },
+  /// Change Layer Opacity.
+  RenderOpacity {
+    name: "render.opacity", title: "Change Layer Opacity", category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend, requires_arguments: true,
+    keywords: &["render", "opacity"], shortcut: None, command_panel: false, frontend: []
+  },
+  /// Inspect Rendering Settings.
+  RenderStatus {
+    name: "render.status",
+    title: "Inspect Rendering Settings",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: false,
+    keywords: &["render", "display", "molecule"],
+    shortcut: None,
+    command_panel: false,
+    frontend: [super::RenderCommand::Status]
+  },
+  /// Set Atom Display Style.
+  RenderAtomStyle {
+    name: "render.atom_style",
+    title: "Set Atom Display Style",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true,
+    keywords: &["render", "display", "molecule"],
+    shortcut: None,
+    command_panel: false,
+    frontend: []
+  },
+  /// Set Polymer Display Style.
+  RenderPolymerStyle {
+    name: "render.polymer_style",
+    title: "Set Polymer Display Style",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true,
+    keywords: &["render", "display", "molecule"],
+    shortcut: None,
+    command_panel: false,
+    frontend: []
+  },
+  /// Set Surface Display Style.
+  RenderSurfaceStyle {
+    name: "render.surface_style",
+    title: "Set Surface Display Style",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true,
+    keywords: &["render", "display", "molecule"],
+    shortcut: None,
+    command_panel: false,
+    frontend: []
+  },
+  /// Set Surface Backend.
+  RenderSurfaceBackend {
+    name: "render.surface_backend",
+    title: "Set Surface Backend",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true,
+    keywords: &["render", "display", "molecule"],
+    shortcut: None,
+    command_panel: false,
+    frontend: []
+  },
   /// Focus the previous project entry.
   WorkspaceFocusPrevious {
     name: "workspace.focus_previous_entry",
@@ -446,7 +542,9 @@ mod tests {
 
   #[test]
   fn frontend_specs_should_construct_commands_in_the_frontend_domain() {
-    for spec in command_specs().filter(|spec| spec.execution_domain == CommandExecutionDomain::Frontend) {
+    for spec in command_specs()
+      .filter(|spec| spec.execution_domain == CommandExecutionDomain::Frontend && !spec.requires_arguments)
+    {
       let command = spec.id.frontend_command_without_arguments();
       assert_eq!(command.as_ref().map(FrontendCommand::id), Some(spec.id));
     }
