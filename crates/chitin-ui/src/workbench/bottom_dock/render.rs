@@ -98,8 +98,8 @@ impl BottomDock {
 impl RenderOnce for BottomDock {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let theme = self.theme;
-    let dock = panel_surface(WorkbenchStyle::new(theme))
-      .bg(theme.background)
+    let style = WorkbenchStyle::new(theme);
+    let dock = panel_surface(style)
       .occlude()
       .on_scroll_wheel(|_, _, cx| {
         cx.stop_propagation();
@@ -109,8 +109,8 @@ impl RenderOnce for BottomDock {
           .flex()
           .items_center()
           .justify_between()
-          .h(px(34.0))
-          .min_h(px(34.0))
+          .h(style.header_height)
+          .min_h(style.header_height)
           .px_3()
           .child(
             div()

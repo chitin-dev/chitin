@@ -92,7 +92,12 @@ impl TabGroupRenderer for WorkbenchTabGroup {
   }
 
   fn render_tab_bar(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> AnyElement {
-    self.inner.render_tab_bar(group, window, cx)
+    div()
+      .flex_none()
+      .border_b_1()
+      .border_color(WorkbenchStyle::global(cx).separator)
+      .child(self.inner.render_tab_bar(group, window, cx))
+      .into_any_element()
   }
 
   fn render_active_panel(

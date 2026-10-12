@@ -15,9 +15,10 @@ use gpui_kit::component::{Theme, ThemeMode};
 pub fn init(cx: &mut App) {
   gpui_kit::init(cx);
   Theme::change(ThemeMode::Dark, None, cx);
-  // Document chrome shares the inset workbench panels' gray surface, while
-  // the window title and outer workbench retain Kit's background color.
+  // Workbench chrome is a continuous gray surface around darker viewports.
   Theme::update(cx, |theme| {
+    theme.colors.title_bar = theme.colors.muted;
+    theme.colors.sidebar = theme.colors.muted;
     theme.colors.tab_bar = theme.colors.muted;
     theme.colors.tab_bar_segmented = theme.colors.muted;
     theme.colors.tab = theme.colors.muted;

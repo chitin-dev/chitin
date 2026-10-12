@@ -17,16 +17,22 @@ pub mod dock;
 #[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct WorkbenchStyle {
-  /// Background exposed between major surfaces.
+  /// Continuous background beneath workbench regions.
   pub background: Hsla,
   /// Gray surface behind panel chrome and content.
   pub panel_background: Hsla,
-  /// Outer panel corner radius.
+  /// Outer region radius; compact regions have square shared edges.
   pub panel_radius: Pixels,
   /// Total separation between neighboring panel surfaces.
   pub panel_gap: Pixels,
-  /// Padding protecting outer corners from rectangular child backgrounds.
+  /// Outer region padding, independent of the inner viewport inset.
   pub panel_inset: Pixels,
+  /// Subtle boundary between adjacent workbench regions.
+  pub separator: Hsla,
+  /// Compact height for window and tool headers.
+  pub header_height: Pixels,
+  /// Space between panel chrome and its inner viewport.
+  pub viewport_inset: Pixels,
   /// Background of a scientific viewport or terminal content.
   pub viewport_background: Hsla,
   /// Inner viewport corner radius.
@@ -52,11 +58,14 @@ impl WorkbenchStyle {
   /// Resolves workbench surfaces without changing Kit's global palette.
   pub fn new(theme: ThemeColor) -> Self {
     Self {
-      background: theme.background,
+      background: theme.muted,
       panel_background: theme.muted,
-      panel_radius: px(8.0),
-      panel_gap: px(8.0),
-      panel_inset: px(4.0),
+      panel_radius: px(0.0),
+      panel_gap: px(0.0),
+      panel_inset: px(0.0),
+      separator: theme.border,
+      header_height: px(32.0),
+      viewport_inset: px(8.0),
       viewport_background: theme.background,
       viewport_radius: px(6.0),
     }
@@ -70,26 +79,15 @@ impl WorkbenchStyle {
 
 /// Decorates one layout slot with a surface, without changing its outer bounds.
 ///
-/// Half the gap belongs to each slot. The workbench adds the other half at its
-/// outside edge. An inset background is painted before the slot's content;
-/// children stay inside its corner region because GPUI's overflow mask is
-/// rectangular. Kit retains ownership of the slot's focus and interactions.
+/// Adjacent slots meet directly; resize handles paint their shared boundary.
+/// Kit retains ownership of the slot's focus and interactions.
 pub fn surface_slot<T: Styled + ParentElement>(slot: T, style: WorkbenchStyle) -> T {
   let half_gap = style.panel_gap * 0.5;
   slot
     .relative()
-    .bg(gpui::transparent_black())
+    .bg(style.panel_background)
     .p(half_gap + style.panel_inset)
-    .child(
-      div()
-        .absolute()
-        .top(half_gap)
-        .bottom(half_gap)
-        .left(half_gap)
-        .right(half_gap)
-        .rounded(style.panel_radius)
-        .bg(style.panel_background),
-    )
+    .rounded(style.panel_radius)
 }
 
 /// Creates a content column occupying one major surface slot.
@@ -106,6 +104,7 @@ pub fn viewport_container(style: WorkbenchStyle) -> Div {
     .flex_1()
     .min_w_0()
     .min_h_0()
+    .m(style.viewport_inset)
     .rounded(style.viewport_radius)
     .bg(style.viewport_background)
     .overflow_hidden()
@@ -114,19 +113,15 @@ pub fn viewport_container(style: WorkbenchStyle) -> Div {
 /// Paints resize feedback without changing Kit's cursor, hit band, or drag state.
 pub fn resize_handle_appearance() -> ResizeHandleRenderer {
   Rc::new(|handle, _, cx| {
-    let (length, opacity) = match handle.state() {
-      ResizeHandleState::Idle => (px(0.0), 0.0),
-      ResizeHandleState::Hovered => (px(20.0), 0.25),
-      ResizeHandleState::Pressed | ResizeHandleState::Dragging => (px(32.0), 0.5),
+    let color = match handle.state() {
+      ResizeHandleState::Idle => WorkbenchStyle::global(cx).separator,
+      ResizeHandleState::Hovered => cx.theme().muted_foreground.opacity(0.4),
+      ResizeHandleState::Pressed | ResizeHandleState::Dragging => cx.theme().muted_foreground.opacity(0.65),
     };
-    let indicator = div()
-      .flex_none()
-      .rounded_full()
-      .bg(cx.theme().muted_foreground)
-      .opacity(opacity);
+    let indicator = div().flex_none().bg(color);
     Some(match handle.axis() {
-      Axis::Horizontal => indicator.w(px(1.0)).h(length).into_any_element(),
-      Axis::Vertical => indicator.h(px(1.0)).w(length).into_any_element(),
+      Axis::Horizontal => indicator.w(px(1.0)).h_full().into_any_element(),
+      Axis::Vertical => indicator.h(px(1.0)).w_full().into_any_element(),
     })
   })
 }
@@ -134,6 +129,17 @@ pub fn resize_handle_appearance() -> ResizeHandleRenderer {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn compact_workbench_should_have_no_outer_gaps_or_card_corners() {
+    let style = WorkbenchStyle::new(*ThemeColor::dark());
+    assert_eq!(
+      (style.panel_gap, style.panel_inset, style.panel_radius),
+      (px(0.0), px(0.0), px(0.0))
+    );
+    assert!(style.viewport_inset > px(0.0));
+    assert!(style.viewport_radius > px(0.0));
+  }
 
   #[test]
   fn viewport_coordinates_use_inner_origin_and_exclude_clipped_corners() {

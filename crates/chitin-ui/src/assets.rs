@@ -54,6 +54,7 @@ mod tests {
   #[test]
   fn asset_bundle_should_include_application_and_kit_icons() -> Result<()> {
     assert!(ChitinAssets.load("icons/terminal-builtin.svg")?.is_some());
+    assert!(ChitinAssets.load("icons/download.svg")?.is_some());
     assert!(ChitinAssets.load("icons/chevron-down.svg")?.is_some());
     Ok(())
   }
@@ -62,6 +63,7 @@ mod tests {
   fn asset_listing_should_merge_icons_without_duplicates_or_directory_prefixes() -> Result<()> {
     let names = ChitinAssets.list("icons")?;
     assert!(names.iter().any(|name| name == "terminal-builtin.svg"));
+    assert!(names.iter().any(|name| name == "download.svg"));
     assert!(names.iter().any(|name| name == "chevron-down.svg"));
     assert!(names.iter().all(|name| !name.contains('/')));
     assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
