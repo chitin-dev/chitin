@@ -19,6 +19,10 @@ use super::model::{
 /// models, and validates the final [`super::Structure`].
 #[derive(Debug, Default)]
 pub(crate) struct StructureInput {
+  /// Source-declared experimental methods before format-neutral construction.
+  pub(crate) experimental_methods: Vec<String>,
+  /// Optional reported diffraction or reconstruction resolution in ångströms.
+  pub(crate) resolution: Option<f32>,
   /// Optional source classification or descriptive header.
   pub(crate) classification: Option<String>,
   /// Optional source structure identifier.

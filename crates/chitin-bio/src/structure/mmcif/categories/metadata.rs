@@ -1,4 +1,4 @@
-//! Crystallographic unit-cell and space-group metadata projection.
+//! Experimental, resolution, and crystallographic metadata projection.
 
 use crate::structure::mmcif::cif::CifDocument;
 use crate::structure::mmcif::schema::{Cell, Symmetry as SymmetryCategory};
@@ -7,19 +7,21 @@ use crate::structure::{MmcifParseError, Symmetry, UnitCell};
 
 use super::required;
 
-/// Projects crystallographic metadata from the generic CIF document into the
-/// format-neutral structure input.
+/// Projects experimental and crystallographic metadata from the CIF document
+/// into the format-neutral structure input.
 ///
-/// The two categories are optional in an mmCIF structure. When present,
-/// `_cell` is validated as a complete six-parameter unit cell before it is
-/// stored, while `_symmetry` preserves whichever space-group identifiers are
+/// All categories are optional. Experimental methods are deduplicated, and the
+/// smallest positive reported refinement or reconstruction resolution is kept.
+/// When present, `_cell` is validated as a complete six-parameter unit cell
+/// before it is stored, while `_symmetry` preserves whichever identifiers are
 /// available. This projection intentionally records metadata only; it does
 /// not expand symmetry mates or transform fractional coordinates.
 ///
 /// # Parameters
 ///
 /// * `document` contains the syntax-level data blocks and category values.
-/// * `input` receives validated unit-cell and space-group metadata.
+/// * `input` receives source identity, experimental methods, resolution,
+///   validated unit-cell parameters, and space-group metadata.
 ///
 /// # Returns
 ///
@@ -27,6 +29,37 @@ use super::required;
 /// Returns [`MmcifParseError::InvalidField`] for malformed numeric values or
 /// geometrically invalid unit-cell parameters.
 pub(crate) fn parse(document: &CifDocument, input: &mut StructureInput) -> Result<(), MmcifParseError> {
+  use crate::structure::mmcif::category::CategoryView;
+  if let Some(category) = CategoryView::from_document(document, "entry") {
+    input.identifier = category
+      .rows()
+      .find_map(|row| row.optional_text(&["_entry.id"]).map(str::to_owned));
+  }
+  if let Some(category) = CategoryView::from_document(document, "exptl") {
+    for row in category.rows() {
+      if let Some(method) = row.optional_text(&["_exptl.method"])
+        && !input.experimental_methods.iter().any(|s| s == method)
+      {
+        input.experimental_methods.push(method.to_owned());
+      }
+    }
+  }
+  // Structures may contain several refinement/reconstruction rows; retain the
+  // highest reported resolving power (smallest positive value in ångströms).
+  for (category, field) in [
+    ("refine", "_refine.ls_d_res_high"),
+    ("em_3d_reconstruction", "_em_3d_reconstruction.resolution"),
+  ] {
+    if let Some(category) = CategoryView::from_document(document, category) {
+      for row in category.rows() {
+        if let Some(value) = row.optional_f32(&[field], field)?
+          && value > 0.
+        {
+          input.resolution = Some(input.resolution.map_or(value, |current| current.min(value)));
+        }
+      }
+    }
+  }
   parse_unit_cell(document, input)?;
   parse_symmetry(document, input)
 }
@@ -153,6 +186,31 @@ fn parse_symmetry(document: &CifDocument, input: &mut StructureInput) -> Result<
 mod tests {
   use super::validate_cell_parameters;
   use crate::structure::MmcifParseError;
+
+  #[test]
+  fn experimental_metadata_should_support_diffraction_and_reconstruction() -> Result<(), Box<dyn std::error::Error>> {
+    for (text, expected) in [
+      (
+        "data_test\n_entry.id 4HHB\n_exptl.method 'X-RAY DIFFRACTION'\n_refine.ls_d_res_high 1.8\n",
+        Some(1.8),
+      ),
+      (
+        "data_test\n_exptl.method 'ELECTRON MICROSCOPY'\n_em_3d_reconstruction.resolution 2.6\n",
+        Some(2.6),
+      ),
+      (
+        "data_test\n_exptl.method 'SOLUTION NMR'\n_refine.ls_d_res_high ?\n",
+        None,
+      ),
+    ] {
+      let document = crate::structure::mmcif::cif::CifParser::parse(text)?;
+      let mut input = crate::structure::projection::StructureInput::default();
+      super::parse(&document, &mut input)?;
+      assert_eq!(input.resolution, expected);
+      assert_eq!(input.experimental_methods.len(), 1);
+    }
+    Ok(())
+  }
 
   #[test]
   fn zero_cell_angle_should_be_rejected() {

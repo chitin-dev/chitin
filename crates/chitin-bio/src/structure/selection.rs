@@ -9,6 +9,7 @@ pub type AtomSelection = BTreeSet<AtomId>;
 /// Compact source metadata retained for scientific selection, not rendering.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SelectionIndex {
+  metadata: super::StructureMetadata,
   chains: Vec<Chain>,
   residues: Vec<Residue>,
   atoms: Vec<(String, ResidueId)>,
@@ -17,6 +18,7 @@ pub struct SelectionIndex {
 impl SelectionIndex {
   pub(super) fn from_structure(structure: &Structure) -> Self {
     Self {
+      metadata: structure.metadata.clone(),
       chains: structure.chains.clone(),
       residues: structure.residues.clone(),
       atoms: structure
@@ -25,6 +27,18 @@ impl SelectionIndex {
         .map(|atom| (atom.name.clone(), atom.residue_id))
         .collect(),
     }
+  }
+  /// Returns source metadata preserved alongside the model's selection index.
+  pub fn metadata(&self) -> &super::StructureMetadata {
+    &self.metadata
+  }
+  /// Looks up chain metadata by its stable topology identity.
+  pub fn chain(&self, id: super::ChainId) -> Option<&Chain> {
+    self.chains.get(id.index())
+  }
+  /// Looks up residue metadata by its stable topology identity.
+  pub fn residue(&self, id: ResidueId) -> Option<&Residue> {
+    self.residues.get(id.index())
   }
   /// Returns all coordinate-bearing atoms of one residue in this scene.
   pub fn residue_atoms(&self, scene: &StructureScene, residue: ResidueId) -> AtomSelection {
@@ -81,7 +95,7 @@ impl SelectionIndex {
   }
 }
 
-/// Validated ChimeraX-style hierarchical subset: `/chain:residue@atom`.
+/// Validated ChimeraX-style hierarchy `/chain:residue@atom`.
 /// Residue terms accept numbers, numeric ranges, and ASCII alphanumeric names.
 /// A number followed by one letter is an insertion-coded number (`42A`),
 /// while other names containing letters (`A2G`, `1PE`, `0G6`) select by name.
@@ -174,6 +188,22 @@ fn parse_residue(value: &str) -> Result<ResidueTerm, String> {
 mod tests {
   use super::super::PdbParser;
   use super::*;
+
+  #[test]
+  fn selection_should_only_accept_hierarchical_shorthand() -> Result<(), String> {
+    for query in ["/A:10-50", "/A:42A", ":1PE", "/A@CA"] {
+      query.parse::<AtomSpec>()?;
+    }
+    for query in [
+      "chain A and resi 10-50",
+      "resn 1PE",
+      "name CA and chain A",
+      "resi 50-10",
+    ] {
+      assert!(query.parse::<AtomSpec>().is_err(), "{query}");
+    }
+    Ok(())
+  }
 
   #[test]
   fn residue_names_should_accept_digits_and_normalize_case() -> Result<(), String> {
