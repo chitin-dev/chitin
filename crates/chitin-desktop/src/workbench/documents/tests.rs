@@ -58,7 +58,6 @@ fn two_tab_document_panel_state() -> DocumentPanelState {
     focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
     next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
     next_tab_id: PanelTabId::new(3),
-    options_menu_panel_id: None,
   }
 }
 
@@ -299,7 +298,6 @@ fn split_panel_should_create_empty_leaf_when_source_has_no_active_tab() {
     focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
     next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
     next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
-    options_menu_panel_id: None,
   };
 
   let Some(new_panel_id) = state.split_panel(DEFAULT_DOCUMENT_PANEL_ID, PanelSplitAxis::Horizontal) else {

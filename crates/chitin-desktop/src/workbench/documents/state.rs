@@ -149,8 +149,6 @@ pub(crate) struct DocumentPanelState {
   pub(super) next_panel_id: PanelId,
   /// Next tab identifier to allocate for newly opened document tabs.
   pub(super) next_tab_id: PanelTabId,
-  /// Panel whose document options popover is currently visible.
-  pub(crate) options_menu_panel_id: Option<PanelId>,
 }
 
 impl OpenedProjectDocument {
@@ -618,7 +616,6 @@ impl DocumentPanelState {
       focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
-      options_menu_panel_id: None,
     }
   }
 
@@ -655,7 +652,6 @@ impl DocumentPanelState {
       focused_panel_id: DEFAULT_DOCUMENT_PANEL_ID,
       next_panel_id: FIRST_DYNAMIC_DOCUMENT_PANEL_ID,
       next_tab_id: FIRST_DYNAMIC_DOCUMENT_TAB_ID,
-      options_menu_panel_id: None,
     }
   }
 
@@ -742,7 +738,6 @@ impl DocumentPanelState {
   pub(crate) fn activate_tab(&mut self, panel_id: PanelId, tab_id: PanelTabId) -> bool {
     if self.tree.activate_tab(panel_id, tab_id) {
       self.focused_panel_id = panel_id;
-      self.options_menu_panel_id = None;
       return true;
     }
     false
@@ -767,7 +762,6 @@ impl DocumentPanelState {
     if !self.tree.close_tab(panel_id, tab_id) {
       return false;
     }
-    self.options_menu_panel_id = None;
 
     let panel_is_empty = self
       .tree
@@ -833,11 +827,6 @@ impl DocumentPanelState {
   /// `Some(&DocumentPanelContent)` when the panel has an active tab.
   pub(crate) fn active_tab_payload(&self, panel_id: PanelId) -> Option<&DocumentPanelContent> {
     self.tree.leaf(panel_id)?.active_tab().map(|tab| &tab.payload)
-  }
-
-  /// Returns the active molecular representation layers in one panel.
-  pub(crate) fn active_representation_layers(&self, panel_id: PanelId) -> Option<RepresentationLayers> {
-    self.active_tab_payload(panel_id)?.representation_layers()
   }
 
   /// Reads presentation state from a stable rendering tab, including inactive tabs.
@@ -961,21 +950,6 @@ impl DocumentPanelState {
       .find(|tab| tab.id == active_tab_id)
       .map(|tab| &mut tab.payload)?;
     content.select_surface_backend(backend)
-  }
-
-  /// Toggles the options menu for a molecular document panel.
-  pub(crate) fn toggle_options_menu(&mut self, panel_id: PanelId) -> bool {
-    if self.active_representation_layers(panel_id).is_none() {
-      return false;
-    }
-    let opening = self.options_menu_panel_id != Some(panel_id);
-    self.options_menu_panel_id = opening.then_some(panel_id);
-    true
-  }
-
-  /// Dismisses the currently visible document options menu.
-  pub(crate) fn dismiss_options_menu(&mut self) -> bool {
-    self.options_menu_panel_id.take().is_some()
   }
 
   /// Splits one document panel and copies its active tab to the new panel.

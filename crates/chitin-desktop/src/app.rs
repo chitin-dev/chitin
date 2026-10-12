@@ -22,7 +22,6 @@ use crate::{
   },
   features::{
     command_palette::{CommandPanelController, render_command_panel},
-    molecule::options::DocumentOptionsControls,
     terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_bottom_dock},
   },
   keybindings::{
@@ -81,8 +80,6 @@ pub struct ChitinApp {
   pub(crate) terminal_panel_controls: Option<TerminalPanelControls>,
   /// Structure paths currently being read and parsed off the UI thread.
   pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
-  /// Persistent semantic controls for molecular document options.
-  pub(crate) document_options_controls: Option<DocumentOptionsControls>,
   /// Window-level transient notification queue.
   pub(crate) toast_viewport: Option<Entity<ToastViewport>>,
 }
@@ -167,7 +164,6 @@ impl ChitinApp {
       terminal_panel: TerminalPanelState::new(),
       terminal_panel_controls: None,
       pending_structure_loads: BTreeSet::new(),
-      document_options_controls: None,
       toast_viewport: None,
     }
   }
@@ -373,18 +369,6 @@ impl ChitinApp {
     }
   }
 
-  /// Returns persistent semantic controls for molecular document options.
-  fn document_options_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> DocumentOptionsControls {
-    if let Some(controls) = self.document_options_controls.as_ref() {
-      return controls.clone();
-    }
-
-    let controls = DocumentOptionsControls::new(window, cx);
-    controls.subscribe(window, cx);
-    self.document_options_controls = Some(controls.clone());
-    controls
-  }
-
   /// Adds a transient notification to the global bottom-right viewport.
   pub fn show_toast(&mut self, toast: Toast, cx: &mut Context<Self>) -> ToastId {
     let viewport = self.toast_viewport(cx);
@@ -420,7 +404,6 @@ impl Render for ChitinApp {
     let theme = gpui_kit::component::Theme::global(cx).colors;
     let workbench_style = WorkbenchStyle::new(theme);
     self.sync_shell_rendering_panels();
-    let document_options_controls = self.document_options_controls(window, cx);
     let toast_viewport = self.toast_viewport(cx);
     let command_palette = self.command_panel.palette(window, cx);
     self.command_panel_rcsb_form(window, cx);
@@ -439,13 +422,17 @@ impl Render for ChitinApp {
       window.focus(&focus, cx);
     }
     let app = cx.weak_entity();
+    // Hidden inline editors must not retain a target for delayed UI events.
+    if self.sidebar_view != SidebarView::Entries || !self.project_sidebar_visible {
+      self.entries_sidebar.unbind_editors();
+    }
     let workbench_focus = self.workbench_focus(cx);
     let document_panel_focus = self.document_panel_focus(cx);
     let mut document_dock = self
       .document_dock
       .take()
       .unwrap_or_else(|| DocumentDock::new(window, cx));
-    document_dock.sync(&self.document_panels, document_options_controls, window, cx);
+    document_dock.sync(&self.document_panels, window, cx);
     self.edit_history.prune(&self.document_panels);
     self.entries_sidebar.prune(&self.document_panels);
     let document_area = document_dock.area.clone();

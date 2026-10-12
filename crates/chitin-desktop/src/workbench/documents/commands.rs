@@ -136,27 +136,6 @@ impl ChitinApp {
       .is_some()
   }
 
-  /// Toggles the active molecular document's options menu.
-  pub(crate) fn toggle_document_options_menu(&mut self, panel_id: PanelId) -> bool {
-    let changed = self.document_panels.toggle_options_menu(panel_id);
-    if self.document_panels.options_menu_panel_id == Some(panel_id)
-      && let Some(controls) = &self.document_options_controls
-      && let Some(tab) = self
-        .document_panels
-        .tree
-        .leaf(panel_id)
-        .and_then(|leaf| leaf.active_tab)
-    {
-      controls.bind_panel(tab.value());
-    }
-    changed
-  }
-
-  /// Dismisses the open molecular document options menu.
-  pub(crate) fn dismiss_document_options_menu(&mut self) -> bool {
-    self.document_panels.dismiss_options_menu()
-  }
-
   /// Focuses the previous tab in the focused document panel.
   pub(crate) fn focus_previous_document_panel_tab(&mut self) -> bool {
     self.document_panels.focus_previous_tab()

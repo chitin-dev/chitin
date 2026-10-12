@@ -28,10 +28,7 @@ use super::{
   render::{render_document_panel_content, render_panel_tab_strip_actions},
   state::{DEFAULT_DOCUMENT_PANEL_ID, DocumentPanelContent, DocumentPanelState},
 };
-use crate::{
-  app::ChitinApp,
-  features::molecule::options::{DocumentOptionsControls, MolecularDocumentOptions},
-};
+use crate::app::ChitinApp;
 
 /// Retained docking state; does not own a second drag or resize state machine.
 pub(crate) struct DocumentDock {
@@ -48,8 +45,6 @@ struct DocumentTab {
   panel_id: PanelId,
   focus: FocusHandle,
   app: WeakEntity<ChitinApp>,
-  controls: DocumentOptionsControls,
-  options_open: bool,
   /// Kit keeps its final dock panel; documents may still close to an empty center.
   last_document: bool,
 }
@@ -130,22 +125,10 @@ impl Panel for DocumentTab {
   }
 
   fn title_suffix(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-    let options = self
-      .tab
-      .payload
-      .representation_layers()
-      .zip(self.tab.payload.surface_backend())
-      .map(|(representation, surface_backend)| MolecularDocumentOptions {
-        representation,
-        surface_backend,
-      });
     Some(render_panel_tab_strip_actions(
       self.panel_id,
       cx.theme().colors,
       self.app.clone(),
-      options,
-      self.options_open,
-      self.controls.clone(),
     ))
   }
 }
@@ -222,20 +205,13 @@ impl DocumentDock {
   /// # Parameters
   ///
   /// * `state` supplies documents, selection, and requested splits.
-  /// * `controls` contains the molecular options controls, not docking state.
   /// * `window` and `cx` create or update persistent document entities.
   ///
   /// # Returns
   ///
   /// Nothing. A changed command layout is installed once; existing GPU views
   /// and Kit panels are reused by stable tab ID.
-  pub(crate) fn sync(
-    &mut self,
-    state: &DocumentPanelState,
-    controls: DocumentOptionsControls,
-    window: &mut Window,
-    cx: &mut Context<ChitinApp>,
-  ) {
+  pub(crate) fn sync(&mut self, state: &DocumentPanelState, window: &mut Window, cx: &mut Context<ChitinApp>) {
     let mut entries = Vec::new();
     collect_tabs(&state.tree.root, &mut entries);
     let retained: HashSet<_> = entries.iter().map(|(_, tab)| tab.id).collect();
@@ -282,21 +258,16 @@ impl DocumentDock {
       }
       if let Some(entity) = self.tabs.get(&tab.id) {
         entity.update(cx, |panel, cx| {
-          let changed = panel.tab != *tab
-            || panel.panel_id != panel_id
-            || panel.options_open != (state.options_menu_panel_id == Some(panel_id))
-            || panel.last_document != last_document;
+          let changed = panel.tab != *tab || panel.panel_id != panel_id || panel.last_document != last_document;
           panel.last_document = last_document;
           panel.tab = tab.clone();
           panel.panel_id = panel_id;
-          panel.options_open = state.options_menu_panel_id == Some(panel_id);
           if changed {
             cx.notify();
           }
         });
       } else {
         let app = cx.weak_entity();
-        let controls = controls.clone();
         let entity = cx.new(|cx| {
           let focus = cx.focus_handle();
           // Selection is Kit-owned; only project focus into command targeting.
@@ -322,8 +293,6 @@ impl DocumentDock {
             panel_id,
             focus,
             app,
-            controls,
-            options_open: state.options_menu_panel_id == Some(panel_id),
             last_document,
           }
         });
@@ -418,12 +387,6 @@ impl DocumentDock {
     let changed = state.tree != tree || state.focused_panel_id != focused;
     state.tree = tree.clone();
     state.focused_panel_id = focused;
-    if state
-      .options_menu_panel_id
-      .is_some_and(|id| state.tree.leaf(id).is_none())
-    {
-      state.options_menu_panel_id = None;
-    }
     self.projected = Some(tree);
     self.remember_leaf_ids(&state.tree, cx);
     changed

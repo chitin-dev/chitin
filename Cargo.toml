@@ -24,8 +24,8 @@ repository = "https://github.com/chitin-dev/chitin"
 
 [workspace.dependencies]
 # Kit and the direct GPUI imports must use the same WGPU backend revision.
-gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "3679d575d3f912efb3b956684898bdab64efc65c" }
-gpui-kit = { git = "https://github.com/chitin-dev/gpui-kit", rev = "05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf" }
+gpui = { package = "gpui-ce", git = "https://github.com/chitin-dev/gpui-wgpu", rev = "ce07f09bf2f60710e6d1d5426cb4ee0d8177936a" }
+gpui-kit = { git = "https://github.com/chitin-dev/gpui-kit", rev = "7f7f61f02c9cbfbbce666caf83152b5064a185ad" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

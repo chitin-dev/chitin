@@ -7,15 +7,19 @@
 mod model;
 #[cfg(test)]
 mod tests;
+use crate::features::molecule::settings::MolecularSettingsControls;
 use crate::{
   app::ChitinApp,
   workbench::documents::layout::{PanelId, PanelTabId},
 };
-use chitin_command::{SelectionCommand, SelectionMode, VisibilityCommand, VisibilityTarget};
-use chitin_molecule_renderer::BallAndStickStyle;
+use chitin_command::{
+  RenderAtomStyle, RenderCommand, RenderLayer, RenderPolymerStyle, RenderSurfaceStyle, SelectionCommand, SelectionMode,
+  VisibilityCommand, VisibilityTarget,
+};
+use chitin_molecule_renderer::{AtomStyle, BallAndStickStyle, RepresentationLayers};
 use gpui::{
-  AppContext, Context, Div, Entity, EntityId, FontWeight, IntoElement, ParentElement, StatefulInteractiveElement,
-  Styled, WeakEntity, Window, div, px, uniform_list,
+  AppContext, Context, Div, Entity, EntityId, FontWeight, InteractiveElement, IntoElement, ParentElement,
+  StatefulInteractiveElement, Styled, WeakEntity, Window, div, list, px,
 };
 use gpui_kit::component::{
   Disableable as _, Icon, Selectable as _, Sizable as _,
@@ -24,7 +28,7 @@ use gpui_kit::component::{
   theme::ThemeColor,
 };
 pub(crate) use model::EntriesSidebarState;
-use model::{EntryState, NodeKind, SavedSelection};
+use model::{EntryState, NodeKind, RowLayoutKey, SavedSelection};
 use std::sync::Arc;
 
 /// Persistent Kit inputs shared by selection submission and bookmark naming.
@@ -64,14 +68,34 @@ struct TreeRow {
   expanded: bool,
   /// Whether the node has children and needs an expansion control.
   branch: bool,
-  /// Whether this row is the active entry's inspected properties scope.
+  /// Whether this row is the scientific Properties scope or an expanded layer.
   selected: bool,
-  /// Number of hidden atoms, allowing partially visible nodes to be identified.
-  hidden: usize,
-  /// Whether the renderer supports atom-level visibility updates.
-  visibility_supported: bool,
+  /// Object visibility and layer enablement are distinct command domains.
+  visibility: RowVisibility,
   /// Up to three distinct packed sRGB colors for the row's preview.
   colors: Vec<u32>,
+  /// Only an expanded representation row owns an inline settings snapshot.
+  editor: Option<InlineLayerEditor>,
+}
+
+/// Immutable rendering snapshot paired with this entry's persistent controls.
+#[derive(Clone)]
+struct InlineLayerEditor {
+  layer: RenderLayer,
+  layers: RepresentationLayers,
+  backend: Option<chitin_bio::surface::MolecularSurfaceBackend>,
+  controls: MolecularSettingsControls,
+}
+
+/// Semantic eye action for one row; rendering layers never hide topology atoms.
+#[derive(Clone)]
+enum RowVisibility {
+  /// Canonical hidden-atom projection for a scientific object.
+  Object { hidden: usize, supported: bool },
+  /// Entry-wide layer state and the typed command that toggles it.
+  Layer { enabled: bool, toggle: RenderCommand },
+  /// Grouping nodes have no independent visibility action.
+  None,
 }
 
 /// Projects open document entries, selection controls, bookmarks, and properties.
@@ -138,9 +162,9 @@ pub(crate) fn render_entries(
         expanded: false,
         branch: false,
         selected: app.document_panels.focused_panel_id == panel,
-        hidden: 0,
-        visibility_supported: false,
+        visibility: RowVisibility::None,
         colors: Vec::new(),
+        editor: None,
       });
       continue;
     };
@@ -159,17 +183,36 @@ pub(crate) fn render_entries(
     state.sync_hidden(&control.hidden);
     state.sync_selection(&control.atoms);
     state.nodes[0].label = title.clone();
-    let layers = app
+    let (_, layers, backend) = app
       .document_panels
       .rendering_settings(tab.value())
-      .map(|(_, layers, _)| layers)
-      .unwrap_or_default();
-    for (node, depth, label) in state.rows(&title) {
+      .unwrap_or_else(|| (title.clone(), RepresentationLayers::default(), None));
+    let visible = state.rows(&title);
+    let editor_visible = state.open_layer.is_some_and(|layer| {
+      visible
+        .iter()
+        .any(|(node, _, _)| state.nodes[*node].kind == NodeKind::Representation(layer))
+    });
+    if editor_visible && state.settings.is_none() {
+      let settings = MolecularSettingsControls::new(window, cx);
+      settings.subscribe(window, cx);
+      state.settings = Some(settings);
+    }
+    if let Some(settings) = &state.settings {
+      settings.bind_entry(editor_visible.then_some((tab.value(), view)));
+    }
+    for (node, depth, label) in visible {
       let item = &state.nodes[node];
       let appearances = layers.appearances();
       let structural = item.polymer || matches!(item.kind, NodeKind::Structure | NodeKind::Chain | NodeKind::Chains);
       // Preview the outermost enabled polymer representation, matching highlight priority.
-      let layer = if layers.surface_style().is_some() && appearances[2].opacity() > 0. && structural {
+      let layer = if let NodeKind::Representation(layer) = item.kind {
+        match layer {
+          RenderLayer::Atom => 0,
+          RenderLayer::Polymer => 1,
+          RenderLayer::Surface => 2,
+        }
+      } else if layers.surface_style().is_some() && appearances[2].opacity() > 0. && structural {
         2
       } else if layers.polymer_style().is_some() && appearances[1].opacity() > 0. && structural {
         1
@@ -193,40 +236,101 @@ pub(crate) fn render_entries(
         view: Some(view),
         node,
         depth,
-        label,
+        label: if let NodeKind::Representation(layer) = item.kind {
+          representation_label(layer, layers)
+        } else {
+          label
+        },
         kind: item.kind,
         atoms: item.atoms.clone(),
-        expanded: state.expanded.contains(&node),
-        branch: !item.children.is_empty(),
-        selected: app.entries_sidebar.active == Some(tab.value()) && state.selected == node,
-        hidden: state.hidden_counts[node],
-        visibility_supported: control.supports_visibility(),
+        expanded: match item.kind {
+          NodeKind::Representation(layer) => state.open_layer == Some(layer),
+          _ => state.expanded.contains(&node),
+        },
+        branch: !item.children.is_empty() || matches!(item.kind, NodeKind::Representation(_)),
+        selected: if let NodeKind::Representation(layer) = item.kind {
+          state.open_layer == Some(layer)
+        } else {
+          app.entries_sidebar.active == Some(tab.value()) && state.selected == node
+        },
+        visibility: match item.kind {
+          NodeKind::Representations => RowVisibility::None,
+          NodeKind::Representation(layer) => representation_visibility(layer, layers),
+          _ => RowVisibility::Object {
+            hidden: state.hidden_counts[node],
+            supported: control.supports_visibility(),
+          },
+        },
         colors,
+        editor: match item.kind {
+          NodeKind::Representation(layer) if state.open_layer == Some(layer) => {
+            state.settings.as_ref().map(|controls| InlineLayerEditor {
+              layer,
+              layers,
+              backend,
+              controls: controls.clone(),
+            })
+          }
+          _ => None,
+        },
       });
     }
   }
   let weak = cx.weak_entity();
   let count = live.len();
-  let rows = Arc::new(rows);
-  let list = uniform_list("scientific-entries-tree", rows.len(), move |range, _, _| {
-    range
-      .map(|index| render_row(rows[index].clone(), theme, weak.clone()))
-      .collect::<Vec<_>>()
+  let layout = rows
+    .iter()
+    .map(|row| RowLayoutKey {
+      tab: row.tab,
+      view: row.view,
+      node: row.node,
+      editor: row.editor.as_ref().map(|editor| {
+        let index = match editor.layer {
+          RenderLayer::Atom => 0,
+          RenderLayer::Polymer => 1,
+          RenderLayer::Surface => 2,
+        };
+        let enabled = match editor.layer {
+          RenderLayer::Atom => editor.layers.atom_style().is_some(),
+          RenderLayer::Polymer => editor.layers.polymer_style().is_some(),
+          RenderLayer::Surface => editor.layers.surface_style().is_some(),
+        };
+        (
+          enabled
+            && editor.layers.appearances()[index].scheme == chitin_molecule_renderer::appearance::ColorScheme::Uniform,
+          editor.layer == RenderLayer::Surface && editor.backend.is_some() && editor.controls.advanced_open(),
+        )
+      }),
+    })
+    .collect();
+  let focus = rows
+    .iter()
+    .map(|row| row.editor.as_ref().map(|editor| editor.controls.focus_handle()))
+    .collect::<Vec<_>>();
+  app.entries_sidebar.sync_layout(layout, &focus);
+  let list = list(app.entries_sidebar.list.clone(), move |index, window, cx| {
+    render_entry_item(rows[index].clone(), theme, weak.clone(), window, cx).into_any_element()
   })
-  .track_scroll(&app.entries_sidebar.scroll)
   .flex_1()
   .min_h(px(120.0));
   let active = app.entries_sidebar.active;
   let submit = cx.weak_entity();
   let save = cx.weak_entity();
   let clear = cx.weak_entity();
+  let tree = div()
+    .flex()
+    .flex_col()
+    .flex_1()
+    .min_h(px(120.0))
+    .child(heading(format!("Open entries · {count}"), theme).py_2())
+    .child(list);
   let mut content = div()
+    .id("entries-inspector")
     .flex()
     .flex_col()
     .flex_1()
     .min_h_0()
-    .child(heading(format!("Open entries · {count}"), theme).text_sm().py_2())
-    .child(list)
+    .overflow_y_scroll()
     .child(
       div()
         .flex_none()
@@ -237,7 +341,7 @@ pub(crate) fn render_entries(
         .gap_2()
         .flex()
         .flex_col()
-        .child(heading("Selection", theme))
+        .child(heading("Selections", theme))
         .child(Input::new(&controls.query).small().disabled(active.is_none()))
         .child(
           div()
@@ -284,7 +388,6 @@ pub(crate) fn render_entries(
   if let Some(id) = active {
     if let Some(state) = app.entries_sidebar.entries.get(&id) {
       content = content.child(render_saved(id, state, theme, cx.weak_entity()));
-      content = content.child(properties(state, theme));
     }
     if let Some(state) = app.entries_sidebar.entries.get(&id) {
       let (atoms, residues, chains) = state.selection_counts;
@@ -300,7 +403,38 @@ pub(crate) fn render_entries(
       );
     }
   }
-  content
+  if let Some(id) = active
+    && let Some(state) = app.entries_sidebar.entries.get(&id)
+  {
+    let body = properties(state);
+    content = content.child(
+      div()
+        .flex_none()
+        .border_t_1()
+        .border_color(theme.border)
+        .px_3()
+        .py_2()
+        .child(heading("Properties", theme))
+        .child(body),
+    );
+  } else {
+    content = content.child(
+      div()
+        .flex_none()
+        .border_t_1()
+        .border_color(theme.border)
+        .px_3()
+        .py_2()
+        .child(heading("Properties", theme))
+        .child(
+          div()
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child("Select an entry to inspect its properties."),
+        ),
+    );
+  }
+  div().flex().flex_col().flex_1().min_h_0().child(tree).child(content)
 }
 
 /// Builds the shared lightweight section heading for Entries controls.
@@ -315,9 +449,109 @@ fn heading(title: impl Into<gpui::SharedString>, theme: ThemeColor) -> Div {
     .child(title.into())
 }
 
+/// Projects each layer's current style into its entry tree label.
+fn representation_label(layer: RenderLayer, layers: RepresentationLayers) -> String {
+  let style = match layer {
+    RenderLayer::Atom => match layers.atom_style() {
+      Some(AtomStyle::Stick) => "Stick",
+      Some(AtomStyle::BallAndStick) => "Ball and stick",
+      Some(AtomStyle::Sphere) => "Space filling",
+      None => "None",
+    },
+    RenderLayer::Polymer => {
+      if layers.polymer_style().is_some() {
+        "Cartoon"
+      } else {
+        "None"
+      }
+    }
+    RenderLayer::Surface => {
+      if layers.surface_style().is_some() {
+        "Solid"
+      } else {
+        "None"
+      }
+    }
+  };
+  format!("{layer:?} · {style}")
+}
+
+/// Builds an entry-wide layer toggle; enabling uses that layer's standard style.
+///
+/// Appearance and object visibility remain unchanged. Non-default atom styles
+/// can be chosen explicitly from the layer's inline editor.
+fn representation_visibility(layer: RenderLayer, layers: RepresentationLayers) -> RowVisibility {
+  let (enabled, toggle) = match layer {
+    RenderLayer::Atom => (
+      layers.atom_style().is_some(),
+      RenderCommand::AtomStyle(if layers.atom_style().is_some() {
+        RenderAtomStyle::None
+      } else {
+        RenderAtomStyle::Stick
+      }),
+    ),
+    RenderLayer::Polymer => (
+      layers.polymer_style().is_some(),
+      RenderCommand::PolymerStyle(if layers.polymer_style().is_some() {
+        RenderPolymerStyle::None
+      } else {
+        RenderPolymerStyle::Cartoon
+      }),
+    ),
+    RenderLayer::Surface => (
+      layers.surface_style().is_some(),
+      RenderCommand::SurfaceStyle(if layers.surface_style().is_some() {
+        RenderSurfaceStyle::None
+      } else {
+        RenderSurfaceStyle::Solid
+      }),
+    ),
+  };
+  RowVisibility::Layer { enabled, toggle }
+}
+
+/// Renders a measured row block, keeping an expanded editor adjacent to its header.
+fn render_entry_item(
+  row: TreeRow,
+  theme: ThemeColor,
+  app: WeakEntity<ChitinApp>,
+  window: &mut Window,
+  cx: &mut gpui::App,
+) -> Div {
+  let editor = row.editor.clone();
+  let depth = row.depth;
+  let id = format!("entry-inline-editor-{}-{}", row.tab, row.node);
+  let mut block = div().flex().flex_col().w_full().child(render_row(row, theme, app));
+  if let Some(editor) = editor {
+    block = block.child(
+      div()
+        .id(id.clone())
+        .debug_selector(move || id.clone())
+        .flex_none()
+        .flex()
+        .flex_col()
+        .w_full()
+        .min_w_0()
+        .pl(px(24.0 + depth as f32 * 12.0))
+        .pr_3()
+        .py_2()
+        .track_focus(&editor.controls.focus_handle())
+        .child(
+          editor
+            .controls
+            .render_layer(editor.layer, editor.layers, editor.backend, theme, window, cx),
+        ),
+    );
+  }
+  block
+}
+
 /// Renders expansion, scientific selection, color preview, and visibility actions.
 fn render_row(row: TreeRow, theme: ThemeColor, app: WeakEntity<ChitinApp>) -> Div {
+  let selector = format!("entry-row-{}-{}", row.tab, row.node);
   let mut line = div()
+    .debug_selector(move || selector.clone())
+    .flex_none()
     .flex()
     .items_center()
     .h(px(28.0))
@@ -329,6 +563,7 @@ fn render_row(row: TreeRow, theme: ThemeColor, app: WeakEntity<ChitinApp>) -> Di
     let id = row.tab;
     let node = row.node;
     let view = row.view;
+    let item = row.clone();
     line = line.child(
       Button::new(format!("entry-expand-{id}-{node}"))
         .ghost()
@@ -340,8 +575,12 @@ fn render_row(row: TreeRow, theme: ThemeColor, app: WeakEntity<ChitinApp>) -> Di
         } else {
           "icons/tree-collapse.svg"
         }))
-        .on_click(move |_, _, cx| {
+        .on_click(move |_, window, cx| {
           let _ = expand.update(cx, |app, cx| {
+            if matches!(item.kind, NodeKind::Representation(_)) {
+              app.select_entry_node(&item, window, cx);
+              return;
+            }
             if app.document_panels.rendering_view_id(id) != view {
               return;
             }
@@ -383,12 +622,16 @@ fn render_row(row: TreeRow, theme: ThemeColor, app: WeakEntity<ChitinApp>) -> Di
               .truncate()
               .font_weight(match row.kind {
                 NodeKind::Structure => FontWeight::SEMIBOLD,
-                NodeKind::Chains | NodeKind::Chain | NodeKind::Residues | NodeKind::Ligands | NodeKind::Waters => {
-                  FontWeight::MEDIUM
-                }
+                NodeKind::Representations
+                | NodeKind::Representation(_)
+                | NodeKind::Chains
+                | NodeKind::Chain
+                | NodeKind::Residues
+                | NodeKind::Ligands
+                | NodeKind::Waters => FontWeight::MEDIUM,
                 NodeKind::Residue => FontWeight::NORMAL,
               })
-              .child(row.label),
+              .child(row.label.clone()),
           ),
       )
       .on_click(move |_, window, cx| {
@@ -402,41 +645,72 @@ fn render_row(row: TreeRow, theme: ThemeColor, app: WeakEntity<ChitinApp>) -> Di
   if row.colors.is_empty() {
     swatch = swatch.border_1().border_color(theme.border);
   }
-  line = line.child(swatch);
-  // A partially visible node hides all its atoms; only a fully hidden node shows them.
-  let visible = row.hidden < row.atoms.len();
+  if matches!(row.kind, NodeKind::Representation(_)) {
+    let inspect = app.clone();
+    let item = row.clone();
+    line = line.child(
+      Button::new(format!("entry-color-{}-{}", row.tab, row.node))
+        .ghost()
+        .size(px(16.0))
+        .px_0()
+        .accessibility_label("Inspect layer color")
+        .child(swatch)
+        .on_click(move |_, window, cx| {
+          let _ = inspect.update(cx, |app, cx| app.edit_entry_layer_color(&item, window, cx));
+        }),
+    );
+  } else if row.kind != NodeKind::Representations {
+    line = line.child(swatch);
+  }
+  let (visible, disabled, tooltip) = match &row.visibility {
+    RowVisibility::Object { hidden, supported } => {
+      let visible = *hidden < row.atoms.len();
+      (
+        visible,
+        !supported || row.atoms.is_empty(),
+        if *hidden > 0 && visible {
+          "Partially visible — hide all"
+        } else if visible {
+          "Hide"
+        } else {
+          "Show"
+        },
+      )
+    }
+    RowVisibility::Layer { enabled, .. } => (*enabled, false, if *enabled { "Disable layer" } else { "Enable layer" }),
+    RowVisibility::None => return line.child(div().w(px(24.0))),
+  };
   let eye = app.clone();
   let id = row.tab;
   let view = row.view;
   let atoms = row.atoms;
+  let visibility = row.visibility;
   line.child(
     Button::new(format!("entry-visibility-{id}-{}", row.node))
       .ghost()
       .size(px(24.0))
       .px_0()
-      .disabled(!row.visibility_supported || atoms.is_empty())
-      .accessibility_label(if visible { "Hide entry" } else { "Show entry" })
-      .tooltip(if row.hidden > 0 && visible {
-        "Partially visible — hide all"
-      } else if visible {
-        "Hide"
-      } else {
-        "Show"
-      })
+      .disabled(disabled)
+      .accessibility_label(tooltip)
+      .tooltip(tooltip)
       .icon(Icon::default().path(if visible { "icons/eye.svg" } else { "icons/eye-off.svg" }))
       .on_click(move |_, _, cx| {
         let _ = eye.update(cx, |app, cx| {
           if app.document_panels.rendering_view_id(id) != view {
             return;
           }
-          let result = app.dispatch_visibility_command(
-            Some(id),
-            VisibilityCommand {
-              target: VisibilityTarget::Atoms(atoms.iter().copied().collect()),
-              visible: !visible,
-            },
-            cx,
-          );
+          let result = match visibility.clone() {
+            RowVisibility::Layer { toggle, .. } => app.dispatch_render_command(Some(id), toggle, cx),
+            RowVisibility::Object { .. } => app.dispatch_visibility_command(
+              Some(id),
+              VisibilityCommand {
+                target: VisibilityTarget::Atoms(atoms.iter().copied().collect()),
+                visible: !visible,
+              },
+              cx,
+            ),
+            RowVisibility::None => return,
+          };
           app.entries_sidebar.error = result.err().map(|error| error.to_string());
           cx.notify();
         });
@@ -525,7 +799,7 @@ fn render_saved(id: u64, state: &EntryState, theme: ThemeColor, app: WeakEntity<
 }
 
 /// Combines inspected-node counts with structure-wide experimental metadata.
-fn properties(state: &EntryState, theme: ThemeColor) -> Div {
+fn properties(state: &EntryState) -> Div {
   let node = &state.nodes[state.selected];
   let metadata = state.scene.selection.metadata();
   let residues = node.residue_count;
@@ -561,15 +835,7 @@ fn properties(state: &EntryState, theme: ThemeColor) -> Div {
       metadata.identifier.clone().unwrap_or_else(|| "Not provided".into()),
     ),
   ];
-  let mut panel = div()
-    .flex()
-    .flex_col()
-    .flex_none()
-    .px_3()
-    .py_2()
-    .border_t_1()
-    .border_color(theme.border)
-    .child(heading("Properties", theme));
+  let mut panel = div().flex().flex_col().flex_none();
   for (label, value) in fields {
     panel = panel.child(
       div()
@@ -604,6 +870,42 @@ fn srgb(color: [f32; 3]) -> u32 {
 }
 
 impl ChitinApp {
+  /// Expands the layer beside its row and opens uniform color editing when applicable.
+  ///
+  /// Non-uniform schemes expose their local scheme editor instead of silently
+  /// switching coloring. Scientific selection and the Properties scope are untouched.
+  fn edit_entry_layer_color(&mut self, row: &TreeRow, window: &mut Window, cx: &mut Context<Self>) {
+    let NodeKind::Representation(layer) = row.kind else {
+      return;
+    };
+    if self.document_panels.rendering_view_id(row.tab) != row.view {
+      return;
+    }
+    let Some((_, layers, _)) = self.document_panels.rendering_settings(row.tab) else {
+      return;
+    };
+    self.activate_sidebar_entry(row.panel, row.tab_id, window, cx);
+    if let Some(state) = self.entries_sidebar.entries.get_mut(&row.tab) {
+      state.open_layer = Some(layer);
+      let settings = state.settings.get_or_insert_with(|| {
+        let settings = MolecularSettingsControls::new(window, cx);
+        settings.subscribe(window, cx);
+        settings
+      });
+      settings.bind_entry(Some((row.tab, state.view)));
+      let (index, enabled) = match layer {
+        RenderLayer::Atom => (0, layers.atom_style().is_some()),
+        RenderLayer::Polymer => (1, layers.polymer_style().is_some()),
+        RenderLayer::Surface => (2, layers.surface_style().is_some()),
+      };
+      if enabled && layers.appearances()[index].scheme == chitin_molecule_renderer::appearance::ColorScheme::Uniform {
+        settings.open_color(layer, window, cx);
+      }
+      self.entries_sidebar.active = Some(row.tab);
+      cx.notify();
+    }
+  }
+
   /// Lazily mounts Entries inputs and retains their Enter/change subscriptions.
   fn entries_controls(&mut self, window: &mut Window, cx: &mut Context<Self>) -> EntriesControls {
     if let Some(controls) = &self.entries_sidebar.controls {
@@ -628,15 +930,27 @@ impl ChitinApp {
     controls
   }
 
-  /// Activates a row's document and replaces selection with its coordinate-bearing atoms.
+  /// Activates a row's document, inspecting topology or toggling its inline layer editor.
   ///
-  /// Stale rendering rows are ignored. Empty nodes still become the inspected
-  /// properties scope, but leave the canonical atom selection unchanged.
+  /// Stale rendering rows are ignored. Scientific objects update Properties and
+  /// select coordinate-bearing atoms. Representation navigation leaves both
+  /// scientific selection and the Properties scope unchanged.
   fn select_entry_node(&mut self, row: &TreeRow, window: &mut Window, cx: &mut Context<Self>) {
     if row.view.is_some() && self.document_panels.rendering_view_id(row.tab) != row.view {
       return;
     }
     self.activate_sidebar_entry(row.panel, row.tab_id, window, cx);
+    if let NodeKind::Representation(layer) = row.kind {
+      if let Some(state) = self.entries_sidebar.entries.get_mut(&row.tab) {
+        state.toggle_layer(layer);
+        self.entries_sidebar.active = Some(row.tab);
+        cx.notify();
+      }
+      return;
+    }
+    if row.kind == NodeKind::Representations {
+      return;
+    }
     if let Some(state) = self.entries_sidebar.entries.get_mut(&row.tab) {
       self.entries_sidebar.active = Some(row.tab);
       state.selected = row.node;
@@ -649,6 +963,7 @@ impl ChitinApp {
           cx,
         );
       }
+      cx.notify();
     }
   }
 

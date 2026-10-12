@@ -2434,7 +2434,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf#05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=7f7f61f02c9cbfbbce666caf83152b5064a185ad#7f7f61f02c9cbfbbce666caf83152b5064a185ad"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2473,7 +2473,7 @@ dependencies = [
 [[package]]
 name = "gpui-ce"
 version = "1.0.0"
-source = "git+https://github.com/chitin-dev/gpui-wgpu?rev=3679d575d3f912efb3b956684898bdab64efc65c#3679d575d3f912efb3b956684898bdab64efc65c"
+source = "git+https://github.com/chitin-dev/gpui-wgpu?rev=ce07f09bf2f60710e6d1d5426cb4ee0d8177936a#ce07f09bf2f60710e6d1d5426cb4ee0d8177936a"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2553,7 +2553,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf#05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=7f7f61f02c9cbfbbce666caf83152b5064a185ad#7f7f61f02c9cbfbbce666caf83152b5064a185ad"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2595,7 +2595,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf#05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=7f7f61f02c9cbfbbce666caf83152b5064a185ad#7f7f61f02c9cbfbbce666caf83152b5064a185ad"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2606,7 +2606,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf#05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=7f7f61f02c9cbfbbce666caf83152b5064a185ad#7f7f61f02c9cbfbbce666caf83152b5064a185ad"
 dependencies = [
  "gpui-base",
  "gpui-ce",
@@ -2617,7 +2617,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf#05c6b2d9c5d97e327c904d480f1fd5b05ade0cdf"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=7f7f61f02c9cbfbbce666caf83152b5064a185ad#7f7f61f02c9cbfbbce666caf83152b5064a185ad"
 dependencies = [
  "anyhow",
  "gpui-ce",

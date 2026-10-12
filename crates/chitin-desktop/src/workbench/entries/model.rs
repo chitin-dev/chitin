@@ -3,10 +3,12 @@
 //! Node indices are local to one immutable scene. Selection and visibility
 //! remain renderer-owned; this module only projects their snapshots for the UI.
 
+use crate::features::molecule::settings::MolecularSettingsControls;
 use chitin_bio::structure::{
   AtomId, ChainId, ElementCategory, ResidueId, ResidueKind, StructureScene, selection::AtomSelection,
 };
-use gpui::{EntityId, UniformListScrollHandle};
+use chitin_command::RenderLayer;
+use gpui::{EntityId, ListAlignment, ListState, px};
 use std::{
   collections::{BTreeMap, HashMap, HashSet},
   sync::Arc,
@@ -17,6 +19,10 @@ use std::{
 pub(super) enum NodeKind {
   /// Root representing all coordinate-bearing atoms in an entry.
   Structure,
+  /// Container for the entry-wide rendering layers, independent of topology.
+  Representations,
+  /// One entry-wide rendering layer inspected without selecting its atoms.
+  Representation(RenderLayer),
   /// Container for the entry's coordinate-bearing chains.
   Chains,
   /// One chain, containing polymer, ligand, and water groups.
@@ -57,6 +63,10 @@ impl NodeKind {
   pub fn icon(self) -> &'static str {
     match self {
       Self::Structure => "icons/entry-structure.svg",
+      Self::Representations => "icons/atom-ball-and-stick.svg",
+      Self::Representation(RenderLayer::Atom) => "icons/atom-stick.svg",
+      Self::Representation(RenderLayer::Polymer) => "icons/atom-cartoon.svg",
+      Self::Representation(RenderLayer::Surface) => "icons/surface-solid.svg",
       Self::Chains | Self::Chain => "icons/entry-chains.svg",
       Self::Residues | Self::Residue => "icons/entry-residues.svg",
       Self::Ligands => "icons/entry-ligands.svg",
@@ -90,6 +100,10 @@ pub(super) struct EntryState {
   pub expanded: HashSet<usize>,
   /// Node inspected by the properties panel, independent of atom selection.
   pub selected: usize,
+  /// At most one entry-local representation editor is expanded at a time.
+  pub open_layer: Option<RenderLayer>,
+  /// Lazily created editors bound only to this entry's rendering view.
+  pub settings: Option<MolecularSettingsControls>,
   /// Entry-local selection bookmarks; these are not persisted to disk.
   pub saved: Vec<SavedSelection>,
   /// Next bookmark identity and default-name suffix.
@@ -105,7 +119,7 @@ pub(super) struct EntryState {
 }
 
 impl EntryState {
-  /// Builds the structure → chains → residue/ligand/water hierarchy for a scene.
+  /// Builds entry-wide representation nodes and the scientific topology hierarchy.
   ///
   /// # Parameters
   ///
@@ -114,7 +128,7 @@ impl EntryState {
   ///
   /// # Returns
   ///
-  /// An entry with its structure and chain-container roots expanded, empty
+  /// An entry with structure, representation, and chain-container roots expanded, empty
   /// bookmarks, and no cached hidden or selected atoms. Residues without
   /// coordinates are excluded because they cannot be targeted in the viewport.
   pub fn new(view: EntityId, scene: Arc<StructureScene>) -> Self {
@@ -245,13 +259,40 @@ impl EntryState {
         }
       }
     }
+    // Representation nodes carry no atom scope: inspecting or toggling a layer
+    // must not select atoms, hide topology, or duplicate scientific counts.
+    let representations = nodes.len();
+    nodes[0].children.insert(0, representations);
+    nodes.push(EntryNode {
+      residue_count: 0,
+      label: "Representations".into(),
+      kind: NodeKind::Representations,
+      chain: None,
+      polymer: false,
+      atoms: Arc::default(),
+      samples: Vec::new(),
+      children: Vec::new(),
+    });
+    for layer in [RenderLayer::Atom, RenderLayer::Polymer, RenderLayer::Surface] {
+      let index = nodes.len();
+      nodes[representations].children.push(index);
+      nodes.push(EntryNode {
+        label: format!("{layer:?}"),
+        kind: NodeKind::Representation(layer),
+        samples: nodes[0].samples.clone(),
+        children: Vec::new(),
+        ..nodes[representations].clone()
+      });
+    }
     let hidden_counts = vec![0; nodes.len()];
     Self {
       view,
       scene,
       nodes,
-      expanded: [0, 1].into(),
+      expanded: [0, 1, representations].into(),
       selected: 0,
+      open_layer: None,
+      settings: None,
       saved: Vec::new(),
       next_saved: 1,
       hidden: Arc::default(),
@@ -259,6 +300,15 @@ impl EntryState {
       selected_atoms: Arc::default(),
       selection_counts: (0, 0, 0),
     }
+  }
+
+  /// Expands a layer or collapses it when already open, without selecting atoms.
+  pub fn toggle_layer(&mut self, layer: RenderLayer) {
+    self.open_layer = if self.open_layer == Some(layer) {
+      None
+    } else {
+      Some(layer)
+    };
   }
 
   /// Recomputes node visibility counts when the canonical hidden snapshot changes.
@@ -308,7 +358,6 @@ impl EntryState {
 }
 
 /// App-owned Entries state retained across sidebar switches.
-#[derive(Default)]
 pub(crate) struct EntriesSidebarState {
   /// Scene caches keyed by document tab identity, not panel position.
   pub(super) entries: HashMap<u64, EntryState>,
@@ -320,11 +369,86 @@ pub(crate) struct EntriesSidebarState {
   pub(super) subscriptions: Vec<gpui::Subscription>,
   /// Latest parse, command, or bookmark validation error shown inline.
   pub(super) error: Option<String>,
-  /// Virtualized tree scroll state retained across renders.
-  pub(super) scroll: UniformListScrollHandle,
+  /// Variable-height virtualized tree geometry and retained scroll position.
+  pub(super) list: ListState,
+  /// Last row identities and height-affecting editor state measured by the list.
+  layout: Vec<RowLayoutKey>,
+}
+
+/// Identity and editor structure affecting a virtualized row's measured height.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct RowLayoutKey {
+  /// Stable document identity, independent of the current docking position.
+  pub tab: u64,
+  /// Rendering revision invalidating cached node identities when replaced.
+  pub view: Option<EntityId>,
+  /// Local tree identity whose header remains a fixed-height row.
+  pub node: usize,
+  /// Presence of an editor, uniform-color field, and advanced backend selector.
+  pub editor: Option<(bool, bool)>,
+}
+
+impl Default for EntriesSidebarState {
+  fn default() -> Self {
+    let list = ListState::new(0, ListAlignment::Top, px(80.0));
+    // Variable-height editors must follow native wheel deltas without an
+    // interpolated offset painting rows outside the measured visible range.
+    list.set_smooth_scroll_enabled(false);
+    Self {
+      entries: HashMap::new(),
+      active: None,
+      controls: None,
+      subscriptions: Vec::new(),
+      error: None,
+      list,
+      layout: Vec::new(),
+    }
+  }
 }
 
 impl EntriesSidebarState {
+  /// Invalidates only changed rows, preserving unaffected measurements and scroll anchors.
+  pub(super) fn sync_layout(&mut self, next: Vec<RowLayoutKey>, focus: &[Option<gpui::FocusHandle>]) {
+    if self.layout.len() == next.len() {
+      for (index, (old, new)) in self.layout.iter().zip(&next).enumerate() {
+        if old != new {
+          self.list.splice_focusable(index..index + 1, [focus[index].clone()]);
+        }
+      }
+    } else {
+      let prefix = self
+        .layout
+        .iter()
+        .zip(&next)
+        .take_while(|(old, new)| old == new)
+        .count();
+      let suffix = self.layout[prefix..]
+        .iter()
+        .rev()
+        .zip(next[prefix..].iter().rev())
+        .take_while(|(old, new)| old == new)
+        .count();
+      self.list.splice_focusable(
+        prefix..self.layout.len() - suffix,
+        focus[prefix..next.len() - suffix].iter().cloned(),
+      );
+    }
+    self.layout = next;
+  }
+
+  /// Disconnects delayed editor events when the Entries view is hidden.
+  pub(crate) fn unbind_editors(&self) {
+    for entry in self.entries.values() {
+      if let Some(settings) = &entry.settings {
+        settings.bind_entry(None);
+      }
+    }
+  }
+  /// Sets or clears the inspector's latest command validation error.
+  pub(crate) fn set_error(&mut self, error: Option<String>) {
+    self.error = error;
+  }
+
   /// Drops caches and bookmarks for closed or replaced rendering views.
   pub(crate) fn prune(&mut self, panels: &crate::workbench::documents::DocumentPanelState) {
     self
