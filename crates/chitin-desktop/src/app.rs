@@ -418,9 +418,13 @@ impl Render for ChitinApp {
       None
     };
     let sequence_visible = self.bottom_dock.is_active(SEQUENCE_DOCK_ITEM_ID);
-    if sequence_visible {
-      self.sequence_panel.sync(&self.document_panels);
-    }
+    let sequence_marquee = if sequence_visible {
+      self.sequence_panel.sync(&self.document_panels, cx);
+      Some(self.sequence_panel.marquee(cx))
+    } else {
+      self.sequence_panel.cancel_drag(cx);
+      None
+    };
     // Runtime output is independent of overlay visibility. Session entities stay alive.
     self.sync_terminal_output();
     if self.terminal_panel.take_focus_request()
@@ -476,10 +480,10 @@ impl Render for ChitinApp {
           cx,
         ))
       })
-      .when(sequence_visible, |layout| {
+      .when_some(sequence_marquee, |layout, marquee| {
         layout.child(render_bottom_dock(
           self,
-          render_sequence_panel(&self.sequence_panel, theme, app.clone()),
+          render_sequence_panel(&self.sequence_panel, theme, app.clone(), marquee),
           theme,
           cx,
         ))

@@ -1,16 +1,24 @@
 //! Coordinate-bearing polymer sequences for the shared bottom dock.
 
 use std::{
+  cell::RefCell,
   collections::{BTreeMap, BTreeSet},
+  rc::Rc,
   sync::Arc,
 };
 
 use chitin_bio::structure::{AtomId, ChainId, ResidueId, ResidueKind, StructureScene, selection::AtomSelection};
 use chitin_command::{SelectionCommand, SelectionMode};
-use chitin_ui::workbench::WorkbenchStyle;
-use gpui::{
-  EntityId, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled, WeakEntity, div, px,
+use chitin_ui::{
+  widgets::marquee::{Marquee, MarqueeEvent, MarqueeState},
+  workbench::WorkbenchStyle,
 };
+use gpui::prelude::FluentBuilder as _;
+use gpui::{
+  App, AppContext, Bounds, Context, Entity, EntityId, InteractiveElement, IntoElement, ParentElement, Pixels,
+  StatefulInteractiveElement, Styled, WeakEntity, div, px,
+};
+use gpui_kit::component::ElementExt as _;
 use gpui_kit::component::{
   Disableable as _, Selectable as _, Sizable as _,
   button::{Button, ButtonVariant, ButtonVariants as _},
@@ -49,11 +57,16 @@ pub(crate) struct SequencePanelState {
   scene: Option<Arc<StructureScene>>,
   chains: Vec<SequenceChain>,
   selected: Arc<AtomSelection>,
+  /// Measured visible cell bounds; clipping masks exclude off-screen residues.
+  item_bounds: Rc<RefCell<BTreeMap<ResidueId, Bounds<Pixels>>>>,
+  /// Temporary sequence highlight; canonical selection changes only on release.
+  preview: Option<AtomSelection>,
+  marquee: Option<Entity<MarqueeState>>,
 }
 
 impl SequencePanelState {
   /// Refreshes only when the focused rendering view or its scene changes.
-  pub(crate) fn sync(&mut self, documents: &DocumentPanelState) {
+  pub(crate) fn sync(&mut self, documents: &DocumentPanelState, cx: &mut App) {
     let target = documents
       .tree
       .leaf(documents.focused_panel_id)
@@ -65,6 +78,7 @@ impl SequencePanelState {
         Some((id, view, control))
       });
     let Some((id, view, control)) = target else {
+      self.cancel_drag(cx);
       self.target = None;
       self.scene = None;
       self.chains.clear();
@@ -77,6 +91,7 @@ impl SequencePanelState {
         .as_ref()
         .is_none_or(|scene| !Arc::ptr_eq(scene, &control.scene));
     if changed {
+      self.cancel_drag(cx);
       // Dense chain IDs belong to one scene; an old filter can name another chain after a tab switch.
       self.chain_filter = None;
       self.chains = project_chains(&control.scene);
@@ -85,6 +100,23 @@ impl SequencePanelState {
     }
     self.selected = control.atoms.clone();
   }
+
+  /// Retains the pointer primitive independently of dock visibility.
+  pub(crate) fn marquee(&mut self, cx: &mut App) -> Entity<MarqueeState> {
+    self
+      .marquee
+      .get_or_insert_with(|| cx.new(|_| MarqueeState::default()))
+      .clone()
+  }
+
+  /// Discards preview when hiding the panel or changing layout/filter identity.
+  pub(crate) fn cancel_drag(&mut self, cx: &mut App) {
+    self.preview = None;
+    self.item_bounds.borrow_mut().clear();
+    if let Some(marquee) = &self.marquee {
+      marquee.update(cx, |state, _| state.cancel());
+    }
+  }
 }
 
 /// Renders the scientific sequence inside the workbench-owned dock surface.
@@ -92,6 +124,7 @@ pub(crate) fn render_sequence_panel(
   state: &SequencePanelState,
   theme: ThemeColor,
   app: WeakEntity<ChitinApp>,
+  marquee: Entity<MarqueeState>,
 ) -> impl IntoElement {
   let style = WorkbenchStyle::new(theme);
   let wrap_app = app.clone();
@@ -130,6 +163,7 @@ pub(crate) fn render_sequence_panel(
               .on_click(move |_, _, cx| {
                 let _ = all_app.update(cx, |this, cx| {
                   this.sequence_panel.chain_filter = None;
+                  this.sequence_panel.cancel_drag(cx);
                   cx.notify();
                 });
               }),
@@ -143,6 +177,7 @@ pub(crate) fn render_sequence_panel(
                 .on_click(move |_, _, cx| {
                   let _ = select_app.update(cx, |this, cx| {
                     this.sequence_panel.chain_filter = Some(id);
+                    this.sequence_panel.cancel_drag(cx);
                     cx.notify();
                   });
                 }),
@@ -160,11 +195,14 @@ pub(crate) fn render_sequence_panel(
         .on_click(move |_, _, cx| {
           let _ = wrap_app.update(cx, |this, cx| {
             this.sequence_panel.wrap = !this.sequence_panel.wrap;
+            this.sequence_panel.cancel_drag(cx);
             cx.notify();
           });
         }),
     );
 
+  // Rebuild geometry during prepaint; old wrap/scroll positions never participate in hit tests.
+  state.item_bounds.borrow_mut().clear();
   let mut rows = div().flex().flex_col().gap_2().p_2();
   for chain in state
     .chains
@@ -181,6 +219,20 @@ pub(crate) fn render_sequence_panel(
     };
     rows = rows.child(div().text_sm().text_color(theme.muted_foreground).child(message));
   }
+  let target = state.target;
+  let selection_app = app;
+  let content = Marquee::new(
+    marquee,
+    div()
+      .id("sequence-vertical-scroll")
+      .flex_1()
+      .min_h_0()
+      .overflow_y_scroll()
+      .child(rows),
+    move |event, _, cx| {
+      let _ = selection_app.update(cx, |this, cx| this.sequence_marquee(event, target, cx));
+    },
+  );
   div()
     .flex()
     .flex_col()
@@ -189,14 +241,7 @@ pub(crate) fn render_sequence_panel(
     .min_w_0()
     .bg(style.panel_background)
     .child(toolbar)
-    .child(
-      div()
-        .id("sequence-vertical-scroll")
-        .flex_1()
-        .min_h_0()
-        .overflow_y_scroll()
-        .child(rows),
-    )
+    .child(content)
 }
 
 fn render_chain(
@@ -213,58 +258,72 @@ fn render_chain(
     letters = letters.flex_none();
   }
   for (position, residue) in chain.residues.iter().enumerate() {
-    let selected = residue.atoms.iter().any(|atom| state.selected.contains(atom));
+    let selection = state.preview.as_ref().unwrap_or(state.selected.as_ref());
+    let selected = residue.atoms.iter().any(|atom| selection.contains(atom));
     let atoms = residue.atoms.clone();
     let target = state.target;
     let select_app = app.clone();
     let number = residue.number;
     let insertion = residue.insertion.map(|code| code.to_string()).unwrap_or_default();
+    let measure_bounds = state.item_bounds.clone();
+    let residue_id = residue.id;
+    let cell = Button::new(format!("sequence-{}-{}", chain.id.index(), residue.id.index()))
+      .with_variant(ButtonVariant::Ghost)
+      .disabled(atoms.is_empty())
+      .selected(selected)
+      .when(selected, |cell| cell.bg(style.raised_hover_background))
+      .tooltip(format!(
+        "{} {}{} · chain {}",
+        residue.name, number, insertion, chain.label
+      ))
+      .w(px(20.0))
+      .h(px(36.0))
+      .px(px(0.0))
+      .child(
+        div()
+          .flex()
+          .flex_col()
+          .items_center()
+          .font_family(TERMINAL_FONT_FAMILY)
+          .child(
+            div()
+              .h(px(14.0))
+              .text_size(px(10.0))
+              .text_color(theme.muted_foreground)
+              .child(if position == 0 || (position + 1) % 10 == 0 {
+                (position + 1).to_string()
+              } else {
+                String::new()
+              }),
+          )
+          .child(div().text_sm().child(residue.letter.to_string())),
+      )
+      .on_click(move |_, _, cx| {
+        let Some((id, view)) = target else { return };
+        let _ = select_app.update(cx, |this, cx| {
+          if this.document_panels.rendering_view_id(id) == Some(view) {
+            let _ = this.dispatch_selection_command(
+              Some(id),
+              SelectionCommand::Atoms {
+                atoms: atoms.as_ref().clone(),
+                mode: SelectionMode::Replace,
+              },
+              cx,
+            );
+          }
+        });
+      });
     letters = letters.child(
-      Button::new(format!("sequence-{}-{}", chain.id.index(), residue.id.index()))
-        .with_variant(ButtonVariant::Ghost)
-        .disabled(atoms.is_empty())
-        .selected(selected)
-        .tooltip(format!(
-          "{} {}{} · chain {}",
-          residue.name, number, insertion, chain.label
-        ))
+      div()
+        .flex_none()
         .w(px(20.0))
         .h(px(36.0))
-        .px(px(0.0))
-        .child(
-          div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .font_family(TERMINAL_FONT_FAMILY)
-            .child(
-              div()
-                .h(px(14.0))
-                .text_size(px(10.0))
-                .text_color(theme.muted_foreground)
-                .child(if position == 0 || (position + 1) % 10 == 0 {
-                  (position + 1).to_string()
-                } else {
-                  String::new()
-                }),
-            )
-            .child(div().text_sm().child(residue.letter.to_string())),
-        )
-        .on_click(move |_, _, cx| {
-          let Some((id, view)) = target else { return };
-          let _ = select_app.update(cx, |this, cx| {
-            if this.document_panels.rendering_view_id(id) == Some(view) {
-              let _ = this.dispatch_selection_command(
-                Some(id),
-                SelectionCommand::Atoms {
-                  atoms: atoms.as_ref().clone(),
-                  mode: SelectionMode::Replace,
-                },
-                cx,
-              );
-            }
-          });
-        }),
+        .on_prepaint(move |bounds, window, _| {
+          measure_bounds
+            .borrow_mut()
+            .insert(residue_id, bounds.intersect(&window.content_mask().bounds));
+        })
+        .child(cell),
     );
   }
   let sequence = if state.wrap {
@@ -307,6 +366,73 @@ fn render_chain(
         ),
     )
     .child(sequence)
+}
+
+impl ChitinApp {
+  /// Previews screen-space hits and commits one undoable command at pointer release.
+  fn sequence_marquee(&mut self, event: MarqueeEvent, target: Option<(u64, EntityId)>, cx: &mut Context<Self>) {
+    if matches!(event, MarqueeEvent::Cancel) {
+      self.sequence_panel.preview = None;
+      cx.notify();
+      return;
+    }
+    let Some((id, view)) = target.filter(|target| Some(*target) == self.sequence_panel.target) else {
+      return;
+    };
+    if self.document_panels.rendering_view_id(id) != Some(view) {
+      self.sequence_panel.cancel_drag(cx);
+      return;
+    }
+    let rectangle = match event {
+      MarqueeEvent::Preview(rectangle) | MarqueeEvent::Commit(rectangle) => rectangle,
+      MarqueeEvent::Cancel => return,
+    };
+    let hits = self.sequence_panel.item_bounds.borrow();
+    let atoms = self
+      .sequence_panel
+      .chains
+      .iter()
+      .flat_map(|chain| &chain.residues)
+      .filter(|residue| {
+        hits
+          .get(&residue.id)
+          .is_some_and(|bounds| selection_intersects(*bounds, rectangle))
+      })
+      .flat_map(|residue| residue.atoms.iter().copied())
+      .collect();
+    drop(hits);
+    match event {
+      MarqueeEvent::Preview(_) => self.sequence_panel.preview = Some(atoms),
+      MarqueeEvent::Commit(_) => {
+        self.sequence_panel.preview = None;
+        let _ = self.dispatch_selection_command(
+          Some(id),
+          SelectionCommand::Atoms {
+            atoms,
+            mode: SelectionMode::Replace,
+          },
+          cx,
+        );
+      }
+      MarqueeEvent::Cancel => {}
+    }
+    cx.notify();
+  }
+}
+
+/// Empty clipped cells never hit; horizontal drags still cross the residue row.
+fn selection_intersects(cell: Bounds<Pixels>, rectangle: Bounds<Pixels>) -> bool {
+  if cell.size.width <= px(0.0) || cell.size.height <= px(0.0) {
+    return false;
+  }
+  if rectangle.size.width <= px(3.0) && rectangle.size.height <= px(3.0) {
+    let point = rectangle.origin;
+    return point.x >= cell.left() && point.x < cell.right() && point.y >= cell.top() && point.y < cell.bottom();
+  }
+  cell.intersects(&Bounds::new(
+    rectangle.origin,
+    gpui::size(rectangle.size.width.max(px(1.0)), rectangle.size.height.max(px(1.0))),
+  ))
 }
 
 fn project_chains(scene: &StructureScene) -> Vec<SequenceChain> {
@@ -418,5 +544,104 @@ mod tests {
   #[test]
   fn unknown_polymer_code_uses_x() {
     assert_eq!(one_letter("A2G"), 'X');
+  }
+
+  #[test]
+  fn horizontal_drag_hits_residues_without_vertical_motion() {
+    let cell = Bounds::new(gpui::point(px(20.0), px(40.0)), gpui::size(px(20.0), px(36.0)));
+    let rectangle = Bounds::new(gpui::point(px(5.0), px(50.0)), gpui::size(px(60.0), px(0.0)));
+    assert!(selection_intersects(cell, rectangle));
+  }
+
+  #[test]
+  fn fully_clipped_residue_does_not_hit_a_selection_rectangle() {
+    let cell = Bounds::new(gpui::point(px(20.0), px(40.0)), gpui::size(px(0.0), px(36.0)));
+    let rectangle = Bounds::new(gpui::point(px(5.0), px(5.0)), gpui::size(px(100.0), px(100.0)));
+    assert!(!selection_intersects(cell, rectangle));
+  }
+
+  #[test]
+  fn wrapped_row_hit_testing_does_not_select_the_row_above() {
+    let cell = Bounds::new(gpui::point(px(20.0), px(10.0)), gpui::size(px(20.0), px(36.0)));
+    let rectangle = Bounds::new(gpui::point(px(5.0), px(50.0)), gpui::size(px(60.0), px(20.0)));
+    assert!(!selection_intersects(cell, rectangle));
+  }
+
+  #[gpui::test]
+  fn previews_leave_canonical_selection_unchanged_and_release_is_one_undoable_edit(cx: &mut gpui::TestAppContext) {
+    use crate::workbench::documents::state::{WgpuDocumentView, WgpuDocumentViewFactory};
+    use gpui::{Render, Window};
+
+    struct Probe;
+    impl Render for Probe {
+      fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+      }
+    }
+    fn view(scene: Arc<StructureScene>, cx: &mut App) -> WgpuDocumentView {
+      WgpuDocumentView::with_representation_layers(cx.new(|_| Probe), Default::default(), |_, _| {}).with_selection(
+        scene,
+        |_, _| {},
+        |_, _| {},
+      )
+    }
+    cx.update(chitin_ui::init);
+    let input = concat!(
+      "ATOM      1  CA  GLY A  10       0.000   0.000   0.000  1.00 10.00           C  \n",
+      "ATOM      2  CA  ALA A  11       1.000   0.000   0.000  1.00 10.00           C  \nEND\n",
+    );
+    let parsed = PdbParser::new()
+      .parse_bytes(input.as_bytes())
+      .unwrap_or_else(|error| panic!("fixture: {error}"));
+    let scene =
+      Arc::new(StructureScene::from_first_model(&parsed.structure).unwrap_or_else(|error| panic!("scene: {error}")));
+    let (app, cx) = cx.add_window_view(move |_, cx| {
+      ChitinApp::new_with_wgpu_document_panel(
+        Some("/tmp".into()),
+        cx.focus_handle(),
+        "sequence.pdb",
+        view(scene.clone(), cx),
+        WgpuDocumentViewFactory::new(move |_, cx| view(scene.clone(), cx)),
+      )
+    });
+    cx.update(|_, cx| {
+      app.update(cx, |app, cx| {
+        app.sequence_panel.sync(&app.document_panels, cx);
+        let target = app.sequence_panel.target;
+        for (index, residue) in app.sequence_panel.chains[0].residues.iter().enumerate() {
+          app.sequence_panel.item_bounds.borrow_mut().insert(
+            residue.id,
+            Bounds::new(
+              gpui::point(px(index as f32 * 20.0), px(0.0)),
+              gpui::size(px(20.0), px(36.0)),
+            ),
+          );
+        }
+        let rectangle = Bounds::new(gpui::point(px(0.0), px(5.0)), gpui::size(px(40.0), px(10.0)));
+        app.sequence_marquee(MarqueeEvent::Preview(rectangle), target, cx);
+        app.sequence_marquee(MarqueeEvent::Preview(rectangle), target, cx);
+        assert!(
+          app
+            .document_panels
+            .selection_control(1)
+            .is_some_and(|control| control.atoms.is_empty())
+        );
+        app.sequence_marquee(MarqueeEvent::Commit(rectangle), target, cx);
+        assert_eq!(
+          app
+            .document_panels
+            .selection_control(1)
+            .map(|control| control.atoms.len()),
+          Some(2)
+        );
+        assert!(app.dispatch_history_command(false, cx).is_ok());
+        assert!(
+          app
+            .document_panels
+            .selection_control(1)
+            .is_some_and(|control| control.atoms.is_empty())
+        );
+      })
+    });
   }
 }
