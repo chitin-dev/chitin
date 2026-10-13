@@ -1,153 +1,183 @@
-//! Terminal content hosted by the reusable workbench bottom dock.
+//! Terminal-owned session navigation and content; workbench owns the overlay.
 
-use chitin_ui::widgets::select_item::IconSelectItem;
-use chitin_ui::workbench::{WorkbenchStyle, viewport_container};
-use chitin_ui::{views::terminal::TerminalEmulator, workbench::bottom_dock::BottomDock};
-use gpui_kit::component::theme::ThemeColor;
-
-use gpui::{
-  ElementId, Entity, InteractiveElement, ParentElement, Pixels, StatefulInteractiveElement, Styled, WeakEntity, div,
-  prelude::FluentBuilder, px,
+use chitin_ui::{
+  views::terminal::TerminalEmulator,
+  workbench::{WorkbenchStyle, bottom_dock::BOTTOM_DOCK_BAR_HEIGHT},
 };
+use gpui::{ElementId, InteractiveElement, ParentElement, Styled, WeakEntity, div, prelude::FluentBuilder, px};
 use gpui_kit::component::{
-  Icon, Selectable as _, Sizable as _,
+  Disableable as _, Icon, Sizable as _,
   button::{Button, ButtonVariant, ButtonVariants as _},
-  select::{Select, SelectState},
+  menu::{DropdownMenu as _, PopupMenuItem},
+  tab::{Tab, TabBar},
+  theme::ThemeColor,
 };
 
-use super::{TerminalPanelControls, terminal_profile_icon};
+use super::{DesktopTerminalProfile, TerminalPanelControls, terminal_profile_icon};
 use crate::{app::ChitinApp, fonts::TERMINAL_FONT_FAMILY, keybindings::COMMAND_TERMINAL_KEY_CONTEXT};
 
-/// Renders the VT terminal emulator as the active bottom-dock item.
-///
-/// # Parameters
-///
-/// * `controls` contains the persistent emulator and in-process shell endpoint.
-/// * `height` is the current workbench-level dock height.
-/// * `theme` supplies semantic colors for the dock and terminal.
-/// * `app` receives resize, close, and session activation from the rendered content.
-///
-/// # Returns
-///
-/// A bottom-dock element containing the shared VT terminal surface.
-pub(crate) fn render_terminal_bottom_dock(
+/// Renders persistent sessions without owning dock geometry or visibility.
+pub(crate) fn render_terminal_panel(
   controls: TerminalPanelControls,
-  height: Pixels,
   theme: ThemeColor,
   app: WeakEntity<ChitinApp>,
 ) -> impl gpui::IntoElement {
   let style = WorkbenchStyle::new(theme);
-  let resize_app = app.clone();
-  let close_app = app.clone();
   let active_terminal = controls.active().map(|session| session.terminal.clone());
-  let tab_scroll = controls.tab_scroll.clone();
-  let tab_strip = Styled::scrollbar_width(
-    div()
-      .id("terminal-session-tabs")
-      .flex()
-      .flex_col()
-      .gap_1()
-      .w(px(38.0))
-      .min_h_0()
-      .p_1()
-      .overflow_y_scroll()
-      .track_scroll(&tab_scroll),
-    // The lane is only wide enough for one icon column, so the native bar would
-    // cover the tabs themselves.
-    px(0.0),
-  );
-  let sessions = controls.sessions.iter().fold(tab_strip, |sessions, session| {
-    let selected = session.id == controls.active_session;
-    let session_id = session.id;
-    let tab_app = app.clone();
-    sessions.child(
-      Button::new(ElementId::from(("terminal-session-tab", session_id.0)))
-        .with_variant(ButtonVariant::Ghost)
-        .selected(selected)
-        .w(px(28.0))
-        .h(px(28.0))
-        .px(px(0.0))
-        .on_click(move |_, window, cx| {
-          let _ = tab_app.update(cx, |this, cx| this.activate_terminal_session(session_id, window, cx));
-        })
-        // The icon takes the button's foreground rather than a colour of its own,
-        // so it stays legible against the tab's selected and hover backgrounds.
-        .child(
-          Icon::default()
-            .path(terminal_profile_icon(session.profile.id()))
-            .with_size(px(14.0)),
-        ),
-    )
+  let selected = controls
+    .sessions
+    .iter()
+    .position(|session| session.id == controls.active_session)
+    .unwrap_or(0);
+  let tabs = controls.sessions.iter().map(|session| {
+    let id = session.id;
+    let close_app = app.clone();
+    let label = if session.profile.id() == "builtin-shell" {
+      "chitin"
+    } else {
+      session.profile.label()
+    };
+    Tab::new()
+      .mr_1()
+      .pl_2()
+      .label(label.to_owned())
+      .prefix(
+        Icon::default()
+          .path(terminal_profile_icon(session.profile.id()))
+          .with_size(px(12.0)),
+      )
+      .suffix(
+        Button::new(ElementId::from(("terminal-session-close", id.0)))
+          .with_variant(ButtonVariant::Ghost)
+          .tooltip("Close session")
+          .w(px(20.0))
+          .h(px(20.0))
+          .px(px(0.0))
+          .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            let _ = close_app.update(cx, |this, cx| this.close_terminal_session(id, cx));
+          })
+          .child(Icon::default().path("icons/window-close.svg").with_size(px(12.0))),
+      )
   });
-  let header_actions = div()
+  let ids: Vec<_> = controls.sessions.iter().map(|session| session.id).collect();
+  let activate_app = app.clone();
+  let navigation = TabBar::new("terminal-session-tabs")
+    .segmented()
+    .selected_background(style.raised_background)
+    .small()
+    .bg(style.panel_background)
+    .menu(false)
+    .track_scroll(&controls.tab_scroll)
+    .selected_index(selected)
+    .children(tabs)
+    .on_click(move |index, window, cx| {
+      if let Some(id) = ids.get(*index) {
+        let _ = activate_app.update(cx, |this, cx| this.activate_terminal_session(*id, window, cx));
+      }
+    });
+  let new_session = new_terminal_menu(&controls, app.clone());
+  let clear_app = app;
+  let actions = div()
     .flex()
+    .flex_none()
     .items_center()
     .gap_1()
-    .child(new_terminal_select(controls.profile_select.clone()))
-    .child({
-      let session_close_app = app.clone();
-      Button::new("terminal-session-close")
-        .with_variant(ButtonVariant::Ghost)
-        .w(px(26.0))
-        .h(px(24.0))
-        .px(px(0.0))
+    .child(new_session)
+    .child(
+      terminal_action_button("terminal-clear-scrollback", "icons/terminal-trash.svg", "Clear")
+        .tooltip("Clear scrollback")
+        .disabled(active_terminal.is_none())
         .on_click(move |_, _, cx| {
-          let _ = session_close_app.update(cx, |this, cx| this.close_active_terminal_session(cx));
-        })
-        .child(Icon::default().path("icons/terminal-trash.svg").with_size(px(14.0)))
-    });
-  let terminal = div()
+          let _ = clear_app.update(cx, |this, cx| this.clear_active_terminal_scrollback(cx));
+        }),
+    );
+  div()
     .flex()
     .flex_col()
     .flex_1()
     .min_h_0()
+    .min_w_0()
+    .bg(style.panel_background)
     .key_context(COMMAND_TERMINAL_KEY_CONTEXT)
     .child(
       div()
         .flex()
-        .flex_row()
+        .items_center()
+        .h(BOTTOM_DOCK_BAR_HEIGHT)
+        .flex_none()
+        .px_2()
+        .child(div().flex_1().min_w_0().child(navigation))
+        .child(actions),
+    )
+    .child(
+      // Utility content belongs to the shared dock surface, not a viewport card.
+      div()
+        .flex()
+        .flex_col()
         .flex_1()
         .min_h_0()
-        .child(
-          viewport_container(style)
-            .p_2()
-            .when_some(active_terminal, |terminal, active_terminal| {
-              terminal.child(
-                TerminalEmulator::new(active_terminal)
-                  .theme(theme)
-                  .font_family(TERMINAL_FONT_FAMILY),
-              )
-            }),
-        )
-        .child(sessions),
-    );
-
-  BottomDock::new("Terminal")
-    .on_close(move |_, _, cx| {
-      let _ = close_app.update(cx, |this, cx| this.close_bottom_dock(cx));
-    })
-    .height(height)
-    .on_resize(move |height, _, cx| {
-      let _ = resize_app.update(cx, |this, cx| {
-        if this.bottom_dock.set_height(height) {
-          cx.notify();
-        }
-      });
-    })
-    .theme(theme)
-    .header_actions(header_actions)
-    .child(terminal)
+        .min_w_0()
+        .bg(style.panel_background)
+        .p_2()
+        .when_some(active_terminal.clone(), |content, terminal| {
+          content.child(
+            TerminalEmulator::new(terminal)
+              .theme(theme)
+              .background(style.panel_background)
+              .font_family(TERMINAL_FONT_FAMILY),
+          )
+        })
+        .when(active_terminal.is_none(), |content| {
+          content.child(
+            div()
+              .text_xs()
+              .text_color(theme.muted_foreground)
+              .child("No terminal sessions. Use + to start a shell."),
+          )
+        }),
+    )
 }
 
-/// Builds the icon-only selector used to create a terminal profile session.
-fn new_terminal_select(profile_select: Entity<SelectState<Vec<IconSelectItem>>>) -> impl gpui::IntoElement {
-  Select::new(&profile_select)
-    .placeholder("")
-    .accessibility_label("New terminal session")
-    .icon(Icon::default().path("icons/terminal-add.svg"))
-    .appearance(false)
+/// Keeps both toolbar actions on the same Kit button appearance and sizing.
+fn terminal_action_button(id: &'static str, icon: &'static str, label: &'static str) -> Button {
+  Button::new(id)
+    .with_variant(ButtonVariant::Ghost)
     .small()
-    .w(px(28.0))
-    .px(px(4.0))
-    .menu_width(px(180.0))
+    .h(px(24.0))
+    .text_xs()
+    .px_2()
+    .child(Icon::default().path(icon).with_size(px(14.0)))
+    .child(label)
+}
+
+/// Kit owns menu focus, keyboard navigation and dismissal; callbacks only launch shells.
+fn new_terminal_menu(controls: &TerminalPanelControls, app: WeakEntity<ChitinApp>) -> impl gpui::IntoElement {
+  let profiles: Vec<_> = std::iter::once(DesktopTerminalProfile::Builtin)
+    .chain(
+      controls
+        .catalog
+        .available()
+        .iter()
+        .cloned()
+        .map(DesktopTerminalProfile::Shell),
+    )
+    .collect();
+  terminal_action_button("terminal-new-session", "icons/terminal-add.svg", "New session").dropdown_menu(
+    move |menu, _, _| {
+      profiles.iter().fold(menu.min_w(px(180.0)), |menu, profile| {
+        let launch_app = app.clone();
+        let launch_profile = profile.clone();
+        menu.item(
+          PopupMenuItem::new(profile.label().to_owned())
+            .icon(Icon::default().path(terminal_profile_icon(profile.id())))
+            .on_click(move |_, window, cx| {
+              let _ = launch_app.update(cx, |this, cx| {
+                this.create_terminal_session(launch_profile.clone(), window, cx)
+              });
+            }),
+        )
+      })
+    },
+  )
 }

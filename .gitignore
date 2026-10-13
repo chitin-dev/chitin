@@ -1,6 +1,8 @@
 **/target/
 /.vscode/
 *.log
+# Heaptrack profiler output must stay local.
+heaptrack.*
 /.temp
 # codex superpower plugin
 docs/superpowers
@@ -10,3 +12,4 @@ docs/superpowers
 .cargo/
 .codex/
 .agents/
+.commandcode/

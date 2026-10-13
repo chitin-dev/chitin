@@ -180,11 +180,13 @@ impl ChitinApp {
                 },
               };
               this.finish_terminal_command(session_id, &output);
-              if let Some(focus) = this.terminal_panel_controls.as_ref().and_then(|controls| {
-                (controls.active_session == session_id)
-                  .then(|| controls.focus(cx))
-                  .flatten()
-              }) {
+              if this.bottom_dock.is_active(super::TERMINAL_DOCK_ITEM_ID)
+                && let Some(focus) = this.terminal_panel_controls.as_ref().and_then(|controls| {
+                  (controls.active_session == session_id)
+                    .then(|| controls.focus(cx))
+                    .flatten()
+                })
+              {
                 window.focus(&focus, cx);
               }
               cx.notify();

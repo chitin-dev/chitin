@@ -41,6 +41,20 @@ impl LayerAppearance {
   pub fn linear_color(self) -> [f32; 3] {
     self.color.map(srgb_to_linear)
   }
+  /// Resolves the same scientific color used by the renderer for an owned primitive.
+  ///
+  /// `element` and `chain` describe its atom owner; `chain` is the stable topology
+  /// index used by chain coloring. `palette` supplies element and default carbon
+  /// colors. The returned RGB values are linear, so UI swatches must encode sRGB.
+  pub fn color_for(self, element: ElementCategory, chain: usize, palette: &crate::BallAndStickPalette) -> [f32; 3] {
+    match self.scheme {
+      ColorScheme::Uniform if self.palette_uniform => palette.carbon.color,
+      ColorScheme::Uniform => self.linear_color(),
+      ColorScheme::Element => palette.for_element(element).color,
+      ColorScheme::ChainElement if element != ElementCategory::Carbon => palette.for_element(element).color,
+      ColorScheme::Chain | ColorScheme::ChainElement => chain_color(chain),
+    }
+  }
   /// Uses a custom sRGB uniform color instead of the renderer's carbon palette.
   pub fn with_color(mut self, color: [u8; 3]) -> Self {
     self.color = color;
@@ -310,22 +324,13 @@ impl ColorCache {
       palette: &BallAndStickPalette,
     ) -> [f32; 3] {
       let element = owner.map_or(ElementCategory::Carbon, |atom| atom.element);
-      match appearance.scheme {
-        ColorScheme::Uniform => {
-          if appearance.palette_uniform {
-            palette.carbon.color
-          } else {
-            appearance.linear_color()
-          }
-        }
-        ColorScheme::Element => palette.for_element(element).color,
-        ColorScheme::ChainElement if element != ElementCategory::Carbon => palette.for_element(element).color,
-        ColorScheme::Chain | ColorScheme::ChainElement => chain_color(
-          chain
-            .or_else(|| owner.map(|atom| atom.chain as usize))
-            .unwrap_or_default(),
-        ),
-      }
+      appearance.color_for(
+        element,
+        chain
+          .or_else(|| owner.map(|atom| atom.chain as usize))
+          .unwrap_or_default(),
+        palette,
+      )
     }
     match index {
       0 => {

@@ -536,8 +536,8 @@ impl Render for ChitinWgpuDocumentPanel {
   ///
   /// # Parameters
   ///
-  /// * `window` is used to request animation frames while the panel is visible.
-  /// * `cx` is notified so GPUI keeps repainting the panel.
+  /// * `window` schedules the next animation frame while the panel is visible.
+  /// * `cx` identifies the view to repaint without refreshing the whole window.
   ///
   /// # Returns
   ///
@@ -563,8 +563,11 @@ impl Render for ChitinWgpuDocumentPanel {
     if self.surface.is_some() {
       self.render_surface(window.scale_factor());
       self.update_selection_preview(cx);
-      window.request_animation_frame();
-      cx.notify();
+      // Entity::render runs before GPUI pushes this view onto its render stack.
+      // request_animation_frame() would therefore refresh the entire window
+      // and bypass cached sibling views such as the Sequence bottom dock.
+      let view = cx.entity_id();
+      window.on_next_frame(move |_, cx| cx.notify(view));
     }
 
     let viewport = match self.surface.clone() {

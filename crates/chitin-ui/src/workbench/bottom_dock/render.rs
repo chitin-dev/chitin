@@ -29,6 +29,9 @@ pub struct BottomDock {
   on_resize: Option<Rc<BottomDockResizeHandler>>,
   theme: ThemeColor,
   header_actions: Option<AnyElement>,
+  navigation: Option<AnyElement>,
+  maximized: bool,
+  on_maximize: Option<Rc<BottomDockCloseHandler>>,
   child: Option<AnyElement>,
 }
 
@@ -42,6 +45,9 @@ impl BottomDock {
       on_resize: None,
       theme: *ThemeColor::dark(),
       header_actions: None,
+      navigation: None,
+      maximized: false,
+      on_maximize: None,
       child: None,
     }
   }
@@ -88,6 +94,24 @@ impl BottomDock {
     self
   }
 
+  /// Supplies tool tabs independently of the active tool's content.
+  pub fn navigation(mut self, navigation: impl IntoElement) -> Self {
+    self.navigation = Some(navigation.into_any_element());
+    self
+  }
+
+  /// Sets whether the overlay occupies the full central area.
+  pub fn maximized(mut self, maximized: bool) -> Self {
+    self.maximized = maximized;
+    self
+  }
+
+  /// Handles maximize/restore without changing document allocation.
+  pub fn on_maximize(mut self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
+    self.on_maximize = Some(Rc::new(handler));
+    self
+  }
+
   /// Sets the active dock item's content.
   pub fn child(mut self, child: impl IntoElement) -> Self {
     self.child = Some(child.into_any_element());
@@ -98,8 +122,8 @@ impl BottomDock {
 impl RenderOnce for BottomDock {
   fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
     let theme = self.theme;
-    let dock = panel_surface(WorkbenchStyle::new(theme))
-      .bg(theme.background)
+    let style = WorkbenchStyle::new(theme);
+    let dock = panel_surface(style)
       .occlude()
       .on_scroll_wheel(|_, _, cx| {
         cx.stop_propagation();
@@ -109,15 +133,19 @@ impl RenderOnce for BottomDock {
           .flex()
           .items_center()
           .justify_between()
-          .h(px(34.0))
-          .min_h(px(34.0))
-          .px_3()
-          .child(
+          .h(super::BOTTOM_DOCK_BAR_HEIGHT)
+          .min_h(super::BOTTOM_DOCK_BAR_HEIGHT)
+          .flex_none()
+          .border_b_1()
+          .border_color(style.separator)
+          .px_2()
+          .child(self.navigation.unwrap_or_else(|| {
             div()
               .text_xs()
               .font_weight(gpui::FontWeight::SEMIBOLD)
-              .child(self.title),
-          )
+              .child(self.title)
+              .into_any_element()
+          }))
           .child(
             div()
               .flex()
@@ -126,9 +154,26 @@ impl RenderOnce for BottomDock {
               .when_some(self.header_actions, |actions, header_actions| {
                 actions.child(header_actions)
               })
+              .when_some(self.on_maximize, |actions, on_maximize| {
+                actions.child(
+                  Button::new("bottom-dock-maximize")
+                    .with_variant(ButtonVariant::Ghost)
+                    .tooltip(if self.maximized {
+                      "Restore dock"
+                    } else {
+                      "Maximize dock"
+                    })
+                    .w(px(26.0))
+                    .h(px(24.0))
+                    .px(px(0.0))
+                    .on_click(move |event, window, cx| on_maximize(event, window, cx))
+                    .child(Icon::default().path("icons/window-maximize.svg").with_size(px(14.0))),
+                )
+              })
               .child(
                 Button::new("bottom-dock-close")
                   .with_variant(ButtonVariant::Ghost)
+                  .tooltip("Hide dock")
                   .cursor_pointer()
                   .w(px(26.0))
                   .h(px(24.0))
@@ -141,6 +186,10 @@ impl RenderOnce for BottomDock {
           ),
       )
       .when_some(self.child, |dock, child| dock.child(child));
+
+    if self.maximized {
+      return div().absolute().inset_0().child(dock);
+    }
 
     // The document is not a child of this split: the upper pane is transparent
     // and non-occluding, so interaction passes through to the full-size document.

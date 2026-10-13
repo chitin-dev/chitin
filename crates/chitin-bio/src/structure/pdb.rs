@@ -199,6 +199,8 @@ mod tests {
   fn projects_pdb_compnd_seqres_and_cryst1_metadata() {
     let input = concat!(
       "HEADER    TEST STRUCTURE                              1ABC\n",
+      "EXPDTA    X-RAY DIFFRACTION\n",
+      "REMARK   2 RESOLUTION.    1.80 ANGSTROMS.\n",
       "COMPND    1 MOL_ID: 1;\n",
       "COMPND    2 MOLECULE: TEST PROTEIN;\n",
       "COMPND    3 CHAIN: A;\n",
@@ -210,6 +212,8 @@ mod tests {
       .parse_bytes(input.as_bytes())
       .unwrap_or_else(|error| panic!("PDB metadata fixture should parse: {error}"));
     assert_eq!(parsed.structure.polymer_entities.len(), 1);
+    assert_eq!(parsed.structure.metadata.experimental_methods, ["X-RAY DIFFRACTION"]);
+    assert_eq!(parsed.structure.metadata.resolution, Some(1.8));
     assert_eq!(parsed.structure.polymer_entities[0].sequence.len(), 3);
     assert_eq!(parsed.structure.chains[0].entity_id.as_deref(), Some("1"));
     assert_eq!(

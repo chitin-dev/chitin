@@ -4,8 +4,10 @@ use gpui::{Pixels, SharedString, px};
 
 /// Default bottom-dock height.
 pub const DEFAULT_BOTTOM_DOCK_HEIGHT: Pixels = px(260.0);
+/// Shared compact height of tool and nested utility navigation bars.
+pub const BOTTOM_DOCK_BAR_HEIGHT: Pixels = px(30.0);
 /// Default minimum height retained by an open bottom dock.
-pub const DEFAULT_BOTTOM_DOCK_MIN_HEIGHT: Pixels = px(120.0);
+pub const DEFAULT_BOTTOM_DOCK_MIN_HEIGHT: Pixels = px(160.0);
 /// Default minimum height reserved for the workbench center area.
 pub const DEFAULT_CENTER_AREA_MIN_HEIGHT: Pixels = px(160.0);
 
@@ -29,6 +31,8 @@ impl BottomDockItemId {
 #[derive(Clone, Debug)]
 pub struct BottomDockState {
   active_item: Option<BottomDockItemId>,
+  visible: bool,
+  maximized: bool,
   height: Pixels,
 }
 
@@ -37,31 +41,35 @@ impl BottomDockState {
   pub fn new() -> Self {
     Self {
       active_item: None,
+      visible: false,
+      maximized: false,
       height: DEFAULT_BOTTOM_DOCK_HEIGHT,
     }
   }
 
-  /// Returns the active dock item, or `None` while the dock is closed.
+  /// Returns the remembered tool, including while the overlay is hidden.
   pub fn active_item(&self) -> Option<&BottomDockItemId> {
     self.active_item.as_ref()
   }
 
   /// Returns whether any dock item is visible.
   pub const fn is_open(&self) -> bool {
-    self.active_item.is_some()
+    self.visible
   }
 
   /// Returns whether the identified item is currently visible.
   pub fn is_active(&self, item_id: &str) -> bool {
-    self
-      .active_item
-      .as_ref()
-      .is_some_and(|active| active.as_str() == item_id)
+    self.visible
+      && self
+        .active_item
+        .as_ref()
+        .is_some_and(|active| active.as_str() == item_id)
   }
 
   /// Shows the identified item, replacing the previously active dock tool.
   pub fn show(&mut self, item_id: impl Into<SharedString>) {
     self.active_item = Some(BottomDockItemId::new(item_id));
+    self.visible = true;
   }
 
   /// Toggles one item and returns whether it is visible afterward.
@@ -78,18 +86,29 @@ impl BottomDockState {
   /// `true` when the requested item is visible afterward; otherwise `false`.
   pub fn toggle(&mut self, item_id: impl Into<SharedString>) -> bool {
     let item_id = BottomDockItemId::new(item_id);
-    if self.active_item.as_ref() == Some(&item_id) {
+    if self.visible && self.active_item.as_ref() == Some(&item_id) {
       self.close();
       false
     } else {
       self.active_item = Some(item_id);
+      self.visible = true;
       true
     }
   }
 
   /// Closes the dock while retaining its last measured height.
   pub fn close(&mut self) {
-    self.active_item = None;
+    self.visible = false;
+  }
+
+  /// Returns whether the overlay fills the central workbench area.
+  pub const fn is_maximized(&self) -> bool {
+    self.maximized
+  }
+
+  /// Toggles the overlay extent without changing its remembered resize height.
+  pub fn toggle_maximized(&mut self) {
+    self.maximized = !self.maximized;
   }
 
   /// Returns the current dock height.
@@ -130,6 +149,22 @@ impl Default for BottomDockState {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn hiding_should_preserve_tool_and_maximized_geometry() {
+    let mut state = BottomDockState::new();
+    state.show("terminal");
+    state.set_height(px(310.0));
+    state.toggle_maximized();
+    state.close();
+    assert!(!state.is_open());
+    assert!(!state.is_active("terminal"));
+    assert_eq!(state.active_item().map(BottomDockItemId::as_str), Some("terminal"));
+    assert!(state.is_maximized());
+    state.show("terminal");
+    state.toggle_maximized();
+    assert_eq!(state.height(), px(310.0));
+  }
 
   #[test]
   fn toggling_active_item_should_close_dock() {

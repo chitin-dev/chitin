@@ -131,6 +131,8 @@ pub(crate) fn build_structure(
   strict: bool,
 ) -> Result<StructureParseResult, StructureBuildError> {
   let StructureInput {
+    experimental_methods,
+    resolution,
     classification,
     identifier,
     unit_cell,
@@ -155,6 +157,8 @@ pub(crate) fn build_structure(
   };
 
   builder.structure.metadata.classification = classification;
+  builder.structure.metadata.experimental_methods = experimental_methods;
+  builder.structure.metadata.resolution = resolution;
   builder.structure.metadata.identifier = identifier;
   builder.structure.metadata.unit_cell = unit_cell;
   builder.structure.metadata.symmetry = symmetry;

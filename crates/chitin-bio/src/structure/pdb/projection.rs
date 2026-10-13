@@ -122,6 +122,13 @@ impl PdbProjection {
         line,
       } => match kind {
         PdbProjectionRecordKind::Compnd => self.project_compnd(&line, line_number)?,
+        PdbProjectionRecordKind::Expdta => {
+          for method in field(&line, 10, 80).split(';').map(str::trim).filter(|s| !s.is_empty()) {
+            if !self.input.experimental_methods.iter().any(|s| s == method) {
+              self.input.experimental_methods.push(method.to_owned());
+            }
+          }
+        }
         PdbProjectionRecordKind::Seqres => self.project_seqres(&line, line_number)?,
         PdbProjectionRecordKind::Remark => self.project_remark(&line, line_number)?,
         PdbProjectionRecordKind::Cryst1 => self.project_cryst1(&line, line_number)?,
@@ -220,6 +227,20 @@ impl PdbProjection {
   /// Dispatches supported REMARK records to PDB-specific projection logic.
   fn project_remark(&mut self, line: &str, line_number: usize) -> Result<(), PdbParseError> {
     match field(line, 7, 10).trim() {
+      "2" => {
+        // REMARK 2 also contains free-text declarations such as NOT APPLICABLE.
+        // Preserve only finite positive resolutions; text is not a parse failure.
+        if let Some(value) = field(line, 10, 80).trim().strip_prefix("RESOLUTION.")
+          && let Some(resolution) = value
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse::<f32>().ok())
+            .filter(|value| value.is_finite() && *value > 0.)
+        {
+          self.input.resolution = Some(resolution);
+        }
+        Ok(())
+      }
       "465" => self.project_missing_residue(line),
       "350" => self.project_assembly_remark(line, line_number),
       _ => Ok(()),

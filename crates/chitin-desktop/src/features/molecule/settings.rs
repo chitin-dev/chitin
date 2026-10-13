@@ -1,26 +1,23 @@
-//! Molecular representation and surface-backend options.
+//! Entry-local molecular editors submitting typed requests through the command bus.
 
 use std::{cell::Cell, rc::Rc};
 
-use crate::{app::ChitinApp, workbench::documents::layout::PanelId};
+use crate::app::ChitinApp;
 use chitin_bio::surface::MolecularSurfaceBackend;
-use chitin_command::{RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle};
+use chitin_command::{
+  RenderAtomStyle, RenderCommand, RenderLayer, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle,
+};
 use chitin_molecule_renderer::{AtomStyle, RepresentationLayers};
 use chitin_ui::widgets::select_item::IconSelectItem;
-use gpui::{
-  App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
-  StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, px, svg,
-};
+use gpui::{App, AppContext, Context, Entity, IntoElement, ParentElement, Styled, Subscription, Window, div};
 use gpui_kit::component::{
-  IndexPath,
-  button::{Button, ButtonVariant, ButtonVariants as _},
-  popover::Popover,
-  select::{SelectEvent, SelectItem, SelectState},
+  Icon, IndexPath, Sizable as _,
+  button::{Button, ButtonVariants as _},
+  collapsible::Collapsible,
+  select::{Select, SelectEvent, SelectItem, SelectState},
   theme::ThemeColor,
 };
 
-/// Asset path for the molecular document options action.
-const PANEL_MORE_ICON_PATH: &str = "icons/panel-more.svg";
 /// Asset path for the stick representation icon.
 const STICK_ICON_PATH: &str = "icons/atom-stick.svg";
 /// Asset path for the ball-and-stick representation icon.
@@ -37,43 +34,18 @@ const SURFACE_SOLID_ICON_PATH: &str = "icons/surface-solid.svg";
 const IMPLICIT_SURFACE_ICON_PATH: &str = "icons/surface-implicit.svg";
 /// Asset path for the analytical MSMS backend icon.
 const MSMS_SURFACE_ICON_PATH: &str = "icons/surface-msms.svg";
-/// Size used by tab strip action icons.
-const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
-/// Width of the molecular document options menu.
-const DOCUMENT_OPTIONS_MENU_WIDTH: Pixels = px(240.0);
-
-/// Molecular rendering choices displayed by one document options popover.
-#[derive(Clone, Copy)]
-pub(crate) struct MolecularDocumentOptions {
-  /// Representation layers selected for the molecular scene.
-  pub(crate) representation: RepresentationLayers,
-  /// Algorithm selected for molecular-surface generation.
-  pub(crate) surface_backend: MolecularSurfaceBackend,
-}
-
-/// Deferred molecular document menu rendered above the clipped tab strip.
-#[derive(IntoElement)]
-struct DocumentOptionsMenu {
-  /// Panel whose active molecular view receives menu changes.
-  panel_id: PanelId,
-  /// Molecular rendering choices selected when this menu is rendered.
-  options: MolecularDocumentOptions,
-  /// Semantic colors for the menu surface and rows.
-  theme: ThemeColor,
-  /// Weak root app entity used by dismissal and selection callbacks.
-  app: WeakEntity<ChitinApp>,
-  /// Controlled open state shared with document-panel command routing.
-  open: bool,
-  /// Persistent interaction state used by the semantic menu primitive.
-  controls: DocumentOptionsControls,
-}
-
-/// Persistent semantic controls used by molecular document panels.
+/// Persistent representation and appearance controls for one entry's inline editors.
 #[derive(Clone)]
-pub(crate) struct DocumentOptionsControls {
+pub(crate) struct MolecularSettingsControls {
+  /// Shared color and opacity controls, including coalesced slider edits.
   appearance: super::appearance::AppearanceControls,
-  /// Retains command targeting when dismissal precedes a deferred confirmation.
-  target_panel: Rc<Cell<Option<u64>>>,
+  /// Active entry identity and rendering view guard for delayed confirmations.
+  target_entry: Rc<Cell<Option<(u64, gpui::EntityId)>>>,
+  /// Surface calculation controls are secondary to the layer's appearance.
+  advanced: Rc<Cell<bool>>,
+  app: gpui::WeakEntity<ChitinApp>,
+  /// Parent focus scope keeps an inline editor mounted while its controls are focused.
+  focus: gpui::FocusHandle,
   /// Single-selection state for atom-layer styles.
   atom: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Single-selection state for polymer-layer styles.
@@ -129,8 +101,8 @@ fn new_representation_select(
   cx.new(|cx| SelectState::new(options, selected, window, cx))
 }
 
-impl DocumentOptionsControls {
-  /// Creates the persistent trigger and representation menu state.
+impl MolecularSettingsControls {
+  /// Creates persistent selectors and appearance controls for one entry.
   pub(crate) fn new(window: &mut Window, cx: &mut Context<ChitinApp>) -> Self {
     let atom = new_representation_select(
       window,
@@ -175,7 +147,10 @@ impl DocumentOptionsControls {
       "implicit-scalar-field",
     );
     Self {
-      target_panel: Rc::new(Cell::new(None)),
+      target_entry: Rc::new(Cell::new(None)),
+      advanced: Rc::new(Cell::new(false)),
+      app: cx.weak_entity(),
+      focus: cx.focus_handle(),
       appearance: super::appearance::AppearanceControls::new(window, cx),
       atom,
       polymer,
@@ -184,28 +159,121 @@ impl DocumentOptionsControls {
     }
   }
 
-  /// Binds selectors to the stable rendering tab opening the menu.
-  pub(crate) fn bind_panel(&self, panel_id: u64) {
-    self.target_panel.set(Some(panel_id));
+  /// Returns whether the Surface backend editor contributes to row height.
+  pub(crate) fn advanced_open(&self) -> bool {
+    self.advanced.get()
   }
 
-  /// Subscribes representation-selector events to document-panel commands.
+  /// Returns the inline editor's enclosing focus scope.
+  pub(crate) fn focus_handle(&self) -> gpui::FocusHandle {
+    self.focus.clone()
+  }
+
+  /// Opens the uniform-color picker after its inline editor is expanded.
+  pub(crate) fn open_color(&self, layer: RenderLayer, window: &mut Window, cx: &mut App) {
+    self.appearance.open_color(layer, window, cx);
+  }
+
+  /// Binds controls to the active entry and rejects events from obsolete views.
+  pub(crate) fn bind_entry(&self, target: Option<(u64, gpui::EntityId)>) {
+    if self.target_entry.get() != target {
+      self.appearance.clear_pending();
+    }
+    self.target_entry.set(target);
+  }
+
+  /// Renders properties for one inspected entry-wide layer, never a topology scope.
   ///
-  /// The ellipsis trigger is not subscribed here: it owns its own click handler
-  /// and reaches the panel state through the app entity.
+  /// Backend controls belong only to Surface. Disabled layers keep their style
+  /// selector available so they can be enabled, while appearance editors are disabled.
+  pub(crate) fn render_layer(
+    &self,
+    layer: RenderLayer,
+    representation: RepresentationLayers,
+    backend: Option<MolecularSurfaceBackend>,
+    theme: ThemeColor,
+    window: &mut Window,
+    cx: &mut App,
+  ) -> impl IntoElement {
+    sync_representation_selectors(self, representation, backend, window, cx);
+    let (index, style, enabled) = match layer {
+      RenderLayer::Atom => (0, &self.atom, representation.atom_style().is_some()),
+      RenderLayer::Polymer => (1, &self.polymer, representation.polymer_style().is_some()),
+      RenderLayer::Surface => (2, &self.surface, representation.surface_style().is_some()),
+    };
+    let mut content = div()
+      .flex()
+      .flex_col()
+      .w_full()
+      .min_w_0()
+      .max_w(super::appearance::EDITOR_MAX_WIDTH)
+      .gap_1()
+      .child(super::appearance::property_field(
+        "Style",
+        Select::new(style).small().w_full(),
+        theme,
+      ))
+      .child(
+        self
+          .appearance
+          .render_layer(index, representation.appearances()[index], enabled, theme, window, cx),
+      );
+    if layer == RenderLayer::Surface && backend.is_some() {
+      let advanced = self.advanced.clone();
+      let app = self.app.clone();
+      content = content.child(
+        Collapsible::new()
+          .open(advanced.get())
+          .child(
+            Button::new(("entry-surface-advanced", self.surface_backend.entity_id()))
+              .ghost()
+              .small()
+              .w_full()
+              .justify_start()
+              .child(
+                div()
+                  .flex()
+                  .w_full()
+                  .items_center()
+                  .gap_1()
+                  .text_xs()
+                  .child(Icon::default().path(if advanced.get() {
+                    "icons/tree-expand.svg"
+                  } else {
+                    "icons/tree-collapse.svg"
+                  }))
+                  .child("Advanced"),
+              )
+              .on_click(move |_, _, cx| {
+                advanced.set(!advanced.get());
+                let _ = app.update(cx, |_, cx| cx.notify());
+              }),
+          )
+          .content(div().flex().flex_col().gap_1().child(super::appearance::property_field(
+            "Backend",
+            Select::new(&self.surface_backend).small().w_full(),
+            theme,
+          ))),
+      );
+    }
+    content
+  }
+
+  /// Routes selector and appearance events through the shared command/undo bus.
   ///
-  /// # Parameters
-  ///
-  /// * `window` supplies focus routing for the menu when it opens.
-  /// * `cx` owns subscriptions and updates the application state.
+  /// Confirmation is deferred by Kit, so each event verifies the bound rendering
+  /// entity before applying scene-specific settings. Subscriptions live with the app.
   pub(crate) fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
-    self.appearance.subscribe(self.target_panel.clone(), window, cx);
-    let target_panel = Rc::clone(&self.target_panel);
+    self.appearance.subscribe(self.target_entry.clone(), window, cx);
+    let target_entry = Rc::clone(&self.target_entry);
     let subscription: Subscription = cx.subscribe_in(&self.atom, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = target_panel.get() else {
+      let Some((panel_id, revision)) = target_entry.get() else {
         return;
       };
+      if app.document_panels.rendering_view_id(panel_id) != Some(revision) {
+        return;
+      }
       let style = match selected_id.as_deref() {
         Some("none") => RenderAtomStyle::None,
         Some("stick") => RenderAtomStyle::Stick,
@@ -213,186 +281,83 @@ impl DocumentOptionsControls {
         Some("sphere") => RenderAtomStyle::Sphere,
         _ => return,
       };
-      submit_menu_command(app, panel_id, RenderCommand::AtomStyle(style), cx);
+      submit_settings_command(app, panel_id, RenderCommand::AtomStyle(style), cx);
       cx.notify();
     });
     subscription.detach();
 
-    let target_panel = Rc::clone(&self.target_panel);
+    let target_entry = Rc::clone(&self.target_entry);
     let subscription: Subscription = cx.subscribe_in(&self.polymer, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = target_panel.get() else {
+      let Some((panel_id, revision)) = target_entry.get() else {
         return;
       };
+      if app.document_panels.rendering_view_id(panel_id) != Some(revision) {
+        return;
+      }
       let style = match selected_id.as_deref() {
         Some("none") => RenderPolymerStyle::None,
         Some("cartoon") => RenderPolymerStyle::Cartoon,
         _ => return,
       };
-      submit_menu_command(app, panel_id, RenderCommand::PolymerStyle(style), cx);
+      submit_settings_command(app, panel_id, RenderCommand::PolymerStyle(style), cx);
       cx.notify();
     });
     subscription.detach();
 
-    let target_panel = Rc::clone(&self.target_panel);
+    let target_entry = Rc::clone(&self.target_entry);
     let subscription: Subscription = cx.subscribe_in(&self.surface, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = target_panel.get() else {
+      let Some((panel_id, revision)) = target_entry.get() else {
         return;
       };
+      if app.document_panels.rendering_view_id(panel_id) != Some(revision) {
+        return;
+      }
       let style = match selected_id.as_deref() {
         Some("none") => RenderSurfaceStyle::None,
         Some("solid") => RenderSurfaceStyle::Solid,
         _ => return,
       };
-      submit_menu_command(app, panel_id, RenderCommand::SurfaceStyle(style), cx);
+      submit_settings_command(app, panel_id, RenderCommand::SurfaceStyle(style), cx);
       cx.notify();
     });
     subscription.detach();
 
-    let target_panel = Rc::clone(&self.target_panel);
+    let target_entry = Rc::clone(&self.target_entry);
     let subscription: Subscription = cx.subscribe_in(&self.surface_backend, window, move |app, _, event, _, cx| {
       let SelectEvent::Confirm(selected_id) = event;
-      let Some(panel_id) = target_panel.get() else {
+      let Some((panel_id, revision)) = target_entry.get() else {
         return;
       };
+      if app.document_panels.rendering_view_id(panel_id) != Some(revision) {
+        return;
+      }
       let backend = match selected_id.as_deref() {
         Some("implicit-scalar-field") => RenderSurfaceBackend::ImplicitScalarField,
         Some("msms") => RenderSurfaceBackend::Msms,
         _ => return,
       };
-      submit_menu_command(app, panel_id, RenderCommand::SurfaceBackend(backend), cx);
+      submit_settings_command(app, panel_id, RenderCommand::SurfaceBackend(backend), cx);
     });
     subscription.detach();
   }
 }
 
-fn submit_menu_command(app: &mut ChitinApp, target: u64, command: RenderCommand, cx: &mut Context<ChitinApp>) {
-  if let Err(error) = app.dispatch_render_command(Some(target), command, cx) {
-    log::error!("{error}");
-  }
-  app.dismiss_document_options_menu();
+fn submit_settings_command(app: &mut ChitinApp, target: u64, command: RenderCommand, cx: &mut Context<ChitinApp>) {
+  let error = app
+    .dispatch_render_command(Some(target), command, cx)
+    .err()
+    .map(|error| error.to_string());
+  app.entries_sidebar.set_error(error);
   cx.notify();
-}
-
-/// Composes GPUI Kit's popover with the molecular document controls.
-///
-/// The framework owns anchoring, dismissal, nested overlays, and focus restoration;
-/// the desktop records which panel receives representation changes.
-pub(crate) fn render_document_options_button(
-  panel_id: PanelId,
-  options: MolecularDocumentOptions,
-  open: bool,
-  theme: ThemeColor,
-  app: WeakEntity<ChitinApp>,
-  controls: DocumentOptionsControls,
-) -> impl IntoElement {
-  DocumentOptionsMenu {
-    panel_id,
-    options,
-    open,
-    theme,
-    app,
-    controls,
-  }
-}
-
-impl RenderOnce for DocumentOptionsMenu {
-  fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-    let panel_id = self.panel_id;
-    let app = self.app;
-    let focus = self.controls.atom.read(cx).focus_handle(cx);
-    let controls = self.controls;
-    let options = self.options;
-    let theme = self.theme;
-    let visibility_app = app.clone();
-    Popover::new(("document-options-menu", panel_id.value()))
-      .anchor(gpui_kit::base::Anchor::TopRight)
-      .open(self.open)
-      .track_focus(&focus)
-      .trigger(
-        Button::new(format!("document-options-{}", panel_id.value()))
-          .with_variant(ButtonVariant::Ghost)
-          .w(px(30.0))
-          .h(px(30.0))
-          .px(px(0.0))
-          .child(
-            svg()
-              .path(PANEL_MORE_ICON_PATH)
-              .size(PANEL_ACTION_ICON_SIZE)
-              .text_color(theme.muted_foreground),
-          ),
-      )
-      .on_open_change(move |open, _, cx| {
-        let _ = app.update(cx, |app, cx| {
-          if *open {
-            if app.document_panels.options_menu_panel_id != Some(panel_id) {
-              app.toggle_document_options_menu(panel_id);
-            }
-          } else if app.document_panels.options_menu_panel_id == Some(panel_id) {
-            app.dismiss_document_options_menu();
-          }
-          cx.notify();
-        });
-      })
-      .content(move |_, window, cx| {
-        sync_document_option_selectors(&controls, options.representation, options.surface_backend, window, cx);
-        gpui::div()
-          .id("molecule-appearance-options")
-          .flex()
-          .flex_col()
-          .w(DOCUMENT_OPTIONS_MENU_WIDTH)
-          .max_h(px(640.0))
-          .overflow_y_scroll()
-          .child(controls.appearance.render(
-            options.representation,
-            [&controls.atom, &controls.polymer, &controls.surface],
-            &controls.surface_backend,
-            theme,
-            window,
-            cx,
-          ))
-          .children(
-            [
-              (
-                "hide-selected",
-                "Hide selected",
-                chitin_command::VisibilityTarget::Selected,
-                false,
-              ),
-              ("show-all", "Show all", chitin_command::VisibilityTarget::All, true),
-            ]
-            .map(|(id, label, target, visible)| {
-              let app = visibility_app.clone();
-              let panel = controls.target_panel.clone();
-              Button::new(id)
-                .with_variant(ButtonVariant::Ghost)
-                .label(label)
-                .on_click(move |_, _, cx| {
-                  let _ = app.update(cx, |app, cx| {
-                    if let Err(error) = app.dispatch_visibility_command(
-                      panel.get(),
-                      chitin_command::VisibilityCommand {
-                        target: target.clone(),
-                        visible,
-                      },
-                      cx,
-                    ) {
-                      log::warn!("Visibility failed: {error}");
-                    }
-                  });
-                })
-            }),
-          )
-      })
-  }
 }
 
 /// Synchronizes representation and surface-backend selectors with the active view.
 ///
 /// # Parameters
 ///
-/// * `controls` contains the Kit selector states owned by this document panel.
+/// * `controls` contains the persistent selector states shared by the Entries inspector.
 /// * `representation` and `surface_backend` supply the current renderer settings.
 /// * `window` and `cx` update selector state without emitting confirmation events.
 ///
@@ -400,10 +365,10 @@ impl RenderOnce for DocumentOptionsMenu {
 ///
 /// Nothing. Only differing selections are updated, preventing a render-time
 /// synchronization from dispatching another renderer command.
-fn sync_document_option_selectors(
-  controls: &DocumentOptionsControls,
+fn sync_representation_selectors(
+  controls: &MolecularSettingsControls,
   representation: RepresentationLayers,
-  surface_backend: MolecularSurfaceBackend,
+  surface_backend: Option<MolecularSurfaceBackend>,
   window: &mut Window,
   cx: &mut App,
 ) {
@@ -424,8 +389,9 @@ fn sync_document_option_selectors(
     "none"
   };
   let surface_backend_id = match surface_backend {
-    MolecularSurfaceBackend::ImplicitScalarField => "implicit-scalar-field",
-    MolecularSurfaceBackend::Msms => "msms",
+    Some(MolecularSurfaceBackend::ImplicitScalarField) => "implicit-scalar-field",
+    Some(MolecularSurfaceBackend::Msms) => "msms",
+    None => "implicit-scalar-field",
   };
   for (state, id) in [
     (&controls.atom, atom_id),
@@ -455,7 +421,82 @@ mod tests {
   }
 
   #[gpui::test]
-  fn backend_confirmation_survives_options_menu_dismissal(cx: &mut gpui::TestAppContext) {
+  fn switching_entries_should_isolate_settings_and_reject_stale_views(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_kit::init);
+    fn view(cx: &mut App) -> WgpuDocumentView {
+      WgpuDocumentView::with_representation_layers(
+        cx.new(|_| SurfaceProbe),
+        RepresentationLayers::atom(AtomStyle::Stick),
+        |_, _| {},
+      )
+    }
+    let (app, cx) = cx.add_window_view(|_, cx| {
+      ChitinApp::new_with_wgpu_document_panel(
+        None,
+        cx.focus_handle(),
+        "settings probe",
+        view(cx),
+        WgpuDocumentViewFactory::new(|_, cx| view(cx)),
+      )
+    });
+    let controls = cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        assert!(app.split_document_panel(
+          app.document_panels.focused_panel_id,
+          crate::workbench::documents::layout::PanelSplitAxis::Horizontal,
+          window,
+          cx,
+        ));
+        let controls = MolecularSettingsControls::new(window, cx);
+        controls.subscribe(window, cx);
+        controls
+      })
+    });
+    for (target, style) in [(1, "sphere"), (2, "ball-and-stick")] {
+      cx.update(|_, cx| {
+        app.update(cx, |app, cx| {
+          let revision = app
+            .document_panels
+            .rendering_view_id(target)
+            .unwrap_or_else(|| panic!("view"));
+          controls.bind_entry(Some((target, revision)));
+          controls
+            .atom
+            .update(cx, |_, cx| cx.emit(SelectEvent::Confirm(Some(style.into()))));
+        });
+      });
+      cx.run_until_parked();
+    }
+    // A replaced view or an unmounted inspector must not accept old confirmations.
+    for bound in [true, false] {
+      cx.update(|_, cx| {
+        app.update(cx, |app, cx| {
+          let foreign_view = app
+            .document_panels
+            .rendering_view_id(2)
+            .unwrap_or_else(|| panic!("view"));
+          controls.bind_entry(bound.then_some((1, foreign_view)));
+          controls
+            .atom
+            .update(cx, |_, cx| cx.emit(SelectEvent::Confirm(Some("none".into()))));
+        });
+      });
+      cx.run_until_parked();
+    }
+    cx.update(|_, cx| {
+      let app = app.read(cx);
+      for (target, expected) in [(1, AtomStyle::Sphere), (2, AtomStyle::BallAndStick)] {
+        let (_, layers, _) = app
+          .document_panels
+          .rendering_settings(target)
+          .unwrap_or_else(|| panic!("settings"));
+        assert_eq!(layers.atom_style(), Some(expected));
+      }
+    });
+  }
+
+  #[gpui::test]
+  fn backend_confirmation_targets_the_bound_entry(cx: &mut gpui::TestAppContext) {
     cx.update(gpui_kit::init);
     let selected_backend = Rc::new(Cell::new(MolecularSurfaceBackend::ImplicitScalarField));
     let (app, cx) = cx.add_window_view({
@@ -478,24 +519,27 @@ mod tests {
         )
       }
     });
-    cx.update(|window, cx| {
+    let _controls = cx.update(|window, cx| {
       app.update(cx, |app, cx| {
-        let controls = DocumentOptionsControls::new(window, cx);
+        let controls = MolecularSettingsControls::new(window, cx);
         controls.subscribe(window, cx);
-        app.document_options_controls = Some(controls.clone());
-        assert!(app.toggle_document_options_menu(app.document_panels.focused_panel_id));
-        assert!(app.dismiss_document_options_menu());
+        let revision = app
+          .document_panels
+          .rendering_view_id(1)
+          .unwrap_or_else(|| panic!("rendering view"));
+        controls.bind_entry(Some((1, revision)));
         controls.surface_backend.update(cx, |_, cx| {
           cx.emit(SelectEvent::Confirm(Some("msms".into())));
         });
-      });
+        controls
+      })
     });
     cx.run_until_parked();
     assert_eq!(selected_backend.get(), MolecularSurfaceBackend::Msms);
   }
 
   #[gpui::test]
-  fn menu_and_shell_share_targeted_render_updates_and_preserve_layers(cx: &mut gpui::TestAppContext) {
+  fn inspector_and_shell_share_targeted_render_updates_and_preserve_layers(cx: &mut gpui::TestAppContext) {
     use crate::commands::shell_host::{DesktopShellDispatch, DesktopShellHost};
     use chitin_builtin_shell::ShellInvocationSource;
     use chitin_molecule_renderer::PolymerStyle;
@@ -520,7 +564,7 @@ mod tests {
         )
       }
     });
-    cx.update(|window, cx| {
+    let _controls = cx.update(|window, cx| {
       app.update(cx, |app, cx| {
         let host = DesktopShellHost::new(chitin_command::CommandExecutionContext::new("."));
         let source = ShellInvocationSource::Interactive;
@@ -540,14 +584,18 @@ mod tests {
             .submit_shell_line_with_host(&host, "panel enter 1", source.clone(), window, cx)
             .is_ok()
         );
-        let controls = DocumentOptionsControls::new(window, cx);
+        let controls = MolecularSettingsControls::new(window, cx);
         controls.subscribe(window, cx);
-        app.document_options_controls = Some(controls.clone());
-        assert!(app.toggle_document_options_menu(app.document_panels.focused_panel_id));
+        let revision = app
+          .document_panels
+          .rendering_view_id(1)
+          .unwrap_or_else(|| panic!("rendering view"));
+        controls.bind_entry(Some((1, revision)));
         controls
           .atom
           .update(cx, |_, cx| cx.emit(SelectEvent::Confirm(Some("sphere".into()))));
-      });
+        controls
+      })
     });
     cx.run_until_parked();
     assert_eq!(updates.get(), 1);

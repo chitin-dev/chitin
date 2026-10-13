@@ -6,17 +6,15 @@ use super::{
 };
 use crate::{
   app::ChitinApp,
-  features::molecule::options::{DocumentOptionsControls, MolecularDocumentOptions, render_document_options_button},
   keybindings::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT},
 };
 use chitin_command::PanelTabCommand;
 use gpui::{
-  AnyElement, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Styled,
+  AnyElement, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Styled,
   WeakEntity, div, px, svg,
 };
 use gpui_kit::component::{
   button::{Button, ButtonVariant, ButtonVariants as _},
-  dock::DockArea,
   theme::ThemeColor,
 };
 
@@ -36,7 +34,7 @@ const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
 ///
 /// A full-size document region; Kit owns its tabs and split interactions.
 pub fn render_document_area(
-  area: Entity<DockArea>,
+  area: impl IntoElement,
   focus_handle: &FocusHandle,
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
@@ -66,7 +64,6 @@ pub fn render_document_area(
 /// * `panel_id` identifies the panel controlled by the split buttons.
 /// * `theme` supplies colors for the action buttons.
 /// * `app` is the weak app entity updated by button clicks.
-/// * `controls` contains the persistent trigger state and menu state.
 ///
 /// # Returns
 ///
@@ -75,22 +72,13 @@ pub(super) fn render_panel_tab_strip_actions(
   panel_id: PanelId,
   theme: ThemeColor,
   app: WeakEntity<ChitinApp>,
-  document_options: Option<MolecularDocumentOptions>,
-  options_menu_open: bool,
-  controls: DocumentOptionsControls,
 ) -> gpui::Div {
-  let mut actions = div().flex().items_center().h_full().flex_none().bg(theme.muted);
-  if let Some(document_options) = document_options {
-    actions = actions.child(render_document_options_button(
-      panel_id,
-      document_options,
-      options_menu_open,
-      theme,
-      app.clone(),
-      controls,
-    ));
-  }
-  actions
+  div()
+    .flex()
+    .items_center()
+    .h_full()
+    .flex_none()
+    .bg(theme.muted)
     .child(render_panel_split_button(
       panel_id,
       PanelSplitAxis::Horizontal,

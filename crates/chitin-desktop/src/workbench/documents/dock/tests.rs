@@ -308,7 +308,7 @@ fn two_documents() -> DocumentPanelState {
 }
 
 #[gpui::test]
-fn appearance_changes_do_not_remount_dock_groups_or_close_the_options_menu(cx: &mut gpui::TestAppContext) {
+fn appearance_changes_do_not_remount_dock_groups(cx: &mut gpui::TestAppContext) {
   use chitin_command::{RenderCommand, RenderLayer, RenderOpacity};
   use chitin_molecule_renderer::{AtomStyle, RepresentationLayers};
 
@@ -321,13 +321,6 @@ fn appearance_changes_do_not_remount_dock_groups_or_close_the_options_menu(cx: &
     WgpuDocumentViewFactory::new(move |_, cx| WgpuDocumentView::new(cx.new(|_| ViewportLayoutProbe(measured.clone())))),
   );
   let (app, cx) = mount(DocumentPanelState::with_content(content), cx);
-  cx.update(|_, cx| {
-    app.update(cx, |app, cx| {
-      app.toggle_document_options_menu(DEFAULT_DOCUMENT_PANEL_ID);
-      cx.notify();
-    });
-  });
-  cx.run_until_parked();
   let groups = cx.update(|_, cx| {
     let Some(dock) = app.read(cx).document_dock.as_ref() else {
       panic!("dock must exist");
@@ -362,10 +355,6 @@ fn appearance_changes_do_not_remount_dock_groups_or_close_the_options_menu(cx: &
           panic!("dock must exist");
         };
         assert_eq!(dock.leaf_ids, groups, "appearance must not reinstall the dock layout");
-        assert_eq!(
-          app.document_panels.options_menu_panel_id,
-          Some(DEFAULT_DOCUMENT_PANEL_ID)
-        );
         dock.read_layout(&mut app.document_panels, window, cx);
         let Some((_, layers, _)) = app.document_panels.rendering_settings(1) else {
           panic!("rendering tab must remain open");

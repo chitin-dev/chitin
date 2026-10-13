@@ -148,6 +148,15 @@ impl TerminalEmulatorState {
     self.session.write(bytes)
   }
 
+  /// Clears retained history and refreshes scrollbar geometry, leaving input intact.
+  pub fn clear_scrollback(&mut self, cx: &mut Context<Self>) {
+    self.session.clear_scrollback();
+    self.scroll_state = self.session.scroll_state();
+    self.scroll_remainder = 0.0;
+    self.publish_scrollbar_geometry();
+    cx.notify();
+  }
+
   fn process_events(&mut self, cx: &mut Context<Self>) {
     // Read before the events are drained: a child program entering or leaving the
     // alternate screen changes what the wheel means, and that is observed here rather
@@ -455,6 +464,7 @@ impl EntityInputHandler for TerminalEmulatorState {
 pub struct TerminalEmulator {
   state: Entity<TerminalEmulatorState>,
   theme: ThemeColor,
+  background: Option<Hsla>,
   font_family: SharedString,
 }
 
@@ -464,6 +474,7 @@ impl TerminalEmulator {
     Self {
       state,
       theme: *ThemeColor::dark(),
+      background: None,
       font_family: "monospace".into(),
     }
   }
@@ -471,6 +482,12 @@ impl TerminalEmulator {
   /// Sets the semantic UI theme.
   pub fn theme(mut self, theme: ThemeColor) -> Self {
     self.theme = theme;
+    self
+  }
+
+  /// Overrides the default VT background while retaining explicit ANSI colors.
+  pub fn background(mut self, background: Hsla) -> Self {
+    self.background = Some(background);
     self
   }
 
@@ -507,7 +524,11 @@ impl RenderOnce for TerminalEmulator {
     let state_for_keys = self.state.clone();
     let state_for_layout = self.state.clone();
     let state_for_scroll = self.state.clone();
-    let theme = self.theme;
+    let mut theme = self.theme;
+    // Default-background cells and the surrounding grid must resolve identically.
+    if let Some(background) = self.background {
+      theme.background = background;
+    }
     let rows = (0..snapshot.rows).map(move |row| {
       let cells = build_row_runs(&snapshot, row)
         .into_iter()

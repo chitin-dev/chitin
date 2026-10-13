@@ -27,7 +27,7 @@ use gpui::{
 
 use crate::{
   app::ChitinApp,
-  workbench::{activity_bar::ActiveActivity, documents::OpenedProjectDocument, explorer::ProjectSidebarState},
+  workbench::{documents::OpenedProjectDocument, explorer::ProjectSidebarState, sidebar::SidebarView},
 };
 
 const DEFAULT_TREE_INDENT: f32 = 12.0;
@@ -133,7 +133,7 @@ impl ChitinApp {
 
   /// Returns whether project-tree key actions may affect current app state.
   fn project_tree_navigation_enabled(&self) -> bool {
-    self.active_activity == ActiveActivity::Workspace && self.workspace.is_some()
+    self.sidebar_view == SidebarView::Project && self.project_sidebar_visible && self.workspace.is_some()
   }
 
   /// Moves keyboard focus to a visible project tree entry.

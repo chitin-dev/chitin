@@ -2,16 +2,14 @@
 
 use crate::app::ChitinApp;
 use chitin_command::{RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderRgb};
-use chitin_molecule_renderer::{
-  RepresentationLayers,
-  appearance::{ColorScheme, LayerAppearance},
-};
+use chitin_molecule_renderer::appearance::{ColorScheme, LayerAppearance};
 use chitin_ui::widgets::select_item::IconSelectItem;
 use gpui::{
-  App, AppContext, Context, Entity, IntoElement, ParentElement, Styled, Window, div, prelude::FluentBuilder, px,
+  App, AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Styled, Window, div, prelude::FluentBuilder,
+  px,
 };
 use gpui_kit::component::{
-  IndexPath,
+  IndexPath, Sizable as _,
   color_picker::{ColorPickerEvent, ColorPickerState, ColorSelect},
   select::{Select, SelectEvent, SelectState},
   slider::{Slider, SliderEvent, SliderState, SliderValue},
@@ -19,20 +17,49 @@ use gpui_kit::component::{
 };
 use std::{cell::Cell, rc::Rc};
 
+/// Shared maximum width for compact inline molecular editors.
+pub(super) const EDITOR_MAX_WIDTH: gpui::Pixels = px(260.0);
+
+/// Aligns an inline editor label beside its control, without stretching the section.
+pub(super) fn property_field(label: &'static str, control: impl IntoElement, theme: ThemeColor) -> gpui::Div {
+  div()
+    .flex()
+    .w_full()
+    .min_w_0()
+    .items_center()
+    .gap_1()
+    .child(
+      div()
+        .w(px(48.0))
+        .flex_none()
+        .text_xs()
+        .text_color(theme.muted_foreground)
+        .child(label),
+    )
+    .child(div().flex().flex_1().min_w_0().child(control))
+}
+
+/// Persistent per-layer appearance editors used by the Entries inspector.
 #[derive(Clone)]
 pub(super) struct AppearanceControls {
   layers: [LayerControls; 3],
 }
 
+/// One rendering layer's persistent editors and frame-coalesced opacity preview.
 #[derive(Clone)]
 struct LayerControls {
+  /// Scientific color scheme for this layer.
   scheme: Entity<SelectState<Vec<IconSelectItem>>>,
+  /// sRGB uniform-color editor, used only by uniform coloring.
   color: Entity<ColorPickerState>,
+  /// Opacity editor whose release completes one undoable edit.
   opacity: Entity<SliderState>,
-  pending_opacity: Rc<Cell<Option<(u64, RenderCommand)>>>,
+  /// Pending command and source view identity, preventing stale frame updates.
+  pending_opacity: Rc<Cell<Option<(u64, gpui::EntityId, RenderCommand)>>>,
 }
 
 impl LayerControls {
+  /// Synchronizes the slider without overwriting a pending user preview.
   fn sync_opacity(&self, appearance: LayerAppearance, window: &mut Window, cx: &mut App) {
     // A coalesced command may not have reached the model yet. Do not roll the
     // thumb back to last frame's value while that command is waiting.
@@ -46,6 +73,7 @@ impl LayerControls {
   }
 }
 
+/// Maps renderer schemes to stable selector values.
 fn scheme_id(scheme: ColorScheme) -> &'static str {
   match scheme {
     ColorScheme::Uniform => "uniform",
@@ -56,13 +84,16 @@ fn scheme_id(scheme: ColorScheme) -> &'static str {
 }
 
 fn dispatch(app: &mut ChitinApp, target: u64, command: RenderCommand, cx: &mut Context<ChitinApp>) {
-  if let Err(error) = app.dispatch_render_command(Some(target), command, cx) {
-    log::error!("{error}");
-  }
+  let error = app
+    .dispatch_render_command(Some(target), command, cx)
+    .err()
+    .map(|error| error.to_string());
+  app.entries_sidebar.set_error(error);
   cx.notify();
 }
 
 impl AppearanceControls {
+  /// Creates color and opacity state without applying renderer settings.
   pub fn new(window: &mut Window, cx: &mut Context<ChitinApp>) -> Self {
     Self {
       layers: std::array::from_fn(|_| LayerControls {
@@ -88,7 +119,32 @@ impl AppearanceControls {
       }),
     }
   }
-  pub fn subscribe(&self, target: Rc<Cell<Option<u64>>>, window: &mut Window, cx: &mut Context<ChitinApp>) {
+  /// Discards queued slider previews when the inspector changes its target.
+  pub fn clear_pending(&self) {
+    for layer in &self.layers {
+      layer.pending_opacity.take();
+    }
+  }
+
+  /// Opens a layer's persistent picker; only its inline ColorSelect renders the popover.
+  pub fn open_color(&self, layer: RenderLayer, window: &mut Window, cx: &mut App) {
+    let index = match layer {
+      RenderLayer::Atom => 0,
+      RenderLayer::Polymer => 1,
+      RenderLayer::Surface => 2,
+    };
+    let state = &self.layers[index].color;
+    state.update(cx, |state, cx| state.set_open(true, cx));
+    window.focus(&state.focus_handle(cx), cx);
+  }
+
+  /// Routes color confirmations and coalesced opacity edits through the command bus.
+  pub fn subscribe(
+    &self,
+    target: Rc<Cell<Option<(u64, gpui::EntityId)>>>,
+    window: &mut Window,
+    cx: &mut Context<ChitinApp>,
+  ) {
     for (controls, layer) in self
       .layers
       .iter()
@@ -97,9 +153,12 @@ impl AppearanceControls {
       let destination = target.clone();
       cx.subscribe_in(&controls.scheme, window, move |app, _, event, _, cx| {
         let SelectEvent::Confirm(value) = event;
-        let Some(target) = destination.get() else {
+        let Some((target, revision)) = destination.get() else {
           return;
         };
+        if app.document_panels.rendering_view_id(target) != Some(revision) {
+          return;
+        }
         let scheme = match value.as_deref() {
           Some("uniform") => RenderColorScheme::Uniform,
           Some("element") => RenderColorScheme::Element,
@@ -124,9 +183,12 @@ impl AppearanceControls {
         let ColorPickerEvent::Change(Some(value)) = event else {
           return;
         };
-        let Some(target) = destination.get() else {
+        let Some((target, revision)) = destination.get() else {
           return;
         };
+        if app.document_panels.rendering_view_id(target) != Some(revision) {
+          return;
+        }
         let rgb = value.to_rgb();
         let value = RenderRgb([rgb.r, rgb.g, rgb.b].map(|channel| (channel.clamp(0.0, 1.0) * 255.0).round() as u8));
         dispatch(
@@ -149,9 +211,12 @@ impl AppearanceControls {
         else {
           return;
         };
-        let Some(target) = destination.get() else {
+        let Some((target, revision)) = destination.get() else {
           return;
         };
+        if app.document_panels.rendering_view_id(target) != Some(revision) {
+          return;
+        }
         let Ok(value) = RenderOpacity::new(*value) else {
           return;
         };
@@ -165,10 +230,11 @@ impl AppearanceControls {
           }
           return;
         }
-        if pending.replace(Some((target, command))).is_none() {
+        if pending.replace(Some((target, revision, command))).is_none() {
           let pending = pending.clone();
           cx.on_next_frame(window, move |app, _, cx| {
-            if let Some((target, command)) = pending.take()
+            if let Some((target, revision, command)) = pending.take()
+              && app.document_panels.rendering_view_id(target) == Some(revision)
               && let Err(error) =
                 app.dispatch_render_edit(Some(target), command, crate::commands::history::EditPhase::Preview, cx)
             {
@@ -180,6 +246,7 @@ impl AppearanceControls {
       .detach();
     }
   }
+  /// Synchronizes and renders one layer's color and opacity editors.
   pub fn render_layer(
     &self,
     index: usize,
@@ -211,66 +278,49 @@ impl AppearanceControls {
     div()
       .flex()
       .flex_col()
-      .gap_2()
-      .child(div().text_xs().text_color(theme.muted_foreground).child("Color"))
-      .child(Select::new(&controls.scheme).disabled(!enabled).w_full())
+      .w_full()
+      .min_w_0()
+      .max_w(EDITOR_MAX_WIDTH)
+      .gap_1()
+      .child(property_field(
+        "Color",
+        Select::new(&controls.scheme).small().disabled(!enabled).w_full(),
+        theme,
+      ))
       .when(enabled && appearance.scheme == ColorScheme::Uniform, |container| {
-        container.child(
+        container.child(property_field(
+          "",
           ColorSelect::new(&controls.color)
+            .small()
             .accessibility_label("Uniform color")
             .w_full(),
-        )
+          theme,
+        ))
       })
-      .child(
-        div()
-          .text_xs()
-          .text_color(theme.muted_foreground)
-          .child(format!("Opacity  {:.0}%", appearance.opacity() * 100.0)),
-      )
-      .child(Slider::new(&controls.opacity).disabled(!enabled).w_full().h(px(20.0)))
-  }
-  pub fn render(
-    &self,
-    representation: RepresentationLayers,
-    styles: [&Entity<SelectState<Vec<IconSelectItem>>>; 3],
-    backend: &Entity<SelectState<Vec<IconSelectItem>>>,
-    theme: ThemeColor,
-    window: &mut Window,
-    cx: &mut App,
-  ) -> impl IntoElement {
-    let enabled = [
-      representation.atom_style().is_some(),
-      representation.polymer_style().is_some(),
-      representation.surface_style().is_some(),
-    ];
-    let mut container = div().flex().flex_col().gap_3().p_2();
-    for (index, name) in ["Atom", "Polymer", "Surface"].into_iter().enumerate() {
-      container = container.child(
+      .child(property_field(
+        "Opacity",
         div()
           .flex()
-          .flex_col()
+          .flex_1()
+          .min_w_0()
+          .items_center()
           .gap_2()
-          .child(div().text_sm().child(name))
-          .child(div().text_xs().text_color(theme.muted_foreground).child("Style"))
-          .child(Select::new(styles[index]).w_full())
-          .child(self.render_layer(
-            index,
-            representation.appearances()[index],
-            enabled[index],
-            theme,
-            window,
-            cx,
-          )),
-      );
-    }
-    container
-      .child(
-        div()
-          .text_xs()
-          .text_color(theme.muted_foreground)
-          .child("Surface backend"),
-      )
-      .child(Select::new(backend).w_full())
+          .child(
+            Slider::new(&controls.opacity)
+              .disabled(!enabled)
+              .flex_1()
+              .min_w_0()
+              .h(px(18.0)),
+          )
+          .child(
+            div()
+              .w(px(32.0))
+              .flex_none()
+              .text_xs()
+              .child(format!("{:.0}%", appearance.opacity() * 100.0)),
+          ),
+        theme,
+      ))
   }
 }
 
@@ -286,7 +336,7 @@ mod tests {
     },
   };
   use chitin_builtin_shell::ShellInvocationSource;
-  use chitin_molecule_renderer::{AtomStyle, PolymerStyle, SurfaceStyle};
+  use chitin_molecule_renderer::{AtomStyle, PolymerStyle, RepresentationLayers, SurfaceStyle};
 
   struct Probe;
   impl gpui::Render for Probe {
@@ -318,6 +368,7 @@ mod tests {
       };
       layer.pending_opacity.set(Some((
         1,
+        app.entity_id(),
         RenderCommand::Opacity {
           layer: RenderLayer::Atom,
           value,
@@ -348,7 +399,11 @@ mod tests {
     let controls = visual.update(|window, cx| {
       app.update(cx, |app, cx| {
         let controls = AppearanceControls::new(window, cx);
-        controls.subscribe(Rc::new(Cell::new(Some(1))), window, cx);
+        let revision = app
+          .document_panels
+          .rendering_view_id(1)
+          .unwrap_or_else(|| panic!("rendering view"));
+        controls.subscribe(Rc::new(Cell::new(Some((1, revision)))), window, cx);
         app.open_project_document(OpenedProjectDocument::new(std::path::Path::new("/tmp/notes.txt")));
         controls.layers[0]
           .scheme

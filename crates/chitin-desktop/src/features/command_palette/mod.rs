@@ -343,6 +343,8 @@ impl ChitinApp {
     };
 
     if spec.requires_arguments {
+      // Sidebar entry points need the same overlay and focus lifecycle as quick-pick.
+      self.command_panel.open(window, cx);
       if self.command_panel.open_form(id) {
         cx.notify();
       }
@@ -358,5 +360,27 @@ impl ChitinApp {
     } else {
       self.dispatch_command_with_window(command, window, cx);
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[gpui::test]
+  fn invoking_download_from_a_sidebar_should_open_the_existing_form(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (app, cx) = cx.add_window_view(|_, _| ChitinApp::new(Some(std::path::PathBuf::from("/tmp"))));
+    cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        assert!(!app.command_panel.is_open());
+        app.invoke_command_from_panel(CommandId::DatabaseDownloadRcsbStructure, window, cx);
+        assert!(app.command_panel.is_open());
+        assert_eq!(
+          app.command_panel.mode(),
+          &CommandPanelMode::Form(CommandId::DatabaseDownloadRcsbStructure)
+        );
+      });
+    });
   }
 }

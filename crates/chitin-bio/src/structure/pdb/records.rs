@@ -63,6 +63,8 @@ pub(super) enum PdbRecord {
 /// PDB records whose meaning requires cross-record projection state.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum PdbProjectionRecordKind {
+  /// Experimental method declaration.
+  Expdta,
   /// Molecular entity declaration.
   Compnd,
   /// Declared polymer sequence.
@@ -176,6 +178,7 @@ pub(super) fn parse_record(line: &str, line_number: usize) -> Result<PdbRecord, 
     "HELIX" => Ok(PdbRecord::Secondary(parse_helix(line, line_number)?)),
     "SHEET" => Ok(PdbRecord::Secondary(parse_sheet(line, line_number)?)),
     "COMPND" => Ok(projection_record(PdbProjectionRecordKind::Compnd, line, line_number)),
+    "EXPDTA" => Ok(projection_record(PdbProjectionRecordKind::Expdta, line, line_number)),
     "SEQRES" => Ok(projection_record(PdbProjectionRecordKind::Seqres, line, line_number)),
     "REMARK" => Ok(projection_record(PdbProjectionRecordKind::Remark, line, line_number)),
     "CRYST1" => Ok(projection_record(PdbProjectionRecordKind::Cryst1, line, line_number)),

@@ -15,18 +15,16 @@ use chitin_command::CommandExecutionContext;
 use chitin_terminal::{ShellCatalog, ShellDefinition, TerminalSession, TerminalSessionError, TerminalSize};
 use chitin_ui::{
   views::terminal::{TerminalEmulatorEvent, TerminalEmulatorState},
-  widgets::select_item::IconSelectItem,
   widgets::toast::{Toast, ToastVariant},
 };
 use gpui::{AppContext, Context, Entity, ScrollHandle, Subscription, Window};
-use gpui_kit::component::select::{SelectEvent, SelectState};
 
 use crate::{
   app::ChitinApp,
   commands::shell_host::{DesktopShellHost, desktop_shell_context},
 };
 
-pub(crate) use render::render_terminal_bottom_dock;
+pub(crate) use render::render_terminal_panel;
 
 pub(crate) const TERMINAL_DOCK_ITEM_ID: &str = "terminal";
 const INITIAL_TERMINAL_SIZE: TerminalSize = TerminalSize::new(80, 24, 9, 21);
@@ -148,7 +146,6 @@ pub(crate) struct TerminalPanelControls {
   catalog: ShellCatalog,
   pub(super) sessions: Vec<ManagedTerminalSession>,
   pub(super) active_session: TerminalSessionId,
-  pub(super) profile_select: Entity<SelectState<Vec<IconSelectItem>>>,
   /// Scroll position of the session tab strip.
   ///
   /// This has to outlive a render: a handle created while rendering would start every
@@ -157,43 +154,14 @@ pub(crate) struct TerminalPanelControls {
 }
 
 impl TerminalPanelControls {
-  /// Cancels active built-in commands before the workbench destroys its sessions.
-  pub(crate) fn cancel_active_commands(&self) {
-    for session in &self.sessions {
-      if let Some(builtin) = session.builtin.as_ref()
-        && let Err(error) = builtin.host.session().cancel_active()
-      {
-        log::warn!("failed to cancel active built-in terminal command: {error}");
-      }
-    }
-  }
-
   /// Creates the session manager with an initial built-in shell.
   fn new(
     initial_id: TerminalSessionId,
     working_directory: &Path,
     shell_context: CommandExecutionContext,
-    window: &mut Window,
     cx: &mut Context<ChitinApp>,
   ) -> Result<Self, TerminalSessionError> {
     let catalog = ShellCatalog::discover();
-    let profile_select = cx.new(|cx| {
-      SelectState::new(
-        std::iter::once(
-          IconSelectItem::new("builtin-shell", "Built-in shell").icon(terminal_profile_icon("builtin-shell")),
-        )
-        .chain(
-          catalog
-            .available()
-            .iter()
-            .map(|shell| IconSelectItem::new(&shell.id, &shell.label).icon(terminal_profile_icon(&shell.id))),
-        )
-        .collect::<Vec<_>>(),
-        None,
-        window,
-        cx,
-      )
-    });
     let session = Self::build_session(
       initial_id,
       &DesktopTerminalProfile::Builtin,
@@ -205,7 +173,6 @@ impl TerminalPanelControls {
       catalog,
       sessions: vec![session],
       active_session: initial_id,
-      profile_select,
       tab_scroll: ScrollHandle::new(),
     })
   }
@@ -247,36 +214,9 @@ impl TerminalPanelControls {
     })
   }
 
-  /// Connects session-manager and initial-session semantic controls.
+  /// Connects the initial session's input and lifecycle events.
   fn subscribe(&self, window: &mut Window, cx: &mut Context<ChitinApp>) {
     self.subscribe_session(&self.sessions[0], window, cx);
-
-    let profile_select = self.profile_select.clone();
-    let profile_select_for_event = profile_select.clone();
-    let subscription: Subscription = cx.subscribe_in(&profile_select, window, move |this, _, event, window, cx| {
-      let SelectEvent::Confirm(Some(selected_id)) = event else {
-        return;
-      };
-      let Some(profile) = this.terminal_panel_controls.as_ref().and_then(|controls| {
-        if selected_id.as_ref() == "builtin-shell" {
-          Some(DesktopTerminalProfile::Builtin)
-        } else {
-          controls
-            .catalog
-            .get(selected_id.as_ref())
-            .cloned()
-            .map(DesktopTerminalProfile::Shell)
-        }
-      }) else {
-        return;
-      };
-      this.create_terminal_session(profile, window, cx);
-      let profile_select = profile_select_for_event.clone();
-      cx.defer_in(window, move |_, window, cx| {
-        profile_select.update(cx, |state, cx| state.set_selected_index(None, window, cx));
-      });
-    });
-    subscription.detach();
   }
 
   /// Connects terminal input events for one session.
@@ -342,7 +282,7 @@ impl ChitinApp {
     let working_directory = self.terminal_working_directory();
     let shell_context = desktop_shell_context(self.workspace.as_ref().map(|workspace| workspace.root.clone()));
     let initial_id = self.terminal_panel.next_session_id();
-    let controls = match TerminalPanelControls::new(initial_id, &working_directory, shell_context, window, cx) {
+    let controls = match TerminalPanelControls::new(initial_id, &working_directory, shell_context, cx) {
       Ok(controls) => controls,
       Err(error) => {
         log::error!("failed to create built-in terminal: {error}");
@@ -390,7 +330,7 @@ impl ChitinApp {
       controls.active_session = id;
       // The new tab is the last child, so revealing it keeps the active session in
       // view without the session manager having to know the strip's geometry.
-      controls.tab_scroll.scroll_to_bottom();
+      controls.tab_scroll.scroll_to_item(controls.sessions.len() - 1);
     }
     self.terminal_panel.request_focus(true);
     cx.notify();
@@ -411,17 +351,17 @@ impl ChitinApp {
     cx.notify();
   }
 
-  /// Closes the active session and selects its nearest remaining neighbor.
-  fn close_active_terminal_session(&mut self, cx: &mut Context<Self>) {
-    let Some(id) = self
+  /// Clears only VT history, preserving the live screen and running shell.
+  fn clear_active_terminal_scrollback(&mut self, cx: &mut Context<Self>) {
+    if let Some(session) = self
       .terminal_panel_controls
       .as_ref()
       .and_then(TerminalPanelControls::active)
-      .map(|session| session.id)
-    else {
-      return;
-    };
-    self.close_terminal_session(id, cx);
+    {
+      session
+        .terminal
+        .update(cx, |terminal, cx| terminal.clear_scrollback(cx));
+    }
   }
 
   /// Retires a session whose terminal backend stopped on its own.
@@ -456,8 +396,7 @@ impl ChitinApp {
     let was_active = controls.active_session == id;
     controls.sessions.remove(index);
     if controls.sessions.is_empty() {
-      self.terminal_panel_controls = None;
-      self.bottom_dock.close();
+      // Retain the chooser and empty tool; closing a session is not hiding the dock.
       self.terminal_panel.request_focus(false);
       cx.notify();
       return;
@@ -490,6 +429,59 @@ impl ChitinApp {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[gpui::test]
+  fn hiding_dock_should_preserve_terminal_entity_and_active_session(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (app, cx) = cx.add_window_view(|_, _| ChitinApp::new(Some(PathBuf::from("/tmp"))));
+    cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        app.bottom_dock.show(TERMINAL_DOCK_ITEM_ID);
+        let Some(before) = app.terminal_panel_controls(window, cx) else {
+          panic!("test terminal could not be created");
+        };
+        let terminal = before.sessions[0].terminal.entity_id();
+        app.close_bottom_dock(window, cx);
+        assert!(!app.bottom_dock.is_open());
+        app.toggle_terminal(cx);
+        let Some(after) = app.terminal_panel_controls.as_ref() else {
+          panic!("hiding discarded terminal controls");
+        };
+        assert_eq!(after.active_session, before.active_session);
+        assert_eq!(after.sessions[0].terminal.entity_id(), terminal);
+      });
+    });
+  }
+
+  #[gpui::test]
+  fn closing_last_session_should_leave_tool_available_for_new_shell(cx: &mut gpui::TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (app, cx) = cx.add_window_view(|_, _| ChitinApp::new(Some(PathBuf::from("/tmp"))));
+    cx.update(|window, cx| {
+      app.update(cx, |app, cx| {
+        app.bottom_dock.show(TERMINAL_DOCK_ITEM_ID);
+        let Some(controls) = app.terminal_panel_controls(window, cx) else {
+          panic!("test terminal could not be created");
+        };
+        let id = controls.active_session;
+        app.close_terminal_session(id, cx);
+        assert!(app.bottom_dock.is_active(TERMINAL_DOCK_ITEM_ID));
+        assert!(
+          app
+            .terminal_panel_controls
+            .as_ref()
+            .is_some_and(|controls| controls.sessions.is_empty())
+        );
+        app.create_terminal_session(DesktopTerminalProfile::Builtin, window, cx);
+        assert!(
+          app
+            .terminal_panel_controls
+            .as_ref()
+            .is_some_and(|controls| { controls.sessions.len() == 1 && controls.active_session != id })
+        );
+      });
+    });
+  }
 
   #[test]
   fn terminal_session_ids_should_not_repeat_after_a_dock_reopen() {

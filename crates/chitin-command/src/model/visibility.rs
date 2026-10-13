@@ -5,6 +5,8 @@ use super::{AtomSpec, CommandId};
 /// Objects resolved in the current rendering panel, including hidden objects.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VisibilityTarget {
+  /// Validated stable identities supplied by a scientific tree or saved selection.
+  Atoms(chitin_bio::structure::selection::AtomSelection),
   /// The current canonical selection.
   Selected,
   /// Every coordinate-bearing atom in the model.

@@ -11,7 +11,7 @@ mod model;
 mod render;
 
 pub use model::{
-  BottomDockItemId, BottomDockState, DEFAULT_BOTTOM_DOCK_HEIGHT, DEFAULT_BOTTOM_DOCK_MIN_HEIGHT,
-  DEFAULT_CENTER_AREA_MIN_HEIGHT,
+  BOTTOM_DOCK_BAR_HEIGHT, BottomDockItemId, BottomDockState, DEFAULT_BOTTOM_DOCK_HEIGHT,
+  DEFAULT_BOTTOM_DOCK_MIN_HEIGHT, DEFAULT_CENTER_AREA_MIN_HEIGHT,
 };
 pub use render::BottomDock;

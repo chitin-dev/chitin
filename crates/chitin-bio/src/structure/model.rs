@@ -302,6 +302,10 @@ pub struct SecondaryRange {
 /// Metadata shared by all models in a structure.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StructureMetadata {
+  /// Experimental methods declared by the source file.
+  pub experimental_methods: Vec<String>,
+  /// Reported diffraction or reconstruction resolution in ångströms.
+  pub resolution: Option<f32>,
   /// Optional PDB HEADER classification.
   pub classification: Option<String>,
   /// Optional four-character source identifier.
