@@ -21,6 +21,10 @@ pub struct WorkbenchStyle {
   pub background: Hsla,
   /// Gray surface behind panel chrome and content.
   pub panel_background: Hsla,
+  /// Raised neutral surface for popups and selected utility navigation tabs.
+  pub raised_background: Hsla,
+  /// Additional contrast for hover/selection inside a raised surface.
+  pub raised_hover_background: Hsla,
   /// Outer region radius; compact regions have square shared edges.
   pub panel_radius: Pixels,
   /// Total separation between neighboring panel surfaces.
@@ -57,13 +61,20 @@ pub fn viewport_position(bounds: Bounds<Pixels>, radius: Pixels, position: Point
 impl WorkbenchStyle {
   /// Resolves workbench surfaces without changing Kit's global palette.
   pub fn new(theme: ThemeColor) -> Self {
+    let mut raised_background = theme.muted;
+    raised_background.l = (raised_background.l + 0.06).min(1.0);
+    let mut raised_hover_background = raised_background;
+    raised_hover_background.l = (raised_hover_background.l + 0.04).min(1.0);
     Self {
       background: theme.muted,
       panel_background: theme.muted,
+      raised_background,
+      raised_hover_background,
       panel_radius: px(0.0),
       panel_gap: px(0.0),
       panel_inset: px(0.0),
-      separator: theme.border,
+      // Kit's dark border and muted surface share a color; derive contrast instead.
+      separator: theme.muted_foreground.opacity(0.25),
       header_height: px(32.0),
       viewport_inset: px(8.0),
       viewport_background: theme.background,
@@ -129,6 +140,23 @@ pub fn resize_handle_appearance() -> ResizeHandleRenderer {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn raised_surfaces_should_be_lighter_than_workbench_panels() {
+    let style = WorkbenchStyle::new(*ThemeColor::dark());
+    assert!(style.raised_background.l > style.panel_background.l);
+    assert!(style.raised_hover_background.l > style.raised_background.l);
+    assert_eq!(style.raised_background.h, style.panel_background.h);
+    assert_eq!(style.raised_background.s, style.panel_background.s);
+  }
+
+  #[test]
+  fn separator_should_be_distinct_from_dark_panel_surface() {
+    let style = WorkbenchStyle::new(*ThemeColor::dark());
+    assert_ne!(style.separator, style.panel_background);
+    assert!(style.separator.a > 0.0);
+    assert!(style.separator.l > style.panel_background.l);
+  }
 
   #[test]
   fn compact_workbench_should_have_no_outer_gaps_or_card_corners() {

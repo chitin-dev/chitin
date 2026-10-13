@@ -70,7 +70,8 @@ pub(crate) fn render_primary_sidebar(
   let weak = cx.weak_entity();
   let navigation = TabBar::new("primary-sidebar-navigation")
     .segmented()
-    .xsmall()
+    .selected_background(WorkbenchStyle::new(theme).raised_background)
+    .small()
     .selected_index(selected)
     .children(SidebarView::ALL.map(sidebar_tab))
     .on_click(move |index, window, cx| {
@@ -91,6 +92,8 @@ pub(crate) fn render_primary_sidebar(
     SidebarView::Functions => render_functions(app, theme, cx).into_any_element(),
   };
   panel_surface(WorkbenchStyle::new(theme))
+    .border_r_1()
+    .border_color(WorkbenchStyle::new(theme).separator)
     .child(
       div()
         .flex_none()
@@ -106,11 +109,11 @@ pub(crate) fn render_primary_sidebar(
 /// Composes a Kit tab with both its icon and full navigation label.
 fn sidebar_tab(view: SidebarView) -> Tab {
   // Kit's icon() selects an icon-only tab; compose the row to keep both visible.
-  Tab::new().aria_label(view.label()).px_0().child(
+  Tab::new().aria_label(view.label()).child(
     div()
       .flex()
       .items_center()
-      .gap_0p5()
+      .gap_1()
       .child(Icon::default().path(view.icon_path()).with_size(px(10.0)))
       .child(
         div()
