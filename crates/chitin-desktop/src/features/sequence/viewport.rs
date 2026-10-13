@@ -6,7 +6,7 @@ use std::{
   rc::Rc,
 };
 
-use chitin_bio::structure::{ChainId, ResidueId};
+use chitin_bio::structure::{ChainId, ResidueId, selection::AtomSelection};
 use chitin_command::{SelectionCommand, SelectionMode};
 use chitin_ui::{
   widgets::marquee::{Marquee, MarqueeEvent, MarqueeState},
@@ -156,12 +156,13 @@ impl SequenceViewport {
       }
       MarqueeEvent::Preview(rectangle) | MarqueeEvent::Commit(rectangle) => rectangle,
     };
-    let spans: Vec<_> = self
+    let candidates: Vec<_> = self
       .geometry
       .borrow()
       .values()
       .filter_map(|row| row.hit(rectangle))
       .collect();
+    let spans = self.selectable_spans(candidates);
     match event {
       MarqueeEvent::Preview(_) => {
         if self.preview.as_ref() != Some(&spans) {
@@ -177,10 +178,11 @@ impl SequenceViewport {
   /// Atom expansion and the root command bus run once when the gesture is committed.
   fn commit(&mut self, spans: Vec<ResidueSpan>, cx: &mut Context<Self>) {
     self.preview = None;
+    let spans = self.selectable_spans(spans);
     let Some((id, view)) = self.target else {
       return;
     };
-    let atoms = spans
+    let atoms: AtomSelection = spans
       .iter()
       .flat_map(|span| {
         self
@@ -193,6 +195,10 @@ impl SequenceViewport {
           .flat_map(|residue| residue.atoms.iter().copied())
       })
       .collect();
+    if atoms.is_empty() {
+      cx.notify();
+      return;
+    }
     let _ = self.app.update(cx, |app, cx| {
       if app.sequence_panel.target == Some((id, view)) && app.document_panels.rendering_view_id(id) == Some(view) {
         let _ = app.dispatch_selection_command(
@@ -206,6 +212,42 @@ impl SequenceViewport {
       }
     });
     cx.notify();
+  }
+
+  /// Splits hit spans around residues that have no coordinates in the active scene.
+  ///
+  /// Such residues remain visible for topology context but their disabled cells
+  /// must not participate in marquee previews or selection commands.
+  fn selectable_spans(&self, spans: impl IntoIterator<Item = ResidueSpan>) -> Vec<ResidueSpan> {
+    let mut selectable = Vec::new();
+    for span in spans {
+      let Some(chain) = self.data.chains.get(span.chain) else {
+        continue;
+      };
+      let end = span.range.end;
+      let mut start = None;
+      for position in span.range {
+        let has_atoms = chain
+          .residues
+          .get(position)
+          .is_some_and(|residue| !residue.atoms.is_empty());
+        if has_atoms {
+          start.get_or_insert(position);
+        } else if let Some(start) = start.take() {
+          selectable.push(ResidueSpan {
+            chain: span.chain,
+            range: start..position,
+          });
+        }
+      }
+      if let Some(start) = start {
+        selectable.push(ResidueSpan {
+          chain: span.chain,
+          range: start..chain.residues.len().min(end),
+        });
+      }
+    }
+    selectable
   }
 
   fn render_row(&self, index: usize, theme: ThemeColor, cx: &Context<Self>) -> gpui::AnyElement {
