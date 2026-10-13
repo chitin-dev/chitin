@@ -418,9 +418,9 @@ impl Render for ChitinApp {
       None
     };
     let sequence_visible = self.bottom_dock.is_active(SEQUENCE_DOCK_ITEM_ID);
-    let sequence_marquee = if sequence_visible {
+    let sequence_viewport = if sequence_visible {
       self.sequence_panel.sync(&self.document_panels, cx);
-      Some(self.sequence_panel.marquee(cx))
+      Some(self.sequence_panel.viewport(cx.weak_entity(), cx))
     } else {
       self.sequence_panel.cancel_drag(cx);
       None
@@ -480,10 +480,10 @@ impl Render for ChitinApp {
           cx,
         ))
       })
-      .when_some(sequence_marquee, |layout, marquee| {
+      .when_some(sequence_viewport, |layout, viewport| {
         layout.child(render_bottom_dock(
           self,
-          render_sequence_panel(&self.sequence_panel, theme, app.clone(), marquee),
+          render_sequence_panel(&self.sequence_panel, theme, app.clone(), viewport),
           theme,
           cx,
         ))

@@ -875,6 +875,7 @@ dependencies = [
  "chitin-ui",
  "chitin-utils",
  "chitin-wgpu",
+ "criterion",
  "env_logger",
  "futures-util",
  "glam",

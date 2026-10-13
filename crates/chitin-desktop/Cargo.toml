@@ -25,10 +25,15 @@ wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"]
 thiserror = "2.0"
 
 [dev-dependencies]
+criterion = "0.5"
 gpui = { workspace = true, features = ["test-support"] }
 bytemuck = "1.24"
 glam = "0.33"
 rayon = "1.11"
+
+[[bench]]
+name = "sequence_virtualization"
+harness = false
 
 [lints]
 workspace = true
