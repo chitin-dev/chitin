@@ -354,6 +354,14 @@ impl SequenceViewport {
       .child(sequence)
       .into_any_element()
   }
+
+  fn render_rows(&self, range: std::ops::Range<usize>, theme: ThemeColor, cx: &Context<Self>) -> Vec<gpui::AnyElement> {
+    // UniformList can update its mounted rows without rendering this view.
+    // Drop departed rows before their old screen positions can enter a gesture;
+    // prepaint refreshes the retained rows' positions before input dispatch.
+    self.geometry.borrow_mut().retain(|index, _| range.contains(index));
+    range.map(|index| self.render_row(index, theme, cx)).collect()
+  }
 }
 
 impl Render for SequenceViewport {
@@ -380,9 +388,7 @@ impl Render for SequenceViewport {
         .into_any_element()
     } else {
       uniform_list("sequence-virtual-rows", self.layout.count, move |range, _, cx| {
-        view.update(cx, |view, cx| {
-          range.map(|index| view.render_row(index, theme, cx)).collect::<Vec<_>>()
-        })
+        view.update(cx, |view, cx| view.render_rows(range, theme, cx))
       })
       .track_scroll(&self.vertical)
       .flex_1()
@@ -536,6 +542,33 @@ mod tests {
       after, before,
       "unchanged Sequence must not rebuild views or rows on sibling frames"
     );
+  }
+
+  #[gpui::test]
+  fn virtual_row_updates_should_exclude_offscreen_residues_from_selection(cx: &mut gpui::TestAppContext) {
+    let (app, cx) = mount(cx, 12, 100);
+    let viewport = viewport(&app, cx);
+    let previous = row(&viewport, 0, cx);
+    let point = previous.clip.origin + gpui::point(px(3.0), px(20.0));
+    let rectangle = gpui::Bounds::new(point, Default::default());
+    let expected = viewport.update(cx, |view, cx| {
+      // A scrolled-in row occupies the old row's screen position. Exercise the
+      // retained virtual-list callback without rebuilding the enclosing view.
+      let mut visible = previous.clone();
+      visible.span = view.layout.row(5).unwrap_or_else(|| panic!("virtual row 5"));
+      let expected = view.data.chains[5].residues[0].atoms.clone();
+      view.geometry.borrow_mut().insert(5, visible);
+      let renders = view.render_count;
+      let theme = Theme::global(cx).colors;
+      drop(view.render_rows(5..6, theme, cx));
+      assert_eq!(view.render_count, renders);
+      view.marquee_event(MarqueeEvent::Commit(rectangle), cx);
+      expected
+    });
+    cx.update(|_, cx| {
+      let control = app.read(cx).document_panels.selection_control(1);
+      assert!(control.is_some_and(|control| control.atoms.as_ref() == expected.as_ref()));
+    });
   }
 
   #[gpui::test]
