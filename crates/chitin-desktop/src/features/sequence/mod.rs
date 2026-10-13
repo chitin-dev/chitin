@@ -10,7 +10,7 @@ use std::{collections::HashSet, rc::Rc, sync::Arc};
 
 use chitin_bio::structure::{ChainId, ResidueId, StructureScene, selection::AtomSelection};
 use chitin_ui::workbench::WorkbenchStyle;
-use gpui::{App, AppContext, Entity, EntityId, IntoElement, ParentElement, Styled, WeakEntity, div, px};
+use gpui::{AnyView, App, AppContext, Entity, EntityId, IntoElement, ParentElement, Styled, WeakEntity, div, px};
 use gpui_kit::component::{
   Selectable as _, Sizable as _,
   button::{Button, ButtonVariant, ButtonVariants as _},
@@ -198,5 +198,7 @@ pub(crate) fn render_sequence_panel(
     .min_w_0()
     .bg(style.panel_background)
     .child(toolbar)
-    .child(viewport)
+    // Molecule rendering requests window frames continuously. Keep the sequence
+    // viewport's layout and paint until its own data, scroll, or bounds change.
+    .child(AnyView::from(viewport).cached(div().flex_1().min_h_0().min_w_0().style().clone()))
 }

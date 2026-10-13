@@ -46,6 +46,10 @@ pub(crate) struct SequenceViewport {
   geometry: Rc<RefCell<BTreeMap<usize, RowGeometry>>>,
   preview: Option<Vec<ResidueSpan>>,
   marquee: Entity<MarqueeState>,
+  #[cfg(test)]
+  render_count: usize,
+  #[cfg(test)]
+  row_render_count: std::cell::Cell<usize>,
 }
 
 impl SequenceViewport {
@@ -64,6 +68,10 @@ impl SequenceViewport {
       geometry: Rc::default(),
       preview: None,
       marquee: cx.new(|_| MarqueeState::default()),
+      #[cfg(test)]
+      render_count: 0,
+      #[cfg(test)]
+      row_render_count: std::cell::Cell::new(0),
     }
   }
 
@@ -116,7 +124,8 @@ impl SequenceViewport {
 
   pub(super) fn cancel_drag(&mut self, cx: &mut Context<Self>) {
     let changed = self.preview.take().is_some();
-    self.geometry.borrow_mut().clear();
+    // Retain measured rows across cached frames; the next render replaces
+    // them when the viewport actually changes.
     self.marquee.update(cx, |state, _| state.cancel());
     if changed {
       cx.notify();
@@ -200,6 +209,8 @@ impl SequenceViewport {
   }
 
   fn render_row(&self, index: usize, theme: ThemeColor, cx: &Context<Self>) -> gpui::AnyElement {
+    #[cfg(test)]
+    self.row_render_count.set(self.row_render_count.get() + 1);
     let Some(span) = self.layout.row(index) else {
       return div().h(px(ROW_HEIGHT)).into_any_element();
     };
@@ -347,6 +358,13 @@ impl SequenceViewport {
 
 impl Render for SequenceViewport {
   fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    #[cfg(test)]
+    {
+      self.render_count += 1;
+    }
+    // A cache hit keeps the existing hit geometry. A real rebuild replaces
+    // measurements as the virtual list prepaints its visible rows.
+    self.geometry.borrow_mut().clear();
     let theme = Theme::global(cx).colors;
     let view = cx.entity().clone();
     let content = if self.layout.count == 0 {
@@ -374,16 +392,15 @@ impl Render for SequenceViewport {
     };
     let event_view = cx.weak_entity();
     let measure_view = cx.weak_entity();
-    let geometry = self.geometry.clone();
-    // Clear stale off-screen rows before the virtual list prepaints its visible rows.
+    // Width is observed after layout so wrapped rows can be recalculated.
     div()
       .flex()
       .flex_col()
       .flex_1()
+      .size_full()
       .min_h_0()
       .min_w_0()
       .on_prepaint(move |bounds, _, cx| {
-        geometry.borrow_mut().clear();
         let _ = measure_view.update(cx, |view, cx| view.resize(bounds.size.width, cx));
       })
       .child(Marquee::new(self.marquee.clone(), content, move |event, _, cx| {
@@ -485,14 +502,40 @@ mod tests {
       let geometry = view.geometry.borrow();
       geometry.get(&index).cloned().unwrap_or_else(|| {
         panic!(
-          "visible row {index}; keys={:?}; count={}; vertical={:?}; horizontal={:?}",
+          "visible row {index}; keys={:?}; count={}; vertical={:?}; horizontal={:?}; renders={}; rows={}",
           geometry.keys().collect::<Vec<_>>(),
           view.layout.count,
           view.vertical.0.borrow().base_handle.offset(),
-          view.horizontal[0].offset()
+          view.horizontal[0].offset(),
+          view.render_count,
+          view.row_render_count.get()
         )
       })
     })
+  }
+
+  #[gpui::test]
+  fn static_sequence_should_reuse_rows_during_workbench_frames(cx: &mut gpui::TestAppContext) {
+    let (app, cx) = mount(cx, 2, 100);
+    let viewport = viewport(&app, cx);
+    let _ = row(&viewport, 0, cx);
+    let before = cx.update(|_, cx| {
+      let view = viewport.read(cx);
+      (view.render_count, view.row_render_count.get())
+    });
+    // Mimic an animated sibling's repeated window frames while Sequence is idle.
+    for _ in 0..120 {
+      app.update(cx, |_, cx| cx.notify());
+      cx.update(|window, cx| window.draw(cx).clear());
+    }
+    let after = cx.update(|_, cx| {
+      let view = viewport.read(cx);
+      (view.render_count, view.row_render_count.get())
+    });
+    assert_eq!(
+      after, before,
+      "unchanged Sequence must not rebuild views or rows on sibling frames"
+    );
   }
 
   #[gpui::test]
