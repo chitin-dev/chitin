@@ -25,12 +25,18 @@ pub struct MarqueeState {
   bounds: Bounds<Pixels>,
   origin: Option<Point<Pixels>>,
   current: Point<Pixels>,
+  /// The owning view is invalidated locally instead of refreshing every window view.
+  owner: Option<gpui::EntityId>,
+  preview_pending: bool,
+  generation: u64,
 }
 
 impl MarqueeState {
   /// Cancels a gesture when its content or coordinate system is replaced.
   pub fn cancel(&mut self) {
     self.origin = None;
+    self.preview_pending = false;
+    self.generation = self.generation.wrapping_add(1);
   }
 
   fn rectangle(&self) -> Option<Bounds<Pixels>> {
@@ -40,6 +46,15 @@ impl MarqueeState {
       gpui::point(a.x.min(b.x), a.y.min(b.y)),
       gpui::point(a.x.max(b.x), a.y.max(b.y)),
     ))
+  }
+
+  /// A queued frame consumes the newest pointer, but cannot revive a finished gesture.
+  fn take_preview(&mut self, generation: u64) -> Option<Bounds<Pixels>> {
+    if self.generation != generation {
+      return None;
+    }
+    self.preview_pending = false;
+    self.rectangle()
   }
 
   fn clamp(&self, point: Point<Pixels>) -> Point<Pixels> {
@@ -113,25 +128,41 @@ impl RenderOnce for Marquee {
     let listeners = gpui::canvas(
       |_, _, _| (),
       move |_, _, window, _| {
+        let owner = window.current_view();
         let state = pointer_state.clone();
         let on_change = pointer_change.clone();
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
           if phase != DispatchPhase::Capture || state.read(cx).origin.is_none() {
             return;
           }
-          let update = state.update(cx, |state, _| {
+          let generation = state.update(cx, |state, _| {
             if event.pressed_button != Some(MouseButton::Left) {
               state.cancel();
-              return MarqueeEvent::Cancel;
+              return None;
             }
             state.current = state.clamp(event.position);
-            state
-              .rectangle()
-              .map(MarqueeEvent::Preview)
-              .unwrap_or(MarqueeEvent::Cancel)
+            if state.preview_pending {
+              return None;
+            }
+            state.preview_pending = true;
+            Some(state.generation)
           });
-          on_change(update, window, cx);
-          window.refresh();
+          if event.pressed_button != Some(MouseButton::Left) {
+            on_change(MarqueeEvent::Cancel, window, cx);
+          } else if let Some(generation) = generation {
+            let state = state.clone();
+            let on_change = on_change.clone();
+            // Consume the newest pointer rectangle once per frame. Generation
+            // guards prevent a queued preview from running after release/cancel.
+            window.on_next_frame(move |window, cx| {
+              let rectangle = state.update(cx, |state, _| state.take_preview(generation));
+              if let Some(rectangle) = rectangle {
+                on_change(MarqueeEvent::Preview(rectangle), window, cx);
+                cx.notify(owner);
+              }
+            });
+          }
+          cx.notify(owner);
           cx.stop_propagation();
         });
         let state = pointer_state;
@@ -150,7 +181,7 @@ impl RenderOnce for Marquee {
             result
           });
           on_change(update, window, cx);
-          window.refresh();
+          cx.notify(owner);
           // A dragged button must not also submit its single-residue click on release.
           cx.stop_propagation();
         });
@@ -172,14 +203,18 @@ impl RenderOnce for Marquee {
       .min_h_0()
       .min_w_0()
       .overflow_hidden()
-      .on_prepaint(move |bounds, _, cx| {
-        measure_state.update(cx, |state, _| state.bounds = bounds);
+      .on_prepaint(move |bounds, window, cx| {
+        measure_state.update(cx, |state, _| {
+          state.bounds = bounds;
+          state.owner = Some(window.current_view());
+        });
       })
       .capture_any_mouse_down(move |event, window, cx| {
         if event.button != MouseButton::Left || !press_state.read(cx).bounds.contains(&event.position) {
           return;
         }
         press_state.update(cx, |state, _| {
+          state.cancel();
           state.origin = Some(event.position);
           state.current = event.position;
         });
@@ -188,7 +223,9 @@ impl RenderOnce for Marquee {
           window,
           cx,
         );
-        window.refresh();
+        if let Some(owner) = press_state.read(cx).owner {
+          cx.notify(owner);
+        }
         cx.stop_propagation();
       })
       .child(self.child)
@@ -291,6 +328,33 @@ mod tests {
         gpui::point(px(10.0), px(20.0)),
         gpui::size(px(60.0), px(30.0))
       ))
+    );
+  }
+
+  #[test]
+  fn frame_preview_uses_latest_pointer_and_cancel_invalidates_queued_work() {
+    let mut state = MarqueeState {
+      origin: Some(gpui::point(px(10.0), px(10.0))),
+      current: gpui::point(px(20.0), px(20.0)),
+      preview_pending: true,
+      generation: 7,
+      ..Default::default()
+    };
+    state.current = gpui::point(px(80.0), px(40.0));
+    assert_eq!(
+      state.take_preview(7),
+      Some(Bounds::new(
+        gpui::point(px(10.0), px(10.0)),
+        gpui::size(px(70.0), px(30.0))
+      ))
+    );
+    state.cancel();
+    state.origin = Some(gpui::point(px(5.0), px(5.0)));
+    state.preview_pending = true;
+    assert_eq!(state.take_preview(7), None);
+    assert!(
+      state.preview_pending,
+      "old frame must not consume the next gesture's pending preview"
     );
   }
 }
