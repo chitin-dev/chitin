@@ -403,6 +403,12 @@ impl TerminalSession {
     TerminalSnapshot::from_term(&self.terminal.lock())
   }
 
+  /// Removes scrollback without sending input or clearing the live screen.
+  pub fn clear_scrollback(&self) {
+    // Use the VT operation so selection and vi-mode coordinates are repaired too.
+    ansi::Handler::clear_screen(&mut *self.terminal.lock(), ansi::ClearMode::Saved);
+  }
+
   /// Moves the visible viewport through the scrollback history.
   ///
   /// # Parameters
@@ -785,6 +791,20 @@ mod tests {
     let written = (1..=lines).map(|line| format!("line-{line}\r\n")).collect::<String>();
     feed(&program, written.as_bytes());
     session
+  }
+
+  #[test]
+  fn clearing_scrollback_should_preserve_live_screen() {
+    let session = session_with_scrollback(10);
+    let before = session.snapshot();
+    session.scroll(TerminalScroll::Top);
+    session.clear_scrollback();
+    assert_eq!(session.scroll_state().history_size, 0);
+    assert_eq!(session.scroll_state().display_offset, 0);
+    let after = session.snapshot();
+    for row in 0..before.rows {
+      assert_eq!(row_text(&before, row), row_text(&after, row));
+    }
   }
 
   /// Returns the trimmed text of one visible row.

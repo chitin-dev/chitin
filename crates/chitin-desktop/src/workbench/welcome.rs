@@ -2,8 +2,8 @@
 
 use chitin_command::CommandId;
 use chitin_ui::workbench::{WorkbenchStyle, panel_surface, viewport_container};
-use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Styled, div};
-use gpui_kit::component::theme::ThemeColor;
+use gpui::{Context, InteractiveElement, IntoElement, ParentElement, Styled, div, px};
+use gpui_kit::component::{Icon, Sizable as _, theme::ThemeColor};
 
 use crate::{
   app::ChitinApp,
@@ -25,6 +25,12 @@ pub(crate) fn render_welcome(app: &ChitinApp, theme: ThemeColor, cx: &Context<Ch
       .justify_center()
       .p_6()
       .gap_3()
+      .child(
+        Icon::default()
+          .path("logo-app.svg")
+          .with_size(px(96.0))
+          .text_color(theme.foreground),
+      )
       .child(div().text_xl().child(title))
       .child(
         div()

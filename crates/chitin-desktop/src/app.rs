@@ -22,13 +22,14 @@ use crate::{
   },
   features::{
     command_palette::{CommandPanelController, render_command_panel},
-    terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_bottom_dock},
+    terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_panel},
   },
   keybindings::{
     RedoWorkbenchEdit, ToggleCommandPanel, ToggleTerminal, ToggleWorkspace, UndoWorkbenchEdit, WORKBENCH_KEY_CONTEXT,
   },
   services::tasks::BackgroundTaskCenter,
   workbench::{
+    bottom_dock::render_bottom_dock,
     documents::{DocumentPanelState, dock::DocumentDock, render_document_area, state::DocumentPanelContent},
     explorer::{MAX_PROJECT_SIDEBAR_WIDTH, MIN_PROJECT_SIDEBAR_WIDTH, ProjectSidebarState},
     sidebar::{SidebarView, render_primary_sidebar},
@@ -412,9 +413,8 @@ impl Render for ChitinApp {
     } else {
       None
     };
-    if terminal_dock_controls.is_some() {
-      self.sync_terminal_output();
-    }
+    // Runtime output is independent of overlay visibility. Session entities stay alive.
+    self.sync_terminal_output();
     if self.terminal_panel.take_focus_request()
       && let Some(controls) = terminal_dock_controls.as_ref()
       && let Some(focus) = controls.focus(cx)
@@ -427,6 +427,15 @@ impl Render for ChitinApp {
       self.entries_sidebar.unbind_editors();
     }
     let workbench_focus = self.workbench_focus(cx);
+    if !self.bottom_dock.is_active(TERMINAL_DOCK_ITEM_ID)
+      && self
+        .terminal_panel_controls
+        .as_ref()
+        .and_then(|controls| controls.focus(cx))
+        .is_some_and(|focus| focus.is_focused(window))
+    {
+      window.focus(&workbench_focus, cx);
+    }
     let document_panel_focus = self.document_panel_focus(cx);
     let mut document_dock = self
       .document_dock
@@ -437,7 +446,6 @@ impl Render for ChitinApp {
     self.entries_sidebar.prune(&self.document_panels);
     let document_area = document_dock.area.clone();
     self.document_dock = Some(document_dock);
-    let bottom_dock_height = self.bottom_dock.height();
 
     let document_body = if self.document_panels.tree.tabs_in_order().is_empty() {
       render_welcome(self, theme, cx).into_any_element()
@@ -453,11 +461,11 @@ impl Render for ChitinApp {
       .min_h_0()
       .child(render_document_area(document_body, &document_panel_focus, cx))
       .when_some(terminal_dock_controls, |layout, controls| {
-        layout.child(render_terminal_bottom_dock(
-          controls,
-          bottom_dock_height,
+        layout.child(render_bottom_dock(
+          self,
+          render_terminal_panel(controls, theme, app.clone()),
           theme,
-          app.clone(),
+          cx,
         ))
       });
     let workbench_content = if self.project_sidebar_visible {
