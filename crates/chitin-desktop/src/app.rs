@@ -22,6 +22,7 @@ use crate::{
   },
   features::{
     command_palette::{CommandPanelController, render_command_panel},
+    sequence::{SEQUENCE_DOCK_ITEM_ID, SequencePanelState, render_sequence_panel},
     terminal::{TERMINAL_DOCK_ITEM_ID, TerminalPanelControls, TerminalPanelState, render_terminal_panel},
   },
   keybindings::{
@@ -79,6 +80,8 @@ pub struct ChitinApp {
   pub(crate) terminal_panel: TerminalPanelState,
   /// Persistent primitive controls for the bottom terminal.
   pub(crate) terminal_panel_controls: Option<TerminalPanelControls>,
+  /// Chain sequence projection and persistent filter/wrapping preferences.
+  pub(crate) sequence_panel: SequencePanelState,
   /// Structure paths currently being read and parsed off the UI thread.
   pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
   /// Window-level transient notification queue.
@@ -164,6 +167,7 @@ impl ChitinApp {
       bottom_dock: BottomDockState::new(),
       terminal_panel: TerminalPanelState::new(),
       terminal_panel_controls: None,
+      sequence_panel: SequencePanelState::default(),
       pending_structure_loads: BTreeSet::new(),
       toast_viewport: None,
     }
@@ -413,6 +417,10 @@ impl Render for ChitinApp {
     } else {
       None
     };
+    let sequence_visible = self.bottom_dock.is_active(SEQUENCE_DOCK_ITEM_ID);
+    if sequence_visible {
+      self.sequence_panel.sync(&self.document_panels);
+    }
     // Runtime output is independent of overlay visibility. Session entities stay alive.
     self.sync_terminal_output();
     if self.terminal_panel.take_focus_request()
@@ -464,6 +472,14 @@ impl Render for ChitinApp {
         layout.child(render_bottom_dock(
           self,
           render_terminal_panel(controls, theme, app.clone()),
+          theme,
+          cx,
+        ))
+      })
+      .when(sequence_visible, |layout| {
+        layout.child(render_bottom_dock(
+          self,
+          render_sequence_panel(&self.sequence_panel, theme, app.clone()),
           theme,
           cx,
         ))

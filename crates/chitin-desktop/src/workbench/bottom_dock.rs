@@ -29,7 +29,10 @@ pub(crate) fn render_bottom_dock(
   cx: &Context<ChitinApp>,
 ) -> impl IntoElement {
   // Only implemented tools are exposed; the UI layer does not know these IDs.
-  let tools = [(crate::features::terminal::TERMINAL_DOCK_ITEM_ID, "Terminal")];
+  let tools = [
+    (crate::features::terminal::TERMINAL_DOCK_ITEM_ID, "Terminal"),
+    (crate::features::sequence::SEQUENCE_DOCK_ITEM_ID, "Sequence"),
+  ];
   let selected = tools
     .iter()
     .position(|(id, _)| app.bottom_dock.is_active(id))
