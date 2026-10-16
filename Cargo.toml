@@ -5,6 +5,7 @@ members = [
   "crates/chitin-cli",
   "crates/chitin-bio",
   "crates/chitin-bio-macros",
+  "crates/chitin-chem",
   "crates/chitin-utils",
   "crates/chitin-databases",
   "crates/chitin-desktop",
