@@ -6,10 +6,16 @@ use chitin_chem::{Atom, AtomId, BondOrder, Element, GraphError, MolecularGraph};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+/// Adds an isolated carbon with unknown chemistry, propagating allocation failure.
 fn carbon(graph: &mut MolecularGraph) -> Result<AtomId, GraphError> {
   graph.add_atom(Atom::new(Element::Carbon))
 }
 
+/// Verifies symmetric adjacency, live endpoints, degree sums, and component coverage.
+///
+/// # Errors
+/// Propagates invalid topology references; assertions identify broken invariants.
+/// It deliberately checks graph structure rather than chemical plausibility.
 fn assert_consistent(graph: &MolecularGraph) -> TestResult {
   let mut degree_sum = 0;
   for (atom, _) in graph.atoms() {

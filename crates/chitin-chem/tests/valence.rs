@@ -4,8 +4,10 @@ use chitin_chem::perception::{ValenceDiagnostic, ValenceModel, ValenceReport, Va
 use chitin_chem::{Atom, AtomId, BondOrder, Element, ImplicitHydrogenPolicy, Isotope, MolecularGraph};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+/// Explicit rule set shared by these fixtures, not an application-wide default.
 const MODEL: ValenceModel = ValenceModel::MainGroupClosedShellV1;
 
+/// Creates explicitly known neutral closed-shell facts with H inference enabled.
 fn known_atom(element: Element) -> Atom {
   // These are explicit test inputs, not defaults of the domain model. Readers
   // and drawing tools will likewise need to establish their own input policies.
@@ -16,6 +18,7 @@ fn known_atom(element: Element) -> Atom {
     .with_implicit_hydrogen_policy(ImplicitHydrogenPolicy::Infer)
 }
 
+/// Resolves a fixture's graph-local report row, failing rather than skipping assertions.
 fn row(
   report: &ValenceReport,
   atom: AtomId,

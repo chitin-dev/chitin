@@ -22,8 +22,11 @@ pub enum ImplicitHydrogenPolicy {
 /// for those same H without reducing the declaration accordingly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HydrogenCounts {
+  /// Adjacent H vertices, already included in incident bond-order contributions.
   pub(crate) neighbors: u32,
+  /// Attribute-level H, never counted again as graph neighbors.
   pub(crate) declared: u8,
+  /// Additional fixed or inferred H, without changing the source atom.
   pub(crate) implicit: u8,
 }
 

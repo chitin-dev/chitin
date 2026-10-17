@@ -4,24 +4,47 @@ use std::ops::Range;
 
 use crate::{Atom, BondOrder, Element, ImplicitHydrogenPolicy, Isotope};
 
-use super::{SmilesError, SmilesErrorKind, error};
+use super::{SmilesError, SmilesErrorKind, error, profile};
 
+/// One positioned lexical fact, before any graph-local handles are allocated.
 #[derive(Debug)]
 pub(super) struct Token {
+  /// Half-open UTF-8 byte range covering the entire token.
   pub span: Range<usize>,
+  /// Atomic source facts or a topology control symbol, never inferred chemistry.
   pub kind: Kind,
 }
 
+/// Supported lexical categories; unsupported annotations never become tokens.
 #[derive(Debug)]
 pub(super) enum Kind {
+  /// Complete atom facts with format-specific H/charge defaults already applied.
   Atom(Atom),
+  /// Explicit order awaiting an atom or ring site in the topology parser.
   Bond(BondOrder),
+  /// Numeric ring identity, independent of digit versus percent spelling.
   Ring(u8),
+  /// Starts a branch whose parent is resolved by the topology parser.
   Open,
+  /// Ends a branch and restores its parent.
   Close,
+  /// Stops the current chain without discarding pending ring identities.
   Dot,
 }
 
+/// Scans the entire input before exposing tokens to graph construction.
+///
+/// # Parameters
+/// - `source`: exact SMILES input, without trimming or record-name handling.
+///
+/// # Returns
+/// Tokens in source order with byte-aligned spans, or an empty vector for empty
+/// input. Bracket fields remain supplied facts rather than perception results.
+///
+/// # Errors
+/// Returns the first lexical, unsupported-feature, or representation error.
+/// Local scanner progress on failure is discarded together with all tokens;
+/// this layer neither recovers malformed input nor returns a partial graph.
 pub(super) fn scan(source: &str) -> Result<Vec<Token>, SmilesError> {
   let mut scanner = Scanner { source, offset: 0 };
   let mut tokens = Vec::new();
@@ -36,25 +59,43 @@ pub(super) fn scan(source: &str) -> Result<Vec<Token>, SmilesError> {
   Ok(tokens)
 }
 
+/// Cursor over borrowed UTF-8 input; successful advances consume ASCII only.
+///
+/// `offset` always lies on a character boundary. Non-ASCII input is reported at
+/// its full character range without incrementing the cursor into a code point.
 struct Scanner<'a> {
+  /// Source storage remains unchanged so token ranges stay valid.
   source: &'a str,
+  /// Byte index of the next unconsumed character, including end-of-input.
   offset: usize,
 }
 
 impl Scanner<'_> {
+  /// Returns the next raw byte, or `None` at end-of-input, without advancing.
   fn peek(&self) -> Option<u8> {
     self.source.as_bytes().get(self.offset).copied()
   }
 
+  /// Covers one full current UTF-8 character, or an empty end-of-input location.
   fn here(&self) -> Range<usize> {
     let width = self.source[self.offset..].chars().next().map_or(0, char::len_utf8);
     self.offset..self.offset + width
   }
 
+  /// Positions a supplied failure at the current cursor without consuming input.
   fn fail(&self, kind: SmilesErrorKind) -> SmilesError {
     error(self.here(), kind)
   }
 
+  /// Consumes one lexical token, including the full spelling of bracket atoms.
+  ///
+  /// # Returns
+  /// One supported category and an advanced byte cursor. Percent ring labels
+  /// consume exactly two following digits; they do not close graph edges here.
+  ///
+  /// # Errors
+  /// Rejects malformed, unsupported, or out-of-range tokens. The cursor may have
+  /// advanced on failure; `scan` owns it and never resumes a failed scan.
   fn token(&mut self) -> Result<Kind, SmilesError> {
     let byte = self
       .peek()
@@ -89,6 +130,10 @@ impl Scanner<'_> {
     Ok(kind)
   }
 
+  /// Distinguishes recognized missing capabilities from unexpected characters.
+  ///
+  /// This is a fail-fast diagnostic classification, not a query/stereo parser;
+  /// reporting a feature as unsupported does not validate its remaining syntax.
   fn unsupported_or_syntax(&self) -> SmilesError {
     let feature = match self.peek() {
       Some(b'a' | b'b' | b'c' | b'n' | b'o' | b'p' | b's' | b':') => "aromatic atoms/bonds or atom classes",
@@ -101,6 +146,15 @@ impl Scanner<'_> {
     self.fail(SmilesErrorKind::Unsupported(feature))
   }
 
+  /// Consumes one unbracketed organic-subset atom with explicit reader defaults.
+  ///
+  /// # Returns
+  /// An unlabelled neutral, closed-shell input atom with zero declared H and
+  /// permission for later implicit-H inference. No H count is computed here.
+  /// Only `Cl`/`Br` consume a second character outside brackets.
+  ///
+  /// # Errors
+  /// Rejects symbols requiring brackets; source ranges refer to the bare token.
   fn bare(&mut self) -> Result<Atom, SmilesError> {
     let start = self.offset;
     self.offset += 1;
@@ -111,13 +165,15 @@ impl Scanner<'_> {
       }
     }
     let symbol = &self.source[start..self.offset];
-    if !matches!(symbol, "B" | "C" | "N" | "O" | "P" | "S" | "F" | "Cl" | "Br" | "I") {
-      return Err(error(
-        start..self.offset,
-        SmilesErrorKind::Syntax("this element requires brackets"),
-      ));
-    }
-    let element = Element::from_symbol(symbol).map_err(|e| error(start..self.offset, e.into()))?;
+    let element = match Element::from_symbol(symbol) {
+      Ok(element) if profile::organic_subset(element) => element,
+      _ => {
+        return Err(error(
+          start..self.offset,
+          SmilesErrorKind::Syntax("this element requires brackets"),
+        ));
+      }
+    };
     Ok(
       Atom::new(element)
         .with_formal_charge(Some(0))
@@ -127,6 +183,18 @@ impl Scanner<'_> {
     )
   }
 
+  /// Consumes an optional ASCII digit run under a caller-selected lexical bound.
+  ///
+  /// # Parameters
+  /// - `name`: field identity retained in numeric-range diagnostics.
+  /// - `max_digits`: spelling limit, not the width of the domain integer type.
+  ///
+  /// # Returns
+  /// `None` without advancing when no digits occur; otherwise a checked value.
+  /// Leading zeros still count toward the lexical width, so they cannot bypass it.
+  ///
+  /// # Errors
+  /// Reports an oversized/unrepresentable run at its complete source range.
   fn number(&mut self, name: &'static str, max_digits: usize) -> Result<Option<u16>, SmilesError> {
     let start = self.offset;
     while self.peek().is_some_and(|byte| byte.is_ascii_digit()) {
@@ -146,10 +214,21 @@ impl Scanner<'_> {
       .map_err(|_| error(start..self.offset, SmilesErrorKind::NumberOutOfRange(name)))
   }
 
+  /// Consumes `[isotope? element H-count? charge?]` without chemical inference.
+  ///
+  /// # Returns
+  /// One atom with known charge/H defaults and fixed zero additional implicit H.
+  /// Isotope H stays an atom, whereas an attached-H declaration creates no
+  /// vertices. Radical state remains unknown even for apparently saturated input.
+  ///
+  /// # Errors
+  /// Rejects unsupported annotations, missing delimiters, invalid element/isotope
+  /// labels, out-of-range numbers, and H declarations hosted on a hydrogen atom.
+  /// Partial fields never escape the failed scan.
   fn bracket(&mut self) -> Result<Atom, SmilesError> {
     self.offset += 1;
     let isotope_start = self.offset;
-    let isotope = self.number("isotope mass number (at most three digits)", 3)?;
+    let isotope = self.number("isotope mass number (at most three digits)", profile::ISOTOPE_DIGITS)?;
     let symbol_start = self.offset;
     if !self.peek().is_some_and(|b| b.is_ascii_uppercase()) {
       return Err(self.unsupported_or_syntax());
@@ -172,7 +251,9 @@ impl Scanner<'_> {
       }
       self.offset += 1;
       let start = self.offset;
-      let count = self.number("declared hydrogen count (one digit)", 1)?.unwrap_or(1);
+      let count = self
+        .number("declared hydrogen count (one digit)", profile::HYDROGEN_DIGITS)?
+        .unwrap_or(1);
       u8::try_from(count).map_err(|_| {
         error(
           start..self.offset,
@@ -197,6 +278,15 @@ impl Scanner<'_> {
     )
   }
 
+  /// Consumes an optional signed numeric charge or the legacy `++`/`--` form.
+  ///
+  /// # Returns
+  /// Zero without advancing if the field is absent, as required by bracket
+  /// syntax. A lone sign means magnitude one; a repeated sign means two.
+  ///
+  /// # Errors
+  /// Returns a positioned range error for unsupported numeric widths/values.
+  /// Trailing or mixed signs are left for the enclosing bracket grammar to reject.
   fn charge(&mut self) -> Result<i16, SmilesError> {
     let sign = match self.peek() {
       Some(b'+') => 1_i32,
@@ -210,7 +300,9 @@ impl Scanner<'_> {
       self.offset += 1;
       2
     } else {
-      self.number("formal charge (at most two digits)", 2)?.unwrap_or(1)
+      self
+        .number("formal charge (at most two digits)", profile::CHARGE_DIGITS)?
+        .unwrap_or(1)
     };
     i16::try_from(sign * i32::from(magnitude))
       .map_err(|_| error(start..self.offset, SmilesErrorKind::NumberOutOfRange("formal charge")))

@@ -195,6 +195,7 @@ impl Element {
 }
 
 impl fmt::Display for Element {
+  /// Formats the canonical symbol rather than the Rust variant name.
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     formatter.write_str(self.symbol())
   }
@@ -202,6 +203,7 @@ impl fmt::Display for Element {
 
 impl FromStr for Element {
   type Err = ElementError;
+  /// Delegates to strict symbol parsing without format-specific normalization.
   fn from_str(symbol: &str) -> Result<Self, Self::Err> {
     Self::from_symbol(symbol)
   }
@@ -209,6 +211,7 @@ impl FromStr for Element {
 
 impl TryFrom<u8> for Element {
   type Error = ElementError;
+  /// Delegates to the checked atomic-number lookup.
   fn try_from(number: u8) -> Result<Self, Self::Error> {
     Self::from_atomic_number(number)
   }
@@ -230,12 +233,22 @@ pub struct IsotopeError {
 /// observed, is bound, or is stable; that requires a separately sourced dataset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Isotope {
+  /// Nuclear charge identity, shared with any atom carrying this label.
   element: Element,
+  /// Proton-plus-neutron count, never a substitute for a measured atomic mass.
   mass_number: u16,
 }
 
 impl Isotope {
   /// Creates an isotope label from element and proton-plus-neutron count.
+  ///
+  /// # Parameters
+  /// - `element`: fixes the proton count Z.
+  /// - `mass_number`: integer nucleon count A, not a mass in daltons.
+  ///
+  /// # Returns
+  /// An explicit label satisfying A >= Z. Existence, abundance, and stability
+  /// are not checked and require a separate nuclide dataset.
   ///
   /// # Errors
   /// Returns [`IsotopeError`] when the mass number is smaller than Z.

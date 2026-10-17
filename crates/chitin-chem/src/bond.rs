@@ -24,7 +24,9 @@ pub enum BondOrder {
 /// unordered. Wedges and dashes are not bond orders and are not modelled here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bond {
+  /// Live endpoints in one graph; source order is retained without directionality.
   pub(crate) atoms: [AtomId; 2],
+  /// Input bond representation, independent of aromaticity perception.
   pub(crate) order: BondOrder,
 }
 

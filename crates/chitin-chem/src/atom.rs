@@ -8,11 +8,17 @@ use crate::{Element, ImplicitHydrogenPolicy, Isotope};
 /// and the implicit-H policy are separate facts; none is a computed cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Atom {
+  /// Nuclear identity; isotope construction must preserve this element.
   element: Element,
+  /// An explicit nuclide label, not a default natural-abundance isotope.
   isotope: Option<Isotope>,
+  /// Supplied integer charge; `None` is not neutral.
   formal_charge: Option<i16>,
+  /// Attached-H attributes, excluding independent H vertices and implicit H.
   declared_hydrogens: Option<u8>,
+  /// Input instruction only; inferred counts live in a detached report.
   implicit_hydrogen_policy: ImplicitHydrogenPolicy,
+  /// Supplied atomic radical count, not molecular spin multiplicity.
   unpaired_electrons: Option<u8>,
 }
 

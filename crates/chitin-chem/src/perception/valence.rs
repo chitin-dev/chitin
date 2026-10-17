@@ -80,6 +80,7 @@ pub enum ValenceDiagnostic {
 }
 
 impl ValenceDiagnostic {
+  /// Classifies one blocker without discarding any other atom-local diagnostics.
   fn status(&self) -> ValenceStatus {
     match self {
       Self::UnknownFormalCharge
@@ -107,8 +108,11 @@ pub struct AtomValence {
 /// One immutable analysis row keyed to an input graph's atom handle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtomValenceAnalysis {
+  /// Aggregate category, with unsupported coverage taking precedence over gaps.
   status: ValenceStatus,
+  /// Present only for a determined row; partial sums are never exposed as facts.
   value: Option<AtomValence>,
+  /// All detected blockers, including those below the aggregate category.
   diagnostics: Vec<ValenceDiagnostic>,
 }
 
@@ -126,6 +130,15 @@ impl AtomValenceAnalysis {
     &self.diagnostics
   }
 
+  /// Builds a value-free row while retaining every supplied failure reason.
+  ///
+  /// # Parameters
+  /// - `diagnostics`: nonempty blockers from fact gathering or final arithmetic.
+  ///
+  /// # Returns
+  /// A row with `Invalid > Unsupported > Indeterminate` category precedence.
+  /// Callers supply invalid-valence reasons only after required facts are known;
+  /// this helper aggregates categories rather than establishing that precondition.
   fn unresolved(diagnostics: Vec<ValenceDiagnostic>) -> Self {
     // Coverage failures take precedence over missing facts, but every reason is
     // retained. Invalid is used only after all required input is established.
@@ -157,7 +170,9 @@ impl AtomValenceAnalysis {
 /// aromaticity, stereochemistry, or suitability for a quantum calculation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValenceReport {
+  /// Rule-set identity required to interpret the atom-local outcomes.
   model: ValenceModel,
+  /// Snapshot rows for the input graph's live IDs, not a self-updating cache.
   atoms: BTreeMap<AtomId, AtomValenceAnalysis>,
 }
 
@@ -217,6 +232,20 @@ pub fn analyze_valence(graph: &MolecularGraph, model: ValenceModel) -> Result<Va
   Ok(ValenceReport { model, atoms })
 }
 
+/// Collects required facts and incident geometry-independent bond contributions.
+///
+/// # Parameters
+/// - `graph`, `id`, `atom`: one live vertex and its attributes from the same graph.
+/// - `model`: explicit target-valence rule set, with no fallback model.
+///
+/// # Returns
+/// A complete local result or all detected missing/unsupported facts. Neighbor H
+/// are counted for composition, but their bonds already contribute to valence.
+/// Unknown/aromatic orders block completion rather than contributing zero.
+///
+/// # Errors
+/// Returns `GraphError` for inconsistent vertex, neighbor, or edge references;
+/// chemical uncertainty and model failures remain diagnostics in the returned row.
 fn analyze_atom(
   graph: &MolecularGraph,
   id: AtomId,
@@ -286,12 +315,35 @@ fn analyze_atom(
   }
 }
 
+/// Dispatches target lookup to the explicitly selected chemistry model.
+///
+/// # Parameters
+/// - `atom`: supplied identity/charge facts needed by the selected lookup.
+/// - `model`: rule-set identity; no ambient default or fallback is selected.
+///
+/// # Returns
+/// One supported target, not a whole-molecule validation result.
+///
+/// # Errors
+/// Returns the selected model's missing/unsupported-input diagnostic unchanged.
 fn target_valence(atom: &Atom, model: ValenceModel) -> Result<u8, ValenceDiagnostic> {
   match model {
     ValenceModel::MainGroupClosedShellV1 => main_group_target(atom),
   }
 }
 
+/// Looks up the restricted V1 element/charge table without guessing a valence.
+///
+/// # Parameters
+/// - `atom`: supplied element and optional formal charge; radical/bond checks
+///   belong to `analyze_atom`, not to this table lookup.
+///
+/// # Returns
+/// The one V1 target for a supported element/charge pair.
+///
+/// # Errors
+/// Unknown charge, unlisted elements, and unlisted charge states return distinct
+/// diagnostics, never an implicit neutral/default-valence fallback.
 fn main_group_target(atom: &Atom) -> Result<u8, ValenceDiagnostic> {
   let neutral = match atom.element() {
     Element::Hydrogen | Element::Fluorine | Element::Chlorine | Element::Bromine | Element::Iodine => 1,
@@ -309,6 +361,19 @@ fn main_group_target(atom: &Atom) -> Result<u8, ValenceDiagnostic> {
   }
 }
 
+/// Completes H accounting after required facts and integer bond orders are known.
+///
+/// # Parameters
+/// - `atom`: source H policy and identity, not modified by completion.
+/// - `bond_sum`: sum of incident single/double/triple orders, including H bonds.
+/// - `neighbors`: independent H-vertex count, used only in the composition report.
+/// - `declared`: known attribute-level attached H, excluding graph vertices.
+/// - `target`: bounded V1 target supplied by the selected model's lookup.
+///
+/// # Returns
+/// A determined row only when explicit plus fixed/inferred implicit H exactly
+/// meets the target. Over/underfill, count overflow, and H-as-host are diagnostics.
+/// Inference never adds neighbor H to valence a second time or repairs source facts.
 fn complete_atom(atom: &Atom, bond_sum: u32, neighbors: u32, declared: u8, target: u8) -> AtomValenceAnalysis {
   let Some(explicit_valence) = bond_sum.checked_add(u32::from(declared)) else {
     return AtomValenceAnalysis::unresolved(vec![ValenceDiagnostic::CountOverflow]);

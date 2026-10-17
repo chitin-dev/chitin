@@ -11,6 +11,7 @@ use std::{
 
 use crate::{Atom, Bond, BondOrder};
 
+/// Generates distinct opaque handle types without exposing raw-ID construction.
 macro_rules! graph_id {
   ($name:ident, $description:literal) => {
     #[doc = $description]
@@ -25,6 +26,7 @@ macro_rules! graph_id {
     }
 
     impl fmt::Display for $name {
+      /// Formats the local numeric handle, not a global chemical identity.
       fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(formatter)
       }
@@ -67,8 +69,10 @@ pub enum GraphError {
   IdentifierExhausted,
 }
 
+/// One live atom and its symmetric, duplicate-free adjacency index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Vertex {
+  /// Supplied attributes; topology operations never sanitize them.
   atom: Atom,
   // One entry per neighboring atom simultaneously prevents parallel edges
   // and makes local traversal independent of deleted IDs and table compaction.
@@ -84,9 +88,13 @@ struct Vertex {
 /// This baseline uses ordered maps; it does not claim dense-array performance.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MolecularGraph {
+  /// Live vertices only; removal does not compact their handles.
   atoms: BTreeMap<AtomId, Vertex>,
+  /// One record per unordered endpoint pair, mirrored by vertex adjacency.
   bonds: BTreeMap<BondId, Bond>,
+  /// Next candidate handle; never decremented after deletion.
   next_atom: u64,
+  /// Independent monotonic bond-handle namespace.
   next_bond: u64,
 }
 
@@ -126,6 +134,13 @@ impl MolecularGraph {
 
   /// Adds supplied atomic attributes without inferring chemical properties.
   ///
+  /// # Parameters
+  /// - `atom`: input facts, including unknown or chemically implausible values.
+  ///
+  /// # Returns
+  /// A fresh graph-local handle for an isolated vertex. The graph takes ownership
+  /// of the supplied facts; no neighbors or inferred properties are added.
+  ///
   /// # Errors
   /// Returns [`GraphError::IdentifierExhausted`] rather than reusing an old ID.
   pub fn add_atom(&mut self, atom: Atom) -> Result<AtomId, GraphError> {
@@ -141,6 +156,10 @@ impl MolecularGraph {
   }
 
   /// Replaces atomic attributes while retaining the ID and all connectivity.
+  ///
+  /// # Parameters
+  /// - `id`: live handle in this graph, not an index into atom iteration.
+  /// - `atom`: replacement facts; no chemical validation is performed.
   ///
   /// # Returns
   /// The previous attributes, suitable for recording a future reversible edit.
@@ -199,6 +218,13 @@ impl MolecularGraph {
 
   /// Removes one bond and both adjacency links, without changing atom IDs.
   ///
+  /// # Parameters
+  /// - `id`: live edge handle in this graph, independent of endpoint orientation.
+  ///
+  /// # Returns
+  /// The removed edge with its original endpoint order and bond label. Both
+  /// endpoints remain live, even when removal leaves them isolated.
+  ///
   /// # Errors
   /// Returns [`GraphError::MissingBond`] when `id` is not live.
   pub fn remove_bond(&mut self, id: BondId) -> Result<Bond, GraphError> {
@@ -217,6 +243,13 @@ impl MolecularGraph {
   ///
   /// Surviving IDs remain unchanged. The returned atom alone is not a complete
   /// undo record: an edit layer must also capture incident bonds before deletion.
+  ///
+  /// # Parameters
+  /// - `id`: live vertex to remove together with every incident edge.
+  ///
+  /// # Returns
+  /// The removed input attributes; survivor IDs and allocation counters retain
+  /// their previous values, so deleted handles are not available for reuse.
   ///
   /// # Errors
   /// Returns [`GraphError::MissingAtom`] when `id` is not live.
@@ -266,6 +299,8 @@ impl MolecularGraph {
         component.push(id);
         if let Some(vertex) = self.atoms.get(&id) {
           for &neighbor in vertex.neighbors.keys() {
+            // Mark on enqueue, not dequeue, so cycles cannot queue a vertex
+            // repeatedly and the traversal retains O(V + E) edge visits.
             if visited.insert(neighbor) {
               pending.push(neighbor);
             }
@@ -279,6 +314,17 @@ impl MolecularGraph {
   }
 }
 
+/// Reserves one monotonic handle without changing the counter on overflow.
+///
+/// # Parameters
+/// - `counter`: next unused value in one atom or bond namespace.
+///
+/// # Returns
+/// The previous counter value, after successfully advancing the allocation cursor.
+/// `u64::MAX` remains the exhausted sentinel rather than an allocatable handle.
+///
+/// # Errors
+/// Returns `IdentifierExhausted` before any write if incrementing would overflow.
 fn allocate_id(counter: &mut u64) -> Result<u64, GraphError> {
   let next = counter.checked_add(1).ok_or(GraphError::IdentifierExhausted)?;
   let id = *counter;

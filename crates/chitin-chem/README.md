@@ -21,6 +21,8 @@ complete cheminformatics toolkit or an editor UI.
   structured diagnostics within an explicit, restricted V1 rule set.
 - A restricted SMILES reader with source positions, independent of perception;
   branches, ring closure, fragments, bracket elements/isotopes/H/charges.
+- A deterministic noncanonical SMILES writer with strict supplied-fact
+  preservation, typed failures, reusable ring labels, and iterative traversal.
 
 ## Boundaries
 
@@ -44,13 +46,16 @@ is not full RDKit sanitization.
 ## SMILES and future formats
 
 ```rust
-use chitin_chem::io::smiles::read_smiles;
+use chitin_chem::io::smiles::{read_smiles, write_smiles};
 use chitin_chem::perception::{ValenceModel, analyze_valence};
 
 let parsed = read_smiles("CC(O)C")?;
 let report = analyze_valence(parsed.graph(), ValenceModel::MainGroupClosedShellV1)?;
 assert_eq!(parsed.graph().atom_count(), 4);
 assert!(report.atoms().all(|(_, row)| row.value().is_some()));
+let serialized = write_smiles(parsed.graph())?;
+let reread = read_smiles(&serialized)?;
+assert_eq!(reread.graph().atom_count(), 4);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
@@ -60,6 +65,14 @@ disable implicit H and retain unknown radical state: `[C]` is not ordinary
 already been perceived. Unsupported aromatic/stereo/query/extension information
 is rejected with a positioned error, never discarded. Record names/whitespace
 are not silently removed. Empty input represents an empty graph.
+
+The writer preserves all supplied atomic attributes and bond orders, up to
+graph isomorphism, without consulting reader provenance or inferring facts.
+It does not promise canonical SMILES or the original input spelling. Unknown
+charge/H, unsupported bond orders, fixed nonzero implicit H, and facts that
+the current reader cannot recover are explicit errors, not silent defaults.
+In particular, a known radical count on a bracket atom (even zero) cannot yet
+survive this strict round trip. Explicit H vertices are never collapsed.
 
 See [Chemical format architecture](docs/formats.md) for the complete current
 capability boundary and staged path to full molecular OpenSMILES, writers,

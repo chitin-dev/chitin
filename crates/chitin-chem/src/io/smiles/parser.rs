@@ -9,18 +9,27 @@ use super::{
   syntax::{Kind, Token},
 };
 
+/// Saved parent and opening location for one unfinished, nonrecursive branch.
 struct Branch {
+  /// Restored after closing the branch, even if a dot disconnected its contents.
   parent: AtomId,
+  /// Vertex-count checkpoint used to reject a branch that added no atoms.
   atom_count: usize,
+  /// Opening parenthesis range for an unclosed-branch diagnostic.
   span: Range<usize>,
 }
 
+/// One unmatched ring site; this is a pending edge, not a perceived chemical ring.
 struct Ring {
+  /// Live atom at the first occurrence of this numeric label.
   atom: AtomId,
+  /// Explicit order, if supplied; absence defers to the other site or single.
   order: Option<BondOrder>,
+  /// First site's bond-symbol/label range, retained for provenance and errors.
   span: Range<usize>,
 }
 
+/// Most recent grammar category; carries no chemical meaning or graph ownership.
 #[derive(Clone, Copy)]
 enum Previous {
   Start,
@@ -33,11 +42,28 @@ enum Previous {
 }
 
 impl Previous {
+  /// Returns whether the last category leaves a complete current atom endpoint.
   fn is_endpoint(self) -> bool {
     matches!(self, Self::Atom | Self::Ring | Self::Close)
   }
 }
 
+/// Assembles a detached graph with explicit branch and pending-ring state.
+///
+/// # Parameters
+/// - `source`: exact input whose byte ranges are carried by `tokens`.
+/// - `tokens`: ordered output of the successful lexical scan of that same input.
+///
+/// # Returns
+/// A complete graph plus provenance, without valence/ring/aromaticity perception.
+/// Dots clear only the current chain; ring labels can legally connect across dots.
+/// Branch closure restores its saved parent. Explicit orders at two ring sites
+/// must agree, and a closed label is available for later reuse.
+///
+/// # Errors
+/// Returns positioned grammar or simple-graph failures, including self/duplicate
+/// ring edges and unfinished state at end-of-input. All construction is local:
+/// any failure drops the partial graph instead of exposing a usable prefix.
 pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, SmilesError> {
   let mut result = ParsedSmiles {
     source: source.into(),
@@ -46,6 +72,8 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
     bond_spans: BTreeMap::new(),
   };
   let mut current = None;
+  // At most one explicit bond can await an endpoint. Atom/ring handling takes
+  // it exactly once; grammar checks prevent overwriting it with another bond.
   let mut pending: Option<(BondOrder, Range<usize>)> = None;
   let mut branches: Vec<Branch> = Vec::new();
   let mut rings: BTreeMap<u8, Ring> = BTreeMap::new();

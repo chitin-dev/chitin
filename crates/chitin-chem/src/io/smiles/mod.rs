@@ -1,4 +1,4 @@
-//! A strict, nonaromatic SMILES reader, not yet a complete SMILES implementation.
+//! Strict, nonaromatic SMILES I/O, not yet a complete SMILES implementation.
 //!
 //! Syntax scanning and topology construction are separate from chemical
 //! perception. Unsupported information is rejected rather than discarded.
@@ -9,7 +9,11 @@ use std::{collections::BTreeMap, ops::Range};
 use crate::{AtomId, BondId, ElementError, GraphError, IsotopeError, MolecularGraph};
 
 mod parser;
+mod profile;
 mod syntax;
+mod writer;
+
+pub use writer::{SmilesAtomWriteError, SmilesWriteError, write_smiles};
 
 /// A positioned read failure; offsets are zero-based UTF-8 byte offsets.
 ///
@@ -35,7 +39,7 @@ pub enum SmilesErrorKind {
   /// Recognized information cannot yet be represented without loss.
   #[error("unsupported SMILES feature: {0}")]
   Unsupported(&'static str),
-  /// An integer exceeds the domain representation; it was not truncated.
+  /// An integer exceeds the lexical/domain range; it was not truncated.
   #[error("{0} is out of range")]
   NumberOutOfRange(&'static str),
   /// The source does not name a known chemical element.
@@ -56,9 +60,13 @@ pub enum SmilesErrorKind {
 /// Source offsets and IDs describe input order, not canonical atom ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSmiles {
+  /// Exact immutable input used by all half-open byte ranges below.
   source: Box<str>,
+  /// Supplied facts only; IDs index provenance within this snapshot's namespace.
   graph: MolecularGraph,
+  /// One complete lexical atom token per graph vertex, including brackets.
   atom_spans: BTreeMap<AtomId, Range<usize>>,
+  /// One ordinary bond site or two ring sites; omitted symbols use empty ranges.
   bond_spans: BTreeMap<BondId, Vec<Range<usize>>>,
 }
 
@@ -120,6 +128,7 @@ pub fn read_smiles(source: &str) -> Result<ParsedSmiles, SmilesError> {
   parser::build(source, tokens)
 }
 
+/// Attaches an existing UTF-8 byte range without normalizing or relocating it.
 fn error(span: Range<usize>, kind: SmilesErrorKind) -> SmilesError {
   SmilesError { span, kind }
 }

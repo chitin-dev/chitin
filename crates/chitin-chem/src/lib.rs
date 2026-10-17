@@ -6,6 +6,10 @@
 //! [`MolecularGraph`] enforces topology, not chemical plausibility, so incomplete
 //! structures can remain editable without being mistaken for validated molecules.
 //!
+//! [`io`] owns format grammar, source provenance, and strict serialization;
+//! [`perception`] owns explicitly selected chemical models and detached reports.
+//! Neither reading nor writing silently runs analysis or repairs the graph.
+//!
 //! # Examples
 //!
 //! ```
