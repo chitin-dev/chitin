@@ -838,6 +838,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin-chemdraw"
+version = "0.1.0"
+dependencies = [
+ "chitin-chem",
+ "thiserror 2.0.20",
+ "ttf-parser",
+]
+
+[[package]]
 name = "chitin-command"
 version = "0.1.0"
 dependencies = [
