@@ -1,0 +1,9 @@
+# name<TAB>explicit-bond SMILES<TAB>total cycle rank
+anthracene	C1=CC=C2C=C3C=CC=CC3=CC2=C1	3
+phenanthrene	C1=CC=C2C(=C1)C=CC1=CC=CC=C12	3
+mixed_five_six	C1CCC2C(C1)CCC1C2CCC2CCCC12	4
+carboxylic_acid	O=C(O)C1=CC=CC=C1	1
+ester	CC(=O)OC1=CC=CC=C1C(=O)O	1
+amide	CC(=O)NCC1=CC=CC=C1	1
+nitrile	CCC#N	0
+substituted_fused	CC(=O)OC1=CC=C2C=C3C=CC=CC3=CC2=C1	3

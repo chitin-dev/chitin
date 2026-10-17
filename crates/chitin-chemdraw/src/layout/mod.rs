@@ -21,6 +21,9 @@ pub struct LayoutOptions {
   pub minimum_spacing: f64,
   /// Maximum input vertex count; exceeding this returns an error, never truncation.
   pub max_atoms: usize,
+  /// Work units for ring-cycle discovery, constraint assembly, and rigid embedding.
+  /// Exceeding this budget returns an error, never a partially drawn ring system.
+  pub ring_search_budget: usize,
   /// Maximum improving branch-search passes; zero disables refinement.
   pub refinement_passes: usize,
   /// Work units for candidate traversal/indexing/geometric tests, shared by fragments.
@@ -29,12 +32,13 @@ pub struct LayoutOptions {
 }
 
 impl Default for LayoutOptions {
-  /// Uses unit geometry, 4096 atoms, and four refinement passes within one million work units.
+  /// Uses unit geometry, 4096 atoms, and bounded ring discovery and refinement.
   fn default() -> Self {
     Self {
       component_gap: 3.,
       minimum_spacing: 0.55,
       max_atoms: 4096,
+      ring_search_budget: 2_000_000,
       refinement_passes: 4,
       refinement_budget: 1_000_000,
     }
@@ -76,6 +80,9 @@ pub enum LayoutError {
     /// Requested limit.
     limit: usize,
   },
+  /// Ring discovery or embedding exhausted the caller's explicit work budget.
+  #[error("ring layout work budget exhausted")]
+  RingSearchBudgetExceeded,
   /// No aromatic/unknown bond semantics are supplied to this initial model.
   #[error("unsupported bond {0} in automatic layout")]
   Bond(BondId),
@@ -168,8 +175,10 @@ impl Layout2d {
 ///
 /// # Errors
 /// Rejects invalid options, exceeded budgets, unsupported bond labels, and any
-/// ring blocks outside the simple-cycle/edge-fused-bicyclic profile. Connected
-/// independent rings and spiro systems are supported. No partial layout is returned.
+/// ring blocks incompatible with shared-edge regular-polygon constraints.
+/// Connected independent rings, spiro systems, and compatible multi-ring fused
+/// systems are supported. Ring work exhaustion is distinct from unsupported
+/// geometry. No partial layout is returned.
 pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, LayoutError> {
   if !options.component_gap.is_finite()
     || options.component_gap <= 0.
@@ -177,6 +186,7 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
     || options.minimum_spacing <= 0.
     || options.minimum_spacing >= 1.
     || options.max_atoms == 0
+    || options.ring_search_budget == 0
     || (options.refinement_passes > 0 && options.refinement_budget == 0)
   {
     return Err(LayoutError::Options);

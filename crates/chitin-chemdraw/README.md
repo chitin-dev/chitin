@@ -34,6 +34,19 @@ expansion, and bounded local refinement:
 - ring systems are embedded through shared vertices and edges;
 - disconnected components are oriented and packed horizontally.
 
+Fused systems are assembled as complete blocks, rather than being limited to
+two rings. Short independent cycles define polygon constraints; faces sharing
+an edge must occupy opposite sides, and every already known anchor must agree.
+This supports linear/angular six-membered systems and compatible mixed five-/
+six-membered systems. Bridged/shared-path blocks, nonmanifold face incidence,
+or incompatible regular-polygon closures still return `LayoutError::RingSystem`.
+
+`LayoutOptions::ring_search_budget` bounds discovery and embedding work across
+all components (2,000,000 units by default). Exhaustion returns
+`RingSearchBudgetExceeded`, not an unsupported-topology error or partial result.
+This is independent of `refinement_budget`, whose exhaustion retains a complete
+best-so-far layout with a diagnostic. See [layout constraints](docs/layout.md).
+
 The algorithm is not a force-directed simulation, canonicalization algorithm,
 template engine, or global collision-free optimizer. It returns diagnostics for
 remaining crowding or crossings. Caller-supplied `Layout2d` coordinates can
@@ -90,7 +103,7 @@ cargo run -p chitin-chemdraw --example smiles_to_svg -- \
 This is an initial depiction backend, not a complete cheminformatics toolkit.
 Automatic layout and depiction currently depend on the capabilities of
 `chitin-chem`; unsupported SMILES features such as aromatic and stereo syntax
-remain rejected. Future work includes stronger fused-ring layout, stereo-aware
+remain rejected. Future work includes bridged-ring layout, exact label-aware refinement, stereo-aware
 depiction, complex text shaping, and raster export.
 
 ## Validation
@@ -100,3 +113,16 @@ cargo test -p chitin-chem -p chitin-chemdraw --locked --offline
 cargo clippy -p chitin-chemdraw --all-targets --locked --offline -- -D warnings
 cargo fmt --all --check
 ```
+
+The fixed corpus in `tests/fixtures/layout.tsv` covers linear/angular fused rings,
+mixed five-/six-membered rings, acid, ester, amide, nitrile, and substituted fused
+systems. It is shared by geometry tests and the visual export example:
+
+```sh
+cargo run -p chitin-chemdraw --example layout_regressions -- \
+  .temp/chemdraw-preview/fused-regressions
+```
+
+Inspect the generated SVGs as well as the tests. Other regressions cover multi-
+anchor closure, incompatible closures, spiro/linked attachments, sparse handles,
+bond insertion-order changes, shared budgets, and an iterative 128-ring strip.

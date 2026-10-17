@@ -1,93 +1,124 @@
-//! Rigid regular-ring seeds assembled across shared vertices/edges.
+//! Rigid polygon systems assembled across shared skeleton edges.
 //!
-//! The domain decomposition determines block boundaries. This initial embedding
-//! supports simple cycle blocks and edge-fused bicyclic blocks, not arbitrary
-//! bridged cages. The selected polygons are layout constraints, not perceived SSSR.
+//! Domain blocks own topological boundaries. Each cyclic block is embedded as a
+//! whole before external branches expand, so local traversal order cannot seed a
+//! second fused face as an unrelated spiro ring. All shared anchors remain fixed.
 
 use super::{LayoutError as Error, placement::Topology};
 use crate::geometry::Point;
-use chitin_chem::{MolecularGraph, perception::analyze_rings};
+use chitin_chem::{AtomId, MolecularGraph, perception::analyze_rings};
 use std::{
+  cmp::Reverse,
   collections::BTreeMap,
   f64::consts::{PI, TAU},
 };
 
-/// Polygon constraints plus an atom-to-polygon incidence index.
+mod constraints;
+use constraints::Constraints;
+
+/// Shared work allowance for ring discovery, assembly, and geometric trials.
+pub(super) struct Work(usize);
+
+impl Work {
+  /// Creates one allowance for all ring systems in an automatic layout.
+  pub(super) const fn new(limit: usize) -> Self {
+    Self(limit)
+  }
+
+  /// Charges before work starts; exhaustion never permits partial geometry.
+  fn charge(&mut self, units: usize) -> Result<(), Error> {
+    self.0 = self.0.checked_sub(units).ok_or(Error::RingSearchBudgetExceeded)?;
+    Ok(())
+  }
+}
+
+/// One biconnected cyclic block represented by regular polygon constraints.
+struct System {
+  /// Short independent cycles and their shared-edge adjacency.
+  constraints: Constraints,
+  /// Global dense atoms in stable handle order.
+  atoms: Vec<usize>,
+  /// Faces incident to each atom, for exterior branch directions.
+  incidence: BTreeMap<usize, Vec<usize>>,
+  /// Stable source handle locating an unsupported constraint system.
+  source: AtomId,
+  /// Topological cycle rank, not a chemical ring count.
+  rank: usize,
+}
+
+/// Complete coordinates and center for one regular polygon candidate.
+struct Pose {
+  /// All polygon vertices, including already fixed shared anchors.
+  points: Vec<(usize, Point)>,
+  /// Interior center used to enforce opposite sides of a fused edge.
+  center: Point,
+}
+
+/// Private assembly snapshot, published only after all polygon closures agree.
+struct Embedding {
+  /// Complete component-sized coordinate scratch space, including fixed anchors.
+  points: Vec<Option<Point>>,
+  /// Interior reference for every face in this system.
+  centers: Vec<Point>,
+}
+
+/// Block-level constraints plus atom-to-system incidence.
 pub(super) struct Rings {
-  /// Each polygon visits consecutive bonded vertices; closure is implicit.
-  cycles: Vec<Vec<usize>>,
-  /// Polygon indices sharing each dense atom, including fused/spiro junctions.
+  /// Systems sorted by largest face first, then stable input handles.
+  systems: Vec<System>,
+  /// Block indices sharing each atom, including spiro articulations.
   pub(super) membership: Vec<Vec<usize>>,
 }
 
 impl Rings {
-  /// Converts topological blocks into the supported rigid polygon constraints.
+  /// Builds shared-edge constraints without assigning aromaticity or ring names.
   ///
   /// # Parameters
-  /// - `graph`, `topology`: the same graph namespace and dense adjacency snapshot.
+  /// - `graph`, `topology`: identical immutable input and dense row mapping.
+  /// - `work`: shared discovery, cycle-reduction, and constraint budget.
   ///
   /// # Returns
-  /// Independent rings, spiro connections, and two polygons per simple fused
-  /// bicyclic block. Connected rings need not share a block to share a molecule.
+  /// One rigid system per cyclic block. Independent and spiro blocks retain
+  /// distinct identities, irrespective of their connected component's rank.
   ///
   /// # Errors
-  /// Rejects bridged/higher-rank blocks rather than breaking a ring-closure bond.
-  pub(super) fn new(graph: &MolecularGraph, topology: &Topology) -> Result<Self, Error> {
+  /// Rejects shared-path/bridged constraints, invalid references, or exhausted work.
+  pub(super) fn new(graph: &MolecularGraph, topology: &Topology, work: &mut Work) -> Result<Self, Error> {
+    work.charge(graph.atom_count() + graph.bond_count())?;
     let report = analyze_rings(graph)?;
     let indices: BTreeMap<_, _> = topology.ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
-    let mut cycles = Vec::new();
+    let mut systems = Vec::new();
     for block in report.blocks().iter().filter(|block| block.cycle_rank() > 0) {
-      let nodes: Vec<_> = block.atoms().iter().map(|id| indices[id]).collect();
-      let mut rows = BTreeMap::<usize, Vec<usize>>::new();
-      for &edge in block.bonds() {
-        let [a, b] = graph
-          .bond(edge)
-          .ok_or(chitin_chem::GraphError::MissingBond(edge))?
-          .atoms();
-        rows.entry(indices[&a]).or_default().push(indices[&b]);
-        rows.entry(indices[&b]).or_default().push(indices[&a]);
-      }
-      for row in rows.values_mut() {
-        row.sort_unstable();
-      }
-      let unsupported = || Error::RingSystem {
-        atom: block.atoms()[0],
-        cycles: block.cycle_rank(),
-      };
-      if block.cycle_rank() == 1 {
-        cycles.push(walk(&rows, nodes[0], rows[&nodes[0]][0], nodes[0]).ok_or_else(unsupported)?);
-      } else if block.cycle_rank() == 2 {
-        let junctions: Vec<_> = nodes.iter().copied().filter(|node| rows[node].len() == 3).collect();
-        if junctions.len() != 2
-          || rows.values().any(|row| !matches!(row.len(), 2 | 3))
-          || !rows[&junctions[0]].contains(&junctions[1])
-        {
-          return Err(unsupported());
+      let constraints = Constraints::new(graph, block, &indices, work)?;
+      let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
+      for (i, face) in constraints.faces.iter().enumerate() {
+        work.charge(face.len())?;
+        for &node in face {
+          incidence.entry(node).or_default().push(i);
         }
-        let [a, b] = [junctions[0], junctions[1]];
-        for &next in rows[&a].iter().filter(|&&next| next != b) {
-          // Two non-shared paths close through the direct fusion edge. A bridged
-          // theta graph without that edge cannot satisfy this polygon model.
-          let mut polygon = walk(&rows, a, next, b).ok_or_else(unsupported)?;
-          polygon.push(b);
-          cycles.push(polygon);
-        }
-      } else {
-        return Err(unsupported());
       }
+      systems.push(System {
+        constraints,
+        atoms: block.atoms().iter().map(|id| indices[id]).collect(),
+        incidence,
+        source: block.atoms()[0],
+        rank: block.cycle_rank(),
+      });
     }
-    // Large ring seeds reduce later attachment constraints; ties are stable IDs.
-    cycles.sort_by(|a, b| b.len().cmp(&a.len()).then(a.cmp(b)));
+    systems.sort_by(|a, b| {
+      let largest = |system: &System| system.constraints.faces.iter().map(Vec::len).max().unwrap_or(0);
+      largest(b).cmp(&largest(a)).then(a.atoms.cmp(&b.atoms))
+    });
     let mut membership = vec![Vec::new(); topology.ids.len()];
-    for (index, cycle) in cycles.iter().enumerate() {
-      for &node in cycle {
+    for (index, system) in systems.iter().enumerate() {
+      for &node in &system.atoms {
         membership[node].push(index);
       }
     }
-    Ok(Self { cycles, membership })
+    Ok(Self { systems, membership })
   }
 
-  /// Returns the largest polygon in a component, if it contains a ring.
+  /// Returns the highest-priority cyclic block in a component, if present.
   pub(super) fn seed(&self, component: &[usize]) -> Option<usize> {
     component
       .iter()
@@ -96,136 +127,357 @@ impl Rings {
       .min()
   }
 
-  /// Returns the number of rigid polygons.
+  /// Returns the number of rigid cyclic systems.
   pub(super) fn len(&self) -> usize {
-    self.cycles.len()
+    self.systems.len()
   }
 
-  /// Embeds a polygon anchored by zero, one, or two adjacent existing vertices.
+  /// Embeds a complete fused system before publishing any of its new coordinates.
   ///
   /// # Parameters
-  /// - `index`: unprocessed polygon constraint.
-  /// - `positions`: previously fixed centers; shared vertices must not move.
-  /// - `component`: rows eligible for scoring, excluding disconnected fragments.
-  /// - `heading`: outward attachment direction when only one vertex is known.
+  /// - `index`: previously unprocessed cyclic block.
+  /// - `positions`: existing centers, including at most one external articulation.
+  /// - `component`: the only rows allowed to influence overlap scoring.
+  /// - `heading`: exterior attachment direction when entering a positioned atom.
+  /// - `work`: shared allowance, also covering scratch snapshots and candidate scores.
   ///
   /// # Returns
-  /// New centers and radial headings for branch expansion. Fused polygons try
-  /// both sides of the shared edge; spiro/attached polygons try six orientations.
-  /// Lowest atom-overlap cost wins deterministically, preserving unit edges.
+  /// All system atom centers and exterior headings, including unchanged entry
+  /// anchors. Adjacent faces must lie on
+  /// opposite sides of their shared edge; every previously known anchor is checked.
   ///
   /// # Errors
-  /// Rejects incompatible anchors instead of stretching a ring closure.
+  /// Rejects geometrically inconsistent regular-polygon constraints or exhausted
+  /// work, never silently dropping a closing edge or stretching an anchor.
   pub(super) fn embed(
     &self,
     index: usize,
     positions: &[Option<Point>],
     component: &[usize],
     heading: f64,
+    work: &mut Work,
   ) -> Result<Vec<(usize, Point, f64)>, Error> {
-    let ring = &self.cycles[index];
-    let known: Vec<_> = ring
+    let system = &self.systems[index];
+    work.charge(system.atoms.len() + system.constraints.faces.iter().map(Vec::len).sum::<usize>())?;
+    let root = system
+      .constraints
+      .faces
       .iter()
       .enumerate()
-      .filter(|&(_, &node)| positions[node].is_some())
+      .max_by_key(|(i, face)| {
+        (
+          face.iter().filter(|&&node| positions[node].is_some()).count(),
+          face.len(),
+          Reverse(*i),
+        )
+      })
       .map(|(i, _)| i)
-      .collect();
-    let radius = 1. / (2. * (PI / ring.len() as f64).sin());
-    let mut candidates = Vec::new();
-    match known.as_slice() {
-      [] => candidates.push((Point::new(0., 0.), 0., 1.)),
-      &[anchor] => {
-        let point = positions[ring[anchor]].ok_or(Error::CoordinateRange)?;
-        for rotation in [0., PI / 3., -PI / 3., 2. * PI / 3., -2. * PI / 3., PI] {
-          let direction = heading + rotation;
-          let center = point.translated(radius * direction.cos(), radius * direction.sin());
-          candidates.push((center, direction + PI - TAU * anchor as f64 / ring.len() as f64, 1.));
-        }
-      }
-      &[a, b] if b == a + 1 || (a == 0 && b == ring.len() - 1) => {
-        let start = positions[ring[a]].ok_or(Error::CoordinateRange)?;
-        let end = positions[ring[b]].ok_or(Error::CoordinateRange)?;
-        let dx = end.x - start.x;
-        let dy = end.y - start.y;
-        let length = start.distance(end);
-        if (length - 1.).abs() > 1e-8 {
-          return Err(Error::CoordinateRange);
-        }
-        let apothem = 0.5 / (PI / ring.len() as f64).tan();
-        for side in [-1., 1.] {
-          let center = Point::new(
-            (start.x + end.x) / 2. - side * dy * apothem,
-            (start.y + end.y) / 2. + side * dx * apothem,
-          );
-          let angle = (start.y - center.y).atan2(start.x - center.x);
-          let sign = if b == a + 1 { side } else { -side };
-          candidates.push((center, angle - sign * TAU * a as f64 / ring.len() as f64, sign));
-        }
-      }
-      _ => return Err(Error::CoordinateRange),
-    }
+      .ok_or(Error::Invariant(system.source))?;
     let mut best = None;
     let mut best_cost = f64::INFINITY;
-    for (center, angle, sign) in candidates {
-      let points: Vec<_> = ring
-        .iter()
-        .enumerate()
-        .map(|(i, &node)| {
-          let radial = angle + sign * TAU * i as f64 / ring.len() as f64;
-          (
-            node,
-            center.translated(radius * radial.cos(), radius * radial.sin()),
-            radial,
-          )
-        })
-        .collect();
-      if points
-        .iter()
-        .any(|&(node, point, _)| positions[node].is_some_and(|old| old.distance(point) > 1e-8))
-      {
+    for pose in poses(&system.constraints.faces[root], positions, heading, work)? {
+      let Some(embedding) = system.assemble(root, pose, positions, work)? else {
         continue;
-      }
-      let cost: f64 = points
-        .iter()
-        .filter(|&&(node, _, _)| positions[node].is_none())
-        .map(|&(_, point, _)| {
-          component
-            .iter()
-            .filter_map(|&node| positions[node])
-            .map(|other| (1. - point.distance(other)).max(0.).powi(2))
-            .sum::<f64>()
-        })
-        .sum();
-      if cost < best_cost {
+      };
+      let cost = score(&system.atoms, &embedding.points, positions, component, work)?;
+      if cost + 1e-10 < best_cost {
         best_cost = cost;
-        best = Some(
-          points
-            .into_iter()
-            .filter(|&(node, _, _)| positions[node].is_none())
-            .collect(),
-        );
+        best = Some(embedding);
       }
     }
-    best.ok_or(Error::CoordinateRange)
+    let Embedding { points, centers } = best.ok_or_else(|| system.unsupported())?;
+    let mut result = Vec::new();
+    for &node in &system.atoms {
+      result.push((
+        node,
+        points[node].ok_or(Error::Invariant(system.source))?,
+        system.outward(node, &points, &centers, work)?,
+      ));
+    }
+    Ok(result)
   }
 }
 
-/// Walks a degree-two path, excluding its target and retaining its starting atom.
-///
-/// Returns `None` for a branch, premature loop, or path that cannot close within
-/// the block's size. The traversal is iterative and independent of numeric IDs.
-fn walk(rows: &BTreeMap<usize, Vec<usize>>, start: usize, next: usize, target: usize) -> Option<Vec<usize>> {
-  let mut path = vec![start];
-  let mut previous = start;
-  let mut current = next;
-  while current != target {
-    if path.len() >= rows.len() || rows.get(&current)?.len() != 2 {
-      return None;
+impl System {
+  /// Returns a source-located failure of the current regular-polygon model.
+  fn unsupported(&self) -> Error {
+    Error::RingSystem {
+      atom: self.source,
+      cycles: self.rank,
     }
-    path.push(current);
-    let other = rows[&current].iter().copied().find(|&node| node != previous)?;
-    previous = current;
-    current = other;
   }
-  Some(path)
+
+  /// Assembles faces by known shared edges, validating multi-anchor closure.
+  ///
+  /// The scratch snapshot is private until all faces agree. Face order prioritizes
+  /// more already known edges, then vertices; atom ID order cannot prematurely
+  /// place a pending face from only one vertex. Incompatible closure returns
+  /// `None`, while resource exhaustion propagates as an error.
+  fn assemble(
+    &self,
+    root: usize,
+    pose: Pose,
+    positions: &[Option<Point>],
+    work: &mut Work,
+  ) -> Result<Option<Embedding>, Error> {
+    work.charge(positions.len() + self.constraints.faces.len())?;
+    let mut points = positions.to_vec();
+    let mut centers = vec![None; self.constraints.faces.len()];
+    install(pose, root, &mut points, &mut centers);
+    for _ in 1..self.constraints.faces.len() {
+      let mut next = None;
+      for (i, face) in self.constraints.faces.iter().enumerate() {
+        work.charge(1 + face.len())?;
+        if centers[i].is_some()
+          || !self.constraints.neighbors[i]
+            .iter()
+            .any(|&other| centers[other].is_some())
+        {
+          continue;
+        }
+        let edges = face
+          .iter()
+          .zip(face.iter().cycle().skip(1))
+          .filter(|&(&a, &b)| points[a].is_some() && points[b].is_some())
+          .count();
+        let vertices = face.iter().filter(|&&node| points[node].is_some()).count();
+        let key = (edges, vertices, face.len(), Reverse(i));
+        if next.is_none_or(|(_, old)| key > old) {
+          next = Some((i, key));
+        }
+      }
+      let Some((next, _)) = next else {
+        return Ok(None);
+      };
+      let mut chosen = None;
+      for candidate in poses(&self.constraints.faces[next], &points, 0., work)? {
+        let mut valid = true;
+        for &other in &self.constraints.neighbors[next] {
+          let Some(center) = centers[other] else {
+            continue;
+          };
+          work.charge(self.constraints.faces[next].len() * self.constraints.faces[other].len())?;
+          let common: Vec<_> = self.constraints.faces[next]
+            .iter()
+            .copied()
+            .filter(|node| self.constraints.faces[other].contains(node))
+            .collect();
+          if common.len() != 2 {
+            return Err(Error::Invariant(self.source));
+          }
+          let a = points[common[0]].ok_or(Error::Invariant(self.source))?;
+          let b = points[common[1]].ok_or(Error::Invariant(self.source))?;
+          if side(a, b, center) * side(a, b, candidate.center) >= -1e-10 {
+            valid = false;
+            break;
+          }
+        }
+        if valid {
+          chosen = Some(candidate);
+          break;
+        }
+      }
+      let Some(pose) = chosen else {
+        return Ok(None);
+      };
+      install(pose, next, &mut points, &mut centers);
+    }
+    let centers = centers
+      .into_iter()
+      .collect::<Option<Vec<_>>>()
+      .ok_or(Error::Invariant(self.source))?;
+    Ok(Some(Embedding { points, centers }))
+  }
+
+  /// Finds an exterior angular gap rather than using the last embedded face's radius.
+  ///
+  /// Multiple fused faces can occupy different sectors at one atom. Candidate gap
+  /// bisectors inside any incident polygon are excluded, so substituents attach
+  /// outside the system. Overcoordinated drafts with no exterior sector retain
+  /// the largest gap and can still produce final crowding diagnostics.
+  fn outward(&self, node: usize, points: &[Option<Point>], centers: &[Point], work: &mut Work) -> Result<f64, Error> {
+    let origin = points[node].ok_or(Error::Invariant(self.source))?;
+    let mut neighbors = BTreeMap::new();
+    for &i in &self.incidence[&node] {
+      let face = &self.constraints.faces[i];
+      work.charge(face.len())?;
+      let index = face
+        .iter()
+        .position(|&vertex| vertex == node)
+        .ok_or(Error::Invariant(self.source))?;
+      for other in [
+        face[(index + 1) % face.len()],
+        face[(index + face.len() - 1) % face.len()],
+      ] {
+        let point = points[other].ok_or(Error::Invariant(self.source))?;
+        neighbors.insert(other, (point.y - origin.y).atan2(point.x - origin.x));
+      }
+    }
+    let mut angles: Vec<_> = neighbors.into_values().collect();
+    angles.sort_by(f64::total_cmp);
+    let mut best = None;
+    let mut fallback = (0., 0.);
+    for i in 0..angles.len() {
+      let gap = (angles[(i + 1) % angles.len()] - angles[i]).rem_euclid(TAU);
+      let heading = angles[i] + gap / 2.;
+      if gap > fallback.0 {
+        fallback = (gap, heading);
+      }
+      let mut interior = false;
+      for &face in &self.incidence[&node] {
+        work.charge(1)?;
+        let center = centers[face];
+        let toward = (center.y - origin.y).atan2(center.x - origin.x);
+        let delta = (heading - toward + PI).rem_euclid(TAU) - PI;
+        let half = PI / 2. - PI / self.constraints.faces[face].len() as f64;
+        if delta.abs() < half - 1e-8 {
+          interior = true;
+          break;
+        }
+      }
+      if !interior && best.is_none_or(|(old, _)| gap > old + 1e-10) {
+        best = Some((gap, heading));
+      }
+    }
+    Ok(best.unwrap_or(fallback).1)
+  }
+}
+
+/// Installs only new centers, retaining existing anchor values exactly.
+fn install(pose: Pose, face: usize, points: &mut [Option<Point>], centers: &mut [Option<Point>]) {
+  for (node, point) in pose.points {
+    if points[node].is_none() {
+      points[node] = Some(point);
+    }
+  }
+  centers[face] = Some(pose.center);
+}
+
+/// Generates regular polygon candidates and verifies every known anchor.
+///
+/// Two or more known vertices require an adjacent anchored edge; extra anchors
+/// become closure constraints, not permission to warp the polygon. No feasible
+/// candidate returns an empty list, leaving the caller to report the block.
+fn poses(face: &[usize], positions: &[Option<Point>], heading: f64, work: &mut Work) -> Result<Vec<Pose>, Error> {
+  work.charge(face.len())?;
+  let known: Vec<_> = face
+    .iter()
+    .enumerate()
+    .filter(|&(_, &node)| positions[node].is_some())
+    .map(|(i, _)| i)
+    .collect();
+  let radius = 1. / (2. * (PI / face.len() as f64).sin());
+  let mut frames = Vec::new();
+  match known.as_slice() {
+    [] => frames.push((Point::new(0., 0.), 0., 1.)),
+    &[anchor] => {
+      let point = positions[face[anchor]].ok_or(Error::CoordinateRange)?;
+      for rotation in [0., PI / 3., -PI / 3., 2. * PI / 3., -2. * PI / 3., PI] {
+        let direction = heading + rotation;
+        frames.push((
+          point.translated(radius * direction.cos(), radius * direction.sin()),
+          direction + PI - TAU * anchor as f64 / face.len() as f64,
+          1.,
+        ));
+      }
+    }
+    _ => {
+      let Some(a) =
+        (0..face.len()).find(|&i| positions[face[i]].is_some() && positions[face[(i + 1) % face.len()]].is_some())
+      else {
+        return Ok(Vec::new());
+      };
+      let b = (a + 1) % face.len();
+      let start = positions[face[a]].ok_or(Error::CoordinateRange)?;
+      let end = positions[face[b]].ok_or(Error::CoordinateRange)?;
+      if (start.distance(end) - 1.).abs() > 1e-8 {
+        return Ok(Vec::new());
+      }
+      let dx = end.x - start.x;
+      let dy = end.y - start.y;
+      let apothem = 0.5 / (PI / face.len() as f64).tan();
+      for sign in [-1., 1.] {
+        let center = Point::new(
+          (start.x + end.x) / 2. - sign * dy * apothem,
+          (start.y + end.y) / 2. + sign * dx * apothem,
+        );
+        let angle = (start.y - center.y).atan2(start.x - center.x);
+        frames.push((center, angle - sign * TAU * a as f64 / face.len() as f64, sign));
+      }
+    }
+  }
+  let mut candidates = Vec::new();
+  for (center, angle, sign) in frames {
+    work.charge(face.len())?;
+    let points: Vec<_> = face
+      .iter()
+      .enumerate()
+      .map(|(i, &node)| {
+        let angle = angle + sign * TAU * i as f64 / face.len() as f64;
+        (node, center.translated(radius * angle.cos(), radius * angle.sin()))
+      })
+      .collect();
+    if points
+      .iter()
+      .all(|&(node, point)| positions[node].is_none_or(|old| old.distance(point) < 1e-8))
+    {
+      candidates.push(Pose { points, center });
+    }
+  }
+  Ok(candidates)
+}
+
+/// Scores new centers against their component only, with unit-cell pruning.
+///
+/// Cells contain existing anchors first, then each new system atom once. A
+/// threshold below one avoids numerical tie-breaking from unit bonded neighbors.
+/// Dense overlap remains budgeted; fragments never influence each other's scores.
+fn score(
+  atoms: &[usize],
+  points: &[Option<Point>],
+  old: &[Option<Point>],
+  component: &[usize],
+  work: &mut Work,
+) -> Result<f64, Error> {
+  let mut grid = BTreeMap::<(i64, i64), Vec<Point>>::new();
+  work.charge(component.len())?;
+  for &node in component {
+    if let Some(point) = old[node] {
+      grid.entry(cell(point)?).or_default().push(point);
+    }
+  }
+  let mut cost = 0.;
+  for &node in atoms {
+    if old[node].is_some() {
+      continue;
+    }
+    let point = points[node].ok_or(Error::CoordinateRange)?;
+    let (x, y) = cell(point)?;
+    work.charge(9)?;
+    for dx in -1..=1 {
+      for dy in -1..=1 {
+        if let Some(others) = grid.get(&(x + dx, y + dy)) {
+          work.charge(others.len())?;
+          for &other in others {
+            cost += (0.95 - point.distance(other)).max(0.).powi(2);
+          }
+        }
+      }
+    }
+    grid.entry((x, y)).or_default().push(point);
+  }
+  Ok(cost)
+}
+
+/// Returns a guarded spatial cell with room for neighboring-cell offsets.
+fn cell(point: Point) -> Result<(i64, i64), Error> {
+  if !point.is_finite() || point.x.abs() > i64::MAX as f64 / 2. || point.y.abs() > i64::MAX as f64 / 2. {
+    return Err(Error::CoordinateRange);
+  }
+  Ok((point.x.floor() as i64, point.y.floor() as i64))
+}
+
+/// Returns the signed cross product locating a point relative to an edge.
+fn side(a: Point, b: Point, p: Point) -> f64 {
+  (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
 }

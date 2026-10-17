@@ -162,9 +162,15 @@ fn candidates(
     && (row.iter().any(|&(_, order)| order == BondOrder::Triple)
       || row.iter().all(|&(_, order)| order == BondOrder::Double));
   let offsets: Vec<_> = if branch.radial {
-    (0..children.len())
-      .map(|i| (i as f64 - (children.len() - 1) as f64 / 2.) * PI / 3.)
-      .collect()
+    if children.len() == 1 && row.len() - children.len() >= 3 {
+      // An entered ring may already have a parent in its exterior sector.
+      // Leave that occupied direction fixed and try either adjacent outer slot.
+      vec![PI / 3.]
+    } else {
+      (0..children.len())
+        .map(|i| (i as f64 - (children.len() - 1) as f64 / 2.) * PI / 3.)
+        .collect()
+    }
   } else {
     let bend = if branch.depth.is_multiple_of(2) {
       super::angles::CHAIN_BEND
@@ -213,7 +219,8 @@ fn candidates(
 /// facts are mutated and partially placed components are never returned.
 pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, Error> {
   let topology = Topology::new(graph)?;
-  let rings = Rings::new(graph, &topology)?;
+  let mut ring_work = super::rings::Work::new(options.ring_search_budget);
+  let rings = Rings::new(graph, &topology, &mut ring_work)?;
   let mut embedded = vec![false; rings.len()];
   let mut positions = vec![None; topology.ids.len()];
   for component in &topology.components {
@@ -222,7 +229,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
     let mut pending = VecDeque::new();
     if let Some(seed) = rings.seed(component) {
       embedded[seed] = true;
-      for (node, point, heading) in rings.embed(seed, &positions, component, 0.)? {
+      for (node, point, heading) in rings.embed(seed, &positions, component, 0., &mut ring_work)? {
         place(node, point, &mut positions, &mut grid)?;
         pending.push_back(Branch {
           node,
@@ -244,13 +251,20 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
         radial: false,
       });
     }
-    while let Some(branch) = pending.pop_front() {
+    while let Some(mut branch) = pending.pop_front() {
       for &index in &rings.membership[branch.node] {
         if embedded[index] {
           continue;
         }
         embedded[index] = true;
-        for (node, point, heading) in rings.embed(index, &positions, component, branch.heading)? {
+        for (node, point, heading) in rings.embed(index, &positions, component, branch.heading, &mut ring_work)? {
+          if positions[node].is_some() {
+            if node == branch.node {
+              branch.heading = heading;
+              branch.radial = true;
+            }
+            continue;
+          }
           place(node, point, &mut positions, &mut grid)?;
           pending.push_front(Branch {
             node,
