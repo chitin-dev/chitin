@@ -27,6 +27,8 @@ mod bond;
 mod element;
 mod graph;
 mod hydrogen;
+/// Format-specific readers and source diagnostics, independent of perception.
+pub mod io;
 /// Read-only chemistry analysis with explicit model boundaries and diagnostics.
 pub mod perception;
 

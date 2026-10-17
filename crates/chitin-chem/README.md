@@ -19,6 +19,8 @@ complete cheminformatics toolkit or an editor UI.
   duplicate unordered pairs are rejected, and atom deletion removes its bonds.
 - Read-only, atom-local closed-shell valence analysis, hydrogen composition, and
   structured diagnostics within an explicit, restricted V1 rule set.
+- A restricted SMILES reader with source positions, independent of perception;
+  branches, ring closure, fragments, bracket elements/isotopes/H/charges.
 
 ## Boundaries
 
@@ -35,9 +37,33 @@ Adding a bond does not infer hydrogens, validate valence, or perceive
 aromaticity. Even a chemically implausible draft remains editable. An aromatic
 bond label records a supplied representation; it does not establish an
 aromaticity model. Wedges and dashes are not encoded as bond orders. Stereo,
-general valence and aromaticity perception, format codecs, edit
+general valence and aromaticity perception, further format codecs, edit
 transactions/undo, and drawing remain separate future work. The current analysis
 is not full RDKit sanitization.
+
+## SMILES and future formats
+
+```rust
+use chitin_chem::io::smiles::read_smiles;
+use chitin_chem::perception::{ValenceModel, analyze_valence};
+
+let parsed = read_smiles("CC(O)C")?;
+let report = analyze_valence(parsed.graph(), ValenceModel::MainGroupClosedShellV1)?;
+assert_eq!(parsed.graph().atom_count(), 4);
+assert!(report.atoms().all(|(_, row)| row.value().is_some()));
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The reader does not sanitize or modify inferred properties. Bracket atoms
+disable implicit H and retain unknown radical state: `[C]` is not ordinary
+`C`, and `[NH4+]` is accepted without claiming that its radical state has
+already been perceived. Unsupported aromatic/stereo/query/extension information
+is rejected with a positioned error, never discarded. Record names/whitespace
+are not silently removed. Empty input represents an empty graph.
+
+See [Chemical format architecture](docs/formats.md) for the complete current
+capability boundary and staged path to full molecular OpenSMILES, writers,
+aromaticity, stereochemistry, canonicalization, and other typed format records.
 
 ## Hydrogen semantics
 
