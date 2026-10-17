@@ -5,8 +5,15 @@
 //! but invalid valence have distinct outcomes. A report belongs to its input
 //! snapshot and must be recomputed after edits; successful analysis never
 //! installs inferred H or other derived properties back into atomic input facts.
+//!
+//! Ring analysis is instead graph-theoretic: bridges, articulation atoms, and
+//! biconnected edge blocks. It accepts unknown chemical facts and assigns neither
+//! aromaticity nor an SSSR/all-rings interpretation to a block's cycle rank.
 
+mod rings;
 mod valence;
+
+pub use rings::{RingBlock, RingTopology, analyze_rings};
 
 pub use valence::{
   AtomValence, AtomValenceAnalysis, ValenceDiagnostic, ValenceModel, ValenceReport, ValenceStatus, analyze_valence,

@@ -19,6 +19,8 @@ complete cheminformatics toolkit or an editor UI.
   duplicate unordered pairs are rejected, and atom deletion removes its bonds.
 - Read-only, atom-local closed-shell valence analysis, hydrogen composition, and
   structured diagnostics within an explicit, restricted V1 rule set.
+- Read-only ring topology: bridges, articulation atoms, and vertex-biconnected
+  edge blocks. Block cycle rank does not assign aromaticity or enumerate all rings.
 - A restricted SMILES reader with source positions, independent of perception;
   branches, ring closure, fragments, bracket elements/isotopes/H/charges.
 - A deterministic noncanonical SMILES writer with strict supplied-fact

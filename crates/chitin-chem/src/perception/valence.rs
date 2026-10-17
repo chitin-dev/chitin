@@ -1,4 +1,4 @@
-//! Restricted, closed-shell valence analysis, not RDKit-compatible sanitization.
+//! Restricted, closed-shell valence analysis, not general chemical sanitization.
 //!
 //! The named V1 model covers nonaromatic neutral H/B/C/N/O/F/Si/Cl/Br/I,
 //! ammonium-like N(+1), and O(-1). It assumes the specified atomic radical
