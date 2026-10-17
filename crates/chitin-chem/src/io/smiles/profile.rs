@@ -15,6 +15,21 @@ pub(super) const MAX_CHARGE: u16 = 10_u16.pow(CHARGE_DIGITS as u32) - 1;
 /// Labels 0..9 and %00..%99 share 100 numeric identities, reusable after closure.
 pub(super) const RING_LABEL_COUNT: usize = 100;
 
+/// Maps supported lowercase atomic spellings; two-letter forms require brackets.
+pub(super) fn aromatic_symbol(element: Element) -> Option<&'static str> {
+  Some(match element {
+    Element::Boron => "b",
+    Element::Carbon => "c",
+    Element::Nitrogen => "n",
+    Element::Oxygen => "o",
+    Element::Phosphorus => "p",
+    Element::Sulfur => "s",
+    Element::Arsenic => "as",
+    Element::Selenium => "se",
+    _ => return None,
+  })
+}
+
 /// Tests bare-symbol eligibility only; this is not a valence/aromaticity rule.
 pub(super) fn organic_subset(element: Element) -> bool {
   matches!(

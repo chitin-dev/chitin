@@ -9,7 +9,7 @@ complete cheminformatics toolkit or an editor UI.
 - The 118 named elements, canonical symbols, and atomic-number lookup.
 - Explicit isotope labels with mass-number checks (`A >= Z`). These checks do
   not assert that a nuclide exists, is stable, or has a particular atomic mass.
-- Atomic isotope, formal charge, declared attached-H count, implicit-H policy,
+- Atomic isotope, aromatic designation, formal charge, declared attached-H count, implicit-H policy,
   and unpaired-electron count. Unknown values remain unknown; explicit zero is a
   separate fact, not a default.
 - Unknown, single, double, triple, and supplied aromatic bond labels.
@@ -25,6 +25,8 @@ complete cheminformatics toolkit or an editor UI.
   branches, ring closure, fragments, bracket elements/isotopes/H/charges.
 - A deterministic noncanonical SMILES writer with strict supplied-fact
   preservation, typed failures, reusable ring labels, and iterative traversal.
+- Supplied aromatic atom designations and aromatic SMILES read/write, plus a
+  bounded detached C/N/O/S Kekulé representation for integer-bond consumers.
 
 ## Boundaries
 
@@ -64,7 +66,8 @@ assert_eq!(reread.graph().atom_count(), 4);
 The reader does not sanitize or modify inferred properties. Bracket atoms
 disable implicit H and retain unknown radical state: `[C]` is not ordinary
 `C`, and `[NH4+]` is accepted without claiming that its radical state has
-already been perceived. Unsupported aromatic/stereo/query/extension information
+already been perceived. Aromatic input designations are preserved independently
+of perception. Unsupported stereo/query/extension information
 is rejected with a positioned error, never discarded. Record names/whitespace
 are not silently removed. Empty input represents an empty graph.
 
@@ -79,6 +82,13 @@ survive this strict round trip. Explicit H vertices are never collapsed.
 See [Chemical format architecture](docs/formats.md) for the complete current
 capability boundary and staged path to full molecular OpenSMILES, writers,
 aromaticity, stereochemistry, canonicalization, and other typed format records.
+The [versioned compatibility matrix](docs/smiles-compatibility.md) distinguishes
+codec support from chemical-model and SVG support; lowercase B/P/As/Se notation
+is representable even though the current drawing model does not cover it.
+
+For supported aromatic inputs, explicitly call `perception::kekulize` with
+`KekuleOptions` to obtain integer bonds. Source facts/IDs remain unchanged;
+aromaticity perception and general sanitization are not implied.
 
 ## Hydrogen semantics
 
@@ -130,6 +140,8 @@ Unknown charge, radical state, H declaration/policy, or bond order blocks a
 determined result; no unknown facts are replaced by zeros. Metals, P/S and other
 unlisted elements, unlisted charge states, nonzero radicals, and aromatic bond
 labels are explicitly unsupported. Aromatic bonds are never treated as 1.5.
+Atomic aromatic designations also block V1, including on explicit integer bonds;
+choose a detached Kekulé representation first rather than ignoring the flags.
 Unsupported takes precedence over missing facts in the status, while all reasons
 are retained. Chemical-invalid outcomes require complete supported input.
 
@@ -142,6 +154,18 @@ The separation of input facts from detached calculations is informed by
 [COSMolKit's valence layer](https://github.com/cosmol-studio/COSMolKit/blob/main/crates/cosmolkit-core/src/valence.rs).
 V1 is a small independent rule set, not a claim of RDKit/COSMolKit behavioral
 parity, a complete SMILES interpretation, or a full sanitization pipeline.
+
+## Alignment references
+
+The [OpenSMILES specification](https://opensmiles.org/opensmiles.html) defines
+the intended molecular notation semantics. Local source audits used
+[SmilesDrawer](https://github.com/reymond-group/smilesDrawer) (the parser grammar,
+atomic H handling, and SVG aromatic rendering) and
+[COSMolKit](https://github.com/cosmol-studio/COSMolKit) (the separation of
+source designations, integer assignment, and chemical validation) as capability
+references, not dependencies or conformance oracles. New regression fixtures
+and the bounded assignment implementation are locally authored. This is not
+a claim of full behavioral or visual parity with either project.
 
 ## Graph identity and mutation
 

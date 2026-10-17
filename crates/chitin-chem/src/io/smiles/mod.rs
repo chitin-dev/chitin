@@ -1,4 +1,4 @@
-//! Strict, nonaromatic SMILES I/O, not yet a complete SMILES implementation.
+//! Strict supplied-fact SMILES I/O, not yet a complete SMILES implementation.
 //!
 //! Syntax scanning and topology construction are separate from chemical
 //! perception. Unsupported information is rejected rather than discarded.
@@ -96,7 +96,7 @@ impl ParsedSmiles {
   }
 }
 
-/// Reads one strict SMILES string without assigning aromaticity or radical state.
+/// Reads one strict SMILES string without perceiving aromaticity or radical state.
 ///
 /// # Parameters
 /// - `source`: SMILES only; whitespace, record names, and extensions are not ignored.
@@ -107,10 +107,13 @@ impl ParsedSmiles {
 /// bracket atoms disable implicit H and leave radical state unresolved. Missing
 /// bracket charge/H mean explicit zero under SMILES rules, not unknown input.
 /// Run a named perception model separately; parsing is not chemical validation.
+/// Lowercase atomic designations and aromatic bonds are retained as supplied
+/// facts. An omitted bond is aromatic only between two aromatic endpoints;
+/// an explicit single bond always remains single, including ring closure.
 ///
 /// # Errors
 /// Returns a positioned syntax, unsupported-feature, representation, or topology
-/// error. Aromatic atoms/bonds, stereo, wildcard/query atoms, atom classes, and
+/// error. Stereo, wildcard/query atoms, atom classes, and
 /// reaction/CXSMILES extensions are rejected, never silently stripped.
 ///
 /// # Examples

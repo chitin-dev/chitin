@@ -103,6 +103,17 @@ impl Scanner<'_> {
     let kind = match byte {
       b'[' => return self.bracket().map(Kind::Atom),
       b'A'..=b'Z' => return self.bare().map(Kind::Atom),
+      b'b' | b'c' | b'n' | b'o' | b'p' | b's' => {
+        return self.aromatic(false).map(|atom| {
+          Kind::Atom(
+            atom
+              .with_formal_charge(Some(0))
+              .with_declared_hydrogens(Some(0))
+              .with_unpaired_electrons(Some(0))
+              .with_implicit_hydrogen_policy(ImplicitHydrogenPolicy::Infer),
+          )
+        });
+      }
       b'0'..=b'9' => Kind::Ring(byte - b'0'),
       b'%' => {
         self.offset += 1;
@@ -121,6 +132,7 @@ impl Scanner<'_> {
       b'-' => Kind::Bond(BondOrder::Single),
       b'=' => Kind::Bond(BondOrder::Double),
       b'#' => Kind::Bond(BondOrder::Triple),
+      b':' => Kind::Bond(BondOrder::Aromatic),
       b'(' => Kind::Open,
       b')' => Kind::Close,
       b'.' => Kind::Dot,
@@ -136,7 +148,7 @@ impl Scanner<'_> {
   /// reporting a feature as unsupported does not validate its remaining syntax.
   fn unsupported_or_syntax(&self) -> SmilesError {
     let feature = match self.peek() {
-      Some(b'a' | b'b' | b'c' | b'n' | b'o' | b'p' | b's' | b':') => "aromatic atoms/bonds or atom classes",
+      Some(b':') => "atom classes",
       Some(b'@' | b'/' | b'\\') => "stereochemistry",
       Some(b'*' | b'?' | b'!' | b'&' | b';' | b'~' | b',') => "wildcard/query syntax",
       Some(b'>' | b'|') => "reaction or CXSMILES extension",
@@ -181,6 +193,31 @@ impl Scanner<'_> {
         .with_unpaired_electrons(Some(0))
         .with_implicit_hydrogen_policy(ImplicitHydrogenPolicy::Infer),
     )
+  }
+
+  /// Consumes a lowercase atomic designation without perceiving aromaticity.
+  ///
+  /// `bracket` permits the two-letter `as`/`se` forms. Unknown lowercase
+  /// symbols are syntax errors; the surrounding grammar owns H/charge defaults.
+  fn aromatic(&mut self, bracket: bool) -> Result<Atom, SmilesError> {
+    let start = self.offset;
+    let tail = &self.source[start..];
+    let width = if bracket && (tail.starts_with("as") || tail.starts_with("se")) {
+      2
+    } else {
+      1
+    };
+    let symbol = self
+      .source
+      .get(start..start + width)
+      .ok_or_else(|| self.fail(SmilesErrorKind::Syntax("expected aromatic symbol")))?;
+    let element = Element::ALL
+      .iter()
+      .copied()
+      .find(|&element| profile::aromatic_symbol(element) == Some(symbol))
+      .ok_or_else(|| self.fail(SmilesErrorKind::Syntax("unknown aromatic symbol")))?;
+    self.offset += width;
+    Ok(Atom::new(element).with_aromatic(true))
   }
 
   /// Consumes an optional ASCII digit run under a caller-selected lexical bound.
@@ -230,20 +267,26 @@ impl Scanner<'_> {
     let isotope_start = self.offset;
     let isotope = self.number("isotope mass number (at most three digits)", profile::ISOTOPE_DIGITS)?;
     let symbol_start = self.offset;
-    if !self.peek().is_some_and(|b| b.is_ascii_uppercase()) {
-      return Err(self.unsupported_or_syntax());
-    }
-    self.offset += 1;
-    if self.peek().is_some_and(|b| b.is_ascii_lowercase()) {
+    let base = if self.peek().is_some_and(|b| b.is_ascii_lowercase()) {
+      self.aromatic(true)?
+    } else {
+      if !self.peek().is_some_and(|b| b.is_ascii_uppercase()) {
+        return Err(self.unsupported_or_syntax());
+      }
       self.offset += 1;
-    }
-    let symbol_span = symbol_start..self.offset;
-    let element = Element::from_symbol(&self.source[symbol_span.clone()]).map_err(|e| error(symbol_span, e.into()))?;
+      if self.peek().is_some_and(|b| b.is_ascii_lowercase()) {
+        self.offset += 1;
+      }
+      let span = symbol_start..self.offset;
+      Atom::new(Element::from_symbol(&self.source[span.clone()]).map_err(|e| error(span, e.into()))?)
+    };
+    let element = base.element();
     let atom = match isotope {
       Some(mass) => {
         Atom::from_isotope(Isotope::new(element, mass).map_err(|e| error(isotope_start..symbol_start, e.into()))?)
+          .with_aromatic(base.is_aromatic())
       }
-      None => Atom::new(element),
+      None => base,
     };
     let hydrogens = if self.peek() == Some(b'H') {
       if element == Element::Hydrogen {

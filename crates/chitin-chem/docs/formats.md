@@ -65,10 +65,16 @@ build cost justify it; the module boundary already isolates that work.
   an explicit closed-shell reading, and permission for implicit-H inference.
 - Bracketed named elements (all 118), isotope mass numbers, declared H, signed
   numeric charges, and the legacy `++`/`--` charge spelling.
+- Bare aromatic `b c n o p s`, bracketed aromatic symbols including `as`/`se`,
+  and explicit `:` bonds. These are retained input designations, not perceived
+  aromaticity or an assertion that a Kekulé representation exists.
 - Implicit/explicit single, double and triple bonds; nested branches; dot
   disconnections; ring labels `0` through `9` and `%00` through `%99`.
 - Ring-label reuse after closure, compatible orders on either closure site,
   and closure across dots. Ring labels describe edges, not ring perception.
+- Omitted bonds between two aromatic atoms default to aromatic; all other
+  omitted bonds default to single. Explicit `-` overrides this at ordinary
+  edges and either ring-closure site. Writing retains that distinction.
 - Empty input as an empty graph. Leading/trailing whitespace, names, line
   endings, comments and extension text are not silently consumed.
 
@@ -126,7 +132,9 @@ identical radical/H knowledge after throwing away annotations. In particular:
   A known bracket radical count, **including zero**, is rejected because the
   current reader cannot recover that fact. Broader chemical interpretation
   belongs to the later model/perception work, not an implicit writer fix-up.
-- Unknown/aromatic bond orders are rejected. A valence-invalid draft using
+- Unknown bond orders are rejected; aromatic orders are written as `:`. Aromatic
+  atomic designations use lowercase symbols; aromatic singles are explicit `-`.
+  A valence-invalid draft using
   representable facts may still serialize: writing does not certify chemistry.
 - Input spellings such as `[CH0]`, `[CH1]`, `[C+0]`, and `[Fe++]` may become
   `[C]`, `[CH]`, `[C]`, and `[Fe+2]` respectively; supplied attributes are retained.
@@ -177,12 +185,12 @@ exponential isomorphism searches.
    queries. Separate cycle membership from a chosen cycle-basis algorithm;
    SMILES ring closure itself does not require SSSR. Preserve uncertainty when
    spin/radical state is not determined by the available facts.
-4. **Aromaticity and Kekulization.** Introduce source aromatic atom facts in
-   the domain before accepting lowercase SMILES. Aromatic atom flags and
-   aromatic bond labels are distinct; do not encode aromaticity solely by
-   `BondOrder::Aromatic` or assume order 1.5. Support `[nH]`, aromatic/biphenyl
-   connectivity, fused rings, explicit single bonds and dearomatized forms with
-   a named aromaticity model and failure diagnostics.
+4. **Aromaticity and Kekulization (partially implemented).** Source aromatic
+   atom facts and bond labels now round-trip independently. The bounded
+   `perception::kekulize` model resolves C/N/O/S and common N charges into a
+   detached integer-bond representation; it does not run general aromaticity
+   perception, assign a numeric order 1.5, or validate every molecular state.
+   See [compatibility matrix](smiles-compatibility.md) for exact coverage.
 5. **Stereo and atom classes.** Domain descriptors must use stable IDs and
    explicit reference-neighbor ordering. Parse tetrahedral `@`/`@@`, directional
    bonds and the remaining OpenSMILES stereo classes only after they can be

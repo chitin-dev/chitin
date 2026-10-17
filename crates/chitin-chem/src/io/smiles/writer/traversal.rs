@@ -23,7 +23,7 @@ struct Node {
 
 /// Supported bond spelling addressed by temporary edge index, not a graph ID.
 struct Edge {
-  /// Empty for single bonds; explicit symbols for double/triple bonds.
+  /// Single is explicit between aromatic atoms; other orders have their own symbol.
   symbol: &'static str,
 }
 
@@ -89,10 +89,16 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
   let mut edges = Vec::with_capacity(graph.bond_count());
   let mut adjacency = vec![Vec::new(); nodes.len()];
   for (id, bond) in graph.bonds() {
+    let aromatic_endpoints = bond
+      .atoms()
+      .into_iter()
+      .all(|atom| graph.atom(atom).is_some_and(|atom| atom.is_aromatic()));
     let symbol = match bond.order() {
+      BondOrder::Single if aromatic_endpoints => "-",
       BondOrder::Single => "",
       BondOrder::Double => "=",
       BondOrder::Triple => "#",
+      BondOrder::Aromatic => ":",
       order => return Err(Error::Bond { bond: id, order }),
     };
     let [a, b] = bond.atoms();

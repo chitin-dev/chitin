@@ -169,9 +169,6 @@ fn all_element_symbols_should_be_readable_inside_brackets() -> TestResult {
 #[test]
 fn unsupported_features_should_fail_instead_of_losing_information() {
   for source in [
-    "c1ccccc1",
-    "[nH]",
-    "C:C",
     "C/C=C\\C",
     "[C@H](F)(Cl)Br",
     "*",

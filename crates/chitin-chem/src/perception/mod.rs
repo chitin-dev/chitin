@@ -10,9 +10,11 @@
 //! biconnected edge blocks. It accepts unknown chemical facts and assigns neither
 //! aromaticity nor an SSSR/all-rings interpretation to a block's cycle rank.
 
+mod kekule;
 mod rings;
 mod valence;
 
+pub use kekule::{KekuleError, KekuleOptions, kekulize};
 pub use rings::{RingBlock, RingTopology, analyze_rings};
 
 pub use valence::{

@@ -23,6 +23,11 @@ use super::{super::profile, SmilesAtomWriteError as Error};
 pub(super) fn encode(atom: &Atom) -> Result<String, Error> {
   let charge = atom.formal_charge().ok_or(Error::UnknownFormalCharge)?;
   let hydrogens = atom.declared_hydrogens().ok_or(Error::UnknownDeclaredHydrogens)?;
+  let symbol = if atom.is_aromatic() {
+    profile::aromatic_symbol(atom.element()).ok_or(Error::AromaticElement(atom.element()))?
+  } else {
+    atom.element().symbol()
+  };
   match atom.implicit_hydrogen_policy() {
     ImplicitHydrogenPolicy::Unspecified => return Err(Error::UnknownHydrogenPolicy),
     ImplicitHydrogenPolicy::Infer => {
@@ -32,7 +37,7 @@ pub(super) fn encode(atom: &Atom) -> Result<String, Error> {
         && hydrogens == 0
         && atom.unpaired_electrons() == Some(0)
       {
-        return Ok(atom.element().symbol().into());
+        return Ok(symbol.into());
       }
       return Err(Error::ImplicitInference);
     }
@@ -62,7 +67,7 @@ pub(super) fn encode(atom: &Atom) -> Result<String, Error> {
     }
     token.push_str(&digits);
   }
-  token.push_str(atom.element().symbol());
+  token.push_str(symbol);
   if hydrogens > 0 {
     token.push('H');
     if hydrogens != 1 {

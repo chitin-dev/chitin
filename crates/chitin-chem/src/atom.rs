@@ -6,10 +6,14 @@ use crate::{Element, ImplicitHydrogenPolicy, Isotope};
 ///
 /// `None` means unspecified, not zero. Hydrogen vertices, declared attached H,
 /// and the implicit-H policy are separate facts; none is a computed cache.
+/// A false aromatic designation means no supplied aromatic flag, not proof of
+/// nonaromaticity under a chemical perception model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Atom {
   /// Nuclear identity; isotope construction must preserve this element.
   element: Element,
+  /// Supplied aromatic designation, not a cached aromaticity-perception result.
+  aromatic: bool,
   /// An explicit nuclide label, not a default natural-abundance isotope.
   isotope: Option<Isotope>,
   /// Supplied integer charge; `None` is not neutral.
@@ -27,6 +31,7 @@ impl Atom {
   pub const fn new(element: Element) -> Self {
     Self {
       element,
+      aromatic: false,
       isotope: None,
       formal_charge: None,
       declared_hydrogens: None,
@@ -46,6 +51,15 @@ impl Atom {
   /// Returns the atom's element.
   pub const fn element(&self) -> Element {
     self.element
+  }
+  /// Returns whether the input explicitly designates this atom aromatic.
+  pub const fn is_aromatic(&self) -> bool {
+    self.aromatic
+  }
+  /// Sets an input aromatic designation without changing bonds or inferring chemistry.
+  pub const fn with_aromatic(mut self, aromatic: bool) -> Self {
+    self.aromatic = aromatic;
+    self
   }
   /// Returns an explicit isotope label, if supplied.
   pub const fn isotope(&self) -> Option<Isotope> {

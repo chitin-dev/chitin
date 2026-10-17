@@ -297,13 +297,12 @@ fn inference_should_only_be_spelled_bare_when_every_reader_default_matches() -> 
 }
 
 #[test]
-fn unknown_and_aromatic_bonds_should_not_be_replaced_with_single_bonds() -> TestResult {
-  for order in [BondOrder::Unknown, BondOrder::Aromatic] {
-    let mut graph = read_smiles("CC")?.into_graph();
-    let bond = graph.bonds().next().map(|(id, _)| id).ok_or("no bond")?;
-    graph.set_bond_order(bond, order)?;
-    assert_eq!(write_smiles(&graph), Err(SmilesWriteError::Bond { bond, order }));
-  }
+fn unknown_bonds_should_not_be_replaced_with_single_bonds() -> TestResult {
+  let order = BondOrder::Unknown;
+  let mut graph = read_smiles("CC")?.into_graph();
+  let bond = graph.bonds().next().map(|(id, _)| id).ok_or("no bond")?;
+  graph.set_bond_order(bond, order)?;
+  assert_eq!(write_smiles(&graph), Err(SmilesWriteError::Bond { bond, order }));
   Ok(())
 }
 

@@ -59,6 +59,8 @@ pub enum ValenceDiagnostic {
   UnsupportedRadical(u8),
   /// Aromatic labels require aromaticity-aware rules, not a numeric order of 1.5.
   AromaticBond(BondId),
+  /// Aromatic atomic designations need an explicitly selected integer-bond model.
+  AromaticAtom,
   /// V1 does not attach declared or additional implicit H to an H vertex.
   HydrogenAsHost,
   /// The total valence exceeds the model's one supported target.
@@ -253,6 +255,9 @@ fn analyze_atom(
   model: ValenceModel,
 ) -> Result<AtomValenceAnalysis, GraphError> {
   let mut diagnostics = Vec::new();
+  if atom.is_aromatic() {
+    diagnostics.push(ValenceDiagnostic::AromaticAtom);
+  }
   if atom.formal_charge().is_none() {
     diagnostics.push(ValenceDiagnostic::UnknownFormalCharge);
   }

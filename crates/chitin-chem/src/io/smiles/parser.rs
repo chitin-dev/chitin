@@ -87,7 +87,8 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
       Kind::Atom(atom) => {
         let id = result.graph.add_atom(atom).map_err(|e| error(span.clone(), e.into()))?;
         if let Some(parent) = current {
-          let (order, bond_span) = pending.take().unwrap_or((BondOrder::Single, span.start..span.start));
+          let default = default_order(&result.graph, parent, id);
+          let (order, bond_span) = pending.take().unwrap_or((default, span.start..span.start));
           let edge = result
             .graph
             .add_bond(parent, id, order)
@@ -158,7 +159,13 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
           // legally connect across a dot and may be reused after closure.
           let edge = result
             .graph
-            .add_bond(open.atom, atom, order.or(open.order).unwrap_or(BondOrder::Single))
+            .add_bond(
+              open.atom,
+              atom,
+              order
+                .or(open.order)
+                .unwrap_or_else(|| default_order(&result.graph, open.atom, atom)),
+            )
             .map_err(|e| error(span.clone(), e.into()))?;
           result.bond_spans.insert(edge, vec![open.span, site]);
         } else {
@@ -189,4 +196,16 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
     return Err(error(eof, SmilesErrorKind::Syntax("expected atom after dot")));
   }
   Ok(result)
+}
+
+/// Omitted bonds are aromatic only when both endpoint designations are aromatic.
+fn default_order(graph: &MolecularGraph, a: AtomId, b: AtomId) -> BondOrder {
+  if [a, b]
+    .into_iter()
+    .all(|id| graph.atom(id).is_some_and(|atom| atom.is_aromatic()))
+  {
+    BondOrder::Aromatic
+  } else {
+    BondOrder::Single
+  }
 }

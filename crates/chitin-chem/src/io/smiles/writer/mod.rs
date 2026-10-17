@@ -13,6 +13,9 @@ mod traversal;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SmilesAtomWriteError {
+  /// No lowercase atomic spelling exists for the supplied aromatic element.
+  #[error("no aromatic SMILES symbol for {0}")]
+  AromaticElement(crate::Element),
   /// Unknown charge cannot be encoded as the SMILES default of neutral.
   #[error("formal charge is unknown")]
   UnknownFormalCharge,
@@ -58,7 +61,7 @@ pub enum SmilesWriteError {
     #[source]
     reason: SmilesAtomWriteError,
   },
-  /// An edge is not a supported single/double/triple bond.
+  /// An edge has an unknown, unsupported chemical order.
   #[error("cannot write bond {bond}: unsupported order {order:?}")]
   Bond {
     /// Handle of the offending input edge.
@@ -98,11 +101,13 @@ pub enum SmilesWriteError {
 /// declared H. Traversal and output are iterative, including deeply nested trees.
 ///
 /// # Errors
-/// Rejects missing/unrepresentable facts, unknown/aromatic bond orders, and a
+/// Rejects missing/unrepresentable facts, unknown bond orders, and a
 /// traversal requiring more than 100 simultaneously open ring labels. Closed
 /// labels are reused, so total cycle count is not limited to 100. A known
 /// bracket radical count (including zero) is rejected because the current
 /// reader cannot recover it. No partial output is returned on failure.
+/// Source aromatic designations are retained without chemical validation;
+/// explicit single bonds between aromatic atoms are never omitted.
 ///
 /// # Examples
 /// ```
