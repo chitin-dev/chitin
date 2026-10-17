@@ -26,8 +26,12 @@ mod atom;
 mod bond;
 mod element;
 mod graph;
+mod hydrogen;
+/// Read-only chemistry analysis with explicit model boundaries and diagnostics.
+pub mod perception;
 
 pub use atom::Atom;
 pub use bond::{Bond, BondOrder};
 pub use element::{Element, ElementError, Isotope, IsotopeError};
 pub use graph::{AtomId, BondId, GraphError, MolecularGraph};
+pub use hydrogen::{HydrogenCounts, ImplicitHydrogenPolicy};
