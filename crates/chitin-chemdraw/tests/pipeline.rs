@@ -137,8 +137,8 @@ fn fragments_should_be_packed_without_changing_internal_geometry() -> TestResult
 }
 
 #[test]
-fn multiple_cycles_and_unknown_orders_should_fail_explicitly_in_auto_layout() -> TestResult {
-  for source in ["C1CC2CCC1C2", "C1CCC2(CC1)CCCC2", "C1CCCCC1C2CCCCC2"] {
+fn unsupported_ring_blocks_and_unknown_orders_should_fail_explicitly_in_auto_layout() -> TestResult {
+  for source in ["C1CC2CCC1C2", "C1CC2C3CCC1C23"] {
     let graph = read_smiles(source)?.into_graph();
     assert!(matches!(
       layout::generate(&graph, &LayoutOptions::default()),
@@ -468,6 +468,10 @@ fn irreducible_local_crowding_should_remain_a_visible_diagnostic() -> TestResult
             < 0.55
         );
       }
+      layout::LayoutDiagnostic::CrossingBonds { a, b } => {
+        assert!(graph.bond(*a).is_some() && graph.bond(*b).is_some());
+      }
+      layout::LayoutDiagnostic::RefinementBudgetExhausted => {}
     }
   }
   Ok(())

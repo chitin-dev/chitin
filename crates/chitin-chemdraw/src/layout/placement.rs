@@ -1,20 +1,20 @@
-//! Independent rule-based placement, not a port of a reference toolkit's runtime.
+//! Ring-aware placement with constrained non-ring angle allocation.
 //!
-//! Leaf peeling isolates the one allowed cycle. A spatial grid limits local
-//! crowding queries; only a bounded set of candidate rotations is evaluated.
+//! Ring blocks are seeded before branch expansion. A spatial grid limits local
+//! crowding queries; a separate refinement pass can then move whole branches.
 
-use super::{Layout2d, LayoutDiagnostic, LayoutError as Error, LayoutOptions};
-use crate::geometry::{Bounds, Point};
+use super::{Layout2d, LayoutError as Error, LayoutOptions, rings::Rings};
+use crate::geometry::Point;
 use chitin_chem::{AtomId, BondOrder, GraphError, MolecularGraph};
 use std::{
   collections::{BTreeMap, VecDeque},
-  f64::consts::{PI, TAU},
+  f64::consts::PI,
 };
 
 /// Temporary adjacency view; dense indices never replace domain handles.
-struct Topology {
+pub(super) struct Topology {
   /// Original graph handles, in stable iteration order.
-  ids: Vec<AtomId>,
+  pub(super) ids: Vec<AtomId>,
   /// Neighbor dense indices and supplied integer bond orders.
   neighbors: Vec<Vec<(usize, BondOrder)>>,
   /// Disjoint connected components, each in stable handle order.
@@ -65,37 +65,6 @@ impl Topology {
       components,
     })
   }
-
-  /// Removes degree-zero/one vertices iteratively; retained vertices form cycle cores.
-  ///
-  /// # Returns
-  /// One flag per dense vertex. This neither selects a cycle basis nor assigns
-  /// aromaticity. Component cycle-rank validation happens before embedding.
-  fn core(&self) -> Vec<bool> {
-    let mut degree: Vec<_> = self.neighbors.iter().map(Vec::len).collect();
-    let mut retained = vec![true; self.ids.len()];
-    let mut queue: VecDeque<_> = degree
-      .iter()
-      .enumerate()
-      .filter(|&(_, d)| *d < 2)
-      .map(|(i, _)| i)
-      .collect();
-    while let Some(node) = queue.pop_front() {
-      if !retained[node] {
-        continue;
-      }
-      retained[node] = false;
-      for &(other, _) in &self.neighbors[node] {
-        if retained[other] {
-          degree[other] -= 1;
-          if degree[other] == 1 {
-            queue.push_back(other);
-          }
-        }
-      }
-    }
-    retained
-  }
 }
 
 /// Unit-cell index for already placed centers; each atom is inserted exactly once.
@@ -144,88 +113,37 @@ fn position(positions: &[Option<Point>], topology: &Topology, node: usize) -> Re
   positions[node].ok_or(Error::Invariant(topology.ids[node]))
 }
 
-/// Inserts one center and retains any crowding that bounded search could not avoid.
+/// Inserts one generated center into the placement snapshot and spatial index.
 ///
 /// # Parameters
 /// - `node`, `point`: previously unplaced vertex and candidate unit-space position.
-/// - `topology`, `positions`, `grid`: same dense namespace; occupied grid entries
-///   must already have stored positions.
-/// - `diagnostics`, `threshold`: append-only close-center reports and distance rule.
+/// - `positions`, `grid`: the same dense namespace, with no entry for this node.
 ///
 /// # Returns
-/// Success after storing the center and adding its index to the grid. Existing
-/// positions are not moved; unresolved close pairs are retained as diagnostics.
+/// Success after storing the center and adding its index to the grid. Quality
+/// diagnostics belong to final inspection, not provisional placement contacts.
 ///
 /// # Errors
-/// Rejects unrepresentable grid keys or a violated occupied-position invariant.
-fn place(
-  node: usize,
-  point: Point,
-  topology: &Topology,
-  positions: &mut [Option<Point>],
-  grid: &mut Grid,
-  diagnostics: &mut Vec<LayoutDiagnostic>,
-  threshold: f64,
-) -> Result<(), Error> {
-  for other in grid.nearby(point)? {
-    if point.distance(position(positions, topology, other)?) < threshold {
-      diagnostics.push(LayoutDiagnostic::CrowdedAtoms {
-        a: topology.ids[other],
-        b: topology.ids[node],
-      });
-    }
-  }
+/// Rejects unrepresentable grid keys before changing either collection.
+fn place(node: usize, point: Point, positions: &mut [Option<Point>], grid: &mut Grid) -> Result<(), Error> {
+  let key = Grid::key(point)?;
   positions[node] = Some(point);
-  grid.0.entry(Grid::key(point)?).or_default().push(node);
+  grid.0.entry(key).or_default().push(node);
   Ok(())
 }
 
-/// Orders a unicyclic core by connectivity, not by ID-sorted polygon vertices.
-///
-/// # Returns
-/// Empty for trees; otherwise cycle order starting at the smallest retained ID.
-/// The caller must establish component cycle rank <= 1 before invoking this helper.
-///
-/// # Errors
-/// Reports broken core adjacency or a traversal that fails to close in finite steps.
-fn cycle(topology: &Topology, component: &[usize], core: &[bool]) -> Result<Vec<usize>, Error> {
-  let Some(&start) = component.iter().find(|&&node| core[node]) else {
-    return Ok(Vec::new());
-  };
-  let mut ordered = vec![start];
-  let mut previous = start;
-  let mut current = topology.neighbors[start]
-    .iter()
-    .find(|&&(node, _)| core[node])
-    .map(|&(node, _)| node)
-    .ok_or(Error::Invariant(topology.ids[start]))?;
-  while current != start {
-    if ordered.len() >= component.len() {
-      return Err(Error::Invariant(topology.ids[start]));
-    }
-    ordered.push(current);
-    let next = topology.neighbors[current]
-      .iter()
-      .find(|&&(node, _)| core[node] && node != previous)
-      .map(|&(node, _)| node)
-      .ok_or(Error::Invariant(topology.ids[current]))?;
-    previous = current;
-    current = next;
-  }
-  Ok(ordered)
-}
-
-/// Picks a bounded rotation of a sibling group, penalizing local center overlap.
+/// Chooses between angle-preserving mirrored assignments of a sibling group.
 ///
 /// Linear degree-two geometry is constrained rather than rotated to avoid crowds.
-/// Other candidates preserve unit bond lengths; residual quality is diagnostic.
+/// Mirroring preserves the incoming/outgoing angle sectors, unlike rotating the
+/// group freely around its parent. Residual crowding remains diagnostic.
 ///
 /// # Parameters
 /// - `children`: unplaced neighbors, in deterministic adjacency order.
 /// - `grid`: already fixed centers in this component only.
 ///
 /// # Returns
-/// The lowest-cost candidate among at most six rotations, with ties retaining
+/// The lowest-cost candidate among at most two mirror assignments, with ties retaining
 /// earlier candidates. This local heuristic does not optimize label envelopes
 /// or certify that bond crossings are absent.
 ///
@@ -243,31 +161,25 @@ fn candidates(
   let linear = row.len() == 2
     && (row.iter().any(|&(_, order)| order == BondOrder::Triple)
       || row.iter().all(|&(_, order)| order == BondOrder::Double));
-  let offsets: Vec<_> = (0..children.len())
-    .map(|i| {
-      if linear {
-        0.
-      } else if branch.radial {
-        (i as f64 - (children.len() - 1) as f64 / 2.) * PI / 3.
-      } else if children.len() == 1 {
-        if branch.depth.is_multiple_of(2) {
-          PI / 3.
-        } else {
-          -PI / 3.
-        }
-      } else {
-        (i as f64 - (children.len() - 1) as f64 / 2.) * TAU / (children.len() + 1) as f64
-      }
-    })
-    .collect();
-  let rotations = [0., PI / 3., -PI / 3., 2. * PI / 3., -2. * PI / 3., PI];
+  let offsets: Vec<_> = if branch.radial {
+    (0..children.len())
+      .map(|i| (i as f64 - (children.len() - 1) as f64 / 2.) * PI / 3.)
+      .collect()
+  } else {
+    let bend = if branch.depth.is_multiple_of(2) {
+      super::angles::CHAIN_BEND
+    } else {
+      -super::angles::CHAIN_BEND
+    };
+    super::angles::offsets(children.len(), row.len() > children.len(), bend, linear)
+  };
   let mut best = Vec::new();
   let mut best_cost = f64::INFINITY;
-  for (attempt, rotation) in rotations.into_iter().take(if linear { 1 } else { 6 }).enumerate() {
+  for (attempt, sign) in [1., -1.].into_iter().take(if linear { 1 } else { 2 }).enumerate() {
     let mut group = Vec::new();
     let mut cost = attempt as f64 * 0.0001;
     for ((node, _), offset) in children.iter().zip(&offsets) {
-      let angle = branch.heading + offset + rotation;
+      let angle = branch.heading + sign * offset;
       let point = origin.translated(angle.cos(), angle.sin());
       for other in grid.nearby(point)? {
         let distance = point.distance(position(positions, topology, other)?);
@@ -286,7 +198,7 @@ fn candidates(
   Ok(best)
 }
 
-/// Embeds supported components, expands their trees, then packs center bounds.
+/// Embeds supported components, expands their trees, then refines and packs them.
 ///
 /// # Parameters
 /// - `graph`: source graph, never mutated or sanitized during placement.
@@ -301,69 +213,53 @@ fn candidates(
 /// facts are mutated and partially placed components are never returned.
 pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, Error> {
   let topology = Topology::new(graph)?;
-  let core = topology.core();
+  let rings = Rings::new(graph, &topology)?;
+  let mut embedded = vec![false; rings.len()];
   let mut positions = vec![None; topology.ids.len()];
-  let mut diagnostics = Vec::new();
-  let mut cursor = 0.;
   for component in &topology.components {
     let root = *component.first().ok_or(Error::CoordinateRange)?;
-    let edges = component
-      .iter()
-      .map(|&node| topology.neighbors[node].len())
-      .sum::<usize>()
-      / 2;
-    let rank = edges + 1 - component.len();
-    if rank > 1 {
-      return Err(Error::RingSystem {
-        atom: topology.ids[root],
-        cycles: rank,
-      });
-    }
-    let ring = cycle(&topology, component, &core)?;
     let mut grid = Grid::default();
     let mut pending = VecDeque::new();
-    if ring.is_empty() {
+    if let Some(seed) = rings.seed(component) {
+      embedded[seed] = true;
+      for (node, point, heading) in rings.embed(seed, &positions, component, 0.)? {
+        place(node, point, &mut positions, &mut grid)?;
+        pending.push_back(Branch {
+          node,
+          heading,
+          depth: 0,
+          radial: true,
+        });
+      }
+    } else {
       let start = *component
         .iter()
         .find(|&&node| topology.neighbors[node].len() <= 1)
         .ok_or(Error::Invariant(topology.ids[root]))?;
-      place(
-        start,
-        Point::new(0., 0.),
-        &topology,
-        &mut positions,
-        &mut grid,
-        &mut diagnostics,
-        options.minimum_spacing,
-      )?;
+      place(start, Point::new(0., 0.), &mut positions, &mut grid)?;
       pending.push_back(Branch {
         node: start,
         heading: -PI / 6.,
         depth: 0,
         radial: false,
       });
-    } else {
-      let radius = 1. / (2. * (PI / ring.len() as f64).sin());
-      for (i, &node) in ring.iter().enumerate() {
-        let angle = TAU * i as f64 / ring.len() as f64;
-        place(
-          node,
-          Point::new(radius * angle.cos(), radius * angle.sin()),
-          &topology,
-          &mut positions,
-          &mut grid,
-          &mut diagnostics,
-          options.minimum_spacing,
-        )?;
-        pending.push_back(Branch {
-          node,
-          heading: angle,
-          depth: 0,
-          radial: true,
-        });
-      }
     }
     while let Some(branch) = pending.pop_front() {
+      for &index in &rings.membership[branch.node] {
+        if embedded[index] {
+          continue;
+        }
+        embedded[index] = true;
+        for (node, point, heading) in rings.embed(index, &positions, component, branch.heading)? {
+          place(node, point, &mut positions, &mut grid)?;
+          pending.push_front(Branch {
+            node,
+            heading,
+            depth: branch.depth,
+            radial: true,
+          });
+        }
+      }
       let children: Vec<_> = topology.neighbors[branch.node]
         .iter()
         .filter(|&&(node, _)| positions[node].is_none())
@@ -373,15 +269,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
         continue;
       }
       for (node, point, heading) in candidates(&topology, &positions, &grid, &branch, &children)? {
-        place(
-          node,
-          point,
-          &topology,
-          &mut positions,
-          &mut grid,
-          &mut diagnostics,
-          options.minimum_spacing,
-        )?;
+        place(node, point, &mut positions, &mut grid)?;
         pending.push_back(Branch {
           node,
           heading,
@@ -390,16 +278,6 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
         });
       }
     }
-    let points = component
-      .iter()
-      .map(|&node| position(&positions, &topology, node))
-      .collect::<Result<Vec<_>, _>>()?;
-    let bounds = Bounds::from_points(points)?.ok_or(Error::Invariant(topology.ids[root]))?;
-    let dy = -(bounds.min().y + bounds.height() / 2.);
-    for &node in component {
-      positions[node] = Some(position(&positions, &topology, node)?.translated(cursor - bounds.min().x, dy));
-    }
-    cursor += bounds.width() + options.component_gap;
   }
   let positions = topology
     .ids
@@ -408,6 +286,8 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
     .map(|(i, &id)| position(&positions, &topology, i).map(|p| (id, p)))
     .collect::<Result<BTreeMap<_, _>, _>>()?;
   let mut result = Layout2d::from_positions(positions)?;
-  result.diagnostics = diagnostics;
+  // Placement-time contacts can disappear after whole-branch refinement. Report
+  // only the final geometry, not obsolete pairs collected during expansion.
+  super::refinement::run(graph, &mut result, options)?;
   Ok(result)
 }

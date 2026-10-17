@@ -1,4 +1,4 @@
-//! Contextual bond geometry inspired by SmilesDrawer's SVG depiction rules.
+//! Contextual bond geometry with shared label clearance and neighbor-ray joins.
 //!
 //! Ring doubles use the axis plus a short inward stroke; acyclic doubles choose
 //! centered/offset strokes from adjacency. Triple side strokes use spacing/1.5.
@@ -60,46 +60,7 @@ impl Context {
     for row in &mut rows {
       row.sort_unstable_by_key(|&(node, _)| node);
     }
-    let mut discovery = vec![usize::MAX; ids.len()];
-    let mut low = vec![0; ids.len()];
-    let mut parent: Vec<Option<(usize, BondId)>> = vec![None; ids.len()];
-    let mut bridges = BTreeSet::new();
-    let mut tick = 0;
-    for root in 0..ids.len() {
-      if discovery[root] != usize::MAX {
-        continue;
-      }
-      discovery[root] = tick;
-      low[root] = tick;
-      tick += 1;
-      let mut stack = vec![(root, 0)];
-      while let Some((node, cursor)) = stack.last_mut() {
-        let node = *node;
-        if let Some(&(other, edge)) = rows[node].get(*cursor) {
-          *cursor += 1;
-          if parent[node].is_some_and(|(_, incoming)| incoming == edge) {
-            continue;
-          }
-          if discovery[other] == usize::MAX {
-            parent[other] = Some((node, edge));
-            discovery[other] = tick;
-            low[other] = tick;
-            tick += 1;
-            stack.push((other, 0));
-          } else {
-            low[node] = low[node].min(discovery[other]);
-          }
-        } else {
-          stack.pop();
-          if let Some((previous, edge)) = parent[node] {
-            if low[node] > discovery[previous] {
-              bridges.insert(edge);
-            }
-            low[previous] = low[previous].min(low[node]);
-          }
-        }
-      }
-    }
+    let bridges = chitin_chem::perception::analyze_rings(graph)?.bridges().clone();
     Ok(Self {
       ids,
       indices,
@@ -116,9 +77,9 @@ impl Context {
   ///
   /// # Returns
   /// A deterministic local cycle reference, not an SSSR/aromaticity result.
-  /// Single-cycle components match the reference style exactly in side choice;
-  /// multi-cycle manual coordinates use a shortest cycle rather than SmilesDrawer's
-  /// largest/aromatic-common-ring catalogue, which is not modelled here yet.
+  /// Single-cycle components have an unambiguous interior side. Multi-cycle
+  /// manual coordinates use a shortest cycle, not a largest/aromatic-common-ring
+  /// catalogue; that broader ring-choice model is not implemented here yet.
   ///
   /// # Errors
   /// Reports a violated bridge/path invariant as an unsupported bond geometry.
@@ -299,7 +260,7 @@ fn join(
   Ok(())
 }
 
-/// Generates reference-style strokes, then applies one shared label-clearance interval.
+/// Generates contextual bond strokes, then applies one shared label-clearance interval.
 ///
 /// # Parameters
 /// - `graph`: source topology; temporary bridge/cycle information is local only.

@@ -48,7 +48,7 @@ pub struct DepictOptions {
 }
 
 impl Default for DepictOptions {
-  /// Uses SmilesDrawer's default proportions, scaled to a 48-unit bond length.
+  /// Uses standard skeletal drawing proportions with a 48-unit bond length.
   fn default() -> Self {
     Self {
       bond_length: 48.,

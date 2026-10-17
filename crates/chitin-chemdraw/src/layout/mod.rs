@@ -1,16 +1,18 @@
 //! Detached normalized coordinates: x-right, y-up, with unit-length bonds.
 //!
-//! The first automatic model handles trees and connected components containing
-//! one simple cycle. Multiple cycles in one component are explicitly unsupported.
-//! Ring peeling here is layout bookkeeping, not aromaticity or SSSR perception.
+//! Domain ring blocks constrain rigid polygon seeds; branch expansion is followed
+//! by bounded overlap refinement. Layout constraints never assign aromaticity.
 
 use crate::geometry::{Bounds, GeometryError, Point};
 use chitin_chem::{AtomId, BondId, GraphError, MolecularGraph};
 use std::collections::BTreeMap;
 
+mod angles;
 mod placement;
+mod refinement;
+mod rings;
 
-/// Resource and spacing policy for the initial deterministic layout model.
+/// Resource, spacing, and bounded refinement policy for deterministic layout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayoutOptions {
   /// Horizontal separation between component atom-center bounds, in bond units.
@@ -19,15 +21,22 @@ pub struct LayoutOptions {
   pub minimum_spacing: f64,
   /// Maximum input vertex count; exceeding this returns an error, never truncation.
   pub max_atoms: usize,
+  /// Maximum improving branch-search passes; zero disables refinement.
+  pub refinement_passes: usize,
+  /// Work units for candidate traversal/indexing/geometric tests, shared by fragments.
+  /// Initial and final quality inspection are outside this optimization budget.
+  pub refinement_budget: usize,
 }
 
 impl Default for LayoutOptions {
-  /// Uses three bond units between fragments, a 0.55 crowding threshold, and 4096 atoms.
+  /// Uses unit geometry, 4096 atoms, and four refinement passes within one million work units.
   fn default() -> Self {
     Self {
       component_gap: 3.,
       minimum_spacing: 0.55,
       max_atoms: 4096,
+      refinement_passes: 4,
+      refinement_budget: 1_000_000,
     }
   }
 }
@@ -35,13 +44,22 @@ impl Default for LayoutOptions {
 /// A layout-quality limitation, not a claim that the molecule is invalid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayoutDiagnostic {
-  /// Bounded local placement could not separate two atom centers sufficiently.
+  /// Final geometry retains two atom centers closer than the requested threshold.
   CrowdedAtoms {
     /// First input handle.
     a: AtomId,
     /// Second input handle in the same graph.
     b: AtomId,
   },
+  /// Two nonincident skeleton edges still cross after bounded refinement.
+  CrossingBonds {
+    /// First input edge handle.
+    a: BondId,
+    /// Second input edge handle.
+    b: BondId,
+  },
+  /// Optimization exhausted its work budget; the complete best-so-far layout remains valid.
+  RefinementBudgetExhausted,
 }
 
 /// Layout cannot provide coordinates without dropping or inventing information.
@@ -61,10 +79,10 @@ pub enum LayoutError {
   /// No aromatic/unknown bond semantics are supplied to this initial model.
   #[error("unsupported bond {0} in automatic layout")]
   Bond(BondId),
-  /// This component needs a later ring-system embedding model.
-  #[error("component at atom {atom} has {cycles} independent cycles; only one is supported")]
+  /// This biconnected block needs a more general ring-system embedding model.
+  #[error("ring block at atom {atom} has {cycles} independent cycles and needs a more general embedding model")]
   RingSystem {
-    /// Smallest component handle for locating the unsupported input.
+    /// Smallest block handle for locating the unsupported input.
     atom: AtomId,
     /// E - V + 1, not an SSSR or aromatic-ring count.
     cycles: usize,
@@ -143,13 +161,15 @@ impl Layout2d {
 ///
 /// # Returns
 /// Deterministic positions for every live atom. Chains use zigzag placement,
-/// triple/cumulated-double degree-two centers are linear, and a single cycle is
-/// a regular polygon. Bounded angle search reduces nearby atom overlap; unresolved
-/// crowding is diagnostic. This is not a global crossing-free layout guarantee.
+/// triple/cumulated-double degree-two centers are linear, and supported ring
+/// blocks use regular polygons. Whole-branch transforms improve geometric overlap
+/// without stretching bonds. Unresolved crowding/crossings remain diagnostic;
+/// this is not a global optimum or label-collision-free guarantee.
 ///
 /// # Errors
 /// Rejects invalid options, exceeded budgets, unsupported bond labels, and any
-/// component with more than one independent cycle. No partial layout is returned.
+/// ring blocks outside the simple-cycle/edge-fused-bicyclic profile. Connected
+/// independent rings and spiro systems are supported. No partial layout is returned.
 pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, LayoutError> {
   if !options.component_gap.is_finite()
     || options.component_gap <= 0.
@@ -157,6 +177,7 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
     || options.minimum_spacing <= 0.
     || options.minimum_spacing >= 1.
     || options.max_atoms == 0
+    || (options.refinement_passes > 0 && options.refinement_budget == 0)
   {
     return Err(LayoutError::Options);
   }
