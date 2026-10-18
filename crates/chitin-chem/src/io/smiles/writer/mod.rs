@@ -2,7 +2,7 @@
 //!
 //! This layer borrows graph facts only. It does not inspect a reader snapshot,
 //! infer properties, renumber graph handles, or install caches. Atom spelling
-//! and traversal are private boundaries for future stereo-aware encoding.
+//! and traversal share ordered tetrahedral references without source-text reuse.
 
 use crate::{AtomId, BondId, BondOrder, GraphError, MolecularGraph};
 
@@ -52,6 +52,9 @@ pub enum SmilesAtomWriteError {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SmilesWriteError {
+  /// Ordered stereo references cannot be represented by the chosen traversal.
+  #[error(transparent)]
+  Stereo(#[from] crate::StereoError),
   /// An atomic fact would be lost or changed by this codec.
   #[error("cannot write atom {atom}: {reason}")]
   Atom {
@@ -97,6 +100,8 @@ pub enum SmilesWriteError {
 /// labeling, chemical normalization, valence validation, or H inference runs.
 /// Reading the result with [`super::read_smiles`] preserves all current atomic
 /// attributes and bond orders up to graph isomorphism, not graph-local IDs.
+/// Tetrahedral reference permutations are corrected for the output traversal;
+/// `@TH1`/`@TH2` may be shortened to `@`/`@@` without changing configuration.
 /// Explicit H vertices stay vertices; fixed implicit H is not merged with
 /// declared H. Traversal and output are iterative, including deeply nested trees.
 ///

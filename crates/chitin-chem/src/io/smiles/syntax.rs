@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use crate::{Atom, BondOrder, Element, ImplicitHydrogenPolicy, Isotope};
+use crate::{Atom, BondOrder, Element, ImplicitHydrogenPolicy, Isotope, TetrahedralWinding};
 
 use super::{SmilesError, SmilesErrorKind, error, profile};
 
@@ -18,8 +18,8 @@ pub(super) struct Token {
 /// Supported lexical categories; unsupported annotations never become tokens.
 #[derive(Debug)]
 pub(super) enum Kind {
-  /// Complete atom facts with format-specific H/charge defaults already applied.
-  Atom(Atom),
+  /// Atom facts and optional local winding; graph ligand identities come later.
+  Atom(Atom, Option<TetrahedralWinding>),
   /// Explicit order awaiting an atom or ring site in the topology parser.
   Bond(BondOrder),
   /// Numeric ring identity, independent of digit versus percent spelling.
@@ -101,8 +101,8 @@ impl Scanner<'_> {
       .peek()
       .ok_or_else(|| self.fail(SmilesErrorKind::Syntax("expected token")))?;
     let kind = match byte {
-      b'[' => return self.bracket().map(Kind::Atom),
-      b'A'..=b'Z' => return self.bare().map(Kind::Atom),
+      b'[' => return self.bracket().map(|(atom, winding)| Kind::Atom(atom, winding)),
+      b'A'..=b'Z' => return self.bare().map(|atom| Kind::Atom(atom, None)),
       b'b' | b'c' | b'n' | b'o' | b'p' | b's' => {
         return self.aromatic(false).map(|atom| {
           Kind::Atom(
@@ -111,6 +111,7 @@ impl Scanner<'_> {
               .with_declared_hydrogens(Some(0))
               .with_unpaired_electrons(Some(0))
               .with_implicit_hydrogen_policy(ImplicitHydrogenPolicy::Infer),
+            None,
           )
         });
       }
@@ -251,7 +252,7 @@ impl Scanner<'_> {
       .map_err(|_| error(start..self.offset, SmilesErrorKind::NumberOutOfRange(name)))
   }
 
-  /// Consumes `[isotope? element H-count? charge?]` without chemical inference.
+  /// Consumes `[isotope? element chirality? H-count? charge?]` without perception.
   ///
   /// # Returns
   /// One atom with known charge/H defaults and fixed zero additional implicit H.
@@ -262,7 +263,7 @@ impl Scanner<'_> {
   /// Rejects unsupported annotations, missing delimiters, invalid element/isotope
   /// labels, out-of-range numbers, and H declarations hosted on a hydrogen atom.
   /// Partial fields never escape the failed scan.
-  fn bracket(&mut self) -> Result<Atom, SmilesError> {
+  fn bracket(&mut self) -> Result<(Atom, Option<TetrahedralWinding>), SmilesError> {
     self.offset += 1;
     let isotope_start = self.offset;
     let isotope = self.number("isotope mass number (at most three digits)", profile::ISOTOPE_DIGITS)?;
@@ -288,6 +289,7 @@ impl Scanner<'_> {
       }
       None => base,
     };
+    let winding = self.chirality()?;
     let hydrogens = if self.peek() == Some(b'H') {
       if element == Element::Hydrogen {
         return Err(self.fail(SmilesErrorKind::Syntax("a hydrogen atom cannot declare attached H")));
@@ -313,12 +315,47 @@ impl Scanner<'_> {
     self.offset += 1;
     // Brackets specify H exactly but not a radical count. Inferring a zero
     // radical here would make [C] look like a known closed-shell carbon atom.
-    Ok(
+    Ok((
       atom
         .with_formal_charge(Some(charge))
         .with_declared_hydrogens(Some(hydrogens))
         .with_implicit_hydrogen_policy(ImplicitHydrogenPolicy::Fixed(0)),
-    )
+      winding,
+    ))
+  }
+
+  /// Consumes tetrahedral shorthand/TH classes, without accepting other stereo.
+  ///
+  /// # Errors
+  /// Extended coordination classes remain unsupported. TH indices outside
+  /// 1/2 and repeated markers are malformed rather than silently shortened.
+  fn chirality(&mut self) -> Result<Option<TetrahedralWinding>, SmilesError> {
+    if self.peek() != Some(b'@') {
+      return Ok(None);
+    }
+    self.offset += 1;
+    let winding = if self.peek() == Some(b'@') {
+      self.offset += 1;
+      TetrahedralWinding::Clockwise
+    } else if self.source[self.offset..].starts_with("TH") {
+      self.offset += 2;
+      let winding = match self.peek() {
+        Some(b'1') => TetrahedralWinding::Anticlockwise,
+        Some(b'2') => TetrahedralWinding::Clockwise,
+        _ => return Err(self.fail(SmilesErrorKind::Syntax("expected TH1 or TH2"))),
+      };
+      self.offset += 1;
+      winding
+    } else {
+      TetrahedralWinding::Anticlockwise
+    };
+    if self
+      .peek()
+      .is_some_and(|byte| byte.is_ascii_alphabetic() && byte != b'H')
+    {
+      return Err(self.fail(SmilesErrorKind::Unsupported("non-tetrahedral stereochemistry")));
+    }
+    Ok(Some(winding))
   }
 
   /// Consumes an optional signed numeric charge or the legacy `++`/`--` form.

@@ -9,6 +9,10 @@ use chitin_chem::{Atom, BondOrder, GraphError, MolecularGraph};
 
 /// Small-graph comparison view with dense indices unrelated to either graph's IDs.
 struct Fixture<'a> {
+  /// Original graph for relative stereo comparison after a full bijection.
+  graph: &'a MolecularGraph,
+  /// Dense-to-stable identity map, scoped only to this test fixture.
+  ids: Vec<chitin_chem::AtomId>,
   /// Borrowed attributes compared exactly, including known-versus-unknown facts.
   atoms: Vec<&'a Atom>,
   /// Symmetric edge-label matrix; `None` records a nonedge, not an unknown bond.
@@ -41,9 +45,42 @@ impl<'a> Fixture<'a> {
       degrees[b] += 1;
     }
     Ok(Self {
+      graph,
+      ids: rows.iter().map(|(id, _)| *id).collect(),
       atoms: rows.into_iter().map(|(_, atom)| atom).collect(),
       edges,
       degrees,
+    })
+  }
+
+  /// Checks relative winding only after a complete candidate bijection exists.
+  fn stereo_matches(&self, other: &Self, mapping: &[Option<usize>]) -> bool {
+    self.ids.iter().enumerate().all(|(index, &id)| {
+      let Some(target) = mapping[index] else {
+        return false;
+      };
+      match (self.graph.tetrahedral(id), other.graph.tetrahedral(other.ids[target])) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+          let mapped: Option<Vec<_>> = a
+            .ligands()
+            .iter()
+            .map(|ligand| match ligand {
+              chitin_chem::StereoLigand::Hydrogen => Some(chitin_chem::StereoLigand::Hydrogen),
+              chitin_chem::StereoLigand::Atom(id) => {
+                let row = self.ids.iter().position(|candidate| candidate == id)?;
+                Some(chitin_chem::StereoLigand::Atom(other.ids[mapping[row]?]))
+              }
+            })
+            .collect();
+          mapped
+            .and_then(|items| items.try_into().ok())
+            .and_then(|ligands| chitin_chem::TetrahedralStereo::new(ligands, a.winding()).ok())
+            .and_then(|stereo| stereo.reordered(*b.ligands()).ok())
+            .is_some_and(|stereo| stereo.winding() == b.winding())
+        }
+        _ => false,
+      }
     })
   }
 }
@@ -89,7 +126,14 @@ pub fn isomorphic(left: &MolecularGraph, right: &MolecularGraph) -> Result<bool,
   // retried; releasing a target restores the bijection invariant before retry.
   loop {
     if depth == size {
-      return Ok(true);
+      if left.stereo_matches(&right, &mapping) {
+        return Ok(true);
+      }
+      depth -= 1;
+      if let Some(b) = mapping[order[depth]].take() {
+        used[b] = false;
+      }
+      continue;
     }
     let a = order[depth];
     let mut found = None;

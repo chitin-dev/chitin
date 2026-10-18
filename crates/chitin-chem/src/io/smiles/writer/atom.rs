@@ -1,6 +1,6 @@
 //! Encode input attributes, not inferred chemical equivalence or source spelling.
 
-use crate::{Atom, Element, ImplicitHydrogenPolicy};
+use crate::{Atom, Element, ImplicitHydrogenPolicy, TetrahedralWinding};
 
 use super::{super::profile, SmilesAtomWriteError as Error};
 
@@ -8,6 +8,7 @@ use super::{super::profile, SmilesAtomWriteError as Error};
 ///
 /// # Parameters
 /// - `atom`: source facts, independent of neighbors or reader provenance.
+/// - `winding`: already permuted into output traversal order, or no stereo.
 ///
 /// # Returns
 /// A bare symbol for an exact match to organic-subset reader defaults; otherwise
@@ -20,7 +21,7 @@ use super::{super::profile, SmilesAtomWriteError as Error};
 /// bracket radical knowledge that would be lost (including known zero), H-as-host,
 /// and numeric fields outside the shared lexical profile. It never merges H
 /// sources, clears an isotope, or replaces unknown values with neutral/zero.
-pub(super) fn encode(atom: &Atom) -> Result<String, Error> {
+pub(super) fn encode(atom: &Atom, winding: Option<TetrahedralWinding>) -> Result<String, Error> {
   let charge = atom.formal_charge().ok_or(Error::UnknownFormalCharge)?;
   let hydrogens = atom.declared_hydrogens().ok_or(Error::UnknownDeclaredHydrogens)?;
   let symbol = if atom.is_aromatic() {
@@ -36,6 +37,7 @@ pub(super) fn encode(atom: &Atom) -> Result<String, Error> {
         && charge == 0
         && hydrogens == 0
         && atom.unpaired_electrons() == Some(0)
+        && winding.is_none()
       {
         return Ok(symbol.into());
       }
@@ -68,6 +70,12 @@ pub(super) fn encode(atom: &Atom) -> Result<String, Error> {
     token.push_str(&digits);
   }
   token.push_str(symbol);
+  if let Some(winding) = winding {
+    token.push_str(match winding {
+      TetrahedralWinding::Anticlockwise => "@",
+      TetrahedralWinding::Clockwise => "@@",
+    });
+  }
   if hydrogens > 0 {
     token.push('H');
     if hydrogens != 1 {

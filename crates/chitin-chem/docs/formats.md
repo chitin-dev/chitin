@@ -191,13 +191,13 @@ exponential isomorphism searches.
    detached integer-bond representation; it does not run general aromaticity
    perception, assign a numeric order 1.5, or validate every molecular state.
    See [compatibility matrix](smiles-compatibility.md) for exact coverage.
-5. **Stereo and atom classes.** Domain descriptors must use stable IDs and
-   explicit reference-neighbor ordering. Parse tetrahedral `@`/`@@`, directional
-   bonds and the remaining OpenSMILES stereo classes only after they can be
-   retained and written correctly. Capture traversal neighbor order, including
-   virtual H and ring openings, at parse time; adjacency-map order is NOT stereo
-   parity. Atom classes/maps must be source annotations, never graph-local IDs.
-   Preserve unknown/unspecified stereo without inventing stereocenters.
+5. **Stereo and atom classes (partially implemented).** Tetrahedral `@`/`@@`
+   and `@TH1`/`@TH2` now use stable graph references, source ring-site order,
+   virtual H and parity-correct noncanonical writing. Generic polygon/line
+   scenes encode solid/hashed wedges from final coordinates. Directional bonds,
+   other stereo classes and CIP labeling remain future work. Atom classes/maps
+   must be source annotations, never graph-local IDs. Unknown/unspecified stereo
+   stays absent rather than being inferred from adjacency or coordinates.
 6. **Full molecular conformance and canonicalization.** Publish a versioned
    capability matrix and specification-derived positive/negative fixtures.
    Cross-check independently licensed corpora with explicit provenance; third

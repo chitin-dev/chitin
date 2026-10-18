@@ -168,17 +168,7 @@ fn all_element_symbols_should_be_readable_inside_brackets() -> TestResult {
 
 #[test]
 fn unsupported_features_should_fail_instead_of_losing_information() {
-  for source in [
-    "C/C=C\\C",
-    "[C@H](F)(Cl)Br",
-    "*",
-    "[*]",
-    "[C:1]",
-    "C>>O",
-    "C|foo|",
-    "C~C",
-    "C$C",
-  ] {
+  for source in ["C/C=C\\C", "*", "[*]", "[C:1]", "C>>O", "C|foo|", "C~C", "C$C"] {
     assert!(
       matches!(
         read_smiles(source).map_err(|e| e.kind),

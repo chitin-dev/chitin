@@ -51,6 +51,9 @@ pub enum SmilesErrorKind {
   /// Connectivity violates the simple-graph contract (e.g. duplicate edges).
   #[error(transparent)]
   Topology(#[from] GraphError),
+  /// Ordered local stereo references do not match supported coordination.
+  #[error(transparent)]
+  Stereo(#[from] crate::StereoError),
 }
 
 /// Detached graph and source provenance from one successful SMILES read.
@@ -110,10 +113,13 @@ impl ParsedSmiles {
 /// Lowercase atomic designations and aromatic bonds are retained as supplied
 /// facts. An omitted bond is aromatic only between two aromatic endpoints;
 /// an explicit single bond always remains single, including ring closure.
+/// Tetrahedral `@`/`@@` and `@TH1`/`@TH2` are stored with ordered ligand
+/// identities, including ring-opening positions and any declared virtual H.
 ///
 /// # Errors
 /// Returns a positioned syntax, unsupported-feature, representation, or topology
-/// error. Stereo, wildcard/query atoms, atom classes, and
+/// error. Non-tetrahedral stereo, directional double-bond stereo,
+/// wildcard/query atoms, atom classes, and
 /// reaction/CXSMILES extensions are rejected, never silently stripped.
 ///
 /// # Examples

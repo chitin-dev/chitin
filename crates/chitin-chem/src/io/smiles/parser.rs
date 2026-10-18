@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, ops::Range};
 
-use crate::{AtomId, BondOrder, MolecularGraph};
+use crate::{AtomId, BondOrder, MolecularGraph, StereoLigand, TetrahedralStereo, TetrahedralWinding};
 
 use super::{
   ParsedSmiles, SmilesError, SmilesErrorKind, error,
@@ -21,11 +21,25 @@ struct Branch {
 
 /// One unmatched ring site; this is a pending edge, not a perceived chemical ring.
 struct Ring {
+  /// Reserved neighbor-order position at the opening site, not closure time.
+  slot: usize,
   /// Live atom at the first occurrence of this numeric label.
   atom: AtomId,
   /// Explicit order, if supplied; absence defers to the other site or single.
   order: Option<BondOrder>,
   /// First site's bond-symbol/label range, retained for provenance and errors.
+  span: Range<usize>,
+}
+
+/// A chiral token awaiting all future branch and ring ligand identities.
+struct StereoSite {
+  /// Live atom whose complete neighborhood is checked after topology assembly.
+  center: AtomId,
+  /// Source winding, still relative to lexical neighbor encounter order.
+  winding: TetrahedralWinding,
+  /// Virtual H goes after an incoming atom, or first at a component root.
+  hydrogen_slot: Option<usize>,
+  /// Whole bracket token used for unsupported-coordination diagnostics.
   span: Range<usize>,
 }
 
@@ -78,15 +92,32 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
   let mut branches: Vec<Branch> = Vec::new();
   let mut rings: BTreeMap<u8, Ring> = BTreeMap::new();
   let mut previous = Previous::Start;
+  // Ring openings reserve slots immediately. Filling them only at closure
+  // would change tetrahedral parity whenever a branch lies between the sites.
+  let mut neighbors: BTreeMap<AtomId, Vec<Option<AtomId>>> = BTreeMap::new();
+  let mut stereo = Vec::new();
   // Grammar places ring labels before an atom's branches. A bond after a
   // completed branch may lead to an atom, but cannot resume its ring labels.
   let mut ring_allowed = false;
   for Token { span, kind } in tokens {
     let syntax = |message| error(span.clone(), SmilesErrorKind::Syntax(message));
     match kind {
-      Kind::Atom(atom) => {
+      Kind::Atom(atom, winding) => {
+        let declared = atom.declared_hydrogens();
         let id = result.graph.add_atom(atom).map_err(|e| error(span.clone(), e.into()))?;
+        neighbors.insert(id, current.into_iter().map(Some).collect());
+        if let Some(winding) = winding {
+          stereo.push(StereoSite {
+            center: id,
+            winding,
+            hydrogen_slot: (declared == Some(1)).then_some(usize::from(current.is_some())),
+            span: span.clone(),
+          });
+        }
         if let Some(parent) = current {
+          if let Some(order) = neighbors.get_mut(&parent) {
+            order.push(Some(id));
+          }
           let default = default_order(&result.graph, parent, id);
           let (order, bond_span) = pending.take().unwrap_or((default, span.start..span.start));
           let edge = result
@@ -168,10 +199,22 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
             )
             .map_err(|e| error(span.clone(), e.into()))?;
           result.bond_spans.insert(edge, vec![open.span, site]);
+          if let Some(order) = neighbors.get_mut(&open.atom) {
+            order[open.slot] = Some(atom);
+          }
+          if let Some(order) = neighbors.get_mut(&atom) {
+            order.push(Some(open.atom));
+          }
         } else {
+          let neighbor_order = neighbors
+            .get_mut(&atom)
+            .ok_or_else(|| syntax("missing ring endpoint"))?;
+          let slot = neighbor_order.len();
+          neighbor_order.push(None);
           rings.insert(
             label,
             Ring {
+              slot,
               atom,
               order,
               span: site,
@@ -194,6 +237,32 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
   }
   if matches!(previous, Previous::Dot) {
     return Err(error(eof, SmilesErrorKind::Syntax("expected atom after dot")));
+  }
+  for StereoSite {
+    center: id,
+    winding,
+    hydrogen_slot,
+    span,
+  } in stereo
+  {
+    let mut ligands: Vec<_> = neighbors[&id]
+      .iter()
+      .filter_map(|id| id.map(StereoLigand::Atom))
+      .collect();
+    if let Some(slot) = hydrogen_slot {
+      ligands.insert(slot, StereoLigand::Hydrogen);
+    }
+    let ligands: [_; 4] = ligands.try_into().map_err(|_| {
+      error(
+        span.clone(),
+        SmilesErrorKind::Stereo(crate::StereoError::Coordination(id)),
+      )
+    })?;
+    let descriptor = TetrahedralStereo::new(ligands, winding).map_err(|e| error(span.clone(), e.into()))?;
+    result
+      .graph
+      .set_tetrahedral(id, Some(descriptor))
+      .map_err(|e| error(span, e.into()))?;
   }
   Ok(result)
 }

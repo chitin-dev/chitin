@@ -5,12 +5,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{AtomId, BondOrder, GraphError, MolecularGraph};
+use crate::{AtomId, BondOrder, GraphError, MolecularGraph, StereoError, StereoLigand};
 
 use super::{super::profile, SmilesWriteError as Error, atom};
 
 /// One temporary dense vertex with its token and ordered serialization sites.
 struct Node {
+  /// Incoming tree neighbor, absent at a component root.
+  parent: Option<usize>,
   /// Original sparse graph handle, used only for failure locations.
   id: AtomId,
   /// Attribute-checked spelling, independent of the spanning forest.
@@ -23,6 +25,8 @@ struct Node {
 
 /// Supported bond spelling addressed by temporary edge index, not a graph ID.
 struct Edge {
+  /// Dense endpoints used to recover the opposite ring-site ligand.
+  atoms: [usize; 2],
   /// Single is explicit between aromatic atoms; other orders have their own symbol.
   symbol: &'static str,
 }
@@ -77,9 +81,10 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
   let mut nodes = Vec::with_capacity(graph.atom_count());
   let mut indices = BTreeMap::new();
   for (id, facts) in graph.atoms() {
-    let token = atom::encode(facts).map_err(|reason| Error::Atom { atom: id, reason })?;
+    let token = atom::encode(facts, None).map_err(|reason| Error::Atom { atom: id, reason })?;
     indices.insert(id, nodes.len());
     nodes.push(Node {
+      parent: None,
       id,
       token,
       children: Vec::new(),
@@ -106,7 +111,7 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
     let b = *indices.get(&b).ok_or(GraphError::MissingAtom(b))?;
     adjacency[a].push((b, edges.len()));
     adjacency[b].push((a, edges.len()));
-    edges.push(Edge { symbol });
+    edges.push(Edge { symbol, atoms: [a, b] });
   }
   // Neighbor order, not bond insertion/orientation, chooses DFS branches.
   for neighbors in &mut adjacency {
@@ -143,6 +148,7 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
         nodes[node].rings.push(RingSite { edge, opening: false });
       } else {
         visited[other] = true;
+        nodes[other].parent = Some(node);
         nodes[node].children.push((other, edge));
         stack.push(Frame { node: other, next: 0 });
       }
@@ -151,6 +157,35 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
   for node in &mut nodes {
     // Close before opening at the same atom so labels can be immediately reused.
     node.rings.sort_by_key(|site| (site.opening, site.edge));
+  }
+  // SMILES reference order is incoming, virtual H, ring sites, then children.
+  // It is not sorted adjacency and may differ from the original source order.
+  for index in 0..nodes.len() {
+    let node = &nodes[index];
+    let Some(stereo) = graph.tetrahedral(node.id) else {
+      continue;
+    };
+    let mut ligands = Vec::new();
+    if let Some(parent) = node.parent {
+      ligands.push(StereoLigand::Atom(nodes[parent].id));
+    }
+    if stereo.ligands().contains(&StereoLigand::Hydrogen) {
+      ligands.push(StereoLigand::Hydrogen);
+    }
+    for site in &node.rings {
+      let [a, b] = edges[site.edge].atoms;
+      ligands.push(StereoLigand::Atom(nodes[if a == index { b } else { a }].id));
+    }
+    for &(child, _) in &node.children {
+      ligands.push(StereoLigand::Atom(nodes[child].id));
+    }
+    let ligands: [_; 4] = ligands.try_into().map_err(|_| StereoError::Coordination(node.id))?;
+    let winding = stereo.reordered(ligands)?.winding();
+    let facts = graph.atom(node.id).ok_or(GraphError::MissingAtom(node.id))?;
+    nodes[index].token = atom::encode(facts, Some(winding)).map_err(|reason| Error::Atom {
+      atom: nodes[index].id,
+      reason,
+    })?;
   }
   Ok(Plan { nodes, edges, roots })
 }

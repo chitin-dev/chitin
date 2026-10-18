@@ -1,10 +1,11 @@
 //! Restricted, closed-shell valence analysis, not general chemical sanitization.
 //!
-//! The named V1 model covers nonaromatic neutral H/B/C/N/O/F/Si/Cl/Br/I,
+//! The original main-group V1 covers nonaromatic neutral H/B/C/N/O/F/Si/Cl/Br/I,
 //! ammonium-like N(+1), and O(-1). It assumes the specified atomic radical
 //! count is zero and only succeeds when its single target valence is satisfied.
-//! Aromaticity, other charges/elements, radicals, and hypervalent models require
-//! distinct future rules, not a fallback default valence.
+//! The separate organic V1 adds neutral N/P normal valences 3/5 and S 2/4/6.
+//! Both require known zero radicals. Aromaticity, unlisted charges/elements,
+//! and open shells are unsupported, never a fallback default valence.
 
 use std::collections::BTreeMap;
 
@@ -17,6 +18,9 @@ use crate::{
 pub enum ValenceModel {
   /// Restricted, saturated closed-shell main-group rules documented in this module.
   MainGroupClosedShellV1,
+  /// Organic-subset normal valences, including neutral N/P(3,5), S(2,4,6).
+  /// Selects the lowest normal valence not below supplied bond/H contributions.
+  SmilesOrganicV1,
 }
 
 /// Atom-local result category; none of these statuses prevents graph editing.
@@ -272,7 +276,9 @@ fn analyze_atom(
   if atom.implicit_hydrogen_policy() == ImplicitHydrogenPolicy::Unspecified {
     diagnostics.push(ValenceDiagnostic::UnknownHydrogenPolicy);
   }
-  let target = match target_valence(atom, model) {
+  // Gather coverage diagnostics in the original V1 order. Organic normal-
+  // valence selection is deferred until incident contributions are available.
+  let mut target = match target_valence(atom, model, 0) {
     Ok(target) => Some(target),
     Err(reason) => {
       if !diagnostics.contains(&reason) {
@@ -312,6 +318,34 @@ fn analyze_atom(
   }
   // Missing options each installed their own diagnostic above. Arithmetic
   // starts only after all required facts are present, never through None -> 0.
+  if let (ValenceModel::SmilesOrganicV1, Some(_), Some(declared)) = (model, target, atom.declared_hydrogens())
+    && diagnostics.is_empty()
+  {
+    let fixed = match atom.implicit_hydrogen_policy() {
+      ImplicitHydrogenPolicy::Fixed(count) => count,
+      ImplicitHydrogenPolicy::Infer => 0,
+      ImplicitHydrogenPolicy::Unspecified => {
+        return Ok(AtomValenceAnalysis::unresolved(vec![
+          ValenceDiagnostic::UnknownHydrogenPolicy,
+        ]));
+      }
+    };
+    let Some(explicit) = bond_sum
+      .checked_add(u32::from(declared))
+      .and_then(|sum| sum.checked_add(u32::from(fixed)))
+    else {
+      return Ok(AtomValenceAnalysis::unresolved(vec![ValenceDiagnostic::CountOverflow]));
+    };
+    target = match target_valence(atom, model, explicit) {
+      Ok(target) => Some(target),
+      Err(reason) => {
+        if !diagnostics.contains(&reason) {
+          diagnostics.push(reason);
+        }
+        None
+      }
+    };
+  }
   match (target, atom.declared_hydrogens()) {
     (Some(target), Some(declared)) if diagnostics.is_empty() => {
       Ok(complete_atom(atom, bond_sum, neighbor_hydrogens, declared, target))
@@ -325,15 +359,37 @@ fn analyze_atom(
 /// # Parameters
 /// - `atom`: supplied identity/charge facts needed by the selected lookup.
 /// - `model`: rule-set identity; no ambient default or fallback is selected.
+/// - `explicit`: known bond/H contribution used to select a normal organic valence.
 ///
 /// # Returns
-/// One supported target, not a whole-molecule validation result.
+/// One supported target, not a whole-molecule validation result. The organic
+/// model chooses the lowest normal value at least as large as `explicit`.
 ///
 /// # Errors
 /// Returns the selected model's missing/unsupported-input diagnostic unchanged.
-fn target_valence(atom: &Atom, model: ValenceModel) -> Result<u8, ValenceDiagnostic> {
+fn target_valence(atom: &Atom, model: ValenceModel, explicit: u32) -> Result<u8, ValenceDiagnostic> {
   match model {
     ValenceModel::MainGroupClosedShellV1 => main_group_target(atom),
+    ValenceModel::SmilesOrganicV1 => {
+      if atom.formal_charge() == Some(0) {
+        let targets: &[u8] = match atom.element() {
+          Element::Nitrogen | Element::Phosphorus => &[3, 5],
+          Element::Sulfur => &[2, 4, 6],
+          _ => return main_group_target(atom),
+        };
+        // An overfilled atom uses the highest target so normal completion emits
+        // an excess-valence diagnostic instead of inventing another valence.
+        Ok(
+          targets
+            .iter()
+            .copied()
+            .find(|&target| u32::from(target) >= explicit)
+            .unwrap_or(targets[targets.len() - 1]),
+        )
+      } else {
+        main_group_target(atom)
+      }
+    }
   }
 }
 

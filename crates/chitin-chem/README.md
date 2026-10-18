@@ -27,6 +27,8 @@ complete cheminformatics toolkit or an editor UI.
   preservation, typed failures, reusable ring labels, and iterative traversal.
 - Supplied aromatic atom designations and aromatic SMILES read/write, plus a
   bounded detached C/N/O/S Kekulé representation for integer-bond consumers.
+- Ordered tetrahedral graph descriptors and SMILES `@`/`@@`/TH read/write,
+  including traversal parity, ring-site order, and virtual declared H.
 
 ## Boundaries
 
@@ -42,7 +44,8 @@ atomic annotation, not a molecular spin multiplicity.
 Adding a bond does not infer hydrogens, validate valence, or perceive
 aromaticity. Even a chemically implausible draft remains editable. An aromatic
 bond label records a supplied representation; it does not establish an
-aromaticity model. Wedges and dashes are not encoded as bond orders. Stereo,
+aromaticity model. Wedges and dashes are not encoded as bond orders. Tetrahedral
+facts are graph annotations, not CIP assignments. Further stereo classes,
 general valence and aromaticity perception, further format codecs, edit
 transactions/undo, and drawing remain separate future work. The current analysis
 is not full RDKit sanitization.
@@ -67,7 +70,7 @@ The reader does not sanitize or modify inferred properties. Bracket atoms
 disable implicit H and retain unknown radical state: `[C]` is not ordinary
 `C`, and `[NH4+]` is accepted without claiming that its radical state has
 already been perceived. Aromatic input designations are preserved independently
-of perception. Unsupported stereo/query/extension information
+of perception. Unsupported directional/non-tetrahedral stereo, query/extension information
 is rejected with a positioned error, never discarded. Record names/whitespace
 are not silently removed. Empty input represents an empty graph.
 
@@ -149,6 +152,25 @@ Reports do not mutate atoms, add H, change bonds/IDs, or install a property
 cache. They are snapshots, not self-updating views: recompute after edits. One
 bad fragment does not suppress other rows, and a locally determined result is
 not proof of molecular stability or suitability for a quantum calculation.
+
+The separately selected `SmilesOrganicV1` adds neutral N/P normal valences 3/5
+and S 2/4/6. It chooses the lowest value not below known input contributions;
+missing facts, unknown radicals, aromatic labels, and unlisted charge states
+still block inference. This does not widen the original main-group V1 contract.
+
+## Tetrahedral configurations
+
+`graph.tetrahedral(center)` exposes four ordered atom/H references and their
+relative winding. `set_tetrahedral` validates connectivity and single-bond
+coordination, not stereogenicity. Parsing reserves ring-opening positions and
+writing corrects odd reference permutations. Unknown stereo stays absent; no
+chirality is inferred from coordinates or atom ID order.
+
+Incident topology/order edits and center-attribute replacement conservatively
+clear affected descriptors. Cloning preserves them; transfer to another graph
+requires explicit reference remapping. See the
+[compatibility matrix](docs/smiles-compatibility.md#tetrahedral-stereo-boundary)
+for virtual-H, mutation, writer, and initial wedge-rendering limits.
 
 The separation of input facts from detached calculations is informed by
 [COSMolKit's valence layer](https://github.com/cosmol-studio/COSMolKit/blob/main/crates/cosmolkit-core/src/valence.rs).

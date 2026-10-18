@@ -1,4 +1,4 @@
-# Molecular SMILES compatibility — revision 1
+# Molecular SMILES compatibility — revision 2
 
 This matrix describes executable capability, not complete format conformance
 or parity with another toolkit. The reader preserves facts; chemistry models
@@ -14,7 +14,8 @@ and drawing each have their own acceptance boundary. Tests are locally authored.
 | Omitted aromatic bonds and explicit `:` | Supported | Shared integer-bond assignment | General aromaticity perception |
 | Explicit `-` between aromatic atoms | Preserved at edges and ring sites | Preserved | None in this stage |
 | Aromatic heterocycle `[nH]` | H declaration preserved | NH label; no extra inferred H | Broader heteroatom states |
-| `/`, `\`, `@`, `@@` and extended stereo classes | Explicit unsupported error | Not implemented | Domain reference ordering, writer, wedges |
+| Tetrahedral `@`, `@@`, `@TH1`, `@TH2` | Supported with ordered graph references | Solid/hashed wedges | CIP labels and stereogenicity perception |
+| `/`, `\` and other stereo classes | Explicit unsupported error | Not implemented | Double-bond and extended coordination models |
 | Atom class/map `:n` inside brackets | Explicit unsupported error | Not implemented | Typed annotations independent of graph IDs |
 | Wildcard/query atoms, SMARTS | Explicit unsupported error | Not implemented | Separate atom identity/query model |
 | Reaction/CX extensions, record names | Explicit unsupported/syntax error | Not implemented | Separate records and selected dialects |
@@ -70,3 +71,55 @@ Visual agreement is assessed chemically, not pixel-for-pixel. Integer bond
 assignment must satisfy all participating atoms; glyphs and inner ring strokes
 must not be missing. Remaining layout/label collision limitations are not
 hidden by widening parser acceptance.
+
+## Tetrahedral stereo boundary
+
+`MolecularGraph` owns center-keyed `TetrahedralStereo` descriptors with four
+ordered `StereoLigand` references and `TetrahedralWinding`. Ligands are graph
+atoms or one virtual declared H; winding is relative to those references, not
+a CIP R/S assignment. The graph checks distinct neighbors, single bonds, no
+aromatic center, a fixed-zero additional-H policy, and four total directions.
+It does not establish stereogenicity or infer unknown radical state.
+
+The reader captures incoming neighbors, virtual H (after incoming, first at a
+root), ring sites in source order, and subsequent branch/continuation neighbors.
+Open ring sites reserve positions before their future atom IDs are known. The
+writer computes its own incoming/ring/child order and flips winding for an odd
+permutation. Reusing the source marker verbatim would invert configurations.
+
+Successful incident bond addition/removal/order changes clear descriptors at
+the affected endpoints; removing an atom also clears its neighbors' descriptors.
+Replacing center attributes clears its descriptor conservatively. Failed edits
+are atomic, and distant edits do not clear unrelated centers. Clones preserve
+descriptors; consumers moving atoms between graphs must explicitly remap ligands.
+
+Depiction plans directed center-to-ligand wedges from final coordinates in a
+right-handed frame. Reflections reverse the wedge kind, rotations do not.
+In skeletal mode, virtual H is resolved as the opposite of the three explicit
+ligand vectors. `ChiralHydrogenMode::Explicit` instead gives a declared H on an
+annotated carbon its own measured label and C–H wedge. The same signed-volume
+calculation preserves configuration in both modes; the graph is not expanded.
+Neighboring annotated centers do not share wedge bonds; a center without an
+unambiguous independent wedge or with degenerate coordinates returns a typed
+error instead of silently losing stereo. An expanded C–H mark does not need an
+independent graph bond and suppresses other wedge marks at that center. This is a conservative initial
+depiction boundary, not full cage-stereo rendering support.
+
+Solid wedges are generic filled `Polygon` scene primitives; hashed wedges use
+short line primitives. Both retain bond provenance, alpha, and label clearance.
+SVG consumes these shapes without interpreting chirality. `wedge_width` and
+`stroke_width` configure broad-end width and line thickness independently.
+Generated H primitives refer to `Source::AttachedHydrogen(center)`, retaining
+host provenance without inventing a graph atom or bond identifier. Existing
+explicit H vertices and source SMILES remain unchanged.
+
+`tests/stereo.rs` checks relative equivalence/enantiomers, all 24 permutations,
+ring sites, virtual/explicit isotope H, invalid coordination, edits, and writer
+round trips. Drawing tests add fixed geometric winding examples, reflection/
+rotation checks, full penicillin input, degenerate coordinates, and scene bounds.
+
+The default depiction H policy now selects the separate `SmilesOrganicV1`
+normal-valence model, so neutral nonaromatic sulfur in this input can be drawn.
+It uses N/P 3 or 5 and S 2, 4 or 6, selecting the lowest normal valence that can
+accommodate input contributions. The previous `MainGroupClosedShellV1` is
+unchanged and remains explicitly selectable; neither model certifies chemistry.

@@ -35,9 +35,11 @@ mod hydrogen;
 pub mod io;
 /// Read-only chemistry analysis with explicit model boundaries and diagnostics.
 pub mod perception;
+mod stereo;
 
 pub use atom::Atom;
 pub use bond::{Bond, BondOrder};
 pub use element::{Element, ElementError, Isotope, IsotopeError};
 pub use graph::{AtomId, BondId, GraphError, MolecularGraph};
 pub use hydrogen::{HydrogenCounts, ImplicitHydrogenPolicy};
+pub use stereo::{StereoError, StereoLigand, TetrahedralStereo, TetrahedralWinding};
