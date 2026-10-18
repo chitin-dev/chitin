@@ -167,7 +167,7 @@ fn element_mode_should_export_builtin_and_overridden_label_colors_with_black_bon
   let config = root.path().join("job.yaml");
   fs::write(
     &config,
-    "depict:\n  color_scheme: element\n  element_colors: {O: '#12345680'}\nsmiles: ['NCCO']",
+    "depict:\n  color_scheme: element\n  bond_color_style: uniform\n  element_colors: {O: '#12345680'}\nsmiles: ['NCCO']",
   )?;
   let output = invoke(&config, false)?;
   assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
@@ -197,7 +197,7 @@ fn circle_option_should_export_inner_circles_without_inner_double_strokes() -> R
   let config = root.path().join("job.yaml");
   fs::write(
     &config,
-    "depict:\n  aromatic_style: circle\n  color_scheme: element\nsmiles: ['c1ccncc1', 'c1ccc2ccccc2c1']",
+    "depict:\n  aromatic_style: circle\n  color_scheme: element\n  bond_color_style: uniform\nsmiles: ['c1ccncc1', 'c1ccc2ccccc2c1']",
   )?;
   let output = invoke(&config, false)?;
   assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));

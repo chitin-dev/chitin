@@ -2,8 +2,9 @@
 output_dir: generated
 depict:
   aromatic_style: circle  # Default kekule; fused/unsuitable rings fall back.
-  # Optional label coloring; omit to retain the default monochrome output.
+  # Default palette colors labels and each bond's nearest endpoint half.
   color_scheme: element
+  bond_color_style: split  # Use uniform for foreground-only bonds.
   # element_colors: {O: '#dc2828', N: '#3058d8'}
   explicit_chiral_hydrogens: false
   stroke_width: 1.6

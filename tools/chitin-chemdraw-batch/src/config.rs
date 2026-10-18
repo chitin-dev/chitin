@@ -11,7 +11,7 @@ use chitin_chemdraw::{
 };
 
 mod colors;
-use colors::{Palette, Scheme};
+use colors::{BondStyle, Palette, Scheme};
 
 /// Ordered inputs and shared drawing policy for a single batch.
 #[derive(Debug, Deserialize)]
@@ -57,8 +57,10 @@ impl Config {
 pub(crate) struct DepictConfig {
   /// Expand declared H only on annotated tetrahedral carbon centers.
   explicit_chiral_hydrogens: bool,
-  /// Label-only color policy; does not color bond strokes.
+  /// Element palette shared by labels and endpoint-colored bonds.
   color_scheme: Scheme,
+  /// Independent choice between uniform foreground and endpoint-colored halves.
+  bond_color_style: BondStyle,
   /// Validated exact element symbols mapped to RGB/RGBA values.
   element_colors: Palette,
   /// Inner circles are display annotations, not aromaticity perception.
@@ -96,6 +98,7 @@ impl DepictConfig {
         None => defaults.font.clone(),
       },
       color_scheme: self.color_scheme.into(),
+      bond_color_style: self.bond_color_style.into(),
       element_colors: self.element_colors.0.clone(),
       aromatic_style: match self.aromatic_style {
         AromaticConfig::Kekule => AromaticStyle::Kekule,
@@ -207,6 +210,7 @@ mod tests {
       "smiles: ['C']\ndepict: {stroke_with: 2}",
       "smiles: ['C']\nsvg: {pad: 2}",
       "smiles: ['C']\ndepict: {color_scheme: rainbow}",
+      "smiles: ['C']\ndepict: {bond_color_style: gradient}",
       "smiles: ['C']\ndepict: {aromatic_style: dashed}",
       "smiles: ['C']\ndepict: {element_colors: {oxygen: '#ff0000'}}",
       "smiles: ['C']\ndepict: {element_colors: {O: '#ff00zz'}}",
@@ -229,6 +233,18 @@ mod tests {
         blue: 0x34,
         alpha: 128
       }
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn uniform_bonds_should_be_an_independent_yaml_override() -> Result<()> {
+    let config: Config = serde_yaml::from_str("smiles: ['CO']\ndepict: {bond_color_style: uniform}")?;
+    let options = config.depict.options(Path::new("job.yaml"))?;
+    assert_eq!(options.color_scheme, chitin_chemdraw::depict::ColorScheme::Element);
+    assert_eq!(
+      options.bond_color_style,
+      chitin_chemdraw::depict::BondColorStyle::Uniform
     );
     Ok(())
   }

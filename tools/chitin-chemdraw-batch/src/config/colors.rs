@@ -5,17 +5,40 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 
 use chitin_chem::Element;
-use chitin_chemdraw::{Color, depict::ColorScheme};
+use chitin_chemdraw::{
+  Color,
+  depict::{BondColorStyle, ColorScheme},
+};
 
 /// Strict YAML spelling for the drawing library's color policy.
 #[derive(Debug, Default, Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Scheme {
   /// Retain the existing single-foreground output.
-  #[default]
   Monochrome,
-  /// Color labels by element, leaving all bonds monochrome.
+  /// Color labels and split bonds by element.
+  #[default]
   Element,
+}
+
+/// Strict YAML transport for the independent bond paint policy.
+#[derive(Debug, Default, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum BondStyle {
+  /// Preserve a single foreground even when labels use element colors.
+  Uniform,
+  /// Meet endpoint colors at the original atom-axis midpoint.
+  #[default]
+  Split,
+}
+
+impl From<BondStyle> for BondColorStyle {
+  fn from(style: BondStyle) -> Self {
+    match style {
+      BondStyle::Uniform => Self::Uniform,
+      BondStyle::Split => Self::Split,
+    }
+  }
 }
 
 impl From<Scheme> for ColorScheme {
