@@ -10,6 +10,9 @@ use chitin_chemdraw::{
   svg::SvgOptions,
 };
 
+mod colors;
+use colors::{Palette, Scheme};
+
 /// Ordered inputs and shared drawing policy for a single batch.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -54,6 +57,10 @@ impl Config {
 pub(crate) struct DepictConfig {
   /// Expand declared H only on annotated tetrahedral carbon centers.
   explicit_chiral_hydrogens: bool,
+  /// Label-only color policy; does not color bond strokes.
+  color_scheme: Scheme,
+  /// Validated exact element symbols mapped to RGB/RGBA values.
+  element_colors: Palette,
   /// Drawing units per normalized bond unit.
   bond_length: Option<f64>,
   /// Element-label size in drawing units.
@@ -73,6 +80,8 @@ impl DepictConfig {
   pub fn options(&self) -> DepictOptions {
     let defaults = DepictOptions::default();
     DepictOptions {
+      color_scheme: self.color_scheme.into(),
+      element_colors: self.element_colors.0.clone(),
       chiral_hydrogens: if self.explicit_chiral_hydrogens {
         ChiralHydrogenMode::Explicit
       } else {
@@ -145,8 +154,29 @@ mod tests {
       "smiles: ['C']\noutput: pictures",
       "smiles: ['C']\ndepict: {stroke_with: 2}",
       "smiles: ['C']\nsvg: {pad: 2}",
+      "smiles: ['C']\ndepict: {color_scheme: rainbow}",
+      "smiles: ['C']\ndepict: {element_colors: {oxygen: '#ff0000'}}",
+      "smiles: ['C']\ndepict: {element_colors: {O: '#ff00zz'}}",
     ] {
       assert!(serde_yaml::from_str::<Config>(yaml).is_err());
     }
+  }
+
+  #[test]
+  fn palette_should_resolve_element_keys_and_rgba_during_yaml_parsing() -> Result<()> {
+    let config: Config =
+      serde_yaml::from_str("smiles: ['CO']\ndepict:\n  color_scheme: element\n  element_colors:\n    O: '#12ab3480'")?;
+    let options = config.depict.options();
+    assert_eq!(options.color_scheme, chitin_chemdraw::depict::ColorScheme::Element);
+    assert_eq!(
+      options.label_color(chitin_chem::Element::Oxygen),
+      chitin_chemdraw::Color {
+        red: 0x12,
+        green: 0xab,
+        blue: 0x34,
+        alpha: 128
+      }
+    );
+    Ok(())
   }
 }

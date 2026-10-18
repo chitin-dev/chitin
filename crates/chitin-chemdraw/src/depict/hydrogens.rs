@@ -181,7 +181,7 @@ fn label(center: AtomId, position: Point, options: &DepictOptions) -> Result<(Te
     content: "H".into(),
     font_size: options.font_size,
     width,
-    color: options.foreground,
+    color: options.label_color(Element::Carbon),
     source: Some(Source::AttachedHydrogen(center)),
   };
   let [min, max] = run.envelope()?;

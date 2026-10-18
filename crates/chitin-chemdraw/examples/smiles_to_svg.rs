@@ -9,17 +9,23 @@ use chitin_chemdraw::{depict, layout, svg};
 /// Propagates parsing, unsupported topology/depiction, and file I/O failures.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut args = std::env::args().skip(1);
-  let first = args
-    .next()
-    .ok_or("usage: smiles_to_svg [--explicit-chiral-hydrogens] '<SMILES>' <output.svg>")?;
   let mut options = depict::DepictOptions::default();
-  let source = if first == "--explicit-chiral-hydrogens" {
-    options.chiral_hydrogens = depict::ChiralHydrogenMode::Explicit;
-    args.next().ok_or("missing SMILES after --explicit-chiral-hydrogens")?
-  } else if first.starts_with("--") {
-    return Err(format!("unknown option: {first}").into());
-  } else {
-    first
+  let source = loop {
+    let argument = args.next().ok_or(
+      "usage: smiles_to_svg [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] '<SMILES>' <output.svg>",
+    )?;
+    match argument.as_str() {
+      "--explicit-chiral-hydrogens" => options.chiral_hydrogens = depict::ChiralHydrogenMode::Explicit,
+      "--color-scheme" => {
+        options.color_scheme = match args.next().as_deref() {
+          Some("monochrome") => depict::ColorScheme::Monochrome,
+          Some("element") => depict::ColorScheme::Element,
+          _ => return Err("--color-scheme requires monochrome or element".into()),
+        };
+      }
+      _ if argument.starts_with("--") => return Err(format!("unknown option: {argument}").into()),
+      _ => break argument,
+    }
   };
   let path = args.next().ok_or("missing output.svg path")?;
   if args.next().is_some() {

@@ -113,3 +113,33 @@ fn invalid_size_should_fail_without_publishing_svg() -> Result<()> {
   assert!(!root.path().join("generated/0001.svg").exists());
   Ok(())
 }
+
+#[test]
+fn element_mode_should_export_builtin_and_overridden_label_colors_with_black_bonds() -> Result<()> {
+  let root = tempfile::tempdir()?;
+  let config = root.path().join("job.yaml");
+  fs::write(
+    &config,
+    "depict:\n  color_scheme: element\n  element_colors: {O: '#12345680'}\nsmiles: ['NCCO']",
+  )?;
+  let output = invoke(&config, false)?;
+  assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+  let svg = fs::read_to_string(root.path().join("generated/0001.svg"))?;
+  assert!(svg.contains("fill=\"#123456\""));
+  assert!(svg.contains("fill-opacity=\"0.5019607843137255\""));
+  assert!(svg.contains("fill=\"#3058d8\""));
+  assert!(svg.contains("stroke=\"#000000\""));
+  Ok(())
+}
+
+#[test]
+fn invalid_palette_should_fail_before_creating_output_directory() -> Result<()> {
+  let root = tempfile::tempdir()?;
+  let config = root.path().join("job.yaml");
+  fs::write(&config, "smiles: ['CO']\ndepict: {element_colors: {O: '#12zz00'}}")?;
+  let output = invoke(&config, false)?;
+  assert!(!output.status.success());
+  assert!(String::from_utf8_lossy(&output.stderr).contains("element_colors.O"));
+  assert!(!root.path().join("generated").exists());
+  Ok(())
+}

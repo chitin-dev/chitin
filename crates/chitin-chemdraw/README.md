@@ -85,7 +85,7 @@ The default depiction supports:
 - element, isotope, charge, and hydrogen labels;
 - explicit hydrogen vertices;
 - label-aware bond clipping;
-- monochrome colors with configurable alpha;
+- default monochrome output, optional element-colored labels and RGBA overrides;
 - bundled Noto Sans font metrics and vector glyph outlines.
 
 Unknown or unsupported chemical facts are rejected instead of silently
@@ -93,6 +93,67 @@ converted. General aromaticity perception, further aromatic elements/charges,
 double-bond/extended stereochemistry, radicals, complex text shaping, and full sanitization require
 future domain support in `chitin-chem`. Read/write coverage is broader than
 drawing coverage; see the [compatibility matrix](../chitin-chem/docs/smiles-compatibility.md).
+
+### Element-colored labels
+
+`DepictOptions::color_scheme` defaults to `ColorScheme::Monochrome`. Select
+`ColorScheme::Element` to color atom labels while leaving all bond strokes,
+including stereo wedges, in `foreground`. The builtin white-page palette uses
+O red (`#e53935`), N blue (`#3058d8`), S dark yellow (`#b59b00`), P orange
+(`#d97706`), F/Cl/Br/I green (`#218c3c`), B pink (`#b45d8a`), and Si brown
+(`#9c6b46`). Carbon, hydrogen and other unlisted elements retain `foreground`.
+These opaque defaults are display choices, not physical element properties or
+an automatically contrast-adjusted palette for every background.
+
+Attached H, H counts, isotopes and charges follow the host label's color.
+Explicit H graph vertices resolve as H, not as their neighbor's element.
+Generated chiral H labels follow their carbon host, but their wedges stay in
+`foreground`. Existing carbon suppression, geometry and chemical facts do not
+change. In element mode, `element_colors: BTreeMap<Element, Color>` overrides
+individual entries, including carbon/H, and supports alpha. In monochrome mode
+the override map is ignored. `label_color(element)` exposes the resolved color.
+
+```rust
+use chitin_chem::Element;
+use chitin_chemdraw::{Color, depict::{ColorScheme, DepictOptions}};
+
+let mut options = DepictOptions {
+  color_scheme: ColorScheme::Element,
+  ..Default::default()
+};
+options.element_colors.insert(Element::Oxygen, Color {
+  red: 220, green: 40, blue: 40, alpha: 255,
+});
+```
+
+The single-molecule example accepts `--color-scheme element`, combinable with
+`--explicit-chiral-hydrogens` before the SMILES argument:
+
+```sh
+cargo run -p chitin-chemdraw --example smiles_to_svg -- \
+  --color-scheme element --explicit-chiral-hydrogens \
+  'N[C@@H](C)C(=O)O' .temp/alanine-colored.svg
+```
+
+The batch tool exposes the same options in YAML:
+
+```yaml
+output_dir: generated
+depict:
+  color_scheme: element  # or monochrome, the default
+  element_colors:
+    O: '#dc2828'        # exact element symbols; quote #RRGGBB / #RRGGBBAA
+    N: '#3058d880'
+smiles:
+  - 'NCCO'
+```
+
+Run `cargo run -p chitin-chemdraw-batch -- path/to/config.yaml`. Relative output
+paths resolve from the YAML's directory; add `--overwrite` to replace existing
+numbered SVGs. The tool's own `generated/` directory is Git-ignored. Invalid
+scheme names, element symbols or hex values fail configuration parsing before
+an output directory is created. Only this transport layer parses YAML; neither
+the chemical model nor SVG export needs to know how the palette was configured.
 
 ## SVG export
 

@@ -14,8 +14,11 @@ use chitin_chem::{Atom, AtomId, BondId, BondOrder, Element, GraphError, Implicit
 use std::collections::BTreeMap;
 
 mod bonds;
+mod color;
 mod hydrogens;
 mod stereo;
+
+pub use color::ColorScheme;
 
 /// Display policy for one declared H on an annotated tetrahedral carbon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,8 +57,13 @@ pub struct DepictOptions {
   pub font: FontFace,
   /// Additional clearance around label envelopes before a bond starts.
   pub label_padding: f64,
-  /// Shared monochrome foreground; scientific color policies can be added separately.
+  /// Bond color and fallback for labels not assigned an element color.
   pub foreground: Color,
+  /// Atom-label policy; monochrome remains the default for existing callers.
+  pub color_scheme: ColorScheme,
+  /// Element-mode overrides, including optional carbon/H entries and alpha.
+  /// Ignored in monochrome mode; absent entries use the builtin palette/fallback.
+  pub element_colors: BTreeMap<Element, Color>,
   /// Explicit H-resolution model; no domain facts are overwritten.
   pub hydrogens: HydrogenMode,
   /// Whether annotated carbon's declared H becomes a separate drawn ligand.
@@ -76,6 +84,8 @@ impl Default for DepictOptions {
       font: FontFace::NotoSans,
       label_padding: 2.,
       foreground: Color::BLACK,
+      color_scheme: ColorScheme::Monochrome,
+      element_colors: BTreeMap::new(),
       hydrogens: HydrogenMode::Infer(ValenceModel::SmilesOrganicV1),
       chiral_hydrogens: ChiralHydrogenMode::Implicit,
     }
@@ -272,8 +282,12 @@ fn label(
     min: center,
     max: center,
   };
-  for primitive in &primitives[start..] {
+  // All runs belong to this atom, including H counts, isotope and charge.
+  // Resolve once so annotations cannot acquire a different elemental identity.
+  let color = options.label_color(atom.element());
+  for primitive in &mut primitives[start..] {
     if let Primitive::Text(run) = primitive {
+      run.color = color;
       let [min, max] = run.envelope()?;
       bounds.min.x = bounds.min.x.min(min.x - padding);
       bounds.min.y = bounds.min.y.min(min.y - padding);

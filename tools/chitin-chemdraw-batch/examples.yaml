@@ -1,6 +1,9 @@
 # Relative paths resolve from this YAML file, not the process working directory.
 output_dir: generated
 depict:
+  # Optional label coloring; omit to retain the default monochrome output.
+  color_scheme: element
+  # element_colors: {O: '#dc2828', N: '#3058d8'}
   explicit_chiral_hydrogens: false
   stroke_width: 1.6
 svg:
