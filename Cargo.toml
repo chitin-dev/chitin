@@ -16,6 +16,7 @@ members = [
   "crates/chitin-wgpu",
   "crates/chitin-wasm",
   "tools/chitin-mmcif-schema",
+  "tools/chitin-chemdraw-batch",
 ]
 resolver = "2"
 

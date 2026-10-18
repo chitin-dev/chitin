@@ -847,6 +847,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin-chemdraw-batch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chitin-chem",
+ "chitin-chemdraw",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "chitin-command"
 version = "0.1.0"
 dependencies = [

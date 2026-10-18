@@ -1,0 +1,152 @@
+//! YAML transport configuration; chemical and rendering defaults stay in their crates.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Result, ensure};
+use serde::Deserialize;
+
+use chitin_chemdraw::{
+  depict::{ChiralHydrogenMode, DepictOptions},
+  svg::SvgOptions,
+};
+
+/// Ordered inputs and shared drawing policy for a single batch.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Config {
+  /// Destination relative to the configuration file, or an absolute path.
+  #[serde(default = "default_output")]
+  pub output_dir: PathBuf,
+  /// Each source keeps its one-based filename even if an earlier source fails.
+  pub smiles: Vec<String>,
+  /// Optional visual overrides, never chemical graph edits.
+  #[serde(default)]
+  pub depict: DepictConfig,
+  /// Document framing independent of molecular geometry.
+  #[serde(default)]
+  pub svg: SvgConfig,
+}
+
+/// Default destination intentionally matches the tool's ignored directory.
+fn default_output() -> PathBuf {
+  PathBuf::from("generated")
+}
+
+impl Config {
+  /// Rejects empty jobs and resolves the destination without depending on CWD.
+  ///
+  /// # Parameters
+  /// - `path`: path used to load this configuration.
+  ///
+  /// # Errors
+  /// Returns an error for an empty SMILES array or empty output path. Individual
+  /// empty/invalid SMILES remain entry failures so later entries can still run.
+  pub fn destination(&self, path: &Path) -> Result<PathBuf> {
+    ensure!(!self.smiles.is_empty(), "smiles must contain at least one entry");
+    ensure!(!self.output_dir.as_os_str().is_empty(), "output_dir must not be empty");
+    Ok(path.parent().unwrap_or_else(|| Path::new(".")).join(&self.output_dir))
+  }
+}
+
+/// Small CLI-specific override surface; absent fields inherit library defaults.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct DepictConfig {
+  /// Expand declared H only on annotated tetrahedral carbon centers.
+  explicit_chiral_hydrogens: bool,
+  /// Drawing units per normalized bond unit.
+  bond_length: Option<f64>,
+  /// Element-label size in drawing units.
+  font_size: Option<f64>,
+  /// Width of ordinary and hashed strokes.
+  stroke_width: Option<f64>,
+  /// Full broad-end width of solid stereo wedges.
+  wedge_width: Option<f64>,
+  /// Separation of multiple-bond strokes.
+  bond_spacing: Option<f64>,
+  /// Additional clearance around element labels.
+  label_padding: Option<f64>,
+}
+
+impl DepictConfig {
+  /// Applies only supplied overrides; final size validation belongs to depiction.
+  pub fn options(&self) -> DepictOptions {
+    let defaults = DepictOptions::default();
+    DepictOptions {
+      chiral_hydrogens: if self.explicit_chiral_hydrogens {
+        ChiralHydrogenMode::Explicit
+      } else {
+        ChiralHydrogenMode::Implicit
+      },
+      bond_length: self.bond_length.unwrap_or(defaults.bond_length),
+      font_size: self.font_size.unwrap_or(defaults.font_size),
+      stroke_width: self.stroke_width.unwrap_or(defaults.stroke_width),
+      wedge_width: self.wedge_width.unwrap_or(defaults.wedge_width),
+      bond_spacing: self.bond_spacing.unwrap_or(defaults.bond_spacing),
+      label_padding: self.label_padding.unwrap_or(defaults.label_padding),
+      ..defaults
+    }
+  }
+}
+
+/// SVG page options without coupling serialization to the domain crates.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct SvgConfig {
+  /// Additional outer margin; absent means the exporter default.
+  padding: Option<f64>,
+  /// Omit the opaque white background rectangle.
+  transparent: bool,
+}
+
+impl SvgConfig {
+  /// Builds framing options while retaining the exporter's default background.
+  pub fn options(&self) -> SvgOptions {
+    let defaults = SvgOptions::default();
+    SvgOptions {
+      padding: self.padding.unwrap_or(defaults.padding),
+      background: if self.transparent { None } else { defaults.background },
+    }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn omitted_options_should_inherit_library_defaults() -> Result<()> {
+    let config: Config = serde_yaml::from_str("smiles: ['CCO']")?;
+    assert_eq!(config.depict.options(), DepictOptions::default());
+    assert_eq!(config.svg.options(), SvgOptions::default());
+    Ok(())
+  }
+
+  #[test]
+  fn destination_should_resolve_relative_to_configuration() -> Result<()> {
+    let config: Config = serde_yaml::from_str("smiles: ['CCO']\noutput_dir: pictures")?;
+    assert_eq!(
+      config.destination(Path::new("configs/job.yaml"))?,
+      Path::new("configs/pictures")
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn empty_batch_should_be_rejected() -> Result<()> {
+    let config: Config = serde_yaml::from_str("smiles: []")?;
+    assert!(config.destination(Path::new("job.yaml")).is_err());
+    Ok(())
+  }
+
+  #[test]
+  fn misspelled_options_should_be_rejected() {
+    for yaml in [
+      "smiles: ['C']\noutput: pictures",
+      "smiles: ['C']\ndepict: {stroke_with: 2}",
+      "smiles: ['C']\nsvg: {pad: 2}",
+    ] {
+      assert!(serde_yaml::from_str::<Config>(yaml).is_err());
+    }
+  }
+}
