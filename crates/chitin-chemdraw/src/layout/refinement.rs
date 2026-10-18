@@ -65,6 +65,8 @@ struct Model {
   linear: Vec<bool>,
   /// Eligible saturated-carbon hydroxyls; ring oxygens and carbonyls are excluded.
   hydroxyls: Vec<terminal::Hydroxyl>,
+  /// Dense axis/reference quadruples with required, coordinate-independent sides.
+  double_stereo: Vec<([usize; 4], chitin_chem::DoubleBondRelation)>,
 }
 
 impl Model {
@@ -126,13 +128,37 @@ impl Model {
       })
       .collect();
     let hydroxyls = terminal::collect(graph, &ids, &indices);
+    let double_stereo = graph
+      .double_bond_stereos()
+      .filter_map(|(_, stereo)| {
+        let [a, b] = stereo.ends();
+        let [ra, rb] = stereo.references();
+        Some((
+          [
+            *indices.get(&a)?,
+            *indices.get(&b)?,
+            *indices.get(&ra)?,
+            *indices.get(&rb)?,
+          ],
+          stereo.relation(),
+        ))
+      })
+      .collect();
     Self {
       ids,
       edges,
       rows,
       linear,
       hydroxyls,
+      double_stereo,
     }
+  }
+
+  /// Rejects optional moves that would invert or flatten a required alkene.
+  fn preserves_double_stereo(&self, points: &[Point]) -> bool {
+    self.double_stereo.iter().all(|(indices, expected)| {
+      crate::stereo_geometry::relation(indices.map(|index| points[index])) == Some(*expected)
+    })
   }
 
   /// Extracts the smaller side of a bridge, preserving its boundary endpoint.
@@ -396,11 +422,13 @@ fn improve_branches(
           };
           candidate[node] = origin.translated(x, y);
         }
-        if !budget.charge(model.rows[moving].len()) {
+        if !budget.charge(model.rows[moving].len() + model.double_stereo.len()) {
           exhausted = true;
           break;
         }
-        if !model.preserves_attachment_angles(moving, fixed, points, &candidate) {
+        if !model.preserves_attachment_angles(moving, fixed, points, &candidate)
+          || !model.preserves_double_stereo(&candidate)
+        {
           continue;
         }
         let Some(quality) = model.measure(&candidate, options.minimum_spacing, budget) else {

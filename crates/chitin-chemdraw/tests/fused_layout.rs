@@ -49,7 +49,11 @@ fn skeleton(faces: &[Vec<usize>]) -> Result<chitin_chem::MolecularGraph, Box<dyn
 fn regression_corpus_should_preserve_unit_bonds_and_refined_quality() -> TestResult {
   for layout_cases::Case { name, source, rank } in layout_cases::load()? {
     let graph = read_smiles(source)?.into_graph();
-    assert_eq!(graph.bond_count() + 1 - graph.atom_count(), rank, "{name}");
+    assert_eq!(
+      graph.bond_count() + graph.connected_components().len() - graph.atom_count(),
+      rank,
+      "{name}"
+    );
     let before = graph.clone();
     for passes in [0, 4] {
       let options = LayoutOptions {
@@ -157,6 +161,7 @@ fn bond_insertion_order_and_endpoint_direction_should_not_change_fused_geometry(
   for layout_cases::Case { source, .. } in layout_cases::load()?.into_iter().filter(|case| case.rank > 1) {
     let graph = read_smiles(source)?.into_graph();
     let expected = layout::generate(&graph, &LayoutOptions::default())?;
+    let tetrahedral: Vec<_> = graph.tetrahedral_centers().map(|(id, stereo)| (id, *stereo)).collect();
     let mut reordered = graph.clone();
     let edges: Vec<_> = graph
       .bonds()
@@ -167,6 +172,9 @@ fn bond_insertion_order_and_endpoint_direction_should_not_change_fused_geometry(
     }
     for &(_, [a, b], order) in edges.iter().rev() {
       reordered.add_bond(b, a, order)?;
+    }
+    for (id, stereo) in tetrahedral {
+      reordered.set_tetrahedral(id, Some(stereo))?;
     }
     let observed = layout::generate(&reordered, &LayoutOptions::default())?;
     for (&id, &point) in expected.positions() {

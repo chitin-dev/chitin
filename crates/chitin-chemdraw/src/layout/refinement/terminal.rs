@@ -161,14 +161,14 @@ pub(super) fn improve(
       let mut best_cost = current.cost;
       let mut exhausted = false;
       for angle in [PI / 12., -PI / 12., PI / 6., -PI / 6.] {
-        if !budget.charge(points.len() + hydroxyl.neighbors.len()) {
+        if !budget.charge(points.len() + hydroxyl.neighbors.len() + model.double_stereo.len()) {
           exhausted = true;
           break;
         }
         let (sin, cos) = angle.sin_cos();
         let mut candidate = points.clone();
         candidate[hydroxyl.leaf] = origin.translated(cos * vector.x - sin * vector.y, sin * vector.x + cos * vector.y);
-        if !hydroxyl.permitted(&original, &candidate) {
+        if !hydroxyl.permitted(&original, &candidate) || !model.preserves_double_stereo(&candidate) {
           continue;
         }
         let Some(quality) = model.measure(&candidate, options.minimum_spacing, budget) else {

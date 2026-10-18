@@ -306,6 +306,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
     .map(|(i, &id)| position(&positions, &topology, i).map(|p| (id, p)))
     .collect::<Result<BTreeMap<_, _>, _>>()?;
   let mut result = Layout2d::from_positions(positions)?;
+  super::alkenes::enforce(graph, &mut result, options.stereo_budget)?;
   // Placement-time contacts can disappear after whole-branch refinement. Report
   // only the final geometry, not obsolete pairs collected during expansion.
   super::refinement::run(graph, &mut result, options)?;

@@ -7,6 +7,7 @@ use crate::geometry::{Bounds, GeometryError, Point};
 use chitin_chem::{AtomId, BondId, GraphError, MolecularGraph};
 use std::collections::BTreeMap;
 
+mod alkenes;
 mod angles;
 mod placement;
 mod refinement;
@@ -29,6 +30,8 @@ pub struct LayoutOptions {
   /// Work units for candidate traversal/indexing/geometric tests, shared by fragments.
   /// Initial and final quality inspection are outside this optimization budget.
   pub refinement_budget: usize,
+  /// Work units for required double-bond stereo constraints, independent of refinement.
+  pub stereo_budget: usize,
 }
 
 impl Default for LayoutOptions {
@@ -41,6 +44,7 @@ impl Default for LayoutOptions {
       ring_search_budget: 2_000_000,
       refinement_passes: 4,
       refinement_budget: 1_000_000,
+      stereo_budget: 1_000_000,
     }
   }
 }
@@ -69,6 +73,12 @@ pub enum LayoutDiagnostic {
 /// Layout cannot provide coordinates without dropping or inventing information.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutError {
+  /// Required stereochemical constraints exceeded their separate work budget.
+  #[error("double-bond stereochemistry work budget exhausted")]
+  StereoBudgetExceeded,
+  /// Existing cyclic/degenerate geometry cannot express the supplied relation.
+  #[error("cannot satisfy double-bond configuration at bond {0}")]
+  DoubleBondStereo(BondId),
   /// Supplied aromatic facts cannot be assigned by the restricted domain model.
   #[error(transparent)]
   Kekule(#[from] chitin_chem::perception::KekuleError),
@@ -193,6 +203,7 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
     || options.minimum_spacing >= 1.
     || options.max_atoms == 0
     || options.ring_search_budget == 0
+    || options.stereo_budget == 0
     || (options.refinement_passes > 0 && options.refinement_budget == 0)
   {
     return Err(LayoutError::Options);

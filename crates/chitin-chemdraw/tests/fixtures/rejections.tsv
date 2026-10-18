@@ -1,0 +1,12 @@
+# name<TAB>SMILES<TAB>failure boundary
+orphan_direction	C/C	read_unsupported
+partial_direction	F/C=C	read_unsupported
+cumulated_direction	F/C=C=C/F	read_unsupported
+conflicting_direction	F/C(\Cl)=C/F	read_syntax
+conflicting_ring	C/1=C/CCCCCC/1	read_syntax
+wildcard	*C	read_unsupported
+mapped_atom	[CH3:1]C	read_unsupported
+extended_stereo	[C@SP1](F)(Cl)(Br)I	read_unsupported
+trans_cyclic_seed	C/1=C\CCCCCC1	layout_stereo
+equal_shortest_bridges	C1C2CC1C2	layout_ring
+aromatic_boron	b1ccccc1	layout_aromatic

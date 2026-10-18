@@ -21,6 +21,7 @@
 #![deny(missing_docs)]
 
 mod chemical;
+mod stereo_geometry;
 
 pub mod depict;
 pub mod font;

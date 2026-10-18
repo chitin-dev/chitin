@@ -229,8 +229,16 @@ cargo run -p chitin-chemdraw --example smiles_to_svg -- \
 
 This is an initial depiction backend, not a complete cheminformatics toolkit.
 Automatic layout and depiction currently depend on the capabilities of
-`chitin-chem`; unsupported SMILES features such as directional double-bond stereo remain
-rejected. Supplied aromatic facts are retained in the source graph; layout and
+`chitin-chem`; unsupported SMILES features remain explicitly rejected.
+Paired slash/backslash markers constrain relative double-bond reference sides.
+Automatic layout reflects complete acyclic sides without stretching bonds;
+optional overlap refinement cannot invert these constraints. Cyclic geometry
+is accepted only if the ring seed already satisfies the supplied configuration;
+trans-ring embedding is not implemented. `LayoutOptions::stereo_budget` bounds
+required stereo work independently of optional quality refinement. Depiction
+rejects caller coordinates that flatten or invert an annotated double bond.
+Partial/unpaired directions and cumulated stereo remain unsupported; no CIP
+E/Z labels are assigned. Supplied aromatic facts are retained in the source graph; layout and
 depiction share a detached integer-bond adapter, not separate display guesses.
 Future work includes broader aromatic chemistry, symmetric/cage bridge layouts, exact label-aware refinement, further stereo
 depiction, complex text shaping, and raster export.

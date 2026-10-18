@@ -100,6 +100,9 @@ impl Default for DepictOptions {
 /// Information that cannot be drawn faithfully by the current depiction profile.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DepictError {
+  /// Supplied coordinates invert or flatten an annotated double bond.
+  #[error("cannot depict double-bond configuration at bond {0}")]
+  DoubleBondStereo(BondId),
   /// The supplied local stereo cannot be shown unambiguously in these coordinates.
   #[error("cannot depict tetrahedral configuration at atom {0}")]
   Stereo(AtomId),
@@ -409,6 +412,13 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
       id,
       Point::new(point.x * options.bond_length, -point.y * options.bond_length),
     );
+  }
+  for (id, stereo) in graph.double_bond_stereos() {
+    let [a, b] = stereo.ends();
+    let [ra, rb] = stereo.references();
+    if crate::stereo_geometry::relation([a, b, ra, rb].map(|atom| points[&atom])) != Some(stereo.relation()) {
+      return Err(DepictError::DoubleBondStereo(id));
+    }
   }
   let report = match options.hydrogens {
     HydrogenMode::KnownOnly => None,
