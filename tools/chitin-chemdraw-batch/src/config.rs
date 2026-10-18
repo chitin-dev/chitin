@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
 use chitin_chemdraw::{
@@ -67,6 +67,8 @@ pub(crate) struct DepictConfig {
   bond_length: Option<f64>,
   /// Element-label size in drawing units.
   font_size: Option<f64>,
+  /// Optional immutable font file, loaded relative to this YAML document.
+  font: Option<FontConfig>,
   /// Width of ordinary and hashed strokes.
   stroke_width: Option<f64>,
   /// Full broad-end width of solid stereo wedges.
@@ -78,10 +80,21 @@ pub(crate) struct DepictConfig {
 }
 
 impl DepictConfig {
-  /// Applies only supplied overrides; final size validation belongs to depiction.
-  pub fn options(&self) -> DepictOptions {
+  /// Resolves visual overrides and loads a font once for the complete batch.
+  ///
+  /// # Parameters
+  /// - `config_path`: YAML location used to resolve relative font paths.
+  ///
+  /// # Errors
+  /// Missing, unreadable or invalid fonts fail before rendering any entry.
+  /// Final size validation still belongs to depiction, not YAML transport.
+  pub fn options(&self, config_path: &Path) -> Result<DepictOptions> {
     let defaults = DepictOptions::default();
-    DepictOptions {
+    Ok(DepictOptions {
+      font: match &self.font {
+        Some(font) => font.load(config_path)?,
+        None => defaults.font.clone(),
+      },
       color_scheme: self.color_scheme.into(),
       element_colors: self.element_colors.0.clone(),
       aromatic_style: match self.aromatic_style {
@@ -100,7 +113,29 @@ impl DepictConfig {
       bond_spacing: self.bond_spacing.unwrap_or(defaults.bond_spacing),
       label_padding: self.label_padding.unwrap_or(defaults.label_padding),
       ..defaults
-    }
+    })
+  }
+}
+
+/// Filesystem transport for one selected TrueType/OpenType collection face.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FontConfig {
+  /// File path; font-family lookup is deliberately not performed by the core.
+  path: PathBuf,
+  /// Collection index, or zero for a standalone font file.
+  #[serde(default)]
+  face_index: u32,
+}
+
+impl FontConfig {
+  /// Reads bytes at the orchestration boundary, retaining no filesystem handle.
+  fn load(&self, config_path: &Path) -> Result<chitin_chemdraw::font::FontFace> {
+    ensure!(!self.path.as_os_str().is_empty(), "depict.font.path must not be empty");
+    let path = config_path.parent().unwrap_or_else(|| Path::new(".")).join(&self.path);
+    let bytes = std::fs::read(&path).with_context(|| format!("read font {}", path.display()))?;
+    chitin_chemdraw::font::FontFace::from_bytes(bytes, self.face_index)
+      .with_context(|| format!("load font {} face {}", path.display(), self.face_index))
   }
 }
 
@@ -143,7 +178,7 @@ mod tests {
   #[test]
   fn omitted_options_should_inherit_library_defaults() -> Result<()> {
     let config: Config = serde_yaml::from_str("smiles: ['CCO']")?;
-    assert_eq!(config.depict.options(), DepictOptions::default());
+    assert_eq!(config.depict.options(Path::new("job.yaml"))?, DepictOptions::default());
     assert_eq!(config.svg.options(), SvgOptions::default());
     Ok(())
   }
@@ -184,7 +219,7 @@ mod tests {
   fn palette_should_resolve_element_keys_and_rgba_during_yaml_parsing() -> Result<()> {
     let config: Config =
       serde_yaml::from_str("smiles: ['CO']\ndepict:\n  color_scheme: element\n  element_colors:\n    O: '#12ab3480'")?;
-    let options = config.depict.options();
+    let options = config.depict.options(Path::new("job.yaml"))?;
     assert_eq!(options.color_scheme, chitin_chemdraw::depict::ColorScheme::Element);
     assert_eq!(
       options.label_color(chitin_chem::Element::Oxygen),
@@ -201,7 +236,10 @@ mod tests {
   #[test]
   fn aromatic_circle_style_should_be_read_from_yaml() -> Result<()> {
     let config: Config = serde_yaml::from_str("smiles: ['c1ccccc1']\ndepict: {aromatic_style: circle}")?;
-    assert_eq!(config.depict.options().aromatic_style, AromaticStyle::Circle);
+    assert_eq!(
+      config.depict.options(Path::new("job.yaml"))?.aromatic_style,
+      AromaticStyle::Circle
+    );
     Ok(())
   }
 }

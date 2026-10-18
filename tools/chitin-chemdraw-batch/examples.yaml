@@ -7,6 +7,8 @@ depict:
   # element_colors: {O: '#dc2828', N: '#3058d8'}
   explicit_chiral_hydrogens: false
   stroke_width: 1.6
+  # Optional font file, relative to this YAML; the default is bundled Noto Sans.
+  # font: {path: fonts/labels.ttf, face_index: 0}
 svg:
   padding: 12
   transparent: false
@@ -17,3 +19,20 @@ smiles:
   - 'Cc1ccc(cc1Nc2nccc(n2)-c3cccnc3)NC(=O)c4ccc(cc4)CN5CCN(CC5)C'
   - 'c1cc(sc1)C(=O)c2c3cc(ccc3n(c2O)C(=O)N)Cl'
   - 'CC1CC2(C(OC(C1)(O2)CCCCCCCC(CC3C(C(C(C(O3)(CC(C(C)C=CC(CCC(C(C4CC(C(C(O4)CC(C(CC5C(C(C(C(O5)CC(C=CC=CCC(C(C(CC=CC(=C)CCC(C(C(C(C)CC6C(C(C(C(O6)C=CC(C(CC7CC8CC(O7)C(O8)CCC9C(CC(O9)CN)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)CC(C)CCCCCC(C(C(C(C(C1C(C(C(C(O1)CC(C(C(=CC(CC(C)C(C(=O)NC=CC(=O)NCCCO)O)O)C)O)O)O)O)O)O)O)O)O)O)C'
+
+  # Fixed layout cases from crates/chitin-chemdraw/tests/fixtures/layout.tsv.
+  # Fused and bridged ring layouts.
+  - 'C1=CC=C2C=C3C=CC=CC3=CC2=C1'  # anthracene
+  - 'C1=CC=C2C(=C1)C=CC1=CC=CC=C12'  # phenanthrene
+  - 'C1CCC2C(C1)CCC1C2CCC2CCCC12'  # mixed_five_six
+  - 'CC(=O)OC1=CC=C2C=C3C=CC=CC3=CC2=C1'  # substituted_fused
+  - 'c1ccc2ccccc2c1'  # aromatic_naphthalene
+  - 'c1ccc2[nH]ccc2c1'  # aromatic_indole
+  - 'C1CCC2(CC1)CCCC2'  # spiro
+  - 'CC1CC2COC(C1)O2'  # asymmetric_bridge
+  # Combined ring and stereochemical layouts.
+  - 'CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)Cc3ccccc3)C(=O)O)C'  # penicillin
+  - 'C/1=C/CCCCCC1'  # cyclic_cis
+  - 'F/C=C/C=C\Cl'  # conjugated_mixed
+  - 'c1ccccc1/C=C\O'  # aromatic_alkene
+  - 'F/C=C/[C@H](Cl)Br'  # alkene_tetrahedral

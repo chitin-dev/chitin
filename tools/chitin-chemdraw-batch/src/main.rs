@@ -46,8 +46,8 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
   let config: config::Config =
     serde_yaml::from_str(&input).with_context(|| format!("parse configuration {}", path.display()))?;
   let destination = config.destination(path)?;
+  let depiction = config.depict.options(path)?;
   fs::create_dir_all(&destination).with_context(|| format!("create output directory {}", destination.display()))?;
-  let depiction = config.depict.options();
   let framing = config.svg.options();
   let mut failures = 0;
   for (index, source) in config.smiles.iter().enumerate() {

@@ -33,6 +33,53 @@ fn batch_should_generate_numbered_svgs_relative_to_yaml() -> Result<()> {
 }
 
 #[test]
+fn custom_font_should_resolve_from_yaml_and_change_rendered_outlines() -> Result<()> {
+  let root = tempfile::tempdir()?;
+  let directory = root.path().join("configs");
+  fs::create_dir(&directory)?;
+  fs::write(
+    directory.join("label font.ttf"),
+    include_bytes!("../../../assets/fonts/cascadia-mono/CascadiaMono-Regular.ttf"),
+  )?;
+  let config = directory.join("job.yaml");
+  fs::write(
+    &config,
+    "smiles: ['[13NH2+]CO']\noutput_dir: custom\ndepict:\n  font:\n    path: 'label font.ttf'\n    face_index: 0",
+  )?;
+  let output = invoke(&config, false)?;
+  assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+  let custom = fs::read_to_string(directory.join("custom/0001.svg"))?;
+  fs::write(&config, "smiles: ['[13NH2+]CO']\noutput_dir: default")?;
+  assert!(invoke(&config, false)?.status.success());
+  let default = fs::read_to_string(directory.join("default/0001.svg"))?;
+  assert_ne!(custom, default);
+  assert!(custom.contains("<path ") && !custom.contains("font-family"));
+  Ok(())
+}
+
+#[test]
+fn unavailable_or_invalid_fonts_should_fail_before_creating_output() -> Result<()> {
+  let root = tempfile::tempdir()?;
+  let config = root.path().join("job.yaml");
+  fs::write(root.path().join("invalid.ttf"), b"not a font")?;
+  fs::write(
+    root.path().join("valid.ttf"),
+    include_bytes!("../../../crates/chitin-chemdraw/assets/NotoSans-Regular.ttf"),
+  )?;
+  for font in [
+    "{path: missing.ttf}",
+    "{path: invalid.ttf}",
+    "{path: valid.ttf, face_index: 1}",
+    "{path: ''}",
+  ] {
+    fs::write(&config, format!("smiles: ['O']\ndepict:\n  font: {font}"))?;
+    assert!(!invoke(&config, false)?.status.success(), "{font}");
+    assert!(!root.path().join("generated").exists(), "{font}");
+  }
+  Ok(())
+}
+
+#[test]
 fn bad_entry_should_not_stop_later_entries_or_renumber_them() -> Result<()> {
   let root = tempfile::tempdir()?;
   let config = root.path().join("job.yaml");
