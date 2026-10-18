@@ -1,4 +1,4 @@
-//! Rigid polygon systems assembled across shared skeleton edges.
+//! Cyclic blocks dispatched to fused-polygon or bicyclic bridge-path geometry.
 //!
 //! Domain blocks own topological boundaries. Each cyclic block is embedded as a
 //! whole before external branches expand, so local traversal order cannot seed a
@@ -13,7 +13,9 @@ use std::{
   f64::consts::{PI, TAU},
 };
 
+mod bridged;
 mod constraints;
+use bridged::Bridged;
 use constraints::Constraints;
 
 /// Shared work allowance for ring discovery, assembly, and geometric trials.
@@ -32,14 +34,25 @@ impl Work {
   }
 }
 
-/// One biconnected cyclic block represented by regular polygon constraints.
+/// Geometry selected from topology, rather than forcing every block into polygons.
+enum Model {
+  /// Edge-fused regular polygons and their incident faces at each vertex.
+  Polygons {
+    /// Selected face cycles and their edge-sharing graph.
+    constraints: Constraints,
+    /// Faces at each atom for exterior sector allocation.
+    incidence: BTreeMap<usize, Vec<usize>>,
+  },
+  /// Three internally disjoint paths between two bridgeheads.
+  Bridged(Bridged),
+}
+
+/// One biconnected cyclic block, embedded atomically before branch expansion.
 struct System {
-  /// Short independent cycles and their shared-edge adjacency.
-  constraints: Constraints,
+  /// Separate models keep shared-path geometry out of fused-face assembly.
+  model: Model,
   /// Global dense atoms in stable handle order.
   atoms: Vec<usize>,
-  /// Faces incident to each atom, for exterior branch directions.
-  incidence: BTreeMap<usize, Vec<usize>>,
   /// Stable source handle locating an unsupported constraint system.
   source: AtomId,
   /// Topological cycle rank, not a chemical ring count.
@@ -82,31 +95,38 @@ impl Rings {
   /// distinct identities, irrespective of their connected component's rank.
   ///
   /// # Errors
-  /// Rejects shared-path/bridged constraints, invalid references, or exhausted work.
+  /// Rejects unsupported cyclic topology, invalid references, or exhausted work.
   pub(super) fn new(graph: &MolecularGraph, topology: &Topology, work: &mut Work) -> Result<Self, Error> {
     work.charge(graph.atom_count() + graph.bond_count())?;
     let report = analyze_rings(graph)?;
     let indices: BTreeMap<_, _> = topology.ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
     let mut systems = Vec::new();
     for block in report.blocks().iter().filter(|block| block.cycle_rank() > 0) {
-      let constraints = Constraints::new(graph, block, &indices, work)?;
-      let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
-      for (i, face) in constraints.faces.iter().enumerate() {
-        work.charge(face.len())?;
-        for &node in face {
-          incidence.entry(node).or_default().push(i);
+      let model = if let Some(bridge) = Bridged::new(graph, block, &indices, work)? {
+        Model::Bridged(bridge)
+      } else {
+        let constraints = Constraints::new(graph, block, &indices, work)?;
+        let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
+        for (i, face) in constraints.faces.iter().enumerate() {
+          work.charge(face.len())?;
+          for &node in face {
+            incidence.entry(node).or_default().push(i);
+          }
         }
-      }
+        Model::Polygons { constraints, incidence }
+      };
       systems.push(System {
-        constraints,
+        model,
         atoms: block.atoms().iter().map(|id| indices[id]).collect(),
-        incidence,
         source: block.atoms()[0],
         rank: block.cycle_rank(),
       });
     }
     systems.sort_by(|a, b| {
-      let largest = |system: &System| system.constraints.faces.iter().map(Vec::len).max().unwrap_or(0);
+      let largest = |system: &System| match &system.model {
+        Model::Polygons { constraints, .. } => constraints.faces.iter().map(Vec::len).max().unwrap_or(0),
+        Model::Bridged(bridge) => bridge.perimeter_len(),
+      };
       largest(b).cmp(&largest(a)).then(a.atoms.cmp(&b.atoms))
     });
     let mut membership = vec![Vec::new(); topology.ids.len()];
@@ -143,7 +163,7 @@ impl Rings {
       .any(|system| self.membership[b].contains(system))
   }
 
-  /// Embeds a complete fused system before publishing any of its new coordinates.
+  /// Embeds a complete cyclic system before publishing any of its new coordinates.
   ///
   /// # Parameters
   /// - `index`: previously unprocessed cyclic block.
@@ -154,8 +174,8 @@ impl Rings {
   ///
   /// # Returns
   /// All system atom centers and exterior headings, including unchanged entry
-  /// anchors. Adjacent faces must lie on
-  /// opposite sides of their shared edge; every previously known anchor is checked.
+  /// anchors. Polygon faces lie on opposite sides of their shared edge; bridge
+  /// paths close on common endpoints. Every previously known anchor is checked.
   ///
   /// # Errors
   /// Rejects geometrically inconsistent regular-polygon constraints or exhausted
@@ -169,9 +189,14 @@ impl Rings {
     work: &mut Work,
   ) -> Result<Vec<(usize, Point, f64)>, Error> {
     let system = &self.systems[index];
-    work.charge(system.atoms.len() + system.constraints.faces.iter().map(Vec::len).sum::<usize>())?;
-    let root = system
-      .constraints
+    let constraints = match &system.model {
+      Model::Polygons { constraints, .. } => constraints,
+      Model::Bridged(bridge) => {
+        return bridge.embed(&system.atoms, positions, component, heading, work, system.source);
+      }
+    };
+    work.charge(system.atoms.len() + constraints.faces.iter().map(Vec::len).sum::<usize>())?;
+    let root = constraints
       .faces
       .iter()
       .enumerate()
@@ -186,7 +211,7 @@ impl Rings {
       .ok_or(Error::Invariant(system.source))?;
     let mut best = None;
     let mut best_cost = f64::INFINITY;
-    for pose in poses(&system.constraints.faces[root], positions, heading, work)? {
+    for pose in poses(&constraints.faces[root], positions, heading, work)? {
       let Some(embedding) = system.assemble(root, pose, positions, work)? else {
         continue;
       };
@@ -231,19 +256,18 @@ impl System {
     positions: &[Option<Point>],
     work: &mut Work,
   ) -> Result<Option<Embedding>, Error> {
-    work.charge(positions.len() + self.constraints.faces.len())?;
+    let Model::Polygons { constraints, .. } = &self.model else {
+      return Err(Error::Invariant(self.source));
+    };
+    work.charge(positions.len() + constraints.faces.len())?;
     let mut points = positions.to_vec();
-    let mut centers = vec![None; self.constraints.faces.len()];
+    let mut centers = vec![None; constraints.faces.len()];
     install(pose, root, &mut points, &mut centers);
-    for _ in 1..self.constraints.faces.len() {
+    for _ in 1..constraints.faces.len() {
       let mut next = None;
-      for (i, face) in self.constraints.faces.iter().enumerate() {
+      for (i, face) in constraints.faces.iter().enumerate() {
         work.charge(1 + face.len())?;
-        if centers[i].is_some()
-          || !self.constraints.neighbors[i]
-            .iter()
-            .any(|&other| centers[other].is_some())
-        {
+        if centers[i].is_some() || !constraints.neighbors[i].iter().any(|&other| centers[other].is_some()) {
           continue;
         }
         let edges = face
@@ -261,17 +285,17 @@ impl System {
         return Ok(None);
       };
       let mut chosen = None;
-      for candidate in poses(&self.constraints.faces[next], &points, 0., work)? {
+      for candidate in poses(&constraints.faces[next], &points, 0., work)? {
         let mut valid = true;
-        for &other in &self.constraints.neighbors[next] {
+        for &other in &constraints.neighbors[next] {
           let Some(center) = centers[other] else {
             continue;
           };
-          work.charge(self.constraints.faces[next].len() * self.constraints.faces[other].len())?;
-          let common: Vec<_> = self.constraints.faces[next]
+          work.charge(constraints.faces[next].len() * constraints.faces[other].len())?;
+          let common: Vec<_> = constraints.faces[next]
             .iter()
             .copied()
-            .filter(|node| self.constraints.faces[other].contains(node))
+            .filter(|node| constraints.faces[other].contains(node))
             .collect();
           if common.len() != 2 {
             return Err(Error::Invariant(self.source));
@@ -307,10 +331,13 @@ impl System {
   /// outside the system. Overcoordinated drafts with no exterior sector retain
   /// the largest gap and can still produce final crowding diagnostics.
   fn outward(&self, node: usize, points: &[Option<Point>], centers: &[Point], work: &mut Work) -> Result<f64, Error> {
+    let Model::Polygons { constraints, incidence } = &self.model else {
+      return Err(Error::Invariant(self.source));
+    };
     let origin = points[node].ok_or(Error::Invariant(self.source))?;
     let mut neighbors = BTreeMap::new();
-    for &i in &self.incidence[&node] {
-      let face = &self.constraints.faces[i];
+    for &i in &incidence[&node] {
+      let face = &constraints.faces[i];
       work.charge(face.len())?;
       let index = face
         .iter()
@@ -335,12 +362,12 @@ impl System {
         fallback = (gap, heading);
       }
       let mut interior = false;
-      for &face in &self.incidence[&node] {
+      for &face in &incidence[&node] {
         work.charge(1)?;
         let center = centers[face];
         let toward = (center.y - origin.y).atan2(center.x - origin.x);
         let delta = (heading - toward + PI).rem_euclid(TAU) - PI;
-        let half = PI / 2. - PI / self.constraints.faces[face].len() as f64;
+        let half = PI / 2. - PI / constraints.faces[face].len() as f64;
         if delta.abs() < half - 1e-8 {
           interior = true;
           break;

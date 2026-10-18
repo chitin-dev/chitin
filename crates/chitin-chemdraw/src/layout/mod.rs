@@ -24,7 +24,7 @@ pub struct LayoutOptions {
   /// Work units for ring-cycle discovery, constraint assembly, and rigid embedding.
   /// Exceeding this budget returns an error, never a partially drawn ring system.
   pub ring_search_budget: usize,
-  /// Maximum improving branch-search passes; zero disables refinement.
+  /// Maximum passes per branch/terminal refinement stage; zero disables both.
   pub refinement_passes: usize,
   /// Work units for candidate traversal/indexing/geometric tests, shared by fragments.
   /// Initial and final quality inspection are outside this optimization budget.
@@ -172,8 +172,9 @@ impl Layout2d {
 /// # Returns
 /// Deterministic positions for every live atom. Chains use zigzag placement,
 /// triple/cumulated-double degree-two centers are linear, and supported ring
-/// blocks use regular polygons. Whole-branch transforms improve geometric overlap
-/// without stretching bonds. Unresolved crowding/crossings remain diagnostic;
+/// blocks use polygon or supported bridge-path constraints. Whole-branch
+/// transforms and bounded terminal hydroxyl adjustments improve overlap without
+/// stretching bonds. Unresolved crowding/crossings remain diagnostic;
 /// this is not a global optimum or label-collision-free guarantee.
 /// Aromatic input uses a detached, bounded C/N/O/S Kekulé representation shared
 /// with depiction. This does not perceive aromaticity or modify input facts.

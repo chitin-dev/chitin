@@ -14,7 +14,8 @@ atom while belonging to different blocks; fused/bridged cycles stay in one block
 `E - V + 1` is cycle-space rank, **not** a catalogue of chemical rings. No graph
 mutation, aromaticity perception, or cached derived facts are installed.
 
-`layout::rings` turns supported blocks into rigid polygon constraints:
+`layout::rings` selects geometry per block. Edge-fused blocks use rigid polygon
+constraints:
 
 - Each edge supplies all tied shortest alternate paths as small-cycle candidates.
   A spanning tree adds a complete fundamental fallback cycle set. A unicyclic
@@ -54,6 +55,34 @@ need nonregular geometry, alternative face decompositions, or more general
 constrained embedding. Such inputs can still be unsupported; no geometric
 success is claimed solely because a cycle basis was found.
 
+## Bicyclic bridge-path model
+
+A rank-two block with two degree-three atoms and degree-two internal atoms has
+three internally disjoint bridgehead paths. Classification uses only block edges,
+so an external substituent does not change an atom's ring-system degree. A direct
+bridgehead edge keeps the existing edge-fused polygon model.
+
+For three paths with a uniquely shortest path, the two longer paths form outer
+arcs and the shorter path forms an interior bridge. Each arc consists of unit
+chords. Bisection solves its turning angle for a common bridgehead separation;
+all paths install the same exact endpoints and validate every edge before any
+coordinates are published. This is not a relaxed regular-polygon closure and
+does not drop bonds or shorten them to hide an overlap.
+
+Three separations, two interior sides, and six rigid orientations are scored
+deterministically against the current component. A single known entry anchor is
+retained exactly. External attachment headings use actual bond rays rather than
+regular-face interior angles. Path detection, root solving, temporary snapshots,
+scoring, and heading scans consume the shared ring-search budget; the current
+heading scans are quadratic in block size, but budgeted.
+
+Equal shortest paths would occupy identical arcs in this model and are explicitly
+unsupported, as are higher-rank cages and multi-anchor entry. They need a flexible
+chain/constrained embedding model. No physical conformation, over/under crossing,
+or tetrahedral configuration is inferred. Source stereochemistry is left to the
+existing depiction stage. Interior-bridge substituents can still cause crossings;
+remaining crowding/crossings are reported normally, not hidden by this solver.
+
 `layout::refinement` then searches whole-branch transformations across **single
 bridges only**. Cyclic edges and multiple bonds are never cut for refinement.
 The smaller branch is reflected across the attachment axis or rotated ±120
@@ -65,6 +94,30 @@ constraint. Rotations at linear triple/cumulated-double centers are excluded.
 Trial coordinates always
 start from the original snapshot and must strictly improve component cost.
 This is a depiction heuristic, not a physical energy minimization.
+
+Terminal neutral hydroxyls on saturated neutral carbon use a separate final
+clearance stage. Rotating a one-atom branch about its own oxygen cannot move
+that oxygen; these no-op branch trials are skipped. The local stage instead
+rotates O about its fixed carbon by ±15°/±30° from the post-branch snapshot.
+The entire ring skeleton stays fixed. Eligible carbon hosts have only single
+bonds; carbonyl/unsaturated/aromatic hosts, ring oxygens, ethers and unknown
+charge/radical states are excluded. This does not change any H count or source
+tetrahedral descriptor.
+
+Each final angle to another carbon ligand stays within 30° of the local stage's
+starting value, with at least 60° separation; all trials refer to that same
+snapshot, so repeated passes cannot accumulate angular drift. This bounded
+saturated projection exception does not relax the rigid-branch trigonal guard.
+Only a completely measured, strictly lower geometry cost with no new proper
+crossings can be committed. The geometry score does not measure text envelopes;
+the large-polycycle regression additionally verifies the actual union of O/H
+glyph bounds, rather than asserting that separated centers always imply legible
+labels. General font-aware layout remains future work.
+
+When eligible hydroxyls exist, one quarter of the remaining refinement budget
+is reserved for this final stage. A large whole-branch search cannot consume
+that reserve. Unspent work is returned, total allowance is unchanged, and either
+stage's exhaustion retains a complete scored result with the existing diagnostic.
 
 These are planar drawing transforms, not changes to supplied tetrahedral facts
 or 3D stereoisomer generation. Depiction computes wedge polarity from the final
@@ -79,7 +132,8 @@ dense overlaps can still have quadratic work. It is not an exact glyph-envelope
 collision model: labels are constructed later with `DepictOptions` and real font
 metrics. Passing layout quality checks is not a promise of collision-free labels.
 
-`LayoutOptions::refinement_passes` bounds search passes (default 4; 0 disables).
+`LayoutOptions::refinement_passes` bounds passes per search stage (default 4;
+0 disables both whole-branch and terminal search).
 `refinement_budget` bounds candidate traversal/indexing/geometric work across all
 fragments (default 1,000,000). Initial/final quality inspection and seed generation
 are outside that search budget; `max_atoms` bounds the input independently.
@@ -121,7 +175,12 @@ insertion, sparse handles, shared search budgets, and a 128-ring strip. The
 `layout_regressions` example exports the same inputs for SVG raster inspection;
 geometry assertions alone cannot establish visual quality.
 
-Next stages: bridged-system constrained embedding/templates, nonregular fused
+Bridge regressions cover asymmetric bicyclic paths, heteroatoms, explicit chiral
+H, linked/spiro entry, exact unit closures, sparse handles, reordered edges, shared
+work budgets, and the supplied large polycycle. Its complete export is tested;
+that does not imply a collision-free global drawing.
+
+Next stages: symmetric/cage constrained embedding/templates, nonregular fused
 embedding, exact label-aware refinement, and richer quality reporting.
 Aromaticity/stereochemistry require corresponding chemical representation and
 parser support first; lowercase SMILES is not silently converted to uppercase.

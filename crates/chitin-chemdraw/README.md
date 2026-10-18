@@ -38,14 +38,30 @@ Fused systems are assembled as complete blocks, rather than being limited to
 two rings. Short independent cycles define polygon constraints; faces sharing
 an edge must occupy opposite sides, and every already known anchor must agree.
 This supports linear/angular six-membered systems and compatible mixed five-/
-six-membered systems. Bridged/shared-path blocks, nonmanifold face incidence,
-or incompatible regular-polygon closures still return `LayoutError::RingSystem`.
+six-membered systems. Nonmanifold face incidence and incompatible regular-polygon
+closures still return `LayoutError::RingSystem`.
+
+Bicyclic bridged blocks use a separate path model: two degree-three bridgeheads
+joined by three internally disjoint paths. A uniquely shortest path lies inside
+two longer outer arcs; every edge retains unit length and both endpoints close
+exactly. Multiple orientations and bridgehead separations are scored against the
+component. Equal shortest paths and higher-rank cages remain unsupported by this
+model; it does not invent 3D geometry or stereo from ring topology. Attachments
+on an interior bridge can still produce crossings reported by quality diagnostics.
 
 Substituents at fused junctions use the exterior gap between ring neighbors.
 Only a separately connected, already placed parent occupies that gap; having
 three ring neighbors does not shift a methyl back onto a ring bond. Regression
 tests cover both steroid junction methyls and entered cyclic blocks with an
 external parent, before and after refinement.
+
+Final hydroxyl clearance rotates only terminal neutral O on saturated carbon,
+within ±30° of its initial direction and with no new proper bond crossings.
+Ring geometry, C–O length and source chemical facts remain fixed. This stage
+has reserved work inside the existing refinement budget, so a large skeleton's
+branch search cannot starve it. Carbonyl/aromatic hosts and ring oxygens are not
+subject to this angle adjustment. Actual OH-label separation is regression-tested
+for the large polycycle; general label-aware optimization is not yet implemented.
 
 `LayoutOptions::ring_search_budget` bounds discovery and embedding work across
 all components (2,000,000 units by default). Exhaustion returns
@@ -115,7 +131,7 @@ Automatic layout and depiction currently depend on the capabilities of
 `chitin-chem`; unsupported SMILES features such as directional double-bond stereo remain
 rejected. Supplied aromatic facts are retained in the source graph; layout and
 depiction share a detached integer-bond adapter, not separate display guesses.
-Future work includes broader aromatic chemistry, bridged-ring layout, exact label-aware refinement, further stereo
+Future work includes broader aromatic chemistry, symmetric/cage bridge layouts, exact label-aware refinement, further stereo
 depiction, complex text shaping, and raster export.
 
 Tetrahedral `@`/`@@` and `@TH1`/`@TH2` preserve relative configuration through

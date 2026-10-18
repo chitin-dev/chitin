@@ -1,9 +1,9 @@
 //! Bounded, deterministic branch search over complete molecular coordinates.
 //!
-//! Only single-bond bridges split movable branches. Reflection preserves every
-//! angle magnitude; rotations about the movable endpoint preserve rigid rings
-//! and all bond lengths, but must also pass attachment-angle validation. Linear
-//! triple/cumulated-double centers are protected before any rotation is tested.
+//! Only single-bond bridges split movable branches. Rigid branch transforms
+//! preserve angle magnitudes; terminal hydroxyl clearance has a separate bounded
+//! saturated-carbon angle policy. Every transform preserves all bond lengths
+//! and ring geometry. Linear triple/cumulated-double centers are protected.
 //! This is drawing optimization, not a force field or chemical-energy model.
 
 use super::{Layout2d, LayoutDiagnostic, LayoutError as Error, LayoutOptions};
@@ -13,6 +13,8 @@ use std::{
   collections::{BTreeMap, BTreeSet},
   f64::consts::PI,
 };
+
+mod terminal;
 
 /// One dense skeleton edge, retaining its original graph identity.
 struct Edge {
@@ -61,6 +63,8 @@ struct Model {
   rows: Vec<Vec<usize>>,
   /// Whether branch rotation at each atom would violate a linear center.
   linear: Vec<bool>,
+  /// Eligible saturated-carbon hydroxyls; ring oxygens and carbonyls are excluded.
+  hydroxyls: Vec<terminal::Hydroxyl>,
 }
 
 impl Model {
@@ -121,11 +125,13 @@ impl Model {
         row.len() == 2 && (row.contains(&BondOrder::Triple) || row.iter().all(|&order| order == BondOrder::Double))
       })
       .collect();
+    let hydroxyls = terminal::collect(graph, &ids, &indices);
     Self {
       ids,
       edges,
       rows,
       linear,
+      hydroxyls,
     }
   }
 
@@ -136,6 +142,13 @@ impl Model {
   /// budget is depleted; cyclic edges never reach this function.
   fn branch(&self, edge: usize, budget: &mut Budget) -> Option<(Vec<usize>, usize, usize)> {
     let [a, b] = self.edges[edge].ends;
+    // A terminal branch used to traverse the entire opposite skeleton only to
+    // discover that rotating about the leaf itself cannot move any geometry.
+    for (leaf, host) in [(a, b), (b, a)] {
+      if self.rows[leaf].len() == 1 {
+        return budget.charge(1).then_some((vec![leaf], leaf, host));
+      }
+    }
     let mut seen = vec![false; self.ids.len()];
     let mut stack = vec![a];
     seen[a] = true;
@@ -305,6 +318,28 @@ fn orient(points: &mut [Point]) {
   }
 }
 
+/// Optimizes a component while reserving work for final terminal-group clearance.
+///
+/// Whole-branch transforms can bring distant hydroxyls together, so local work
+/// must run after them. A quarter of the remaining shared budget is reserved;
+/// otherwise a large skeleton can exhaust all work before any leaf is repaired.
+/// Unspent reserved work is returned for later disconnected components.
+fn improve(model: &Model, points: &mut Vec<Point>, options: &LayoutOptions, budget: &mut Budget) -> bool {
+  let Some(mut current) = model.measure(points, options.minimum_spacing, &mut Budget(usize::MAX)) else {
+    return false;
+  };
+  if current.cost < 1e-12 {
+    return false;
+  }
+  let reserve = if model.hydroxyls.is_empty() { 0 } else { budget.0 / 4 };
+  budget.0 -= reserve;
+  let exhausted = improve_branches(model, points, &mut current, options, budget);
+  let mut local = Budget(reserve);
+  let local_exhausted = terminal::improve(model, points, &mut current, options, &mut local);
+  budget.0 += local.0;
+  exhausted || local_exhausted
+}
+
 /// Optimizes one component by best-improving rigid branch transforms.
 ///
 /// Reflection is always eligible; ±120-degree rotations around the movable
@@ -312,10 +347,13 @@ fn orient(points: &mut [Point]) {
 /// to prevent drift, and every trial starts from the exact original snapshot.
 /// All candidates must preserve attachment angles before cost can be considered.
 /// Returns whether the shared work budget was exhausted, never partial geometry.
-fn improve(model: &Model, points: &mut Vec<Point>, options: &LayoutOptions, budget: &mut Budget) -> bool {
-  let Some(mut current) = model.measure(points, options.minimum_spacing, &mut Budget(usize::MAX)) else {
-    return false;
-  };
+fn improve_branches(
+  model: &Model,
+  points: &mut Vec<Point>,
+  current: &mut Quality,
+  options: &LayoutOptions,
+  budget: &mut Budget,
+) -> bool {
   for _ in 0..options.refinement_passes {
     if current.cost < 1e-12 {
       return false;
@@ -331,6 +369,9 @@ fn improve(model: &Model, points: &mut Vec<Point>, options: &LayoutOptions, budg
       let Some((branch, moving, fixed)) = model.branch(edge, budget) else {
         return true;
       };
+      if branch.len() == 1 {
+        continue;
+      }
       let origin = points[moving];
       let vector = Point::new(origin.x - points[fixed].x, origin.y - points[fixed].y);
       let angle = vector.y.atan2(vector.x);
@@ -373,7 +414,7 @@ fn improve(model: &Model, points: &mut Vec<Point>, options: &LayoutOptions, budg
       }
       if let Some((candidate, quality)) = best {
         *points = candidate;
-        current = quality;
+        *current = quality;
         changed = true;
       }
       if exhausted {
