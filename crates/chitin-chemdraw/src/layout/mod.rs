@@ -182,7 +182,7 @@ impl Layout2d {
 /// # Returns
 /// Deterministic positions for every live atom. Chains use zigzag placement,
 /// triple/cumulated-double degree-two centers are linear, and supported ring
-/// blocks use polygon or supported bridge-path constraints. Whole-branch
+/// blocks use polygon, even-macrocycle, or supported bridge-path constraints. Whole-branch
 /// transforms and bounded terminal hydroxyl adjustments improve overlap without
 /// stretching bonds. Unresolved crowding/crossings remain diagnostic;
 /// this is not a global optimum or label-collision-free guarantee.

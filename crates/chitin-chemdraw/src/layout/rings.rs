@@ -1,4 +1,4 @@
-//! Cyclic blocks dispatched to fused-polygon or bicyclic bridge-path geometry.
+//! Cyclic blocks dispatched to polygons, macrocycles, or bridge-path geometry.
 //!
 //! Domain blocks own topological boundaries. Each cyclic block is embedded as a
 //! whole before external branches expand, so local traversal order cannot seed a
@@ -15,6 +15,7 @@ use std::{
 
 mod bridged;
 mod constraints;
+mod macrocycles;
 use bridged::Bridged;
 use constraints::Constraints;
 
@@ -45,6 +46,8 @@ enum Model {
   },
   /// Three internally disjoint paths between two bridgeheads.
   Bridged(Bridged),
+  /// A simple even macrocycle with nonregular, closed unit-edge candidates.
+  Macrocycle(macrocycles::Macrocycle),
 }
 
 /// One biconnected cyclic block, embedded atomically before branch expansion.
@@ -106,14 +109,26 @@ impl Rings {
         Model::Bridged(bridge)
       } else {
         let constraints = Constraints::new(graph, block, &indices, work)?;
-        let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
-        for (i, face) in constraints.faces.iter().enumerate() {
-          work.charge(face.len())?;
-          for &node in face {
-            incidence.entry(node).or_default().push(i);
+        if constraints.faces.len() == 1
+          && constraints.faces[0].len() >= 12
+          && constraints.faces[0].len().is_multiple_of(2)
+        {
+          Model::Macrocycle(macrocycles::Macrocycle::new(
+            graph,
+            &constraints.faces[0],
+            &topology.ids,
+            work,
+          )?)
+        } else {
+          let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
+          for (i, face) in constraints.faces.iter().enumerate() {
+            work.charge(face.len())?;
+            for &node in face {
+              incidence.entry(node).or_default().push(i);
+            }
           }
+          Model::Polygons { constraints, incidence }
         }
-        Model::Polygons { constraints, incidence }
       };
       systems.push(System {
         model,
@@ -126,6 +141,7 @@ impl Rings {
       let largest = |system: &System| match &system.model {
         Model::Polygons { constraints, .. } => constraints.faces.iter().map(Vec::len).max().unwrap_or(0),
         Model::Bridged(bridge) => bridge.perimeter_len(),
+        Model::Macrocycle(model) => model.len(),
       };
       largest(b).cmp(&largest(a)).then(a.atoms.cmp(&b.atoms))
     });
@@ -193,6 +209,9 @@ impl Rings {
       Model::Polygons { constraints, .. } => constraints,
       Model::Bridged(bridge) => {
         return bridge.embed(&system.atoms, positions, component, heading, work, system.source);
+      }
+      Model::Macrocycle(model) => {
+        return model.embed(positions, component, heading, work, system.source);
       }
     };
     work.charge(system.atoms.len() + constraints.faces.iter().map(Vec::len).sum::<usize>())?;

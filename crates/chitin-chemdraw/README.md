@@ -41,6 +41,17 @@ This supports linear/angular six-membered systems and compatible mixed five-/
 six-membered systems. Nonmanifold face incidence and incompatible regular-polygon
 closures still return `LayoutError::RingSystem`.
 
+Simple even macrocycles of at least 12 atoms use closed hexagonal-lattice
+outlines rather than nearly straight regular-polygon corners. Compact growth
+and a strip/end-cap construction supply candidates; cyclic offsets and reversed
+traversals are checked against every annotated ring double bond. Unsatisfied
+configurations are rejected, never traded for a lower crowding score. External
+references use the free 120-degree attachment sector, including at concave
+corners. Every edge remains unit length and existing entry anchors stay fixed.
+Odd macrocycles retain the regular-polygon model; this stage does not provide
+general fused-macrocycle or cage embedding, nor guarantee all cyclic stereo is
+drawable. Candidate construction and scoring share the ring-search budget.
+
 Bicyclic bridged blocks use a separate path model: two degree-three bridgeheads
 joined by three internally disjoint paths. A uniquely shortest path lies inside
 two longer outer arcs; every edge retains unit length and both endpoints close
@@ -304,8 +315,9 @@ Automatic layout and depiction currently depend on the capabilities of
 Paired slash/backslash markers constrain relative double-bond reference sides.
 Automatic layout reflects complete acyclic sides without stretching bonds;
 optional overlap refinement cannot invert these constraints. Cyclic geometry
-is accepted only if the ring seed already satisfies the supplied configuration;
-trans-ring embedding is not implemented. `LayoutOptions::stereo_budget` bounds
+is accepted only if the ring seed satisfies the supplied configuration;
+supported even macrocycles search nonregular candidates for cis/trans relations.
+Other cyclic mismatches still return an error. `LayoutOptions::stereo_budget` bounds
 required stereo work independently of optional quality refinement. Depiction
 rejects caller coordinates that flatten or invert an annotated double bond.
 Partial/unpaired directions and cumulated stereo remain unsupported; no CIP
@@ -381,3 +393,11 @@ cargo run -p chitin-chemdraw --example layout_regressions -- \
 Inspect the generated SVGs as well as the tests. Other regressions cover multi-
 anchor closure, incompatible closures, spiro/linked attachments, sparse handles,
 bond insertion-order changes, shared budgets, and an iterative 128-ring strip.
+
+## Inspired by
+
+The macrocycle candidate strategy is informed by
+[typed-smiles](https://github.com/GeronimoCastano/typed-smiles): separate closed
+outline construction, cyclic assignment, and stereochemical validation. Chitin's
+implementation uses its own immutable graph models, exact unit-edge contract,
+explicit work budgets, and typed failures; no external engine is invoked.

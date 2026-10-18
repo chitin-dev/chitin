@@ -55,6 +55,41 @@ need nonregular geometry, alternative face decompositions, or more general
 constrained embedding. Such inputs can still be unsupported; no geometric
 success is claimed solely because a cycle basis was found.
 
+## Simple even macrocycles
+
+An independent unicyclic block with an even size of at least 12 uses a separate
+outline model. It is not installed as a nonregular face inside the rigid fused
+polygon solver. Odd macrocycles and small rings retain their existing regular
+polygon model; linked or spiro-connected blocks retain separate ownership.
+
+Candidate boundaries come from compact hexagonal-cell growth and a guaranteed
+strip construction, capped by a three-cell triangle for sizes divisible by
+four. Shared integer edges cancel before tracing one simple closed perimeter.
+Every retained edge is unit length: there is no fitted closing edge, omitted
+vertex, odd-corner shortcut, or spring-length tolerance. Compact growth may stop
+short of its requested perimeter; the strip construction still supplies a
+complete exact-size candidate. Holes, pinches and extra loops are rejected.
+
+Each boundary is tested in both traversal directions at every cyclic offset.
+Annotated ring double bonds are hard filters, with exocyclic references converted
+to the equivalent adjacent-ring-neighbor relation. If no enumerated candidate
+satisfies all relations, layout returns `DoubleBondStereo`, not a lower-quality
+incorrect configuration. This is a limited candidate family, not a complete
+solver for all physically possible cyclic configurations.
+
+Scoring considers component-local center clearance and penalizes external
+attachments assigned to concave corners. Attachment headings use the free
+120-degree sector between ring rays, not a convex-only radial approximation.
+At a concave center this slot can point into the global ring interior; using
+the topological exterior there would make 60-degree substituent angles and
+can invert an exocyclic stereo reference. Remaining crowding is still diagnosed.
+
+A single existing articulation point is retained bit-for-bit and six rigid
+rotations are compared when entering an anchored block. Construction, cyclic
+assignment, constraint checks, snapshots and scoring consume the existing shared
+ring-search allowance. Growth and candidate evaluation can be quadratic (with
+ordered-map overhead); exhaustion returns an error without partial geometry.
+
 ## Bicyclic bridge-path model
 
 A rank-two block with two degree-three atoms and degree-two internal atoms has
@@ -122,7 +157,10 @@ stage's exhaustion retains a complete scored result with the existing diagnostic
 These are planar drawing transforms, not changes to supplied tetrahedral facts
 or 3D stereoisomer generation. Depiction computes wedge polarity from the final
 coordinates and unchanged ordered ligand descriptors, including reflections.
-Directional double-bond and other extended stereo remain unsupported.
+Required acyclic double-bond relations are enforced before optional refinement;
+refinement candidates cannot invert them. Ring double-bond relations must be
+satisfied by the selected seed, including the macrocycle candidates above.
+Other extended stereochemistry remains unsupported.
 
 ## Quality and resource contract
 

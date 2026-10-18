@@ -29,3 +29,9 @@ tetrahedral	N[C@H](C)C(=O)O	0
 spiro	C1CCC2(CC1)CCCC2	2
 asymmetric_bridge	CC1CC2COC(C1)O2	2
 penicillin	CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)Cc3ccccc3)C(=O)O)C	3
+macrocycle_twelve	C1CCCCCCCCCCC1	1
+macrocycle_sixteen	C1CCCCCCCCCCCCCCC1	1
+macrocycle_trans	C/1=C\CCCCCCCCCC1	1
+macrocycle_cis	C/1=C/CCCCCCCCCC1	1
+macrocycle_exocyclic_reference	F/C1=C(/Cl)CCCCCCCCCC1	1
+macrocycle_substituted	OC1CCCCCCCCCCC1N	1
