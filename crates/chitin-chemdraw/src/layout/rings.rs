@@ -15,6 +15,8 @@ use std::{
 
 mod bridged;
 mod constraints;
+mod fused_macrocycles;
+mod geometry;
 mod macrocycles;
 use bridged::Bridged;
 use constraints::Constraints;
@@ -46,8 +48,10 @@ enum Model {
   },
   /// Three internally disjoint paths between two bridgeheads.
   Bridged(Bridged),
-  /// A simple even macrocycle with nonregular, closed unit-edge candidates.
+  /// A simple macrocycle with nonregular, closed unit-edge candidates.
   Macrocycle(macrocycles::Macrocycle),
+  /// One macrocycle and one small face sharing exactly one skeleton edge.
+  FusedMacrocycle(fused_macrocycles::FusedMacrocycle),
 }
 
 /// One biconnected cyclic block, embedded atomically before branch expansion.
@@ -109,16 +113,15 @@ impl Rings {
         Model::Bridged(bridge)
       } else {
         let constraints = Constraints::new(graph, block, &indices, work)?;
-        if constraints.faces.len() == 1
-          && constraints.faces[0].len() >= 12
-          && constraints.faces[0].len().is_multiple_of(2)
-        {
+        if constraints.faces.len() == 1 && constraints.faces[0].len() >= 12 {
           Model::Macrocycle(macrocycles::Macrocycle::new(
             graph,
             &constraints.faces[0],
             &topology.ids,
             work,
           )?)
+        } else if let Some(model) = fused_macrocycles::FusedMacrocycle::new(graph, &constraints, &topology.ids, work)? {
+          Model::FusedMacrocycle(model)
         } else {
           let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
           for (i, face) in constraints.faces.iter().enumerate() {
@@ -142,6 +145,7 @@ impl Rings {
         Model::Polygons { constraints, .. } => constraints.faces.iter().map(Vec::len).max().unwrap_or(0),
         Model::Bridged(bridge) => bridge.perimeter_len(),
         Model::Macrocycle(model) => model.len(),
+        Model::FusedMacrocycle(model) => model.len(),
       };
       largest(b).cmp(&largest(a)).then(a.atoms.cmp(&b.atoms))
     });
@@ -212,6 +216,9 @@ impl Rings {
       }
       Model::Macrocycle(model) => {
         return model.embed(positions, component, heading, work, system.source);
+      }
+      Model::FusedMacrocycle(model) => {
+        return model.embed(&system.atoms, positions, component, heading, work, system.source);
       }
     };
     work.charge(system.atoms.len() + constraints.faces.iter().map(Vec::len).sum::<usize>())?;

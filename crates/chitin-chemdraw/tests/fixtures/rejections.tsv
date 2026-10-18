@@ -10,3 +10,4 @@ extended_stereo	[C@SP1](F)(Cl)(Br)I	read_unsupported
 trans_cyclic_seed	C/1=C\CCCCCC1	layout_stereo
 equal_shortest_bridges	C1C2CC1C2	layout_ring
 aromatic_boron	b1ccccc1	layout_aromatic
+shared_ring_stereo_candidate_limit	C1CCCCCCCCCC/C2CCCC/C1=2	layout_stereo

@@ -9,13 +9,13 @@ and drawing each have their own acceptance boundary. Tests are locally authored.
 | Organic subset, branches, fragments | Supported | Supported within valence model | Broader valence/H models |
 | All 118 bracket elements | Supported | Only known H/facts or supported inference | Element-specific label/valence rules |
 | Isotope, charge, declared H, explicit H vertices | Supported | Supported; no radical knowledge invented | Broader charged/open-shell models |
-| Ring closure, reuse, `%00`–`%99` | Supported | Monocyclic, spiro, compatible fused systems | Bridged/nonregular embedding |
+| Ring closure, reuse, `%00`–`%99` | Supported | Monocyclic, spiro, compatible fused, asymmetric bridged, odd/even macrocycles and a single small fused face | General cages and multi-face nonregular embedding |
 | Aromatic `b c n o p s`, bracket `as se` | Supported | Restricted C/N/O/S model below | B/P/As/Se and further charge states |
 | Omitted aromatic bonds and explicit `:` | Supported | Shared integer-bond assignment | General aromaticity perception |
 | Explicit `-` between aromatic atoms | Preserved at edges and ring sites | Preserved | None in this stage |
 | Aromatic heterocycle `[nH]` | H declaration preserved | NH label; no extra inferred H | Broader heteroatom states |
 | Tetrahedral `@`, `@@`, `@TH1`, `@TH2` | Supported with ordered graph references | Solid/hashed wedges | CIP labels and stereogenicity perception |
-| Paired directional bonds around noncumulated doubles | Relative references, conjugation, ring sites | Required acyclic side constraints; compatible ring seeds | General trans-ring embedding; CIP labels |
+| Paired directional bonds around noncumulated doubles | Relative references, conjugation, ring sites | Required acyclic side constraints; constrained macrocycle candidates and compatible other ring seeds | Complete cyclic constraint solving; CIP labels |
 | Partial/unpaired directions and extended stereo classes | Explicit unsupported error | Not implemented | Partial-state and extended coordination models |
 | Atom class/map `:n` inside brackets | Explicit unsupported error | Not implemented | Typed annotations independent of graph IDs |
 | Wildcard/query atoms, SMARTS | Explicit unsupported error | Not implemented | Separate atom identity/query model |

@@ -6,6 +6,7 @@
 //! and ring geometry. Linear triple/cumulated-double centers are protected.
 //! This is drawing optimization, not a force field or chemical-energy model.
 
+use super::quality::{self, Budget, Quality, segment_distance};
 use super::{Layout2d, LayoutDiagnostic, LayoutError as Error, LayoutOptions};
 use crate::geometry::{Bounds, Point};
 use chitin_chem::{AtomId, BondId, BondOrder, MolecularGraph, perception::analyze_rings};
@@ -26,39 +27,14 @@ struct Edge {
   movable: bool,
 }
 
-/// Shared optimization budget; quality inspection itself is never truncated.
-struct Budget(usize);
-
-impl Budget {
-  /// Charges work before doing it, returning false instead of overspending.
-  fn charge(&mut self, units: usize) -> bool {
-    if self.0 < units {
-      self.0 = 0;
-      false
-    } else {
-      self.0 -= units;
-      true
-    }
-  }
-}
-
-/// Measured geometric penalties and final reportable contacts.
-#[derive(Default)]
-struct Quality {
-  /// Dimensionless crowding, atom-edge contact, and crossing penalty.
-  cost: f64,
-  /// Dense atom pairs below the caller's diagnostic threshold.
-  crowds: Vec<(usize, usize)>,
-  /// Nonincident skeleton-edge pairs with a proper crossing.
-  crossings: BTreeSet<(usize, usize)>,
-}
-
 /// Temporary component-local representation; no chemical graph ownership.
 struct Model {
   /// Stable atom handles, independent of holes left by graph editing.
   ids: Vec<AtomId>,
   /// Every skeleton edge in stable bond order.
   edges: Vec<Edge>,
+  /// Parallel geometry-only edges consumed by the shared score evaluator.
+  segments: Vec<[usize; 2]>,
   /// Incident edge indices for iterative branch extraction.
   rows: Vec<Vec<usize>>,
   /// Whether branch rotation at each atom would violate a linear center.
@@ -144,9 +120,11 @@ impl Model {
         ))
       })
       .collect();
+    let segments = edges.iter().map(|edge| edge.ends).collect();
     Self {
       ids,
       edges,
+      segments,
       rows,
       linear,
       hydroxyls,
@@ -215,97 +193,8 @@ impl Model {
   /// penalty. `None` abandons a candidate before budget overspending. Grid costs
   /// are local for ordinary drawings, but dense overlap can still be quadratic.
   fn measure(&self, points: &[Point], threshold: f64, budget: &mut Budget) -> Option<Quality> {
-    if !budget.charge(points.len() + self.edges.len()) {
-      return None;
-    }
-    let mut atoms = BTreeMap::<(i64, i64), Vec<usize>>::new();
-    let mut edges = BTreeMap::<(i64, i64), Vec<usize>>::new();
-    for (i, &point) in points.iter().enumerate() {
-      atoms.entry(cell(point)).or_default().push(i);
-    }
-    for (i, edge) in self.edges.iter().enumerate() {
-      let [a, b] = edge.ends.map(|node| cell(points[node]));
-      for x in a.0.min(b.0)..=a.0.max(b.0) {
-        for y in a.1.min(b.1)..=a.1.max(b.1) {
-          edges.entry((x, y)).or_default().push(i);
-        }
-      }
-    }
-    let mut quality = Quality::default();
-    for (i, &point) in points.iter().enumerate() {
-      let (x, y) = cell(point);
-      let mut close_edges = BTreeSet::<usize>::new();
-      for dx in -1..=1 {
-        for dy in -1..=1 {
-          if let Some(others) = atoms.get(&(x + dx, y + dy)) {
-            for &j in others.iter().filter(|&&j| j > i) {
-              if !budget.charge(1) {
-                return None;
-              }
-              let distance = point.distance(points[j]);
-              quality.cost += (0.95 - distance).max(0.).powi(2);
-              if distance < threshold {
-                quality.crowds.push((i, j));
-              }
-            }
-          }
-          if let Some(candidates) = edges.get(&(x + dx, y + dy)) {
-            close_edges.extend(candidates.iter().copied());
-          }
-        }
-      }
-      for &edge in &close_edges {
-        if !budget.charge(1) {
-          return None;
-        }
-        let [a, b] = self.edges[edge].ends;
-        if a != i && b != i {
-          quality.cost += 4. * (0.25 - segment_distance(point, points[a], points[b])).max(0.).powi(2);
-        }
-      }
-    }
-    // A crossing can occur far from either endpoint's cell in future non-unit
-    // layouts. Edge bounding cells, rather than atom hits, own this broad phase.
-    let mut tested = BTreeSet::new();
-    for bucket in edges.values() {
-      for (offset, &i) in bucket.iter().enumerate() {
-        for &j in &bucket[offset + 1..] {
-          if !budget.charge(1) {
-            return None;
-          }
-          if !tested.insert((i, j)) {
-            continue;
-          }
-          let [a, b] = self.edges[i].ends;
-          let [c, d] = self.edges[j].ends;
-          if a != c && a != d && b != c && b != d && crosses(points[a], points[b], points[c], points[d]) {
-            quality.cost += 8.;
-            quality.crossings.insert((i, j));
-          }
-        }
-      }
-    }
-    Some(quality)
+    quality::measure(points, &self.segments, threshold, budget)
   }
-}
-
-/// Returns a generated finite point's cell; automatic embedding bounds casts.
-fn cell(point: Point) -> (i64, i64) {
-  (point.x.floor() as i64, point.y.floor() as i64)
-}
-
-/// Returns the distance to a finite unit-length skeleton segment.
-fn segment_distance(point: Point, a: Point, b: Point) -> f64 {
-  let dx = b.x - a.x;
-  let dy = b.y - a.y;
-  let t = (((point.x - a.x) * dx + (point.y - a.y) * dy) / (dx * dx + dy * dy)).clamp(0., 1.);
-  point.distance(a.translated(t * dx, t * dy))
-}
-
-/// Tests proper intersections, excluding collinearity and endpoint tangencies.
-fn crosses(a: Point, b: Point, c: Point, d: Point) -> bool {
-  let side = |p: Point, q: Point, r: Point| (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
-  side(a, b, c) * side(a, b, d) < -1e-12 && side(c, d, a) * side(c, d, b) < -1e-12
 }
 
 /// Makes a component's widest sampled direction horizontal in 30-degree steps.
@@ -474,6 +363,8 @@ fn improve_branches(
 pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &LayoutOptions) -> Result<(), Error> {
   let rings = analyze_rings(graph)?;
   let mut budget = Budget(options.refinement_budget);
+  let mut projected_budget = Budget(options.optimization.work_budget);
+  let mut projected_exhausted = false;
   let mut exhausted = false;
   let mut cursor = 0.;
   layout.diagnostics.clear();
@@ -486,6 +377,25 @@ pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &Layou
       .collect::<Result<_, _>>()?;
     if !exhausted && options.refinement_passes > 0 {
       exhausted = improve(&model, &mut points, options, &mut budget);
+    }
+    if !projected_exhausted
+      && options.refinement_passes > 0
+      && options.optimization.iterations > 0
+      && options.optimization.work_budget > 0
+    {
+      projected_exhausted = super::optimization::component(
+        super::optimization::Scope {
+          graph,
+          anchors: &BTreeSet::new(),
+          bridges: rings.bridges(),
+        },
+        &model.ids,
+        &mut points,
+        &options.optimization,
+        &mut projected_budget,
+        true,
+      )?
+      .exhausted;
     }
     orient(&mut points);
     let quality = model
@@ -514,6 +424,9 @@ pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &Layou
   }
   if exhausted {
     layout.diagnostics.push(LayoutDiagnostic::RefinementBudgetExhausted);
+  }
+  if projected_exhausted {
+    layout.diagnostics.push(LayoutDiagnostic::OptimizationBudgetExhausted);
   }
   layout.bounds = Bounds::from_points(layout.positions.values().copied())?;
   Ok(())

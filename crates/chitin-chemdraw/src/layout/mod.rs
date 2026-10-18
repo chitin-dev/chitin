@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 
 mod alkenes;
 mod angles;
+pub mod optimization;
 mod placement;
+mod quality;
 mod refinement;
 mod rings;
 
@@ -25,13 +27,15 @@ pub struct LayoutOptions {
   /// Work units for ring-cycle discovery, constraint assembly, and rigid embedding.
   /// Exceeding this budget returns an error, never a partially drawn ring system.
   pub ring_search_budget: usize,
-  /// Maximum passes per branch/terminal refinement stage; zero disables both.
+  /// Maximum discrete passes; zero disables all optional refinement stages.
   pub refinement_passes: usize,
   /// Work units for candidate traversal/indexing/geometric tests, shared by fragments.
   /// Initial and final quality inspection are outside this optimization budget.
   pub refinement_budget: usize,
   /// Work units for required double-bond stereo constraints, independent of refinement.
   pub stereo_budget: usize,
+  /// Projected coordinate search after discrete refinement; zero iterations disables it.
+  pub optimization: optimization::OptimizationOptions,
 }
 
 impl Default for LayoutOptions {
@@ -45,6 +49,7 @@ impl Default for LayoutOptions {
       refinement_passes: 4,
       refinement_budget: 1_000_000,
       stereo_budget: 1_000_000,
+      optimization: optimization::OptimizationOptions::default(),
     }
   }
 }
@@ -68,11 +73,16 @@ pub enum LayoutDiagnostic {
   },
   /// Optimization exhausted its work budget; the complete best-so-far layout remains valid.
   RefinementBudgetExhausted,
+  /// Projected search exhausted its separate allowance; the best validated layout remains.
+  OptimizationBudgetExhausted,
 }
 
 /// Layout cannot provide coordinates without dropping or inventing information.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutError {
+  /// A complete coordinate snapshot failed the optional optimizer's input contract.
+  #[error(transparent)]
+  Optimization(#[from] optimization::OptimizationError),
   /// Required stereochemical constraints exceeded their separate work budget.
   #[error("double-bond stereochemistry work budget exhausted")]
   StereoBudgetExceeded,
@@ -182,9 +192,9 @@ impl Layout2d {
 /// # Returns
 /// Deterministic positions for every live atom. Chains use zigzag placement,
 /// triple/cumulated-double degree-two centers are linear, and supported ring
-/// blocks use polygon, even-macrocycle, or supported bridge-path constraints. Whole-branch
-/// transforms and bounded terminal hydroxyl adjustments improve overlap without
-/// stretching bonds. Unresolved crowding/crossings remain diagnostic;
+/// blocks use polygon, macrocycle, or supported bridge-path constraints. Whole-branch
+/// transforms, terminal hydroxyl adjustments and bounded projected refinement
+/// improve overlap with unit-bond constraints. Unresolved crowding/crossings remain diagnostic;
 /// this is not a global optimum or label-collision-free guarantee.
 /// Aromatic input uses a detached, bounded C/N/O/S Kekulé representation shared
 /// with depiction. This does not perceive aromaticity or modify input facts.
@@ -205,6 +215,7 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
     || options.ring_search_budget == 0
     || options.stereo_budget == 0
     || (options.refinement_passes > 0 && options.refinement_budget == 0)
+    || !options.optimization.valid()
   {
     return Err(LayoutError::Options);
   }

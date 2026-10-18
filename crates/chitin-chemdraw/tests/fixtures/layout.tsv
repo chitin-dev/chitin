@@ -35,3 +35,11 @@ macrocycle_trans	C/1=C\CCCCCCCCCC1	1
 macrocycle_cis	C/1=C/CCCCCCCCCC1	1
 macrocycle_exocyclic_reference	F/C1=C(/Cl)CCCCCCCCCC1	1
 macrocycle_substituted	OC1CCCCCCCCCCC1N	1
+macrocycle_thirteen	C1CCCCCCCCCCCC1	1
+macrocycle_fifteen	C1CCCCCCCCCCCCCC1	1
+macrocycle_seventeen	C1CCCCCCCCCCCCCCCC1	1
+macrocycle_odd_trans	C/1=C\CCCCCCCCCCC1	1
+macrocycle_three_doubles	C/1=C\CC/C=C/CC/C=C\CCCCC1	1
+macrocycle_odd_fused	C1CCCCCCCCCCC2CCCCC12	2
+macrocycle_even_fused	C1CCCCCCCCCC2CCCCC12	2
+macrocycle_fused_shared_stereo	C1CCCCCCCCCC/C2CCCC\C1=2	2

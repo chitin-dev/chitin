@@ -30,6 +30,15 @@ smiles:
   - 'c1ccc2[nH]ccc2c1'  # aromatic_indole
   - 'C1CCC2(CC1)CCCC2'  # spiro
   - 'CC1CC2COC(C1)O2'  # asymmetric_bridge
+  # Even macrocycles use closed lattice/strip candidates with exact unit edges.
+  - 'C1CCCCCCCCCCC1'  # 12-membered macrocycle
+  - 'C1CCCCCCCCCCCCC1'  # 14-membered macrocycle
+  - 'C1CCCCCCCCCCCCCCC1'  # 16-membered macrocycle
+  - 'C1CCCCCCCCCCCCCCCCC1'  # 18-membered macrocycle
+  # Odd macrocycles use nonlattice end-cap candidates with exact unit edges.
+  - 'C1CCCCCCCCCCCC1'  # 13-membered macrocycle
+  - 'C1CCCCCCCCCCCCCC1'  # 15-membered macrocycle
+  - 'C1CCCCCCCCCCCCCCCC1'  # 17-membered macrocycle
   # Combined ring and stereochemical layouts.
   - 'CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)Cc3ccccc3)C(=O)O)C'  # penicillin
   - 'C/1=C/CCCCCC1'  # cyclic_cis

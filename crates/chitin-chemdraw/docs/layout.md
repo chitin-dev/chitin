@@ -55,20 +55,30 @@ need nonregular geometry, alternative face decompositions, or more general
 constrained embedding. Such inputs can still be unsupported; no geometric
 success is claimed solely because a cycle basis was found.
 
-## Simple even macrocycles
+## Macrocycle candidates
 
-An independent unicyclic block with an even size of at least 12 uses a separate
+An independent unicyclic block of at least 12 atoms uses a separate
 outline model. It is not installed as a nonregular face inside the rigid fused
-polygon solver. Odd macrocycles and small rings retain their existing regular
-polygon model; linked or spiro-connected blocks retain separate ownership.
+polygon solver. Small rings retain their existing regular polygon model;
+linked or spiro-connected blocks retain separate ownership.
 
-Candidate boundaries come from compact hexagonal-cell growth and a guaranteed
+Even-size candidate boundaries start with compact hexagonal-cell growth and a guaranteed
 strip construction, capped by a three-cell triangle for sizes divisible by
 four. Shared integer edges cancel before tracing one simple closed perimeter.
 Every retained edge is unit length: there is no fitted closing edge, omitted
 vertex, odd-corner shortcut, or spring-length tolerance. Compact growth may stop
 short of its requested perimeter; the strip construction still supplies a
 complete exact-size candidate. Holes, pinches and extra loops are rejected.
+
+Nonlattice candidates use a regular five- or seven-sided end cap for odd sizes,
+and a six- or eight-sided cap to diversify even rings. Attaching a hexagon along
+one boundary edge replaces that edge with five unit edges, adding four vertices.
+The old endpoints are retained exactly; no graph edge or atom is invented.
+Straight and alternating extension sequences supply different turn patterns.
+Every complete walk is checked for finite unit edges (including closure), visible
+nonacute bends, crossings, collinear overlaps, tangencies and a 0.25-unit
+nonincident-edge clearance. The end-cap families have occupied bond angles
+between 105 and 135 degrees. They do not use a near-linear odd-corner shortcut.
 
 Each boundary is tested in both traversal directions at every cyclic offset.
 Annotated ring double bonds are hard filters, with exocyclic references converted
@@ -79,7 +89,9 @@ solver for all physically possible cyclic configurations.
 
 Scoring considers component-local center clearance and penalizes external
 attachments assigned to concave corners. Attachment headings use the free
-120-degree sector between ring rays, not a convex-only radial approximation.
+sector opposite the sum of the two ring rays, not a convex-only radial approximation.
+It is exactly the free 120-degree sector at ordinary lattice corners; nonregular
+cap corners retain their actual ring angles and bisect the remaining sector.
 At a concave center this slot can point into the global ring interior; using
 the topological exterior there would make 60-degree substituent angles and
 can invert an exocyclic stereo reference. Remaining crowding is still diagnosed.
@@ -89,6 +101,31 @@ rotations are compared when entering an anchored block. Construction, cyclic
 assignment, constraint checks, snapshots and scoring consume the existing shared
 ring-search allowance. Growth and candidate evaluation can be quadratic (with
 ordered-map overhead); exhaustion returns an error without partial geometry.
+
+## A macrocycle with one fused small face
+
+Exactly two selected faces, one of size at least 12 and one of size 3–8,
+dispatch to a separate atomic block model. The large face streams full candidate
+poses; the small regular polygon is assembled on the common unit edge. The
+local interior side follows polygon winding and directed boundary order, not
+the centroid of a possibly concave macrocycle. Interior containment and all
+nonincident block edge pairs reject overlapping faces, crossings and tangencies.
+
+Source stereo referencing a vertex of the attached face is deferred until both
+faces exist. Such a reference is not a freely positioned substituent, so simply
+inverting a ring-neighbor side can be wrong at a concave junction. Constraints
+whose four reference/axis vertices are in the block are checked together before
+scoring. External references still pass through the required final stereo stage.
+If no candidate meets a known configuration, an explicit `DoubleBondStereo`
+failure remains; this does not classify the input as chemically invalid.
+
+Whole-block rigid placements preserve one fixed entry vertex in either face,
+including a shared junction, bit-for-bit. Two fixed vertices are unsupported by
+this model. Multiple small faces, two fused macrocycles, shared paths and cages
+still require more general embedding; they are not advertised as solved by this
+two-face construction. Cross-face validation can be quadratic per candidate;
+all scans and trials share the ring work allowance. There is no continuous
+relaxation or physical conformation search in this stage.
 
 ## Bicyclic bridge-path model
 
@@ -162,6 +199,69 @@ refinement candidates cannot invert them. Ring double-bond relations must be
 satisfied by the selected seed, including the macrocycle candidates above.
 Other extended stereochemistry remains unsupported.
 
+## Projected coordinate search
+
+`layout::optimization` owns a separate complete-coordinate solver. After discrete
+refinement, automatic placement invokes it for crowded components containing a
+nonbridge edge whose shortest alternate path has more than seven edges. A
+bounded BFS per cyclic edge detects short-cycle witnesses; their vertices stay
+fixed as existing small-ring templates. The standalone `optimize` entry point
+can also refine acyclic complete coordinates with explicit graph-local anchors.
+Neither path constructs missing coordinates or broadens ring seed support.
+
+Source bonds are unit-distance equations. Multiple-bond and supplied tetrahedral
+centers additionally constrain neighbor chord lengths and preserve nondegenerate
+ray orientation. At other centers, the original angle supplies a reference and
+a ±30-degree motion envelope. The lower angle bound is the smaller of the
+original angle and 60 degrees; the upper bound is the larger of the original
+angle and 150 degrees, intersected with that envelope. Existing acute/straight
+input is not made worse merely to escape a collision. Bounds are implemented
+as neighbor-chord intervals and projected with unit equations; rejecting active
+inequalities only after a gradient step would spuriously stall feasible descent.
+
+Each trial applies a bounded objective-gradient step and deterministic sequential
+distance projection, then scans all residuals. Unit-edge error at the acceptance
+boundary is at most `1e-9`; projection targets `1e-10`. Explicit anchors and
+short-ring template pins retain exact original points. Failed or nonconverged
+projection is a discarded scratch trial, never an approximately closed output.
+Angle magnitudes, protected orientations, coordinate range and every supplied
+double relation are checked again before scoring. No graph facts are changed.
+
+The old and new stages share `layout::quality` for geometry score and diagnostic
+contacts. Analytical gradients include atom repulsion and atom/edge clearance;
+bounded soft-angle terms prefer the initial projection. Proper crossings also
+have a depth term, because their discrete count alone has no descent direction.
+Backtracking requires a strictly lower combined objective and no crossing pair
+outside the initial set. Private intermediate states may temporarily have a
+worse geometry-only score; the separately retained publishable best must satisfy
+all constraints and a shared geometry score no greater than at entry. Exhaustion
+or stagnation returns that best, including the unchanged original if appropriate.
+This is not a guarantee of finding a feasible uncrossing path or a global optimum.
+
+The default allowance is 64 iterations per component, up to 256 projection
+sweeps per backtracking trial, and 1,000,000 shared work units. Short-cycle search,
+angle/chord preparation, proposal generation, projection scans, validation,
+gradients, and candidate scoring consume this allowance. Mandatory topology,
+input validation, and initial/final diagnostic inspection are outside search
+work and bounded by the input atom limit. Initial integer/aromatic representation
+validation uses the existing domain contract. The initial gradient implementation
+scans atom pairs and atom/edge pairs quadratically; it is budgeted, not described
+as globally linear. Metadata allocation and ordered-map operations add overhead.
+
+Automatic `optimization.iterations = 0` or `optimization.work_budget = 0` disables
+this stage; `refinement_passes = 0` still disables all optional stages. Its work
+allowance is independent of the discrete budget and cannot consume the reserved
+hydroxyl allowance. `OptimizationBudgetExhausted` differs from discrete
+`RefinementBudgetExhausted`; neither implies a truncated result. Reaching the
+iteration limit or a stationary projected step is not certified convergence.
+
+The independent API additionally checks exact live-ID coverage, unknown anchors,
+finite guarded coordinate ranges, unit source edges, and initial double-bond
+configuration. Disconnected components are scored independently without pose
+reorientation or repacking; the caller retains responsibility for interfragment
+spacing. Explicit rejection of an invalid initial state is distinct from a
+valid but unhelpful or budget-limited optimization result.
+
 ## Quality and resource contract
 
 Cost combines close centers, atom-to-nonincident-edge clearance, and proper
@@ -171,7 +271,7 @@ collision model: labels are constructed later with `DepictOptions` and real font
 metrics. Passing layout quality checks is not a promise of collision-free labels.
 
 `LayoutOptions::refinement_passes` bounds passes per search stage (default 4;
-0 disables both whole-branch and terminal search).
+0 disables whole-branch, terminal and projected search).
 `refinement_budget` bounds candidate traversal/indexing/geometric work across all
 fragments (default 1,000,000). Initial/final quality inspection and seed generation
 are outside that search budget; `max_atoms` bounds the input independently.

@@ -5,6 +5,8 @@
 //! primitives. [`svg`] exports that scene without reinterpreting chemistry.
 //! Existing coordinates may replace automatic layout. No stage owns selection,
 //! windows, command history, or mutable chemical property caches.
+//! [`layout::optimization`] refines complete unit coordinates with explicit pins
+//! and a finite work allowance; it is a drawing optimizer, not a force field.
 //!
 //! # Examples
 //! ```

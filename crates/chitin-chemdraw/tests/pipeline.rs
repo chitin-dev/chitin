@@ -476,7 +476,7 @@ fn irreducible_local_crowding_should_remain_a_visible_diagnostic() -> TestResult
       layout::LayoutDiagnostic::CrossingBonds { a, b } => {
         assert!(graph.bond(*a).is_some() && graph.bond(*b).is_some());
       }
-      layout::LayoutDiagnostic::RefinementBudgetExhausted => {}
+      layout::LayoutDiagnostic::RefinementBudgetExhausted | layout::LayoutDiagnostic::OptimizationBudgetExhausted => {}
     }
   }
   Ok(())

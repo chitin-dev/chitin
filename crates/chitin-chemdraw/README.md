@@ -41,16 +41,25 @@ This supports linear/angular six-membered systems and compatible mixed five-/
 six-membered systems. Nonmanifold face incidence and incompatible regular-polygon
 closures still return `LayoutError::RingSystem`.
 
-Simple even macrocycles of at least 12 atoms use closed hexagonal-lattice
-outlines rather than nearly straight regular-polygon corners. Compact growth
-and a strip/end-cap construction supply candidates; cyclic offsets and reversed
-traversals are checked against every annotated ring double bond. Unsatisfied
-configurations are rejected, never traded for a lower crowding score. External
-references use the free 120-degree attachment sector, including at concave
-corners. Every edge remains unit length and existing entry anchors stay fixed.
-Odd macrocycles retain the regular-polygon model; this stage does not provide
-general fused-macrocycle or cage embedding, nor guarantee all cyclic stereo is
-drawable. Candidate construction and scoring share the ring-search budget.
+Simple macrocycles of at least 12 atoms use closed nonregular outlines rather
+than nearly straight regular-polygon corners. Even rings retain their lattice
+candidates first. Five-/seven-sided end caps and hexagonal extensions provide
+odd sizes; six-/eight-sided caps diversify even turn patterns. The cap faces
+are temporary construction geometry, not additional chemical rings or bonds.
+All edges stay unit length, with exact closure and visible bends. Cyclic offsets
+and reversed traversals are checked against all annotated ring double bonds
+together. Unsatisfied configurations are rejected, never traded for a lower
+crowding score. External attachments use the free sector opposite the two ring
+rays, including at concave corners.
+
+A separate block model supports one macrocycle edge-fused to one 3–8-membered
+regular face. It checks actual local interior sides, polygon overlap, skeleton
+crossings, and fully known source stereo references before committing the block.
+One entry anchor in either face is retained exactly. Multiple fused caps,
+macrocycle-to-macrocycle fusion, general cage embedding, and all possible cyclic
+stereo configurations are not covered by this candidate family. Construction,
+validation and scoring share the ring-search budget; exhaustion never publishes
+a partial ring. Small rings below 12 retain their regular-polygon model.
 
 Bicyclic bridged blocks use a separate path model: two degree-three bridgeheads
 joined by three internally disjoint paths. A uniquely shortest path lies inside
@@ -66,9 +75,9 @@ three ring neighbors does not shift a methyl back onto a ring bond. Regression
 tests cover both steroid junction methyls and entered cyclic blocks with an
 external parent, before and after refinement.
 
-Final hydroxyl clearance rotates only terminal neutral O on saturated carbon,
+Discrete hydroxyl clearance rotates only terminal neutral O on saturated carbon,
 within ±30° of its initial direction and with no new proper bond crossings.
-Ring geometry, C–O length and source chemical facts remain fixed. This stage
+Ring geometry, C–O length and source chemical facts remain fixed during this stage. It
 has reserved work inside the existing refinement budget, so a large skeleton's
 branch search cannot starve it. Carbonyl/aromatic hosts and ring oxygens are not
 subject to this angle adjustment. Actual OH-label separation is regression-tested
@@ -80,10 +89,63 @@ all components (2,000,000 units by default). Exhaustion returns
 This is independent of `refinement_budget`, whose exhaustion retains a complete
 best-so-far layout with a diagnostic. See [layout constraints](docs/layout.md).
 
-The algorithm is not a force-directed simulation, canonicalization algorithm,
+The algorithm is not a physical force-field simulation, canonicalization algorithm,
 template engine, or global collision-free optimizer. It returns diagnostics for
 remaining crowding or crossings. Caller-supplied `Layout2d` coordinates can
 bypass automatic layout restrictions.
+
+### Projected coordinate refinement
+
+After the discrete stages, crowded components with a cycle longer than eight
+edges can use bounded projected descent. Ring closure and unit source bonds are
+hard constraints (`optimization::BOND_TOLERANCE = 1e-9`); configured source
+double-bond relations and explicit pins cannot be inverted or moved. Existing
+small-cycle templates (3–8 edges) remain fixed. Multiple-bond centers and supplied
+tetrahedral centers retain their local angle geometry. Other angles may flex by
+at most 30 degrees from the stage's initial snapshot, with projected lower/upper
+bounds preventing further needle corners or flattening. These are drawing
+constraints, not equilibrium molecular bond angles.
+
+The shared geometry score measures atom crowding, atom/edge clearance and proper
+crossings. Soft angle and crossing-depth terms guide search; only a completely
+validated improvement with no new crossing pair and a nonworse shared geometry
+score can replace the input. There is no force-field energy, chemistry mutation,
+new ring construction, or exact text-envelope optimization in this stage.
+
+`LayoutOptions::optimization` controls its separate iteration, projection, and
+work limits. Zero `iterations` or `work_budget` disables projected search;
+`refinement_passes = 0` disables all optional automatic refinement as before.
+Exhaustion adds `OptimizationBudgetExhausted` while retaining the best complete
+result. The default is 64 iterations, 256 projection sweeps per trial, and
+1,000,000 shared search work units.
+
+For existing coordinates, call `layout::optimization::optimize` directly:
+
+```rust
+use std::collections::BTreeSet;
+use chitin_chemdraw::layout::optimization::{optimize, OptimizationOptions};
+# fn refine(graph: &chitin_chem::MolecularGraph, initial: &chitin_chemdraw::layout::Layout2d)
+#   -> Result<(), Box<dyn std::error::Error>> {
+let anchors = BTreeSet::new(); // Add graph-local AtomIds to fix exact positions.
+let result = optimize(graph, initial, &anchors, &OptimizationOptions::default())?;
+let coordinates = result.layout;
+let report = result.report;
+# let _ = (coordinates, report);
+# Ok(()) }
+```
+
+The independent API requires exact live-ID coverage and unit initial bonds. It
+does not orient or repack components and reports geometry costs, iterations, work
+usage and budget exhaustion. Invalid initial double configurations are rejected,
+not silently repaired. Its `max_atoms` bounds independent input validation;
+automatic generation still uses `LayoutOptions::max_atoms`.
+
+Inspect authored before/after examples with:
+
+```sh
+cargo run -p chitin-chemdraw --release --example optimize_coordinates -- \
+  .temp/chemdraw-preview/projected-refinement
+```
 
 ## Depiction
 
@@ -101,7 +163,7 @@ The default depiction supports:
 
 Unknown or unsupported chemical facts are rejected instead of silently
 converted. General aromaticity perception, further aromatic elements/charges,
-double-bond/extended stereochemistry, radicals, complex text shaping, and full sanitization require
+extended stereochemistry, radicals, complex text shaping, and full sanitization require
 future domain support in `chitin-chem`. Read/write coverage is broader than
 drawing coverage; see the [compatibility matrix](../chitin-chem/docs/smiles-compatibility.md).
 
@@ -316,7 +378,7 @@ Paired slash/backslash markers constrain relative double-bond reference sides.
 Automatic layout reflects complete acyclic sides without stretching bonds;
 optional overlap refinement cannot invert these constraints. Cyclic geometry
 is accepted only if the ring seed satisfies the supplied configuration;
-supported even macrocycles search nonregular candidates for cis/trans relations.
+supported macrocycles search nonregular candidates for cis/trans relations.
 Other cyclic mismatches still return an error. `LayoutOptions::stereo_budget` bounds
 required stereo work independently of optional quality refinement. Depiction
 rejects caller coordinates that flatten or invert an annotated double bond.
@@ -383,7 +445,8 @@ cargo fmt --all --check
 
 The fixed corpus in `tests/fixtures/layout.tsv` covers linear/angular fused rings,
 mixed five-/six-membered rings, acid, ester, amide, nitrile, and substituted fused
-systems. It is shared by geometry tests and the visual export example:
+systems, as well as odd/even macrocycles, combined double-bond constraints and
+single-cap fused macrocycles. It is shared by geometry tests and the visual export example:
 
 ```sh
 cargo run -p chitin-chemdraw --example layout_regressions -- \

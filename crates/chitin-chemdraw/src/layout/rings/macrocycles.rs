@@ -1,4 +1,4 @@
-//! Closed unit-edge outlines for isolated even macrocyclic blocks.
+//! Closed unit-edge outlines for isolated macrocyclic blocks.
 //!
 //! Hexagonal cell boundaries provide visible chain bends without breaking ring
 //! closure. Cyclic index offsets and traversal directions are candidates, not
@@ -13,6 +13,8 @@ use chitin_chem::{AtomId, BondId, DoubleBondRelation, MolecularGraph};
 
 use super::{Error, Point, Work, score, side};
 use crate::stereo_geometry::relation;
+
+mod caps;
 
 /// Integer axial cell coordinates and doubled lattice vertex coordinates.
 type Pair = (i32, i32);
@@ -48,12 +50,27 @@ impl Macrocycle {
   /// - `work`: shared allowance for topology and stereo inspection.
   ///
   /// # Returns
-  /// An independent model for one even, unicyclic block of at least 12 atoms.
+  /// An independent model for one unicyclic block of at least 12 atoms.
   /// Exocyclic stereo references invert the corresponding ring-neighbor side.
   ///
   /// # Errors
   /// Propagates graph inconsistencies and work exhaustion before storing geometry.
   pub(super) fn new(graph: &MolecularGraph, face: &[usize], ids: &[AtomId], work: &mut Work) -> Result<Self, Error> {
+    Self::with_deferred(graph, face, ids, &BTreeSet::new(), work)
+  }
+
+  /// Defers references in an attached face until the complete fused block exists.
+  ///
+  /// A neighboring face is not a freely placed substituent: its reference can
+  /// lie on either side at a concave junction. Its actual positions must be
+  /// checked by the fused owner, not inferred by inverting a ring-neighbor side.
+  pub(super) fn with_deferred(
+    graph: &MolecularGraph,
+    face: &[usize],
+    ids: &[AtomId],
+    deferred: &BTreeSet<AtomId>,
+    work: &mut Work,
+  ) -> Result<Self, Error> {
     work.charge(face.len())?;
     let slots: BTreeMap<_, _> = face.iter().enumerate().map(|(i, &row)| (ids[row], i)).collect();
     let mut attachments = Vec::with_capacity(face.len());
@@ -78,6 +95,9 @@ impl Macrocycle {
         continue;
       };
       let [source_a, source_b] = stereo.references();
+      if deferred.contains(&source_a) || deferred.contains(&source_b) {
+        continue;
+      }
       let invert = (source_a != ids[face[ra]]) != (source_b != ids[face[rb]]);
       let expected = match (stereo.relation(), invert) {
         (DoubleBondRelation::SameSide, false) | (DoubleBondRelation::OppositeSides, true) => {
@@ -126,6 +146,50 @@ impl Macrocycle {
     work: &mut Work,
     source: AtomId,
   ) -> Result<Vec<(usize, Point, f64)>, Error> {
+    let mut best = None;
+    let mut best_cost = f64::INFINITY;
+    self.visit(old, heading, work, source, |candidate, work| {
+      work.charge(old.len() + candidate.len())?;
+      let mut points = old.to_vec();
+      for &(row, point, _) in candidate {
+        points[row] = Some(point);
+      }
+      let cost = score(&self.face, &points, old, component, work)? + self.attachment_cost(candidate);
+      if cost + 1e-10 < best_cost {
+        work.charge(candidate.len())?;
+        best_cost = cost;
+        best = Some(candidate.to_vec());
+      }
+      Ok(())
+    })?;
+    best.ok_or(Error::RingSystem {
+      atom: source,
+      cycles: 1,
+    })
+  }
+
+  /// Streams complete rigid candidates to a consumer without retaining all poses.
+  ///
+  /// # Parameters
+  /// - `old`, `heading`: global known centers and optional entry direction.
+  /// - `work`, `source`: shared allowance and typed failure locator.
+  /// - `visit`: receives a temporary complete ring and the same work allowance.
+  ///
+  /// # Returns
+  /// Success after visiting every candidate satisfying local constraints. This
+  /// permits a fused owner to test another face before committing the block.
+  ///
+  /// # Errors
+  /// Rejects multiple anchors, exhausted work, or a constraint set for which no
+  /// complete candidate exists. Consumer failures propagate unchanged.
+  pub(super) fn visit(
+    &self,
+    old: &[Option<Point>],
+    heading: f64,
+    work: &mut Work,
+    source: AtomId,
+    mut visit: impl FnMut(&[(usize, Point, f64)], &mut Work) -> Result<(), Error>,
+  ) -> Result<(), Error> {
     let n = self.len();
     work.charge(n)?;
     let anchors: Vec<_> = self
@@ -142,12 +206,10 @@ impl Macrocycle {
       });
     }
     let anchor = anchors.first().copied();
-    let mut best = None;
-    let mut best_cost = f64::INFINITY;
+    let mut emitted = false;
     let mut failed_bond = None;
     for outline in outlines(n, work)? {
       for reverse in [false, true] {
-        let winding = if reverse { -1. } else { 1. };
         for offset in 0..n {
           work.charge(n + self.requirements.len())?;
           let local: Vec<_> = (0..n)
@@ -161,10 +223,6 @@ impl Macrocycle {
             failed_bond = Some(failed.bond);
             continue;
           }
-          let inward: usize = (0..n)
-            .filter(|&i| winding * side(local[(i + n - 1) % n], local[i], local[(i + 1) % n]) < 0.)
-            .map(|i| self.attachments[i])
-            .sum();
           let attachment_heading = |i: usize| {
             let prev = local[(i + n - 1) % n];
             let next = local[(i + 1) % n];
@@ -180,43 +238,55 @@ impl Macrocycle {
           // entry heading points away from it.
           let base = anchor.map_or(0., |i| heading + PI - attachment_heading(i));
           for rotation in 0..if anchor.is_some() { 6 } else { 1 } {
-            work.charge(old.len() + n)?;
+            work.charge(n)?;
             let angle = base + rotation as f64 * PI / 3.;
             let (sin, cos) = angle.sin_cos();
-            let mut points = old.to_vec();
-            for (i, &row) in self.face.iter().enumerate() {
-              let (x, y) = (local[i].x - origin.x, local[i].y - origin.y);
-              points[row] = Some(old[row].unwrap_or(target.translated(x * cos - y * sin, x * sin + y * cos)));
-            }
-            let cost = score(&self.face, &points, old, component, work)? + inward as f64 * 0.1;
-            if cost + 1e-10 < best_cost {
-              best_cost = cost;
-              best = Some(
-                self
-                  .face
-                  .iter()
-                  .enumerate()
-                  .map(|(i, &row)| {
-                    points[row]
-                      .map(|point| (row, point, attachment_heading(i) + angle))
-                      .ok_or(Error::Invariant(source))
-                  })
-                  .collect::<Result<Vec<_>, _>>()?,
-              );
-            }
+            let points: Vec<_> = self
+              .face
+              .iter()
+              .enumerate()
+              .map(|(i, &row)| {
+                let (x, y) = (local[i].x - origin.x, local[i].y - origin.y);
+                (
+                  row,
+                  old[row].unwrap_or(target.translated(x * cos - y * sin, x * sin + y * cos)),
+                  attachment_heading(i) + angle,
+                )
+              })
+              .collect();
+            visit(&points, work)?;
+            emitted = true;
           }
         }
       }
     }
-    best.ok_or_else(|| {
-      failed_bond.map_or(
+    if emitted {
+      Ok(())
+    } else {
+      Err(failed_bond.map_or(
         Error::RingSystem {
           atom: source,
           cycles: 1,
         },
         Error::DoubleBondStereo,
-      )
-    })
+      ))
+    }
+  }
+
+  /// Penalizes attachment-bearing concave corners independently of rigid pose.
+  fn attachment_cost(&self, points: &[(usize, Point, f64)]) -> f64 {
+    let n = points.len();
+    let area: f64 = (0..n)
+      .map(|i| {
+        let a = points[i].1;
+        let b = points[(i + 1) % n].1;
+        a.x * b.y - a.y * b.x
+      })
+      .sum();
+    (0..n)
+      .filter(|&i| area * side(points[(i + n - 1) % n].1, points[i].1, points[(i + 1) % n].1) < 0.)
+      .map(|i| self.attachments[i] as f64 * 0.1)
+      .sum()
   }
 }
 
@@ -228,6 +298,9 @@ impl Macrocycle {
 /// guarantees a second construction for every supported even size. All
 /// construction visits consume ring work.
 fn outlines(n: usize, work: &mut Work) -> Result<Vec<Vec<Point>>, Error> {
+  if !n.is_multiple_of(2) {
+    return caps::generate(n, work);
+  }
   let mut cells = BTreeSet::from([(0, 0)]);
   let mut perimeter = 6;
   while perimeter < n {
@@ -276,6 +349,9 @@ fn outlines(n: usize, work: &mut Work) -> Result<Vec<Vec<Point>>, Error> {
   {
     result.push(points);
   }
+  // Keep lattice candidates first so unconstrained even rings retain their
+  // established geometry. End caps add different turn patterns for stereo.
+  result.extend(caps::generate(n, work)?);
   Ok(result)
 }
 
