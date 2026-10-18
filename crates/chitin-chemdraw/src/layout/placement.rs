@@ -141,6 +141,8 @@ fn place(node: usize, point: Point, positions: &mut [Option<Point>], grid: &mut 
 /// # Parameters
 /// - `children`: unplaced neighbors, in deterministic adjacency order.
 /// - `grid`: already fixed centers in this component only.
+/// - `rings`: cyclic membership distinguishing fused neighbors from an external
+///   parent; neighbor count alone cannot establish exterior-sector occupancy.
 ///
 /// # Returns
 /// The lowest-cost candidate among at most two mirror assignments, with ties retaining
@@ -155,6 +157,7 @@ fn candidates(
   grid: &Grid,
   branch: &Branch,
   children: &[(usize, BondOrder)],
+  rings: &Rings,
 ) -> Result<Vec<(usize, Point, f64)>, Error> {
   let origin = position(positions, topology, branch.node)?;
   let row = &topology.neighbors[branch.node];
@@ -162,8 +165,11 @@ fn candidates(
     && (row.iter().any(|&(_, order)| order == BondOrder::Triple)
       || row.iter().all(|&(_, order)| order == BondOrder::Double));
   let offsets: Vec<_> = if branch.radial {
-    if children.len() == 1 && row.len() - children.len() >= 3 {
-      // An entered ring may already have a parent in its exterior sector.
+    let external_parent = row
+      .iter()
+      .any(|&(node, _)| positions[node].is_some() && !rings.shares_system(branch.node, node));
+    if children.len() == 1 && row.len() - children.len() >= 3 && external_parent {
+      // An entered ring already has an external parent in its exterior sector.
       // Leave that occupied direction fixed and try either adjacent outer slot.
       vec![PI / 3.]
     } else {
@@ -282,7 +288,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
       if children.is_empty() {
         continue;
       }
-      for (node, point, heading) in candidates(&topology, &positions, &grid, &branch, &children)? {
+      for (node, point, heading) in candidates(&topology, &positions, &grid, &branch, &children, &rings)? {
         place(node, point, &mut positions, &mut grid)?;
         pending.push_back(Branch {
           node,

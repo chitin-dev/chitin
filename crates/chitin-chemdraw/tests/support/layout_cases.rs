@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 pub struct Case {
   /// Safe, unique file stem for generated visual artifacts.
   pub name: &'static str,
-  /// Explicit integer-bond notation, without implied aromatic parsing support.
+  /// Molecular notation; aromatic input uses the shared domain representation model.
   pub source: &'static str,
   /// E - V + component count, not an aromatic ring count.
   pub rank: usize,

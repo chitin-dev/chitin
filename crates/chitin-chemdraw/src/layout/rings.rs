@@ -132,6 +132,17 @@ impl Rings {
     self.systems.len()
   }
 
+  /// Tests whether adjacent vertices share a rigid cyclic block.
+  ///
+  /// For an existing graph edge, common block membership distinguishes a ring
+  /// neighbor from an external bridge attachment. A fused junction can have
+  /// three ring neighbors without any parent occupying its exterior sector.
+  pub(super) fn shares_system(&self, a: usize, b: usize) -> bool {
+    self.membership[a]
+      .iter()
+      .any(|system| self.membership[b].contains(system))
+  }
+
   /// Embeds a complete fused system before publishing any of its new coordinates.
   ///
   /// # Parameters

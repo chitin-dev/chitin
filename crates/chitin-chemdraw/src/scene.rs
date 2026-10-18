@@ -40,6 +40,9 @@ impl Color {
 /// Optional link to chemical input; handles remain scoped to that input graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
+  /// A depiction-only attached H and its bond, identified by its host atom.
+  /// No atom/bond handle is allocated and no source graph vertex is implied.
+  AttachedHydrogen(AtomId),
   /// An atom label or annotation.
   Atom(AtomId),
   /// A bond stroke; multiple strokes may share this source.
@@ -58,6 +61,17 @@ pub struct Line {
   /// Stroke color.
   pub color: Color,
   /// Chemical origin, absent for generic decorations.
+  pub source: Option<Source>,
+}
+
+/// A filled closed polygon in y-down drawing units, with no implicit stroke.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Polygon {
+  /// At least three finite vertices in boundary order; closure is implicit.
+  pub points: Vec<Point>,
+  /// Fill color with straight alpha.
+  pub color: Color,
+  /// Chemical source, absent for generic decorations.
   pub source: Option<Source>,
 }
 
@@ -103,6 +117,8 @@ impl Text {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Primitive {
+  /// A filled closed boundary, such as a solid stereochemical wedge.
+  Polygon(Polygon),
   /// A stroked segment.
   Line(Line),
   /// A baseline-positioned glyph run.
@@ -152,6 +168,12 @@ impl Drawing {
     let mut points = Vec::new();
     for (index, primitive) in primitives.iter().enumerate() {
       match primitive {
+        Primitive::Polygon(polygon) => {
+          if polygon.points.len() < 3 {
+            return Err(DrawingError::Dimensions(index));
+          }
+          points.extend(polygon.points.iter().copied());
+        }
         Primitive::Line(line) => {
           if !positive(line.width) {
             return Err(DrawingError::Dimensions(index));

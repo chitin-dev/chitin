@@ -14,6 +14,17 @@ use chitin_chem::{Atom, AtomId, BondId, BondOrder, Element, GraphError, Implicit
 use std::collections::BTreeMap;
 
 mod bonds;
+mod hydrogens;
+mod stereo;
+
+/// Display policy for one declared H on an annotated tetrahedral carbon.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChiralHydrogenMode {
+  /// Keep attached H skeletal and put the wedge on an existing graph bond.
+  Implicit,
+  /// Draw a separate H label and C–H wedge without adding graph entities.
+  Explicit,
+}
 
 /// Policy for obtaining label H counts; explicit H vertices are never collapsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +44,8 @@ pub struct DepictOptions {
   pub font_size: f64,
   /// Positive bond stroke width.
   pub stroke_width: f64,
+  /// Positive full width at the broad end of a tetrahedral wedge.
+  pub wedge_width: f64,
   /// Separation of adjacent double/triple strokes.
   pub bond_spacing: f64,
   /// Retained axis-length fraction for an auxiliary one-sided double stroke.
@@ -45,6 +58,9 @@ pub struct DepictOptions {
   pub foreground: Color,
   /// Explicit H-resolution model; no domain facts are overwritten.
   pub hydrogens: HydrogenMode,
+  /// Whether annotated carbon's declared H becomes a separate drawn ligand.
+  /// Explicit graph H vertices are unaffected and are never drawn twice.
+  pub chiral_hydrogens: ChiralHydrogenMode,
 }
 
 impl Default for DepictOptions {
@@ -54,12 +70,14 @@ impl Default for DepictOptions {
       bond_length: 48.,
       font_size: 48. * 11. / 30.,
       stroke_width: 1.6,
+      wedge_width: 48. * 0.14,
       bond_spacing: 48. * 0.17,
       short_bond_ratio: 0.8,
       font: FontFace::NotoSans,
       label_padding: 2.,
       foreground: Color::BLACK,
-      hydrogens: HydrogenMode::Infer(ValenceModel::MainGroupClosedShellV1),
+      hydrogens: HydrogenMode::Infer(ValenceModel::SmilesOrganicV1),
+      chiral_hydrogens: ChiralHydrogenMode::Implicit,
     }
   }
 }
@@ -67,6 +85,12 @@ impl Default for DepictOptions {
 /// Information that cannot be drawn faithfully by the current depiction profile.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DepictError {
+  /// The supplied local stereo cannot be shown unambiguously in these coordinates.
+  #[error("cannot depict tetrahedral configuration at atom {0}")]
+  Stereo(AtomId),
+  /// Supplied aromatic facts cannot be assigned by the restricted domain model.
+  #[error(transparent)]
+  Kekule(#[from] chitin_chem::perception::KekuleError),
   /// The scene font cannot represent the requested chemical label.
   #[error(transparent)]
   Font(#[from] FontError),
@@ -88,7 +112,7 @@ pub enum DepictError {
   /// H inference is not allowed or cannot be resolved by the selected model.
   #[error("cannot resolve label hydrogens for atom {0}")]
   Hydrogens(AtomId),
-  /// Unknown/aromatic orders require later chemical representation support.
+  /// An unknown order cannot be drawn without inventing bond semantics.
   #[error("unsupported bond order at bond {0}")]
   Bond(BondId),
   /// Endpoints coincide or label envelopes leave no visible stroke.
@@ -313,8 +337,12 @@ fn clip(start: Point, end: Point, bounds: Option<LabelBounds>) -> Option<Point> 
 /// Bonds followed by labels in painter's order, with source IDs on every stroke
 /// and text run. Ordinary neutral skeletal carbons are suppressed except when
 /// isolated; isotope/charge/declared-H or bracket-state carbon stays labelled.
-/// Layout and molecular facts are not modified. No stereo/aromatic conventions
-/// are guessed, and explicit H vertices remain independently visible.
+/// Layout and molecular facts are not modified. Supported aromatic input uses
+/// the shared detached Kekulé model before drawing ordinary integer bonds.
+/// No stereo is guessed; explicit H vertices remain independently visible.
+/// `chiral_hydrogens` can display a declared H at an annotated carbon as a
+/// separate label and C–H wedge. These primitives use `Source::AttachedHydrogen`
+/// and do not allocate graph handles or change hydrogen counts.
 ///
 /// # Errors
 /// Rejects coordinate-coverage mismatch, unknown required facts, known radicals,
@@ -325,6 +353,7 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
     options.bond_length,
     options.font_size,
     options.stroke_width,
+    options.wedge_width,
     options.bond_spacing,
   ]
   .into_iter()
@@ -342,6 +371,8 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
       return Err(DepictError::UnexpectedPosition(id));
     }
   }
+  let resolved = crate::chemical::integer_bonds(graph)?;
+  let graph = resolved.as_ref();
   // Check representation before H inference so missing bond semantics do not
   // masquerade as an unrelated hydrogen-model failure.
   for (id, bond) in graph.bonds() {
@@ -363,6 +394,7 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
   };
   let mut labels = Vec::new();
   let mut envelopes = BTreeMap::new();
+  let expanded = hydrogens::centers(graph, options);
   for (id, atom) in graph.atoms() {
     let charge = atom.formal_charge().ok_or(DepictError::UnknownFacts(id))?;
     let declared = atom.declared_hydrogens().ok_or(DepictError::UnknownFacts(id))?;
@@ -372,9 +404,10 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
     let hidden = atom.element() == Element::Carbon
       && atom.isotope().is_none()
       && charge == 0
-      && declared == 0
-      && atom.unpaired_electrons() == Some(0)
-      && atom.implicit_hydrogen_policy() == ImplicitHydrogenPolicy::Infer
+      && ((declared == 0
+        && atom.unpaired_electrons() == Some(0)
+        && atom.implicit_hydrogen_policy() == ImplicitHydrogenPolicy::Infer)
+        || graph.tetrahedral(id).is_some())
       && graph.neighbors(id)?.len() != 0;
     if hidden {
       continue;
@@ -407,14 +440,19 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
         center: points[&id],
         hydrogen_left: neighbor_x > 1e-10,
       },
-      u16::from(declared) + u16::from(implicit),
+      u16::from(declared) + u16::from(implicit) - u16::from(expanded.contains(&id)),
       charge,
       options,
     )?;
     envelopes.insert(id, bounds);
   }
+  let attached = hydrogens::plan(graph, &points, &envelopes, &expanded, options)?;
   let mut primitives = Vec::new();
-  bonds::draw(graph, &points, &envelopes, options, &mut primitives)?;
+  bonds::draw(graph, &points, &envelopes, &expanded, options, &mut primitives)?;
+  for attached in attached {
+    primitives.extend(attached.wedge);
+    labels.push(Primitive::Text(attached.label));
+  }
   primitives.extend(labels);
   Ok(Drawing::new(primitives)?)
 }

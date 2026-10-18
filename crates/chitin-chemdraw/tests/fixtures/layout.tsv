@@ -7,3 +7,11 @@ ester	CC(=O)OC1=CC=CC=C1C(=O)O	1
 amide	CC(=O)NCC1=CC=CC=C1	1
 nitrile	CCC#N	0
 substituted_fused	CC(=O)OC1=CC=C2C=C3C=CC=CC3=CC2=C1	3
+aromatic_benzene	c1ccccc1	1
+aromatic_pyridine	n1ccccc1	1
+aromatic_pyrrole	[nH]1cccc1	1
+aromatic_furan	o1cccc1	1
+aromatic_thiophene	s1cccc1	1
+aromatic_naphthalene	c1ccc2ccccc2c1	2
+aromatic_indole	c1ccc2[nH]ccc2c1	2
+aromatic_ester	CC(=O)Oc1ccccc1C(=O)O	1

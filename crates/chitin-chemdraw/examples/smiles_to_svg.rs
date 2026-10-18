@@ -9,7 +9,18 @@ use chitin_chemdraw::{depict, layout, svg};
 /// Propagates parsing, unsupported topology/depiction, and file I/O failures.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut args = std::env::args().skip(1);
-  let source = args.next().ok_or("usage: smiles_to_svg '<SMILES>' <output.svg>")?;
+  let first = args
+    .next()
+    .ok_or("usage: smiles_to_svg [--explicit-chiral-hydrogens] '<SMILES>' <output.svg>")?;
+  let mut options = depict::DepictOptions::default();
+  let source = if first == "--explicit-chiral-hydrogens" {
+    options.chiral_hydrogens = depict::ChiralHydrogenMode::Explicit;
+    args.next().ok_or("missing SMILES after --explicit-chiral-hydrogens")?
+  } else if first.starts_with("--") {
+    return Err(format!("unknown option: {first}").into());
+  } else {
+    first
+  };
   let path = args.next().ok_or("missing output.svg path")?;
   if args.next().is_some() {
     return Err("too many arguments".into());
@@ -19,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   if !coordinates.diagnostics().is_empty() {
     eprintln!("layout diagnostics: {:?}", coordinates.diagnostics());
   }
-  let drawing = depict::depict(&graph, &coordinates, &depict::DepictOptions::default())?;
+  let drawing = depict::depict(&graph, &coordinates, &options)?;
   let output = svg::export(&drawing, &svg::SvgOptions::default())?;
   std::fs::write(path, output)?;
   Ok(())

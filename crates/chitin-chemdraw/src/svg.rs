@@ -162,6 +162,11 @@ pub fn export(drawing: &Drawing, options: &SvgOptions) -> Result<String, SvgErro
   }
   for primitive in drawing.primitives() {
     match primitive {
+      Primitive::Polygon(polygon) => output.push_str(&format!(
+        "<polygon points=\"{}\" fill=\"{}\" fill-opacity=\"{}\"/>\n",
+        polygon.points.iter().map(|point| format!("{},{}", point.x, point.y)).collect::<Vec<_>>().join(" "),
+        color(polygon.color), f64::from(polygon.color.alpha) / 255.
+      )),
       Primitive::Line(line) => output.push_str(&format!("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linecap=\"round\"/>\n",
         line.start.x, line.start.y, line.end.x, line.end.y, color(line.color), f64::from(line.color.alpha) / 255., line.width)),
       Primitive::Text(text) => output.push_str(&text_run(text)?),

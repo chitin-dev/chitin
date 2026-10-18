@@ -275,11 +275,17 @@ pub(super) fn draw(
   graph: &MolecularGraph,
   points: &BTreeMap<AtomId, Point>,
   labels: &BTreeMap<AtomId, LabelBounds>,
+  expanded_hydrogens: &BTreeSet<AtomId>,
   options: &DepictOptions,
   output: &mut Vec<Primitive>,
 ) -> Result<(), Error> {
   let context = Context::new(graph)?;
+  let marks = super::stereo::plan(graph, points, &context.bridges, expanded_hydrogens)?;
   for (id, bond) in graph.bonds() {
+    if let Some(mark) = marks.get(&id) {
+      super::stereo::draw(id, mark, points, labels, options, output)?;
+      continue;
+    }
     let [mut a, mut b] = bond.atoms();
     // Stable spatial orientation makes auxiliary-side tie breaks independent of
     // source edge orientation and handle allocation order.

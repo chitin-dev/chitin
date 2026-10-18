@@ -20,6 +20,8 @@
 
 #![deny(missing_docs)]
 
+mod chemical;
+
 pub mod depict;
 pub mod font;
 pub mod geometry;

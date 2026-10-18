@@ -43,6 +43,11 @@ the least crowded complete candidate. Existing anchors remain unchanged. Branch
 headings use exterior angular gaps outside all incident faces, not the radius
 of whichever face was placed last. Existing entry directions are refreshed too;
 an occupied exterior parent slot is not reused for a remaining substituent.
+The parent must actually lie outside the atom's cyclic block. A fused junction's
+three already embedded ring neighbors do not occupy that exterior slot: its
+remaining methyl uses the exterior bisector unchanged. Offsetting such a methyl
+by 60 degrees would fold it back onto a ring edge. An entered block with an
+actual external bridge parent retains the adjacent-slot allocation instead.
 
 These are rigid regular-polygon constraints. Some topologically fused graphs
 need nonregular geometry, alternative face decompositions, or more general
@@ -61,8 +66,10 @@ Trial coordinates always
 start from the original snapshot and must strictly improve component cost.
 This is a depiction heuristic, not a physical energy minimization.
 
-The current input model has no stereo constraints. When those become supported,
-reflection/rotation eligibility must respect them before enabling stereo layout.
+These are planar drawing transforms, not changes to supplied tetrahedral facts
+or 3D stereoisomer generation. Depiction computes wedge polarity from the final
+coordinates and unchanged ordered ligand descriptors, including reflections.
+Directional double-bond and other extended stereo remain unsupported.
 
 ## Quality and resource contract
 

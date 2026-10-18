@@ -151,7 +151,11 @@ fn unsupported_ring_blocks_and_unknown_orders_should_fail_explicitly_in_auto_lay
     graph.set_bond_order(edge, order)?;
     assert_eq!(
       layout::generate(&graph, &LayoutOptions::default()),
-      Err(LayoutError::Bond(edge))
+      Err(if order == BondOrder::Aromatic {
+        LayoutError::Kekule(chitin_chem::perception::KekuleError::Bond(edge))
+      } else {
+        LayoutError::Bond(edge)
+      })
     );
   }
   Ok(())
@@ -205,6 +209,7 @@ fn sparse_handles_should_survive_coordinates_and_primitive_provenance() -> TestR
     };
     match source {
       Some(Source::Atom(id)) => assert!(graph.atom(id).is_some()),
+      Some(Source::AttachedHydrogen(id)) => assert!(graph.atom(id).is_some()),
       Some(Source::Bond(id)) => assert!(graph.bond(id).is_some()),
       None => return Err("missing source".into()),
     }

@@ -41,6 +41,12 @@ This supports linear/angular six-membered systems and compatible mixed five-/
 six-membered systems. Bridged/shared-path blocks, nonmanifold face incidence,
 or incompatible regular-polygon closures still return `LayoutError::RingSystem`.
 
+Substituents at fused junctions use the exterior gap between ring neighbors.
+Only a separately connected, already placed parent occupies that gap; having
+three ring neighbors does not shift a methyl back onto a ring bond. Regression
+tests cover both steroid junction methyls and entered cyclic blocks with an
+external parent, before and after refinement.
+
 `LayoutOptions::ring_search_budget` bounds discovery and embedding work across
 all components (2,000,000 units by default). Exhaustion returns
 `RingSearchBudgetExceeded`, not an unsupported-topology error or partial result.
@@ -57,6 +63,8 @@ bypass automatic layout restrictions.
 The default depiction supports:
 
 - single, double, and triple bonds;
+- tetrahedral solid/hashed wedges with bond provenance and label clearance;
+- supported aromatic SMILES through shared, detached C/N/O/S Kekulé assignment;
 - skeletal-carbon suppression;
 - element, isotope, charge, and hydrogen labels;
 - explicit hydrogen vertices;
@@ -65,8 +73,10 @@ The default depiction supports:
 - bundled Noto Sans font metrics and vector glyph outlines.
 
 Unknown or unsupported chemical facts are rejected instead of silently
-converted. Aromaticity, stereochemistry, radicals, complex text shaping, and
-full sanitization require future domain support in `chitin-chem`.
+converted. General aromaticity perception, further aromatic elements/charges,
+double-bond/extended stereochemistry, radicals, complex text shaping, and full sanitization require
+future domain support in `chitin-chem`. Read/write coverage is broader than
+drawing coverage; see the [compatibility matrix](../chitin-chem/docs/smiles-compatibility.md).
 
 ## SVG export
 
@@ -84,7 +94,7 @@ SVG export consumes only the validated `Drawing` scene. It provides:
 use chitin_chem::io::smiles::read_smiles;
 use chitin_chemdraw::{depict, layout, svg};
 
-let graph = read_smiles("CC(=O)OC1=CC=CC=C1C(=O)O")?.into_graph();
+let graph = read_smiles("CC(=O)Oc1ccccc1C(=O)O")?.into_graph();
 let coordinates = layout::generate(&graph, &layout::LayoutOptions::default())?;
 let drawing = depict::depict(&graph, &coordinates, &depict::DepictOptions::default())?;
 let document = svg::export(&drawing, &svg::SvgOptions::default())?;
@@ -102,9 +112,58 @@ cargo run -p chitin-chemdraw --example smiles_to_svg -- \
 
 This is an initial depiction backend, not a complete cheminformatics toolkit.
 Automatic layout and depiction currently depend on the capabilities of
-`chitin-chem`; unsupported SMILES features such as aromatic and stereo syntax
-remain rejected. Future work includes bridged-ring layout, exact label-aware refinement, stereo-aware
+`chitin-chem`; unsupported SMILES features such as directional double-bond stereo remain
+rejected. Supplied aromatic facts are retained in the source graph; layout and
+depiction share a detached integer-bond adapter, not separate display guesses.
+Future work includes broader aromatic chemistry, bridged-ring layout, exact label-aware refinement, further stereo
 depiction, complex text shaping, and raster export.
+
+Tetrahedral `@`/`@@` and `@TH1`/`@TH2` preserve relative configuration through
+SMILES writing and reflected/rotated coordinates. Wedge direction is computed
+from final geometry, not directly from token spelling. Ordinary chiral carbon
+and its declared H remain skeletal by default; isotope/charge labels remain visible.
+`DepictOptions::wedge_width` controls the broad end (default 6.72 drawing units),
+independently of `stroke_width` (default 1.6). The default H model is now
+`SmilesOrganicV1`, including normal valences for nonaromatic sulfur/phosphorus;
+the older restricted V1 remains selectable. Degenerate stereo or centers without
+an independent nonshared wedge return typed errors; CIP labels, cage-stereo
+rendering, E/Z and extended classes are not claimed as supported.
+
+### Displaying chiral carbon hydrogens
+
+For fused rings or other structures where a visible H makes the configuration
+clearer, opt into depiction-only expansion:
+
+```rust
+use chitin_chemdraw::depict::{ChiralHydrogenMode, DepictOptions};
+
+let options = DepictOptions {
+  chiral_hydrogens: ChiralHydrogenMode::Explicit,
+  ..Default::default()
+};
+```
+
+Each annotated `[C@H]`/`[C@@H]` receives one H label and a C–H solid/hashed wedge,
+instead of another wedge on an existing bond. Four-explicit-ligand centers,
+unannotated CH groups, other elements, and actual `[H]`/`[2H]` vertices are not
+expanded. Host isotope/charge labels stay visible without repeating the H.
+Glyphs and marks use `Source::AttachedHydrogen(center)` rather than fictitious
+atom/bond IDs; the graph, serialized facts, and layout remain unchanged.
+
+Candidate directions derive from local bond vectors, with bounded label/bond
+clearance scoring and H-bond lengths of 0.55–0.85 times the normal bond length.
+Final coordinates determine wedge polarity; placement never changes molecular
+configuration. This local display policy does not repair crowded skeletons or
+guarantee a globally collision-free drawing. Degenerate coordinates or completely
+obscured C–H marks fail explicitly.
+
+The example exposes the same policy as an optional leading flag; existing
+two-positional-argument usage retains its original default:
+
+```sh
+cargo run -p chitin-chemdraw --example smiles_to_svg -- \
+  --explicit-chiral-hydrogens 'N[C@H](C)C(=O)O' alanine.svg
+```
 
 ## Validation
 

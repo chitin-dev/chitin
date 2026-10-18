@@ -69,6 +69,9 @@ pub enum LayoutDiagnostic {
 /// Layout cannot provide coordinates without dropping or inventing information.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutError {
+  /// Supplied aromatic facts cannot be assigned by the restricted domain model.
+  #[error(transparent)]
+  Kekule(#[from] chitin_chem::perception::KekuleError),
   /// Options are nonfinite, nonpositive, or have an invalid threshold/budget.
   #[error("invalid layout options")]
   Options,
@@ -83,7 +86,7 @@ pub enum LayoutError {
   /// Ring discovery or embedding exhausted the caller's explicit work budget.
   #[error("ring layout work budget exhausted")]
   RingSearchBudgetExceeded,
-  /// No aromatic/unknown bond semantics are supplied to this initial model.
+  /// An unknown order cannot provide integer-bond geometry.
   #[error("unsupported bond {0} in automatic layout")]
   Bond(BondId),
   /// This biconnected block needs a more general ring-system embedding model.
@@ -163,7 +166,7 @@ impl Layout2d {
 /// Generates unit-bond coordinates without changing topology or chemical facts.
 ///
 /// # Parameters
-/// - `graph`: possibly disconnected input with single/double/triple bonds.
+/// - `graph`: possibly disconnected input with integer or supported aromatic bonds.
 /// - `options`: fragment spacing, crowding threshold, and explicit resource budget.
 ///
 /// # Returns
@@ -172,6 +175,8 @@ impl Layout2d {
 /// blocks use regular polygons. Whole-branch transforms improve geometric overlap
 /// without stretching bonds. Unresolved crowding/crossings remain diagnostic;
 /// this is not a global optimum or label-collision-free guarantee.
+/// Aromatic input uses a detached, bounded C/N/O/S Kekulé representation shared
+/// with depiction. This does not perceive aromaticity or modify input facts.
 ///
 /// # Errors
 /// Rejects invalid options, exceeded budgets, unsupported bond labels, and any
@@ -197,5 +202,6 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
       limit: options.max_atoms,
     });
   }
-  placement::generate(graph, options)
+  let resolved = crate::chemical::integer_bonds(graph)?;
+  placement::generate(&resolved, options)
 }
