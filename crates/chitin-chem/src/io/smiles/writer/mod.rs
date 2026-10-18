@@ -7,6 +7,7 @@
 use crate::{AtomId, BondId, BondOrder, GraphError, MolecularGraph};
 
 mod atom;
+mod directional;
 mod traversal;
 
 /// A supplied atomic fact cannot survive the current strict SMILES round trip.

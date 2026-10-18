@@ -3,7 +3,10 @@
 //! Graph-local ligand identities belong to graph annotations, not atom values.
 //! A permutation changes the written winding, never the molecular configuration.
 
-use crate::{AtomId, GraphError};
+use crate::{AtomId, BondId, GraphError};
+
+mod double_bond;
+pub use double_bond::{DoubleBondRelation, DoubleBondStereo};
 
 /// One tetrahedral reference direction; virtual H is not a graph vertex.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -47,10 +50,16 @@ pub struct TetrahedralStereo {
   winding: TetrahedralWinding,
 }
 
-/// Rejected stereo references or unsupported tetrahedral coordination.
+/// Rejected stereo references, coordination, or shared directional constraints.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum StereoError {
+  /// Double-bond references are repeated, disconnected, or unsupported.
+  #[error("invalid double-bond stereochemistry at bond {0}")]
+  DoubleBond(BondId),
+  /// Relative directional constraints cannot be serialized consistently.
+  #[error("conflicting double-bond directional constraints at bond {0}")]
+  DirectionConflict(BondId),
   /// A reference list contains duplicates or is not a permutation of another.
   #[error("invalid tetrahedral ligand permutation")]
   Ligands,

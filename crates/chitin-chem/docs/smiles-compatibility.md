@@ -1,4 +1,4 @@
-# Molecular SMILES compatibility — revision 2
+# Molecular SMILES compatibility — revision 3
 
 This matrix describes executable capability, not complete format conformance
 or parity with another toolkit. The reader preserves facts; chemistry models
@@ -15,7 +15,8 @@ and drawing each have their own acceptance boundary. Tests are locally authored.
 | Explicit `-` between aromatic atoms | Preserved at edges and ring sites | Preserved | None in this stage |
 | Aromatic heterocycle `[nH]` | H declaration preserved | NH label; no extra inferred H | Broader heteroatom states |
 | Tetrahedral `@`, `@@`, `@TH1`, `@TH2` | Supported with ordered graph references | Solid/hashed wedges | CIP labels and stereogenicity perception |
-| `/`, `\` and other stereo classes | Explicit unsupported error | Not implemented | Double-bond and extended coordination models |
+| Paired directional bonds around noncumulated doubles | Relative references, conjugation, ring sites | Required acyclic side constraints; compatible ring seeds | General trans-ring embedding; CIP labels |
+| Partial/unpaired directions and extended stereo classes | Explicit unsupported error | Not implemented | Partial-state and extended coordination models |
 | Atom class/map `:n` inside brackets | Explicit unsupported error | Not implemented | Typed annotations independent of graph IDs |
 | Wildcard/query atoms, SMARTS | Explicit unsupported error | Not implemented | Separate atom identity/query model |
 | Reaction/CX extensions, record names | Explicit unsupported/syntax error | Not implemented | Separate records and selected dialects |
@@ -66,11 +67,49 @@ budget and use the detached integer graph for both stages.
   depiction paths, nitrogen H labels, typed failures, and bond source associations.
 - The shared drawing corpus and `layout_regressions` example export fixed SVGs
   for visual inspection, including the preexisting nonaromatic cases.
+  The corpus now has 30 successful examples: functional groups, isotope/charge,
+  ionic fragments, aromatic/fused/spiro/bridged rings, tetrahedral centers, and
+  directional alkenes. Eleven negative fixtures in the drawing crate's
+  `tests/fixtures/rejections.tsv` pin syntax, unsupported-feature, aromatic-model,
+  and layout-geometry failure boundaries separately. `tests/compatibility.rs`
+  also checks chemical read/write/read equivalence for every positive example.
+- `tests/double_stereo.rs` and the drawing counterpart verify reference-side
+  equivalence, independent writing, conjugation, ring directions, edit
+  invalidation, immutable inputs, required budgets, and geometric side tests.
 
 Visual agreement is assessed chemically, not pixel-for-pixel. Integer bond
 assignment must satisfy all participating atoms; glyphs and inner ring strokes
 must not be missing. Remaining layout/label collision limitations are not
 hidden by widening parser acceptance.
+
+## Directional double-bond boundary
+
+`DoubleBondStereo` stores axis endpoints, one explicit single-bond reference
+at each endpoint, and `DoubleBondRelation::{SameSide, OppositeSides}`. These
+are relative input facts, not CIP E/Z assignments or stereogenicity detection.
+Installation validates live double-bond endpoints, nonaromatic coordination
+with two or three explicit neighbors, zero or one declared H, and single bonds
+to every other neighbor. Cumulated doubles are rejected. Atom attributes are
+not sanitized and chemically identical substituents are not ranked.
+
+Lexical reversal reverses slash/backslash; reversing a ring closing site's marker
+therefore matters. Two marked references at one end must point to opposite
+sides. Conjugated double bonds share single-bond variables: the writer solves
+their parity constraints together instead of overwriting each other's markers.
+It rejects inconsistent constraint cycles and any chosen assignment that would
+accidentally specify an unannotated neighboring double. Alternative reference
+search is not yet implemented. A marker may be partial at one double but shared
+with a fully specified adjacent one. A marker consumed by no complete relation
+is explicitly unsupported, not silently discarded. The full format permits
+partial directional specification; this strict subset does not yet retain it.
+
+Endpoint atom replacement or incident structural edits clear the corresponding
+fact. Remote reference-atom attribute changes do not erase it; detached aromatic
+assignment consequently preserves adjacent nonaromatic double-bond stereo.
+Automatic layout applies required geometry before optional quality refinement.
+Reflections/rotations of complete molecules preserve relative sides. An
+incompatible cyclic seed or collinear reference returns a typed error rather
+than a chemically wrong drawing. This is not general trans-cycloalkene layout.
 
 ## Tetrahedral stereo boundary
 

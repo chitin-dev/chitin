@@ -268,7 +268,7 @@ fn malformed_lowercase_symbols_and_unsupported_stereo_should_still_fail() {
   for source in ["[cl]", "[si]", "se1cccc1", "as1ccccc1", "[nHH]", "c:1ccccc-1"] {
     assert!(read_smiles(source).is_err(), "{source}");
   }
-  for source in ["[nH:1]1cccc1", "N[C@AL1](C)C(=O)O", "C/C=C\\C"] {
+  for source in ["[nH:1]1cccc1", "N[C@AL1](C)C(=O)O", "C/C=C"] {
     assert!(
       matches!(
         read_smiles(source).map_err(|e| e.kind),

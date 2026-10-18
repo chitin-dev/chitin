@@ -70,7 +70,9 @@ The reader does not sanitize or modify inferred properties. Bracket atoms
 disable implicit H and retain unknown radical state: `[C]` is not ordinary
 `C`, and `[NH4+]` is accepted without claiming that its radical state has
 already been perceived. Aromatic input designations are preserved independently
-of perception. Unsupported directional/non-tetrahedral stereo, query/extension information
+of perception. Paired directional single bonds preserve relative double-bond
+reference sides, including conjugated and ring-site markers; these are not CIP
+E/Z assignments. Partial/unpaired directions, cumulated/extended stereo and query/extension information
 is rejected with a positioned error, never discarded. Record names/whitespace
 are not silently removed. Empty input represents an empty graph.
 

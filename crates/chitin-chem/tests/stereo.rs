@@ -141,7 +141,6 @@ fn unsupported_coordination_and_stereo_classes_should_not_be_ignored() {
     "[C@SP1](F)(Cl)(Br)I",
     "[C@TH3](F)(Cl)(Br)I",
     "[C@@@](F)(Cl)(Br)I",
-    "F/C=C/F",
   ] {
     assert!(read_smiles(source).is_err(), "{source}");
   }

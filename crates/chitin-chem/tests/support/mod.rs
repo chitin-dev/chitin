@@ -55,6 +55,9 @@ impl<'a> Fixture<'a> {
 
   /// Checks relative winding only after a complete candidate bijection exists.
   fn stereo_matches(&self, other: &Self, mapping: &[Option<usize>]) -> bool {
+    if !self.double_stereo_matches(other, mapping) {
+      return false;
+    }
     self.ids.iter().enumerate().all(|(index, &id)| {
       let Some(target) = mapping[index] else {
         return false;
@@ -78,6 +81,47 @@ impl<'a> Fixture<'a> {
             .and_then(|ligands| chitin_chem::TetrahedralStereo::new(ligands, a.winding()).ok())
             .and_then(|stereo| stereo.reordered(*b.ligands()).ok())
             .is_some_and(|stereo| stereo.winding() == b.winding())
+        }
+        _ => false,
+      }
+    })
+  }
+
+  /// Compares relative double-bond facts under endpoint and reference changes.
+  fn double_stereo_matches(&self, other: &Self, mapping: &[Option<usize>]) -> bool {
+    let mapped = |id| {
+      let index = self.ids.iter().position(|&candidate| candidate == id)?;
+      Some(other.ids[mapping[index]?])
+    };
+    self.graph.bonds().all(|(id, bond)| {
+      let [Some(a), Some(b)] = bond.atoms().map(mapped) else {
+        return false;
+      };
+      let Some(edge) = other.graph.bond_between(a, b) else {
+        return false;
+      };
+      match (self.graph.double_bond_stereo(id), other.graph.double_bond_stereo(edge)) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+          let [Some(a), Some(_)] = left.ends().map(mapped) else {
+            return false;
+          };
+          let [Some(ra), Some(rb)] = left.references().map(mapped) else {
+            return false;
+          };
+          let references = if right.ends()[0] == a {
+            right.references()
+          } else {
+            let [a, b] = right.references();
+            [b, a]
+          };
+          let odd = (ra != references[0]) ^ (rb != references[1]);
+          left.relation()
+            == if odd {
+              right.relation().inverted()
+            } else {
+              right.relation()
+            }
         }
         _ => false,
       }

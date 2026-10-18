@@ -194,8 +194,10 @@ exponential isomorphism searches.
 5. **Stereo and atom classes (partially implemented).** Tetrahedral `@`/`@@`
    and `@TH1`/`@TH2` now use stable graph references, source ring-site order,
    virtual H and parity-correct noncanonical writing. Generic polygon/line
-   scenes encode solid/hashed wedges from final coordinates. Directional bonds,
-   other stereo classes and CIP labeling remain future work. Atom classes/maps
+   scenes encode solid/hashed wedges from final coordinates. Paired directional
+   bonds now retain relative double-bond references and use shared-edge parity
+   constraints when writing. Partial directions, extended stereo classes and
+   CIP labeling remain future work. Atom classes/maps
    must be source annotations, never graph-local IDs. Unknown/unspecified stereo
    stays absent rather than being inferred from adjacency or coordinates.
 6. **Full molecular conformance and canonicalization.** Publish a versioned

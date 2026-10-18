@@ -29,6 +29,19 @@ struct Edge {
   atoms: [usize; 2],
   /// Single is explicit between aromatic atoms; other orders have their own symbol.
   symbol: &'static str,
+  /// Canonical low-to-high handle direction, reversed at opposite emission sites.
+  direction: Option<bool>,
+}
+
+impl Edge {
+  /// Resolves a lexical direction from its actual traversal origin.
+  fn symbol(&self, from: usize) -> &'static str {
+    match self.direction {
+      Some(slash) if slash ^ (from != self.atoms[0].min(self.atoms[1])) => "/",
+      Some(_) => "\\",
+      None => self.symbol,
+    }
+  }
 }
 
 /// One half of a non-tree edge's serialization, paired by temporary edge index.
@@ -92,6 +105,7 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
     });
   }
   let mut edges = Vec::with_capacity(graph.bond_count());
+  let directions = super::directional::assign(graph)?;
   let mut adjacency = vec![Vec::new(); nodes.len()];
   for (id, bond) in graph.bonds() {
     let aromatic_endpoints = bond
@@ -111,7 +125,11 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
     let b = *indices.get(&b).ok_or(GraphError::MissingAtom(b))?;
     adjacency[a].push((b, edges.len()));
     adjacency[b].push((a, edges.len()));
-    edges.push(Edge { symbol, atoms: [a, b] });
+    edges.push(Edge {
+      symbol,
+      atoms: [a, b],
+      direction: directions.get(&id).copied(),
+    });
   }
   // Neighbor order, not bond insertion/orientation, chooses DFS branches.
   for neighbors in &mut adjacency {
@@ -195,7 +213,7 @@ enum Event {
   /// Emit this vertex's token and ring sites before scheduling its children.
   Atom(usize),
   /// Emit a tree edge's supported order immediately before its child atom.
-  Bond(usize),
+  Bond(usize, usize),
   /// Start a non-continuation child branch.
   Open,
   /// Close that branch after its entire subtree has been emitted.
@@ -232,7 +250,7 @@ pub(super) fn emit(plan: Plan) -> Result<String, Error> {
       match event {
         Event::Open => text.push('('),
         Event::Close => text.push(')'),
-        Event::Bond(edge) => text.push_str(plan.edges[edge].symbol),
+        Event::Bond(edge, from) => text.push_str(plan.edges[edge].symbol(from)),
         Event::Atom(index) => {
           let node = &plan.nodes[index];
           text.push_str(&node.token);
@@ -240,7 +258,7 @@ pub(super) fn emit(plan: Plan) -> Result<String, Error> {
             let label = if site.opening {
               let label = free.pop_first().ok_or(Error::RingLabelCapacity { atom: node.id })?;
               labels[site.edge] = Some(label);
-              text.push_str(plan.edges[site.edge].symbol);
+              text.push_str(plan.edges[site.edge].symbol(index));
               label
             } else {
               // Each closing site has one earlier opening by construction.
@@ -264,7 +282,7 @@ pub(super) fn emit(plan: Plan) -> Result<String, Error> {
               stack.push(Event::Close);
             }
             stack.push(Event::Atom(child));
-            stack.push(Event::Bond(edge));
+            stack.push(Event::Bond(edge, index));
             if branch {
               stack.push(Event::Open);
             }

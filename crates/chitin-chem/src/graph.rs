@@ -11,6 +11,8 @@ use std::{
 
 use crate::{Atom, Bond, BondOrder, ImplicitHydrogenPolicy, StereoError, StereoLigand, TetrahedralStereo};
 
+mod double_bond;
+
 /// Generates distinct opaque handle types without exposing raw-ID construction.
 macro_rules! graph_id {
   ($name:ident, $description:literal) => {
@@ -94,6 +96,8 @@ pub struct MolecularGraph {
   bonds: BTreeMap<BondId, Bond>,
   /// Supplied ordered local configurations, invalidated by incident structural edits.
   tetrahedral: BTreeMap<AtomId, TetrahedralStereo>,
+  /// Relative alkene configurations, invalidated by endpoint coordination edits.
+  double_bond_stereo: BTreeMap<BondId, crate::DoubleBondStereo>,
   /// Next candidate handle; never decremented after deletion.
   next_atom: u64,
   /// Independent monotonic bond-handle namespace.
@@ -220,10 +224,11 @@ impl MolecularGraph {
   ///
   /// # Errors
   /// Returns [`GraphError::MissingAtom`] when `id` is not live.
-  /// Successful replacement clears a supplied tetrahedral descriptor at `id`.
+  /// Successful replacement clears supplied stereo centered on `id`.
   pub fn replace_atom(&mut self, id: AtomId, atom: Atom) -> Result<Atom, GraphError> {
     let vertex = self.atoms.get_mut(&id).ok_or(GraphError::MissingAtom(id))?;
     self.tetrahedral.remove(&id);
+    self.double_bond_stereo.retain(|_, stereo| !stereo.ends().contains(&id));
     Ok(std::mem::replace(&mut vertex.atom, atom))
   }
 
@@ -253,6 +258,7 @@ impl MolecularGraph {
     let id = BondId(allocate_id(&mut self.next_bond)?);
     self.tetrahedral.remove(&a);
     self.tetrahedral.remove(&b);
+    self.clear_double_stereo_at(&[a, b]);
     self.bonds.insert(id, Bond { atoms: [a, b], order });
     // Endpoints were checked before any writes. No user code can mutate the
     // graph between validation and these symmetric adjacency updates.
@@ -269,10 +275,13 @@ impl MolecularGraph {
   ///
   /// # Errors
   /// Returns [`GraphError::MissingBond`] when `id` is not live.
-  /// An actual order change clears tetrahedral descriptors at both endpoints.
+  /// An actual order change clears stereo centered on either endpoint.
   pub fn set_bond_order(&mut self, id: BondId, order: BondOrder) -> Result<BondOrder, GraphError> {
     let bond = self.bonds.get_mut(&id).ok_or(GraphError::MissingBond(id))?;
     if bond.order != order {
+      self
+        .double_bond_stereo
+        .retain(|_, stereo| !stereo.ends().iter().any(|end| bond.atoms.contains(end)));
       for atom in bond.atoms {
         self.tetrahedral.remove(&atom);
       }
@@ -294,6 +303,7 @@ impl MolecularGraph {
   pub fn remove_bond(&mut self, id: BondId) -> Result<Bond, GraphError> {
     let bond = self.bonds.remove(&id).ok_or(GraphError::MissingBond(id))?;
     let [a, b] = bond.atoms;
+    self.clear_double_stereo_at(&[a, b]);
     self.tetrahedral.remove(&a);
     self.tetrahedral.remove(&b);
     if let Some(vertex) = self.atoms.get_mut(&a) {
@@ -321,8 +331,10 @@ impl MolecularGraph {
   /// Returns [`GraphError::MissingAtom`] when `id` is not live.
   pub fn remove_atom(&mut self, id: AtomId) -> Result<Atom, GraphError> {
     let vertex = self.atoms.remove(&id).ok_or(GraphError::MissingAtom(id))?;
+    self.clear_double_stereo_at(&[id]);
     self.tetrahedral.remove(&id);
     for (neighbor, bond) in vertex.neighbors {
+      self.clear_double_stereo_at(&[neighbor]);
       self.tetrahedral.remove(&neighbor);
       self.bonds.remove(&bond);
       if let Some(other) = self.atoms.get_mut(&neighbor) {

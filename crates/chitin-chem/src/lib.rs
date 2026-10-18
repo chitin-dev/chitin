@@ -42,4 +42,6 @@ pub use bond::{Bond, BondOrder};
 pub use element::{Element, ElementError, Isotope, IsotopeError};
 pub use graph::{AtomId, BondId, GraphError, MolecularGraph};
 pub use hydrogen::{HydrogenCounts, ImplicitHydrogenPolicy};
-pub use stereo::{StereoError, StereoLigand, TetrahedralStereo, TetrahedralWinding};
+pub use stereo::{
+  DoubleBondRelation, DoubleBondStereo, StereoError, StereoLigand, TetrahedralStereo, TetrahedralWinding,
+};

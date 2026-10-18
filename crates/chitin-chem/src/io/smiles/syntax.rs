@@ -20,8 +20,8 @@ pub(super) struct Token {
 pub(super) enum Kind {
   /// Atom facts and optional local winding; graph ligand identities come later.
   Atom(Atom, Option<TetrahedralWinding>),
-  /// Explicit order awaiting an atom or ring site in the topology parser.
-  Bond(BondOrder),
+  /// Explicit order and optional slash bit (true = slash) awaiting an endpoint.
+  Bond(BondOrder, Option<bool>),
   /// Numeric ring identity, independent of digit versus percent spelling.
   Ring(u8),
   /// Starts a branch whose parent is resolved by the topology parser.
@@ -130,10 +130,12 @@ impl Scanner<'_> {
           .map_err(|_| error(start..self.offset, SmilesErrorKind::NumberOutOfRange("ring label")))?;
         return Ok(Kind::Ring(label));
       }
-      b'-' => Kind::Bond(BondOrder::Single),
-      b'=' => Kind::Bond(BondOrder::Double),
-      b'#' => Kind::Bond(BondOrder::Triple),
-      b':' => Kind::Bond(BondOrder::Aromatic),
+      b'-' => Kind::Bond(BondOrder::Single, None),
+      b'=' => Kind::Bond(BondOrder::Double, None),
+      b'#' => Kind::Bond(BondOrder::Triple, None),
+      b':' => Kind::Bond(BondOrder::Aromatic, None),
+      b'/' => Kind::Bond(BondOrder::Single, Some(true)),
+      b'\\' => Kind::Bond(BondOrder::Single, Some(false)),
       b'(' => Kind::Open,
       b')' => Kind::Close,
       b'.' => Kind::Dot,

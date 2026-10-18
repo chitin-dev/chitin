@@ -8,6 +8,7 @@ use std::{collections::BTreeMap, ops::Range};
 
 use crate::{AtomId, BondId, ElementError, GraphError, IsotopeError, MolecularGraph};
 
+mod directional;
 mod parser;
 mod profile;
 mod syntax;
@@ -115,10 +116,12 @@ impl ParsedSmiles {
 /// an explicit single bond always remains single, including ring closure.
 /// Tetrahedral `@`/`@@` and `@TH1`/`@TH2` are stored with ordered ligand
 /// identities, including ring-opening positions and any declared virtual H.
+/// Paired slash/backslash markers become relative double-bond reference sides,
+/// including shared conjugated markers and directions on ring-closure sites.
 ///
 /// # Errors
 /// Returns a positioned syntax, unsupported-feature, representation, or topology
-/// error. Non-tetrahedral stereo, directional double-bond stereo,
+/// error. Partial/unpaired directions, cumulated and extended stereo,
 /// wildcard/query atoms, atom classes, and
 /// reaction/CXSMILES extensions are rejected, never silently stripped.
 ///
