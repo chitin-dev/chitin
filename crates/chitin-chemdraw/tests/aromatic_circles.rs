@@ -39,7 +39,11 @@ fn simple_aromatic_rings_should_replace_inner_doubles_without_changing_facts() -
     let before = graph.clone();
     let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
     let original = coordinates.clone();
-    let drawing = depict::depict(&graph, &coordinates, &circles())?;
+    let options = DepictOptions {
+      bond_color_style: depict::BondColorStyle::Uniform,
+      ..circles()
+    };
+    let drawing = depict::depict(&graph, &coordinates, &options)?;
     assert_eq!(marks(&drawing).len(), 1, "{source}");
     for (id, _) in graph.bonds() {
       let strokes = drawing
@@ -74,7 +78,11 @@ fn fused_unmarked_and_explicit_alternating_inputs_should_fall_back_completely() 
 fn linked_independent_rings_should_each_receive_their_own_circle() -> TestResult {
   let graph = read_smiles("c1ccccc1-c2ccncc2")?.into_graph();
   let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
-  let drawing = depict::depict(&graph, &coordinates, &circles())?;
+  let options = DepictOptions {
+    bond_color_style: depict::BondColorStyle::Uniform,
+    ..circles()
+  };
+  let drawing = depict::depict(&graph, &coordinates, &options)?;
   assert_eq!(marks(&drawing).len(), 2);
   assert_eq!(
     drawing

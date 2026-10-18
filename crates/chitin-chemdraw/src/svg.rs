@@ -3,7 +3,7 @@
 use crate::{
   font::{Command, FontError},
   geometry::{GeometryError, Point},
-  scene::{Color, Drawing, Primitive, Text},
+  scene::{Color, Drawing, Line, LineCap, Primitive, Text},
 };
 
 /// Standalone document framing, separate from chemical depiction options.
@@ -171,11 +171,60 @@ pub fn export(drawing: &Drawing, options: &SvgOptions) -> Result<String, SvgErro
         polygon.points.iter().map(|point| format!("{},{}", point.x, point.y)).collect::<Vec<_>>().join(" "),
         color(polygon.color), f64::from(polygon.color.alpha) / 255.
       )),
-      Primitive::Line(line) => output.push_str(&format!("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linecap=\"round\"/>\n",
-        line.start.x, line.start.y, line.end.x, line.end.y, color(line.color), f64::from(line.color.alpha) / 255., line.width)),
+      Primitive::Line(line) => output.push_str(&line_run(line)),
       Primitive::Text(text) => output.push_str(&text_run(text)?),
     }
   }
   output.push_str("</svg>\n");
   Ok(output)
+}
+
+/// Serializes asymmetric caps as one filled outline, avoiding alpha overdraw.
+///
+/// Ordinary strokes keep the compact SVG line representation. A split stroke
+/// needs a round exterior and flat interior; independent circles would composite
+/// translucent paint twice where they overlap the stroke rectangle.
+fn line_run(line: &Line) -> String {
+  if line.caps[0] == line.caps[1] || line.start == line.end {
+    let cap = if line.caps[0] == LineCap::Round {
+      "round"
+    } else {
+      "butt"
+    };
+    return format!(
+      "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linecap=\"{cap}\"/>\n",
+      line.start.x,
+      line.start.y,
+      line.end.x,
+      line.end.y,
+      color(line.color),
+      f64::from(line.color.alpha) / 255.,
+      line.width
+    );
+  }
+  let radius = line.width / 2.;
+  let length = line.start.distance(line.end);
+  let normal = Point::new(
+    -(line.end.y - line.start.y) / length * radius,
+    (line.end.x - line.start.x) / length * radius,
+  );
+  let a = line.start.translated(normal.x, normal.y);
+  let b = line.end.translated(normal.x, normal.y);
+  let c = line.end.translated(-normal.x, -normal.y);
+  let d = line.start.translated(-normal.x, -normal.y);
+  let mut path = format!("M{} {}L{} {}", a.x, a.y, b.x, b.y);
+  for (index, (cap, point)) in [(line.caps[1], c), (line.caps[0], a)].into_iter().enumerate() {
+    if index == 1 {
+      path.push_str(&format!("L{} {}", d.x, d.y));
+    }
+    match cap {
+      LineCap::Round => path.push_str(&format!("A{radius} {radius} 0 0 0 {} {}", point.x, point.y)),
+      LineCap::Butt => path.push_str(&format!("L{} {}", point.x, point.y)),
+    }
+  }
+  format!(
+    "<path d=\"{path}Z\" fill=\"{}\" fill-opacity=\"{}\"/>\n",
+    color(line.color),
+    f64::from(line.color.alpha) / 255.
+  )
 }

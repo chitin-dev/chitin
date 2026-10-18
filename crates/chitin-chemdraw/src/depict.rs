@@ -21,7 +21,7 @@ mod labels;
 mod stereo;
 
 pub use aromatic::AromaticStyle;
-pub use color::ColorScheme;
+pub use color::{BondColorStyle, ColorScheme};
 pub use labels::measurement_requests;
 
 /// Display policy for one declared H on an annotated tetrahedral carbon.
@@ -61,10 +61,12 @@ pub struct DepictOptions {
   pub font: FontFace,
   /// Additional clearance around label envelopes before a bond starts.
   pub label_padding: f64,
-  /// Bond color and fallback for labels not assigned an element color.
+  /// Uniform bond color and fallback for elements without a palette entry.
   pub foreground: Color,
-  /// Atom-label policy; monochrome remains the default for existing callers.
+  /// Atom palette used by labels and endpoint-colored bonds; defaults to element.
   pub color_scheme: ColorScheme,
+  /// Bond paint policy; defaults to two endpoint colors meeting at the axis midpoint.
+  pub bond_color_style: BondColorStyle,
   /// Element-mode overrides, including optional carbon/H entries and alpha.
   /// Ignored in monochrome mode; absent entries use the builtin palette/fallback.
   pub element_colors: BTreeMap<Element, Color>,
@@ -90,7 +92,8 @@ impl Default for DepictOptions {
       font: FontFace::NotoSans,
       label_padding: 2.,
       foreground: Color::BLACK,
-      color_scheme: ColorScheme::Monochrome,
+      color_scheme: ColorScheme::Element,
+      bond_color_style: BondColorStyle::Split,
       element_colors: BTreeMap::new(),
       aromatic_style: AromaticStyle::Kekule,
       hydrogens: HydrogenMode::Infer(ValenceModel::SmilesOrganicV1),

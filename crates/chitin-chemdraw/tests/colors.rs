@@ -1,9 +1,9 @@
-//! Coloring is label-only and must not affect graph facts or drawing geometry.
+//! Palette and bond paint policies preserve source chemical facts.
 
 use chitin_chem::{Element, io::smiles::read_smiles};
 use chitin_chemdraw::{
   Color,
-  depict::{self, ChiralHydrogenMode, ColorScheme, DepictOptions},
+  depict::{self, BondColorStyle, ChiralHydrogenMode, ColorScheme, DepictOptions},
   layout::{self, LayoutOptions},
   scene::{Primitive, Source},
   svg,
@@ -57,11 +57,13 @@ fn builtin_palette_should_keep_documented_element_colors_stable() {
 }
 
 #[test]
-fn monochrome_should_remain_the_default_and_ignore_element_overrides() -> TestResult {
+fn explicit_monochrome_should_ignore_element_overrides() -> TestResult {
   let graph = read_smiles("NCC(O)S")?.into_graph();
   let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
-  let defaults = DepictOptions::default();
-  assert_eq!(defaults.color_scheme, ColorScheme::Monochrome);
+  let defaults = DepictOptions {
+    color_scheme: ColorScheme::Monochrome,
+    ..Default::default()
+  };
   let mut options = defaults.clone();
   options.element_colors.insert(Element::Oxygen, CUSTOM);
   assert_eq!(
@@ -79,6 +81,7 @@ fn element_labels_and_their_attached_hydrogens_should_follow_the_same_palette() 
   let original_coordinates = coordinates.clone();
   let options = DepictOptions {
     color_scheme: ColorScheme::Element,
+    bond_color_style: BondColorStyle::Uniform,
     ..Default::default()
   };
   let drawing = depict::depict(&graph, &coordinates, &options)?;
@@ -141,6 +144,8 @@ fn coloring_should_change_only_text_colors_not_geometry_or_stereo_marks() -> Tes
   for mode in [ChiralHydrogenMode::Implicit, ChiralHydrogenMode::Explicit] {
     let mono = DepictOptions {
       chiral_hydrogens: mode,
+      color_scheme: ColorScheme::Monochrome,
+      bond_color_style: BondColorStyle::Uniform,
       ..Default::default()
     };
     let mut options = mono.clone();
@@ -152,7 +157,7 @@ fn coloring_should_change_only_text_colors_not_geometry_or_stereo_marks() -> Tes
     for primitive in &mut normalized {
       if let Primitive::Text(text) = primitive {
         if matches!(text.source, Some(Source::AttachedHydrogen(_))) {
-          assert_eq!(text.color, CUSTOM);
+          assert_eq!(text.color, options.label_color(Element::Hydrogen));
         }
         text.color = mono.foreground;
       }

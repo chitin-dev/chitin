@@ -1,17 +1,31 @@
-//! Atom-label palettes are drawing policy, never properties of chemical elements.
+//! Atom palettes and bond paint are drawing policy, never chemical element facts.
 
 use chitin_chem::Element;
 
 use super::{Color, DepictOptions};
 
+mod bonds;
+pub(super) use bonds::BondPaint;
+
+/// Color distribution along ordinary strokes and tetrahedral marks.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum BondColorStyle {
+  /// Use `foreground` for the entire bond, independently of the label palette.
+  Uniform,
+  /// Use each endpoint's atom color on its side of the original axis midpoint.
+  /// Label clearance and multiple-stroke shortening do not move this boundary.
+  #[default]
+  Split,
+}
+
 /// Color policy for complete atom labels, independent of bond-stroke styling.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum ColorScheme {
   /// Every label uses the foreground, ignoring element palette overrides.
-  #[default]
   Monochrome,
   /// Use per-element overrides, then the builtin palette, then the foreground.
   /// Carbon and hydrogen have no builtin entry, retaining skeletal contrast.
+  #[default]
   Element,
 }
 
@@ -21,8 +35,8 @@ impl DepictOptions {
   /// In element mode, `element_colors` overrides the builtin opaque palette.
   /// Unlisted elements fall back to `foreground`, including its alpha channel.
   /// Attached H, isotope, charge, and subscript runs follow their host label;
-  /// explicit H graph vertices resolve independently as hydrogen. Bond strokes
-  /// and generated H wedges always retain `foreground`.
+  /// explicit H graph vertices resolve independently as hydrogen. Split bonds
+  /// use this same palette; uniform bonds always retain `foreground`.
   pub fn label_color(&self, element: Element) -> Color {
     match self.color_scheme {
       ColorScheme::Monochrome => self.foreground,

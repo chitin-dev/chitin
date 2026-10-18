@@ -14,6 +14,14 @@ use std::collections::BTreeMap;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+/// Tests physical stroke joins independently of endpoint paint segmentation.
+fn geometry_options() -> DepictOptions {
+  DepictOptions {
+    bond_color_style: chitin_chemdraw::depict::BondColorStyle::Uniform,
+    ..Default::default()
+  }
+}
+
 /// Extracts only one bond's strokes, preserving renderer-independent provenance.
 fn lines(drawing: &Drawing, id: BondId) -> Vec<&Line> {
   drawing
@@ -39,7 +47,7 @@ fn projection(point: Point, direction: Point) -> f64 {
 fn ring_doubles_should_use_full_skeleton_and_short_interior_stroke_under_transforms() -> TestResult {
   for source in ["C1=CC=CC=C1", "C1=CC1", "C1=CCC1", "C1=CCCCCCC1"] {
     let graph = read_smiles(source)?.into_graph();
-    let options = DepictOptions::default();
+    let options = geometry_options();
     let original = generate(&graph, &LayoutOptions::default())?;
     for (angle, reflect) in [(0_f64, 1.), (0.7, 1.), (1.57, -1.)] {
       let positions: BTreeMap<_, _> = original
@@ -92,7 +100,7 @@ fn ring_doubles_should_use_full_skeleton_and_short_interior_stroke_under_transfo
 #[test]
 fn terminal_imine_should_keep_axis_join_and_use_short_side_stroke() -> TestResult {
   let graph = read_smiles("CCC=N")?.into_graph();
-  let options = DepictOptions::default();
+  let options = geometry_options();
   let coordinates = generate(&graph, &LayoutOptions::default())?;
   let scene = depict(&graph, &coordinates, &options)?;
   let (id, bond) = graph
@@ -120,7 +128,7 @@ fn terminal_imine_should_keep_axis_join_and_use_short_side_stroke() -> TestResul
 #[test]
 fn triple_label_ends_should_share_an_axial_clearance_and_reference_spacing() -> TestResult {
   let graph = read_smiles("CCC#N")?.into_graph();
-  let options = DepictOptions::default();
+  let options = geometry_options();
   let coordinates = generate(&graph, &LayoutOptions::default())?;
   let scene = depict(&graph, &coordinates, &options)?;
   let (id, _) = graph
@@ -151,7 +159,7 @@ fn triple_label_ends_should_share_an_axial_clearance_and_reference_spacing() -> 
 
 #[test]
 fn centered_carbonyl_strokes_should_meet_real_neighbor_rays_at_both_axis_orientations() -> TestResult {
-  let options = DepictOptions::default();
+  let options = geometry_options();
   for source in ["CC(=O)O", "OC(=O)C"] {
     let graph = read_smiles(source)?.into_graph();
     let original = generate(&graph, &LayoutOptions::default())?;
@@ -230,7 +238,7 @@ fn geometry(drawing: &Drawing) -> Vec<[f64; 4]> {
 fn reversing_all_source_bond_endpoints_should_not_change_stroke_geometry() -> TestResult {
   for source in ["CCC=N", "CCC#N", "CC(=O)O", "C1=CC=CC=C1"] {
     let mut graph = read_smiles(source)?.into_graph();
-    let options = DepictOptions::default();
+    let options = geometry_options();
     let coordinates = generate(&graph, &LayoutOptions::default())?;
     let before = geometry(&depict(&graph, &coordinates, &options)?);
     let edges: Vec<_> = graph.bonds().map(|(id, b)| (id, b.atoms(), b.order())).collect();
@@ -259,7 +267,7 @@ fn label_advances_should_be_measured_and_svg_should_not_require_installed_fonts(
   ));
   let graph = read_smiles("OCC")?.into_graph();
   let coordinates = generate(&graph, &LayoutOptions::default())?;
-  let scene = depict(&graph, &coordinates, &DepictOptions::default())?;
+  let scene = depict(&graph, &coordinates, &geometry_options())?;
   let o = scene
     .primitives()
     .iter()
@@ -304,7 +312,7 @@ fn separated_rings_connected_by_a_double_bridge_should_not_be_misclassified_as_o
       (id, Point::new(angle.cos() + if i < 6 { 0. } else { 3. }, angle.sin()))
     })
     .collect();
-  let scene = depict(&graph, &Layout2d::from_positions(positions)?, &DepictOptions::default())?;
+  let scene = depict(&graph, &Layout2d::from_positions(positions)?, &geometry_options())?;
   let (id, _) = graph
     .bonds()
     .find(|(_, b)| b.order() == BondOrder::Double)

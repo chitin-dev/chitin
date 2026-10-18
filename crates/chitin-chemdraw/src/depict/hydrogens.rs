@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chitin_chem::{AtomId, Element, MolecularGraph, StereoLigand};
 
+use super::color::BondPaint;
 use super::{ChiralHydrogenMode, DepictError as Error, DepictOptions, LabelBounds, stereo};
 use crate::{
   geometry::Point,
@@ -139,6 +140,7 @@ pub(super) fn plan(
           solid,
           Source::AttachedHydrogen(center),
           options,
+          &BondPaint::new([origin, position], [Element::Carbon, Element::Hydrogen], options),
           &mut wedge,
         )
         .is_err()
@@ -185,7 +187,7 @@ fn label(center: AtomId, position: Point, options: &DepictOptions) -> Result<(Te
     content: "H".into(),
     font_size: options.font_size,
     width,
-    color: options.label_color(Element::Carbon),
+    color: options.label_color(Element::Hydrogen),
     source: Some(Source::AttachedHydrogen(center)),
   };
   let [min, max] = run.envelope()?;

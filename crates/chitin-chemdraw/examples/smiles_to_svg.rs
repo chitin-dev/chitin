@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut font_index = 0;
   let source = loop {
     let argument = args.next().ok_or(
-      "usage: smiles_to_svg [--font-file path] [--font-index n] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
+      "usage: smiles_to_svg [--font-file path] [--font-index n] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--bond-color-style split|uniform] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
     )?;
     match argument.as_str() {
       "--font-file" => {
@@ -32,6 +32,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
           Some("monochrome") => depict::ColorScheme::Monochrome,
           Some("element") => depict::ColorScheme::Element,
           _ => return Err("--color-scheme requires monochrome or element".into()),
+        };
+      }
+      "--bond-color-style" => {
+        options.bond_color_style = match args.next().as_deref() {
+          Some("split") => depict::BondColorStyle::Split,
+          Some("uniform") => depict::BondColorStyle::Uniform,
+          _ => return Err("--bond-color-style requires split or uniform".into()),
         };
       }
       "--aromatic-style" => {

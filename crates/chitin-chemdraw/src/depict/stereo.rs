@@ -7,10 +7,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chitin_chem::{AtomId, BondId, MolecularGraph, StereoLigand, TetrahedralStereo, TetrahedralWinding};
 
-use super::{DepictError as Error, DepictOptions, LabelBounds, clip};
+use super::{DepictError as Error, DepictOptions, LabelBounds, clip, color::BondPaint};
 use crate::{
   geometry::Point,
-  scene::{Line, Polygon, Primitive, Source},
+  scene::{Line, LineCap, Polygon, Primitive, Source},
 };
 
 /// A mark directed from its stereocenter (narrow) to its ligand (wide).
@@ -149,6 +149,7 @@ pub(super) fn draw(
   points: &BTreeMap<AtomId, Point>,
   labels: &BTreeMap<AtomId, LabelBounds>,
   options: &DepictOptions,
+  paint: &BondPaint,
   output: &mut Vec<Primitive>,
 ) -> Result<(), Error> {
   wedge(
@@ -157,6 +158,7 @@ pub(super) fn draw(
     mark.solid,
     Source::Bond(edge),
     options,
+    paint,
     output,
   )
 }
@@ -171,6 +173,7 @@ pub(super) fn wedge(
   solid: bool,
   source: Source,
   options: &DepictOptions,
+  paint: &BondPaint,
   output: &mut Vec<Primitive>,
 ) -> Result<(), Error> {
   let occluded = || match source {
@@ -195,31 +198,38 @@ pub(super) fn wedge(
   let normal = Point::new(-dy / length, dx / length);
   let source = Some(source);
   if solid {
-    output.push(Primitive::Polygon(Polygon {
-      points: vec![
-        start,
-        end.translated(normal.x * options.wedge_width / 2., normal.y * options.wedge_width / 2.),
-        end.translated(
-          -normal.x * options.wedge_width / 2.,
-          -normal.y * options.wedge_width / 2.,
-        ),
-      ],
-      color: options.foreground,
-      source,
-    }));
+    paint.polygon(
+      Polygon {
+        points: vec![
+          start,
+          end.translated(normal.x * options.wedge_width / 2., normal.y * options.wedge_width / 2.),
+          end.translated(
+            -normal.x * options.wedge_width / 2.,
+            -normal.y * options.wedge_width / 2.,
+          ),
+        ],
+        color: options.foreground,
+        source,
+      },
+      output,
+    );
   } else {
     // The narrow center-to-wide-ligand direction is preserved for both marks.
     for i in 1..=7 {
       let t = f64::from(i) / 8.;
       let center = start.translated((end.x - start.x) * t, (end.y - start.y) * t);
       let half = options.wedge_width * t / 2.;
-      output.push(Primitive::Line(Line {
-        start: center.translated(normal.x * half, normal.y * half),
-        end: center.translated(-normal.x * half, -normal.y * half),
-        width: options.stroke_width,
-        color: options.foreground,
-        source,
-      }));
+      paint.line(
+        Line {
+          start: center.translated(normal.x * half, normal.y * half),
+          end: center.translated(-normal.x * half, -normal.y * half),
+          width: options.stroke_width,
+          color: options.foreground,
+          caps: [LineCap::Round; 2],
+          source,
+        },
+        output,
+      );
     }
   }
   Ok(())

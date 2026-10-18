@@ -4,10 +4,10 @@
 //! centered/offset strokes from adjacency. Triple side strokes use spacing/1.5.
 //! Geometry and group label clearance are resolved before generic scene export.
 
-use super::{DepictError as Error, DepictOptions, LabelBounds, clip};
+use super::{DepictError as Error, DepictOptions, LabelBounds, clip, color::BondPaint};
 use crate::{
   geometry::Point,
-  scene::{Line, Primitive, Source, positive},
+  scene::{Line, LineCap, Primitive, Source, positive},
 };
 use chitin_chem::{AtomId, BondId, BondOrder, GraphError, MolecularGraph};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -285,8 +285,17 @@ pub(super) fn draw(
   let context = Context::new(graph)?;
   let marks = super::stereo::plan(graph, points, &context.bridges, expanded_hydrogens)?;
   for (id, bond) in graph.bonds() {
+    let atoms = bond.atoms();
+    let paint = BondPaint::new(
+      atoms.map(|atom| points[&atom]),
+      [
+        graph.atom(atoms[0]).ok_or(GraphError::MissingAtom(atoms[0]))?.element(),
+        graph.atom(atoms[1]).ok_or(GraphError::MissingAtom(atoms[1]))?.element(),
+      ],
+      options,
+    );
     if let Some(mark) = marks.get(&id) {
-      super::stereo::draw(id, mark, points, labels, options, output)?;
+      super::stereo::draw(id, mark, points, labels, options, &paint, output)?;
       continue;
     }
     let [mut a, mut b] = bond.atoms();
@@ -423,19 +432,23 @@ pub(super) fn draw(
       if to <= from {
         return Err(Error::OccludedBond(id));
       }
-      output.push(Primitive::Line(Line {
-        start: start.translated(
-          direction.x * from + normal.x * stroke.offset,
-          direction.y * from + normal.y * stroke.offset,
-        ),
-        end: start.translated(
-          direction.x * to + normal.x * stroke.offset,
-          direction.y * to + normal.y * stroke.offset,
-        ),
-        width: options.stroke_width,
-        color: options.foreground,
-        source: Some(Source::Bond(id)),
-      }));
+      paint.line(
+        Line {
+          start: start.translated(
+            direction.x * from + normal.x * stroke.offset,
+            direction.y * from + normal.y * stroke.offset,
+          ),
+          end: start.translated(
+            direction.x * to + normal.x * stroke.offset,
+            direction.y * to + normal.y * stroke.offset,
+          ),
+          width: options.stroke_width,
+          color: options.foreground,
+          caps: [LineCap::Round; 2],
+          source: Some(Source::Bond(id)),
+        },
+        output,
+      );
     }
   }
   Ok(())

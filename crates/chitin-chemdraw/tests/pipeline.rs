@@ -19,7 +19,11 @@ fn drawing(source: &str) -> Result<Drawing, Box<dyn std::error::Error>> {
   let graph = read_smiles(source)?.into_graph();
   let before = graph.clone();
   let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
-  let result = depict::depict(&graph, &coordinates, &DepictOptions::default())?;
+  let options = DepictOptions {
+    bond_color_style: depict::BondColorStyle::Uniform,
+    ..Default::default()
+  };
+  let result = depict::depict(&graph, &coordinates, &options)?;
   assert_eq!(graph, before);
   Ok(result)
 }
@@ -287,7 +291,11 @@ fn existing_coordinates_should_bypass_auto_layout_but_require_exact_id_coverage(
     (ids[0], Point::new(0., 0.)),
     (ids[1], Point::new(2., 0.)),
   ]))?;
-  let scene = depict::depict(&graph, &coordinates, &DepictOptions::default())?;
+  let options = DepictOptions {
+    bond_color_style: depict::BondColorStyle::Uniform,
+    ..Default::default()
+  };
+  let scene = depict::depict(&graph, &coordinates, &options)?;
   assert!(
     scene
       .primitives()
@@ -379,6 +387,7 @@ fn scene_bounds_should_include_strokes_and_text_envelopes() -> TestResult {
     end: Point::new(10., 0.),
     width: 2.,
     color: Color::BLACK,
+    caps: [chitin_chemdraw::scene::LineCap::Round; 2],
     source: None,
   })])?;
   let bounds = scene.bounds().ok_or("missing bounds")?;

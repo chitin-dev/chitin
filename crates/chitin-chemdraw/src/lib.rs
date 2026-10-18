@@ -32,4 +32,4 @@ pub mod layout;
 pub mod scene;
 pub mod svg;
 
-pub use scene::{Circle, Color, Drawing, Line, Primitive, Source, Text};
+pub use scene::{Circle, Color, Drawing, Line, LineCap, Primitive, Source, Text};

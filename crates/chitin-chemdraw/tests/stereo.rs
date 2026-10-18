@@ -13,6 +13,14 @@ use chitin_chemdraw::{
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+/// Keeps each geometric wedge whole; split-color coverage lives in bond_colors.
+fn geometry_options() -> DepictOptions {
+  DepictOptions {
+    bond_color_style: depict::BondColorStyle::Uniform,
+    ..Default::default()
+  }
+}
+
 /// Builds four ligand directions in a known right-handed frame.
 fn cross(
   graph: &chitin_chem::MolecularGraph,
@@ -44,8 +52,8 @@ fn known_four_ligand_projection_should_flip_wedges_for_enantiomers_and_reflectio
   for (source, solid) in [("[C@](F)(Cl)(Br)I", 1), ("[C@@](F)(Cl)(Br)I", 0)] {
     let graph = read_smiles(source)?.into_graph();
     for angle in [0., 0.7, 2.1] {
-      let direct = depict::depict(&graph, &cross(&graph, false, angle)?, &DepictOptions::default())?;
-      let reflected = depict::depict(&graph, &cross(&graph, true, angle)?, &DepictOptions::default())?;
+      let direct = depict::depict(&graph, &cross(&graph, false, angle)?, &geometry_options())?;
+      let reflected = depict::depict(&graph, &cross(&graph, true, angle)?, &geometry_options())?;
       assert_eq!(solids(&direct), solid, "{source}, {angle}");
       assert_eq!(solids(&reflected), 1 - solid, "{source}, {angle}");
       let document = svg::export(&direct, &svg::SvgOptions::default())?;
@@ -69,7 +77,7 @@ fn virtual_hydrogen_projection_should_use_its_declared_reference_slot() -> TestR
         Point::new(-0.5, -0.8660254),
       ])
       .collect();
-    let drawing = depict::depict(&graph, &Layout2d::from_positions(points)?, &DepictOptions::default())?;
+    let drawing = depict::depict(&graph, &Layout2d::from_positions(points)?, &geometry_options())?;
     assert_eq!(solids(&drawing), solid, "{source}");
     // Ordinary chiral carbon and its declared H remain skeletal rather than
     // introducing crowded CH labels at every wedge origin.
@@ -91,7 +99,7 @@ fn penicillin_input_should_export_every_stereocenter_without_modifying_facts() -
   assert_eq!(graph.tetrahedral_centers().len(), 3);
   let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
   assert!(coordinates.diagnostics().is_empty());
-  let drawing = depict::depict(&graph, &coordinates, &DepictOptions::default())?;
+  let drawing = depict::depict(&graph, &coordinates, &geometry_options())?;
   let mut per_bond = BTreeMap::new();
   for primitive in drawing.primitives() {
     let source = match primitive {
@@ -123,7 +131,7 @@ fn degenerate_coordinates_should_not_silently_drop_supplied_stereo() -> TestResu
     .map(|(i, (id, _))| (id, Point::new(i as f64, 0.)))
     .collect();
   assert!(matches!(
-    depict::depict(&graph, &Layout2d::from_positions(points)?, &DepictOptions::default()),
+    depict::depict(&graph, &Layout2d::from_positions(points)?, &geometry_options()),
     Err(depict::DepictError::Stereo(_))
   ));
   Ok(())
@@ -169,7 +177,7 @@ fn wedge_width_should_be_configurable_and_invalid_widths_rejected() -> TestResul
       &coordinates,
       &DepictOptions {
         wedge_width: width,
-        ..Default::default()
+        ..geometry_options()
       },
     )?;
     let polygon = drawing
@@ -186,7 +194,7 @@ fn wedge_width_should_be_configurable_and_invalid_widths_rejected() -> TestResul
         &coordinates,
         &DepictOptions {
           wedge_width: width,
-          ..Default::default()
+          ..geometry_options()
         }
       ),
       Err(depict::DepictError::Options)
@@ -199,7 +207,7 @@ fn wedge_width_should_be_configurable_and_invalid_widths_rejected() -> TestResul
 fn reversing_bond_storage_should_not_reverse_the_wedge_origin() -> TestResult {
   let mut graph = read_smiles("[C@](F)(Cl)(Br)I")?.into_graph();
   let coordinates = cross(&graph, false, 0.)?;
-  let before = depict::depict(&graph, &coordinates, &DepictOptions::default())?;
+  let before = depict::depict(&graph, &coordinates, &geometry_options())?;
   let descriptors: Vec<_> = graph.tetrahedral_centers().map(|(id, s)| (id, *s)).collect();
   let bonds: Vec<_> = graph.bonds().map(|(id, b)| (id, b.atoms(), b.order())).collect();
   for &(id, _, _) in &bonds {
@@ -211,7 +219,7 @@ fn reversing_bond_storage_should_not_reverse_the_wedge_origin() -> TestResult {
   for (id, stereo) in descriptors {
     graph.set_tetrahedral(id, Some(stereo))?;
   }
-  let after = depict::depict(&graph, &coordinates, &DepictOptions::default())?;
+  let after = depict::depict(&graph, &coordinates, &geometry_options())?;
   let polygons = |drawing: &Drawing| {
     drawing
       .primitives()

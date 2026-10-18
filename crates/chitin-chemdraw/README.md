@@ -158,7 +158,7 @@ The default depiction supports:
 - element, isotope, charge, and hydrogen labels;
 - explicit hydrogen vertices;
 - label-aware bond clipping;
-- default monochrome output, optional element-colored labels and RGBA overrides;
+- default element-colored labels and split-color bonds, with RGBA overrides;
 - bundled Noto Sans font metrics and vector glyph outlines.
 
 Unknown or unsupported chemical facts are rejected instead of silently
@@ -167,11 +167,21 @@ extended stereochemistry, radicals, complex text shaping, and full sanitization 
 future domain support in `chitin-chem`. Read/write coverage is broader than
 drawing coverage; see the [compatibility matrix](../chitin-chem/docs/smiles-compatibility.md).
 
-### Element-colored labels
+### Element colors and split bonds
 
-`DepictOptions::color_scheme` defaults to `ColorScheme::Monochrome`. Select
-`ColorScheme::Element` to color atom labels while leaving all bond strokes,
-including stereo wedges, in `foreground`. The builtin white-page palette uses
+`DepictOptions::color_scheme` defaults to `ColorScheme::Element`, and
+`bond_color_style` defaults to `BondColorStyle::Split`. Labels and each half of
+a bond use their endpoint's element color. All strokes of double/triple bonds
+share the original atom-axis midpoint, regardless of label clearance or stroke
+shortening. Solid and hashed stereo marks follow the same policy without
+changing their shape or stereochemical meaning. Equal colors need no split.
+Scene lines carry independent caps: exterior ends remain round, while internal
+color seams are flat and do not overlap, including translucent overrides.
+
+Set `BondColorStyle::Uniform` for colored labels with entirely foreground bonds.
+Set `ColorScheme::Monochrome` for the previous all-foreground appearance; its
+palette overrides are ignored even when the split policy is selected.
+The builtin white-page palette uses
 O red (`#e53935`), N blue (`#3058d8`), S dark yellow (`#b59b00`), P orange
 (`#d97706`), F/Cl/Br/I green (`#218c3c`), B pink (`#b45d8a`), and Si brown
 (`#9c6b46`). Carbon, hydrogen and other unlisted elements retain `foreground`.
@@ -180,18 +190,19 @@ an automatically contrast-adjusted palette for every background.
 
 Attached H, H counts, isotopes and charges follow the host label's color.
 Explicit H graph vertices resolve as H, not as their neighbor's element.
-Generated chiral H labels follow their carbon host, but their wedges stay in
-`foreground`. Existing carbon suppression, geometry and chemical facts do not
+Generated chiral H labels also resolve as H, and their virtual C–H wedges use
+the carbon/H endpoint colors. Existing carbon suppression and chemical facts do not
 change. In element mode, `element_colors: BTreeMap<Element, Color>` overrides
 individual entries, including carbon/H, and supports alpha. In monochrome mode
 the override map is ignored. `label_color(element)` exposes the resolved color.
 
 ```rust
 use chitin_chem::Element;
-use chitin_chemdraw::{Color, depict::{ColorScheme, DepictOptions}};
+use chitin_chemdraw::{Color, depict::{BondColorStyle, ColorScheme, DepictOptions}};
 
 let mut options = DepictOptions {
   color_scheme: ColorScheme::Element,
+  bond_color_style: BondColorStyle::Split,
   ..Default::default()
 };
 options.element_colors.insert(Element::Oxygen, Color {
@@ -199,7 +210,8 @@ options.element_colors.insert(Element::Oxygen, Color {
 });
 ```
 
-The single-molecule example accepts `--color-scheme element`, combinable with
+The single-molecule example accepts `--color-scheme element` and
+`--bond-color-style split|uniform`, combinable with
 `--explicit-chiral-hydrogens` before the SMILES argument:
 
 ```sh
@@ -213,7 +225,8 @@ The batch tool exposes the same options in YAML:
 ```yaml
 output_dir: generated
 depict:
-  color_scheme: element  # or monochrome, the default
+  color_scheme: element  # default; monochrome restores all-foreground output
+  bond_color_style: split  # default; uniform keeps bonds in foreground
   element_colors:
     O: '#dc2828'        # exact element symbols; quote #RRGGBB / #RRGGBBAA
     N: '#3058d880'
@@ -309,7 +322,7 @@ aromatic cycles, including supported heterocycles. Example/YAML options:
 ```yaml
 depict:
   aromatic_style: circle  # or kekule, the default
-  color_scheme: element  # independent label-color policy
+  color_scheme: element  # palette for labels and split perimeter bonds
 ```
 
 ```sh

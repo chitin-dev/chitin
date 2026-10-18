@@ -77,7 +77,7 @@ fn fused_steroid_should_expand_each_declared_chiral_h_without_mutating_graph_or_
       .collect();
     assert!(geometry.len() == 1 || geometry.len() == 7);
     // All existing graph bonds at this expanded center stay ordinary lines.
-    for (_, edge) in graph.neighbors(center)? {
+    for (neighbor, edge) in graph.neighbors(center)? {
       let strokes: Vec<_> = drawing
         .primitives()
         .iter()
@@ -87,8 +87,11 @@ fn fused_steroid_should_expand_each_declared_chiral_h_without_mutating_graph_or_
           _ => false,
         })
         .collect();
-      assert_eq!(strokes.len(), 1);
-      assert!(matches!(strokes[0], Primitive::Line(_)));
+      let options = explicit();
+      let element = graph.atom(neighbor).ok_or("missing neighbor")?.element();
+      let split = options.label_color(element) != options.label_color(chitin_chem::Element::Carbon);
+      assert_eq!(strokes.len(), if split { 2 } else { 1 });
+      assert!(strokes.iter().all(|p| matches!(p, Primitive::Line(_))));
     }
   }
   assert_eq!(graph, before);

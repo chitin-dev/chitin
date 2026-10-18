@@ -49,7 +49,16 @@ pub enum Source {
   Bond(BondId),
 }
 
-/// One round-capped line in y-down drawing units.
+/// Endpoint shape for a scene stroke, independent of chemical bond order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LineCap {
+  /// Semicircle extending half the stroke width beyond the endpoint.
+  Round,
+  /// Flat endpoint; neighboring colored halves meet without overlap.
+  Butt,
+}
+
+/// One line in y-down drawing units with independently specified endpoint caps.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line {
   /// First endpoint, after label clipping if produced by chemical depiction.
@@ -60,6 +69,8 @@ pub struct Line {
   pub width: f64,
   /// Stroke color.
   pub color: Color,
+  /// Start/end caps; depiction uses round outer ends and flat color seams.
+  pub caps: [LineCap; 2],
   /// Chemical origin, absent for generic decorations.
   pub source: Option<Source>,
 }
