@@ -95,6 +95,8 @@ pub struct Polygon {
 ///
 /// Font identity and advances belong to the scene, not an export backend's
 /// installed fonts. Optional target-width fitting uses the same measured glyphs.
+/// Host-measured runs must be drawn by the host identified by `font`; outline
+/// exporters refuse them instead of substituting a different font.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Text {
   /// Reproducible font identity, shared by metrics and all export consumers.

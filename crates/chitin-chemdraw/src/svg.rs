@@ -26,7 +26,7 @@ impl Default for SvgOptions {
 }
 
 /// Invalid document framing; export never returns a partially formed document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SvgError {
   /// A scene font/outline could not be represented without substitution.
   #[error(transparent)]

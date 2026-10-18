@@ -155,6 +155,77 @@ scheme names, element symbols or hex values fail configuration parsing before
 an output directory is created. Only this transport layer parses YAML; neither
 the chemical model nor SVG export needs to know how the palette was configured.
 
+### Custom fonts and host-measured labels
+
+The default is still bundled Noto Sans. `DepictOptions::font` may instead hold
+immutable caller-supplied TrueType/OpenType bytes and a collection face index:
+
+```rust
+use chitin_chemdraw::{depict::DepictOptions, font::FontFace};
+
+let font = FontFace::from_bytes(std::fs::read("labels.ttf")?, 0)?;
+let options = DepictOptions { font, ..Default::default() };
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+File I/O and family/style resolution belong to the application. The core never
+searches installed fonts or silently falls back. Font bytes are shared, not
+copied per glyph, and retained by output scenes. Measurement, centering, clipping,
+text bounds and SVG outlines all use the same selected face. Element and separate
+H anchors use actual measured envelopes rather than a default-font baseline
+offset. SVG embeds glyph paths and therefore needs no matching installed font.
+Missing glyphs, invalid faces and visible glyphs without supported outlines
+produce explicit errors. The caller must have the rights needed to use its font.
+
+Native byte-backed measurement currently maps literal glyphs without kerning or
+complex-script shaping; variable fonts use their default instance. Select a
+static style face/file or use a shaping host for other requirements. Font family
+names alone cannot guarantee reproducible metrics. `FontFace` is now `Clone`,
+not `Copy`; `data()` returns `Option<&[u8]>` because host fonts need not have bytes.
+
+The single-molecule example accepts `--font-file labels.ttf` and optionally
+`--font-index 0` before the SMILES. The batch tool accepts:
+
+```yaml
+depict:
+  font:
+    path: fonts/labels.ttf  # relative to the YAML file, not process CWD
+    face_index: 0          # optional collection face index
+  font_size: 17.6
+smiles: ['[13NH2+]CO']
+```
+
+For a future typesetting/frontend host, use the two-stage API instead of
+substituting its font after the drawing is already clipped:
+
+1. Call `depict::measurement_requests(graph, options)` to obtain unique exact
+   `TextRequest` values. Requests cover visible element, H, isotope, charge,
+   subscript and separately expanded chiral-H runs; no placeholder font is needed.
+2. Measure each literal run at its requested size with the resolved host font.
+   Return `TextMetrics { advance, min, max }` in the same drawing units, with
+   bounds relative to the left baseline and y increasing downwards. A raw
+   width/height without baseline placement is not a sufficient measurement.
+3. Build `FontFace::from_measurements(identity, entries)`, put it into the same
+   options, then call `depict`. The graph, size and H policy must remain unchanged.
+4. Render `Drawing` primitives in the host, using each text run's baseline,
+   size, width and `font.host_identity()`. Resolve identity to exactly the
+   font/style/features/fallback settings used during measurement. Host glyphs
+   must be transformed into the supplied target width if it differs from advance.
+
+Both paths use the same chemical label recipes and geometric code. Tables are
+immutable and validate finite ordered bounds; missing or duplicate requests are
+errors, not interpolation or fallback. Changed font settings require a new
+identity/table; changed sizes or chemistry require collecting requests again.
+Host-managed fallback/shaping is possible only when its measurements and final
+drawing agree. The core does not invoke a host callback or retain mutable session
+state, so the contract can be transported through a pure WASM byte interface.
+
+Host-only fonts do not include outlines. SVG export of text backed by them
+returns `OutlinesUnavailable`; it never emits a guessed `font-family`. Use the
+host renderer or supply actual font bytes for standalone SVG. A Typst wrapper,
+WASM transport, OS font discovery and general label-aware skeleton optimization
+are not implemented by this font API.
+
 ### Aromatic inner circles
 
 `DepictOptions::aromatic_style` defaults to `AromaticStyle::Kekule`, preserving

@@ -174,10 +174,14 @@ fn unit(p: Point) -> Option<Point> {
 
 /// Prepares an upright H glyph with the same metrics/centering as normal labels.
 fn label(center: AtomId, position: Point, options: &DepictOptions) -> Result<(Text, LabelBounds), Error> {
-  let width = options.font.measure("H", options.font_size)?.advance;
+  let metrics = options.font.measure("H", options.font_size)?;
+  let width = metrics.advance;
   let run = Text {
-    font: options.font,
-    origin: position.translated(-width / 2., options.font_size * 0.35),
+    font: options.font.clone(),
+    origin: position.translated(
+      -(metrics.min.x + metrics.max.x) / 2.,
+      -(metrics.min.y + metrics.max.y) / 2.,
+    ),
     content: "H".into(),
     font_size: options.font_size,
     width,

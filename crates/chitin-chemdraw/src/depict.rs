@@ -9,18 +9,20 @@ use crate::{
   layout::Layout2d,
   scene::{Color, Drawing, DrawingError, Primitive, Source, Text, positive},
 };
-use chitin_chem::perception::{ValenceModel, analyze_valence};
-use chitin_chem::{Atom, AtomId, BondId, BondOrder, Element, GraphError, ImplicitHydrogenPolicy, MolecularGraph};
+use chitin_chem::perception::ValenceModel;
+use chitin_chem::{AtomId, BondId, BondOrder, Element, GraphError, MolecularGraph};
 use std::collections::BTreeMap;
 
 mod aromatic;
 mod bonds;
 mod color;
 mod hydrogens;
+mod labels;
 mod stereo;
 
 pub use aromatic::AromaticStyle;
 pub use color::ColorScheme;
+pub use labels::measurement_requests;
 
 /// Display policy for one declared H on an annotated tetrahedral carbon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,7 +177,7 @@ fn text(
 ) -> Result<f64, DepictError> {
   let width = options.font.measure(&content, size)?.advance;
   primitives.push(Primitive::Text(Text {
-    font: options.font,
+    font: options.font.clone(),
     origin,
     content,
     font_size: size,
@@ -190,10 +192,8 @@ fn text(
 ///
 /// # Parameters
 /// - `primitives`: append-only text-command destination in painter's order.
-/// - `id`, `atom`: source handle and facts from the same graph namespace.
-/// - `hydrogens`: known attached H only, excluding explicit neighbor H vertices.
+/// - `recipe`: resolved chemical fragments, shared with host measurement requests.
 /// - `placement`: transformed atom anchor and resolved horizontal H direction.
-/// - `charge`: known integer charge; unknown charge is rejected by the caller.
 /// - `options`: validated sizes, color, and label clearance.
 ///
 /// # Returns
@@ -201,46 +201,40 @@ fn text(
 /// radical state is left unspecified; a known radical is rejected by `depict`.
 fn label(
   primitives: &mut Vec<Primitive>,
-  id: AtomId,
-  atom: &Atom,
+  recipe: &labels::Recipe,
   placement: LabelPlacement,
-  hydrogens: u16,
-  charge: i16,
   options: &DepictOptions,
 ) -> Result<LabelBounds, DepictError> {
   let LabelPlacement { center, hydrogen_left } = placement;
+  let id = recipe.id;
   let start = primitives.len();
   let size = options.font_size;
-  let baseline = center.y + size * 0.35;
-  let left = center.x - options.font.measure(atom.element().symbol(), size)?.advance / 2.;
+  let base = options.font.measure(recipe.element.symbol(), size)?;
+  let baseline = center.y - (base.min.y + base.max.y) / 2.;
+  let left = center.x - (base.min.x + base.max.x) / 2.;
   let mut right = text(
     primitives,
     id,
     Point::new(left, baseline),
-    atom.element().symbol().into(),
+    recipe.element.symbol().into(),
     size,
     options,
   )?;
   let mut prefix_right = left;
-  if let Some(isotope) = atom.isotope() {
-    let content = isotope.mass_number().to_string();
+  if let Some(content) = &recipe.isotope {
     let small = size * 0.7;
-    prefix_right = left - options.font.measure(&content, small)?.advance;
+    prefix_right = left - options.font.measure(content, small)?.advance;
     text(
       primitives,
       id,
       Point::new(prefix_right, baseline - size * 0.5),
-      content,
+      content.clone(),
       small,
       options,
     )?;
   }
-  if hydrogens > 0 {
-    let count = if hydrogens > 1 {
-      hydrogens.to_string()
-    } else {
-      String::new()
-    };
+  if recipe.hydrogens > 0 {
+    let count = recipe.hydrogen_count().unwrap_or_default();
     let h_width = options.font.measure("H", size)?.advance;
     let count_width = if count.is_empty() {
       0.
@@ -253,7 +247,7 @@ fn label(
       right
     };
     let mut h_right = text(primitives, id, Point::new(h_start, baseline), "H".into(), size, options)?;
-    if hydrogens > 1 {
+    if recipe.hydrogens > 1 {
       h_right = text(
         primitives,
         id,
@@ -267,20 +261,12 @@ fn label(
       right = h_right;
     }
   }
-  if charge != 0 {
-    // Use the supported ASCII minus glyph rather than silently relying on a
-    // system-font fallback for U+2212, absent from this bundled Latin face.
-    let sign = if charge > 0 { '+' } else { '-' };
-    let content = if charge.unsigned_abs() == 1 {
-      sign.to_string()
-    } else {
-      format!("{}{sign}", charge.unsigned_abs())
-    };
+  if let Some(content) = &recipe.charge {
     text(
       primitives,
       id,
       Point::new(right, baseline - size * 0.5),
-      content,
+      content.clone(),
       size * 0.7,
       options,
     )?;
@@ -292,7 +278,7 @@ fn label(
   };
   // All runs belong to this atom, including H counts, isotope and charge.
   // Resolve once so annotations cannot acquire a different elemental identity.
-  let color = options.label_color(atom.element());
+  let color = options.label_color(recipe.element);
   for primitive in &mut primitives[start..] {
     if let Primitive::Text(run) = primitive {
       run.color = color;
@@ -373,6 +359,12 @@ fn clip(start: Point, end: Point, bounds: Option<LabelBounds>) -> Option<Point> 
 /// unsupported bond orders, unresolved label H, coincident/fully obscured bonds,
 /// invalid sizing, or nonrepresentable derived geometry.
 pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions) -> Result<Drawing, DepictError> {
+  validate_options(options)?;
+  depict_validated(graph, layout, options)
+}
+
+/// Checks shared sizes before native or externally measured label preparation.
+fn validate_options(options: &DepictOptions) -> Result<(), DepictError> {
   if ![
     options.bond_length,
     options.font_size,
@@ -390,6 +382,15 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
   {
     return Err(DepictError::Options);
   }
+  Ok(())
+}
+
+/// Builds geometry using the same immutable font for label placement and bounds.
+fn depict_validated(
+  graph: &MolecularGraph,
+  layout: &Layout2d,
+  options: &DepictOptions,
+) -> Result<Drawing, DepictError> {
   for &id in layout.positions().keys() {
     if graph.atom(id).is_none() {
       return Err(DepictError::UnexpectedPosition(id));
@@ -420,43 +421,11 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
       return Err(DepictError::DoubleBondStereo(id));
     }
   }
-  let report = match options.hydrogens {
-    HydrogenMode::KnownOnly => None,
-    HydrogenMode::Infer(model) => Some(analyze_valence(graph, model)?),
-  };
+  let recipes = labels::prepare(graph, options)?;
   let mut labels = Vec::new();
   let mut envelopes = BTreeMap::new();
   let expanded = hydrogens::centers(graph, options);
-  for (id, atom) in graph.atoms() {
-    let charge = atom.formal_charge().ok_or(DepictError::UnknownFacts(id))?;
-    let declared = atom.declared_hydrogens().ok_or(DepictError::UnknownFacts(id))?;
-    if atom.unpaired_electrons().is_some_and(|count| count > 0) {
-      return Err(DepictError::Radical(id));
-    }
-    let hidden = atom.element() == Element::Carbon
-      && atom.isotope().is_none()
-      && charge == 0
-      && ((declared == 0
-        && atom.unpaired_electrons() == Some(0)
-        && atom.implicit_hydrogen_policy() == ImplicitHydrogenPolicy::Infer)
-        || graph.tetrahedral(id).is_some())
-      && graph.neighbors(id)?.len() != 0;
-    if hidden {
-      continue;
-    }
-    let implicit = match atom.implicit_hydrogen_policy() {
-      ImplicitHydrogenPolicy::Fixed(count) => count,
-      ImplicitHydrogenPolicy::Infer => report
-        .as_ref()
-        .and_then(|r| r.atom(id))
-        .and_then(|r| r.value())
-        .map(|value| value.hydrogens.implicit())
-        .ok_or(DepictError::Hydrogens(id))?,
-      ImplicitHydrogenPolicy::Unspecified => return Err(DepictError::Hydrogens(id)),
-    };
-    if atom.element() == Element::Hydrogen && (declared != 0 || implicit != 0) {
-      return Err(DepictError::Hydrogens(id));
-    }
+  for (&id, recipe) in &recipes {
     let mut neighbor_x = 0.;
     for (neighbor, _) in graph.neighbors(id)? {
       let distance = points[&neighbor].distance(points[&id]);
@@ -466,14 +435,11 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
     }
     let bounds = label(
       &mut labels,
-      id,
-      atom,
+      recipe,
       LabelPlacement {
         center: points[&id],
         hydrogen_left: neighbor_x > 1e-10,
       },
-      u16::from(declared) + u16::from(implicit) - u16::from(expanded.contains(&id)),
-      charge,
       options,
     )?;
     envelopes.insert(id, bounds);
