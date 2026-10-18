@@ -265,6 +265,8 @@ fn join(
 /// # Parameters
 /// - `graph`: source topology; temporary bridge/cycle information is local only.
 /// - `points`, `labels`: validated-stage data in one y-down drawing namespace.
+/// - `circle_edges`: fully accepted aromatic-circle edges drawn as single axes;
+///   integer graph orders remain available for valence and all other bonds.
 /// - `options`: validated proportions and colors, shared by every bond type.
 /// - `output`: append-only generic scene commands; no SVG-specific geometry here.
 ///
@@ -276,6 +278,7 @@ pub(super) fn draw(
   points: &BTreeMap<AtomId, Point>,
   labels: &BTreeMap<AtomId, LabelBounds>,
   expanded_hydrogens: &BTreeSet<AtomId>,
+  circle_edges: &BTreeSet<BondId>,
   options: &DepictOptions,
   output: &mut Vec<Primitive>,
 ) -> Result<(), Error> {
@@ -306,7 +309,12 @@ pub(super) fn draw(
     let direction = Point::new((end.x - start.x) / length, (end.y - start.y) / length);
     let normal = Point::new(-direction.y, direction.x);
     let short = length * (1. - options.short_bond_ratio) / 2.;
-    let mut strokes = match bond.order() {
+    let order = if circle_edges.contains(&id) {
+      BondOrder::Single
+    } else {
+      bond.order()
+    };
+    let mut strokes = match order {
       BondOrder::Single => vec![Stroke {
         offset: 0.,
         trim: [0.; 2],

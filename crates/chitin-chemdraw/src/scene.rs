@@ -64,6 +64,22 @@ pub struct Line {
   pub source: Option<Source>,
 }
 
+/// An unfilled stroked circle, independent of any chemical ring interpretation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Circle {
+  /// Center in y-down drawing units.
+  pub center: Point,
+  /// Positive radius to the stroke's centerline.
+  pub radius: f64,
+  /// Positive full stroke width.
+  pub width: f64,
+  /// Stroke color, including alpha.
+  pub color: Color,
+  /// Optional input locator. Aromatic annotations use their smallest atom handle,
+  /// not a fabricated ring identity or attribution to a single ring bond.
+  pub source: Option<Source>,
+}
+
 /// A filled closed polygon in y-down drawing units, with no implicit stroke.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Polygon {
@@ -117,6 +133,8 @@ impl Text {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Primitive {
+  /// An unfilled stroked circular boundary.
+  Circle(Circle),
   /// A filled closed boundary, such as a solid stereochemical wedge.
   Polygon(Polygon),
   /// A stroked segment.
@@ -134,7 +152,7 @@ pub enum DrawingError {
   /// A geometry coordinate or aggregate bound is not finite.
   #[error(transparent)]
   Geometry(#[from] GeometryError),
-  /// Stroke widths and text sizes/advances must be finite and positive.
+  /// Stroke widths, radii and text sizes/advances must be finite and positive.
   #[error("invalid drawing dimensions at primitive {0}")]
   Dimensions(usize),
   /// Empty text or XML-forbidden characters cannot be exported consistently.
@@ -168,6 +186,14 @@ impl Drawing {
     let mut points = Vec::new();
     for (index, primitive) in primitives.iter().enumerate() {
       match primitive {
+        Primitive::Circle(circle) => {
+          if !positive(circle.radius) || !positive(circle.width) {
+            return Err(DrawingError::Dimensions(index));
+          }
+          let outer = circle.radius + circle.width / 2.;
+          points.push(circle.center.translated(-outer, -outer));
+          points.push(circle.center.translated(outer, outer));
+        }
         Primitive::Polygon(polygon) => {
           if polygon.points.len() < 3 {
             return Err(DrawingError::Dimensions(index));

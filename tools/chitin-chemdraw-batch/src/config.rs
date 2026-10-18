@@ -6,7 +6,7 @@ use anyhow::{Result, ensure};
 use serde::Deserialize;
 
 use chitin_chemdraw::{
-  depict::{ChiralHydrogenMode, DepictOptions},
+  depict::{AromaticStyle, ChiralHydrogenMode, DepictOptions},
   svg::SvgOptions,
 };
 
@@ -61,6 +61,8 @@ pub(crate) struct DepictConfig {
   color_scheme: Scheme,
   /// Validated exact element symbols mapped to RGB/RGBA values.
   element_colors: Palette,
+  /// Inner circles are display annotations, not aromaticity perception.
+  aromatic_style: AromaticConfig,
   /// Drawing units per normalized bond unit.
   bond_length: Option<f64>,
   /// Element-label size in drawing units.
@@ -82,6 +84,10 @@ impl DepictConfig {
     DepictOptions {
       color_scheme: self.color_scheme.into(),
       element_colors: self.element_colors.0.clone(),
+      aromatic_style: match self.aromatic_style {
+        AromaticConfig::Kekule => AromaticStyle::Kekule,
+        AromaticConfig::Circle => AromaticStyle::Circle,
+      },
       chiral_hydrogens: if self.explicit_chiral_hydrogens {
         ChiralHydrogenMode::Explicit
       } else {
@@ -96,6 +102,17 @@ impl DepictConfig {
       ..defaults
     }
   }
+}
+
+/// Strict YAML spellings without adding serialization dependencies to drawing.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AromaticConfig {
+  /// Preserve existing alternating single/double strokes.
+  #[default]
+  Kekule,
+  /// Request circles where topology and geometry permit them.
+  Circle,
 }
 
 /// SVG page options without coupling serialization to the domain crates.
@@ -155,6 +172,7 @@ mod tests {
       "smiles: ['C']\ndepict: {stroke_with: 2}",
       "smiles: ['C']\nsvg: {pad: 2}",
       "smiles: ['C']\ndepict: {color_scheme: rainbow}",
+      "smiles: ['C']\ndepict: {aromatic_style: dashed}",
       "smiles: ['C']\ndepict: {element_colors: {oxygen: '#ff0000'}}",
       "smiles: ['C']\ndepict: {element_colors: {O: '#ff00zz'}}",
     ] {
@@ -177,6 +195,13 @@ mod tests {
         alpha: 128
       }
     );
+    Ok(())
+  }
+
+  #[test]
+  fn aromatic_circle_style_should_be_read_from_yaml() -> Result<()> {
+    let config: Config = serde_yaml::from_str("smiles: ['c1ccccc1']\ndepict: {aromatic_style: circle}")?;
+    assert_eq!(config.depict.options().aromatic_style, AromaticStyle::Circle);
     Ok(())
   }
 }

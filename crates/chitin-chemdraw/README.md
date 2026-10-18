@@ -155,6 +155,46 @@ scheme names, element symbols or hex values fail configuration parsing before
 an output directory is created. Only this transport layer parses YAML; neither
 the chemical model nor SVG export needs to know how the palette was configured.
 
+### Aromatic inner circles
+
+`DepictOptions::aromatic_style` defaults to `AromaticStyle::Kekule`, preserving
+the existing alternating single/double depiction. `AromaticStyle::Circle`
+requests a single-stroke perimeter and inner circle for independent simple
+aromatic cycles, including supported heterocycles. Example/YAML options:
+
+```yaml
+depict:
+  aromatic_style: circle  # or kekule, the default
+  color_scheme: element  # independent label-color policy
+```
+
+```sh
+cargo run -p chitin-chemdraw --example smiles_to_svg -- \
+  --aromatic-style circle --color-scheme element 'c1ccncc1' .temp/pyridine.svg
+```
+
+The original input must mark **every ring atom and ring edge as aromatic**.
+Uppercase alternating bonds are not assigned aromaticity. Lowercase input with
+explicit single/double ring edges also conservatively retains its Kekulé strokes.
+Fused/shared-vertex rings fall back as whole blocks; rings connected only by
+external bonds may each receive a circle. Chemical validation and label H counts
+always use the existing detached integer model, even in circle mode. Invalid
+chemistry is not made acceptable by a different display style.
+
+The circle is fitted to a near-regular polygon in the supplied coordinates,
+with radius 70% of the smallest center-to-edge distance. Distorted, concave or
+star-like manual geometry, thick strokes, inward labels, unrelated bonds or
+generated chiral-H marks can trigger a complete per-ring fallback. Geometry is
+never moved to force a circle to fit; no per-circle radius setting is exposed.
+The circle uses the bond foreground/width, independently of label colors. Inner
+double strokes are suppressed only for a fully accepted circle, leaving external
+carbonyls and other rings unchanged.
+
+Generic scenes now provide `Circle` / `Primitive::Circle`, with stroke-inclusive
+bounds, validation and SVG `<circle fill="none">` export. A chemical inner circle
+uses `Source::Atom` with the ring's smallest atom handle as a source locator, not
+as a newly invented chemical ring identifier.
+
 ## SVG export
 
 SVG export consumes only the validated `Drawing` scene. It provides:

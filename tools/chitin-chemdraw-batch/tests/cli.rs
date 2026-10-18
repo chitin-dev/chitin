@@ -143,3 +143,22 @@ fn invalid_palette_should_fail_before_creating_output_directory() -> Result<()> 
   assert!(!root.path().join("generated").exists());
   Ok(())
 }
+
+#[test]
+fn circle_option_should_export_inner_circles_without_inner_double_strokes() -> Result<()> {
+  let root = tempfile::tempdir()?;
+  let config = root.path().join("job.yaml");
+  fs::write(
+    &config,
+    "depict:\n  aromatic_style: circle\n  color_scheme: element\nsmiles: ['c1ccncc1', 'c1ccc2ccccc2c1']",
+  )?;
+  let output = invoke(&config, false)?;
+  assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+  let single = fs::read_to_string(root.path().join("generated/0001.svg"))?;
+  assert_eq!(single.matches("<circle ").count(), 1);
+  assert_eq!(single.matches("<line ").count(), 6);
+  assert!(single.contains("fill=\"#3058d8\""));
+  let fused = fs::read_to_string(root.path().join("generated/0002.svg"))?;
+  assert!(!fused.contains("<circle "));
+  Ok(())
+}

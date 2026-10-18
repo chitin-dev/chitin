@@ -13,11 +13,13 @@ use chitin_chem::perception::{ValenceModel, analyze_valence};
 use chitin_chem::{Atom, AtomId, BondId, BondOrder, Element, GraphError, ImplicitHydrogenPolicy, MolecularGraph};
 use std::collections::BTreeMap;
 
+mod aromatic;
 mod bonds;
 mod color;
 mod hydrogens;
 mod stereo;
 
+pub use aromatic::AromaticStyle;
 pub use color::ColorScheme;
 
 /// Display policy for one declared H on an annotated tetrahedral carbon.
@@ -38,7 +40,7 @@ pub enum HydrogenMode {
   Infer(ValenceModel),
 }
 
-/// Depiction sizes in drawing units, independent of normalized layout units.
+/// Depiction sizes and display policies, independent of normalized layout units.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DepictOptions {
   /// Drawing units per normalized bond unit.
@@ -64,6 +66,8 @@ pub struct DepictOptions {
   /// Element-mode overrides, including optional carbon/H entries and alpha.
   /// Ignored in monochrome mode; absent entries use the builtin palette/fallback.
   pub element_colors: BTreeMap<Element, Color>,
+  /// Aromatic ring display policy; does not change supplied aromatic facts.
+  pub aromatic_style: AromaticStyle,
   /// Explicit H-resolution model; no domain facts are overwritten.
   pub hydrogens: HydrogenMode,
   /// Whether annotated carbon's declared H becomes a separate drawn ligand.
@@ -86,6 +90,7 @@ impl Default for DepictOptions {
       foreground: Color::BLACK,
       color_scheme: ColorScheme::Monochrome,
       element_colors: BTreeMap::new(),
+      aromatic_style: AromaticStyle::Kekule,
       hydrogens: HydrogenMode::Infer(ValenceModel::SmilesOrganicV1),
       chiral_hydrogens: ChiralHydrogenMode::Implicit,
     }
@@ -345,7 +350,7 @@ fn clip(start: Point, end: Point, bounds: Option<LabelBounds>) -> Option<Point> 
 /// # Parameters
 /// - `graph`: chemical input; handles must share the layout's namespace.
 /// - `layout`: automatic or caller-supplied normalized y-up coordinates.
-/// - `options`: drawing scale, monochrome style, and explicit H-resolution policy.
+/// - `options`: drawing scale, colors, aromatic style and explicit H-resolution policy.
 ///
 /// # Returns
 /// Bonds followed by labels in painter's order, with source IDs on every stroke
@@ -353,6 +358,8 @@ fn clip(start: Point, end: Point, bounds: Option<LabelBounds>) -> Option<Point> 
 /// isolated; isotope/charge/declared-H or bracket-state carbon stays labelled.
 /// Layout and molecular facts are not modified. Supported aromatic input uses
 /// the shared detached Kekulé model before drawing ordinary integer bonds.
+/// Circle style may replace eligible original aromatic cycles after geometry
+/// and annotation clearance checks; it does not alter validation or H counts.
 /// No stereo is guessed; explicit H vertices remain independently visible.
 /// `chiral_hydrogens` can display a declared H at an annotated carbon as a
 /// separate label and C–H wedge. These primitives use `Source::AttachedHydrogen`
@@ -385,6 +392,7 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
       return Err(DepictError::UnexpectedPosition(id));
     }
   }
+  let source_graph = graph;
   let resolved = crate::chemical::integer_bonds(graph)?;
   let graph = resolved.as_ref();
   // Check representation before H inference so missing bond semantics do not
@@ -461,8 +469,18 @@ pub fn depict(graph: &MolecularGraph, layout: &Layout2d, options: &DepictOptions
     envelopes.insert(id, bounds);
   }
   let attached = hydrogens::plan(graph, &points, &envelopes, &expanded, options)?;
+  let aromatic = aromatic::plan(source_graph, &points, &envelopes, &attached, options)?;
   let mut primitives = Vec::new();
-  bonds::draw(graph, &points, &envelopes, &expanded, options, &mut primitives)?;
+  bonds::draw(
+    graph,
+    &points,
+    &envelopes,
+    &expanded,
+    &aromatic.edges,
+    options,
+    &mut primitives,
+  )?;
+  primitives.extend(aromatic.circles.into_iter().map(Primitive::Circle));
   for attached in attached {
     primitives.extend(attached.wedge);
     labels.push(Primitive::Text(attached.label));

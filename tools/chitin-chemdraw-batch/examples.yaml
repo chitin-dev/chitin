@@ -1,6 +1,7 @@
 # Relative paths resolve from this YAML file, not the process working directory.
 output_dir: generated
 depict:
+  aromatic_style: circle  # Default kekule; fused/unsuitable rings fall back.
   # Optional label coloring; omit to retain the default monochrome output.
   color_scheme: element
   # element_colors: {O: '#dc2828', N: '#3058d8'}

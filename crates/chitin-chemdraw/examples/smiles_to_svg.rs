@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut options = depict::DepictOptions::default();
   let source = loop {
     let argument = args.next().ok_or(
-      "usage: smiles_to_svg [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] '<SMILES>' <output.svg>",
+      "usage: smiles_to_svg [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
     )?;
     match argument.as_str() {
       "--explicit-chiral-hydrogens" => options.chiral_hydrogens = depict::ChiralHydrogenMode::Explicit,
@@ -21,6 +21,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
           Some("monochrome") => depict::ColorScheme::Monochrome,
           Some("element") => depict::ColorScheme::Element,
           _ => return Err("--color-scheme requires monochrome or element".into()),
+        };
+      }
+      "--aromatic-style" => {
+        options.aromatic_style = match args.next().as_deref() {
+          Some("kekule") => depict::AromaticStyle::Kekule,
+          Some("circle") => depict::AromaticStyle::Circle,
+          _ => return Err("--aromatic-style requires kekule or circle".into()),
         };
       }
       _ if argument.starts_with("--") => return Err(format!("unknown option: {argument}").into()),
