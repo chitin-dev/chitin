@@ -84,7 +84,7 @@ fn reserve(counter: &AtomicU64) -> Result<u64, GraphError> {
   // Only uniqueness is synchronized here; no molecular data is published through
   // these counters, so acquiring/releasing unrelated memory is unnecessary.
   counter
-    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
+    .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| value.checked_add(1))
     .map_err(|_| GraphError::IdentifierExhausted)
 }
 
