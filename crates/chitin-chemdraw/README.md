@@ -78,9 +78,62 @@ Multiple orientations and bridgehead separations are scored against the
 component. Discrete refinement preserves the projected lengths. The optional
 unit-distance optimizer skips components containing shortened bonds; standalone
 `optimization::optimize` retains its strict unit-input contract and rejects them.
-Higher-rank cages remain unsupported; the model does not invent 3D geometry or
-stereo from ring topology. Attachments on an interior bridge can still produce
+Other higher-rank blocks require their own cage/fused models; this path model
+does not invent 3D geometry or stereo from ring topology. Attachments on an interior bridge can still produce
 crossings reported by quality diagnostics.
+
+### Saturated cage templates
+
+An independent block model supports complete adamantane and cubane skeletons.
+It matches the exact induced core adjacency, not SMILES strings, atom IDs, degree
+counts alone, or a partial subgraph. Core edges must all be single; heteroatom
+replacements and external substituents are allowed without changing input facts.
+Examples include amino/carboxyl-substituted adamantanes, nitrogen-replaced
+adamantane topology, and cubane carboxyl/amides. Unsaturated cores and unmatched
+cage families still use the existing fallback or return a typed ring error.
+
+Adamantane's neutral, isotope-free carbon core uses a **chair-based perspective
+view** for the parent and derivatives decorated at only one core site. Its one
+authored crossing has a continuous foreground strut and a gap in the rear bond.
+This follows the perspective conventions in [IUPAC ST-3.1](https://iupac.qmul.ac.uk/drawing/stereo.html):
+the view is upright, and the visible discontinuity exceeds twice the stroke
+width. The gap is real scene geometry, not a white mask, so transparent SVG and
+future scene consumers retain the same meaning. Every original bond keeps its
+source ID; no atom or chemical stereo descriptor is inserted at the crossing.
+
+Undecorated heteroatom cores also use this view when every core automorphism
+preserves all supplied atomic attributes, as in the four-nitrogen bridgehead
+replacement. This checks complete mappings, not just element counts or degrees.
+
+Perspective can imply configuration. Asymmetrically replaced or externally
+decorated heterocages, isotope/charged/radical cores, multiple
+decorated carbon core sites, supplied core tetrahedral descriptors, or constrained
+alkenes in the same component therefore retain the nonperspective fallback.
+This conservative policy avoids manufacturing unspecified cage configuration;
+it is not a general potential-stereocenter/CIP analysis. Cubane uses two offset
+square faces joined by parallel oblique edges. Its two crossings have explicit
+rear-bond gaps under the same eligibility policy; uncertain variants retain the
+nested-square fallback. These projections use mean core length one, not equal
+individual lengths. The optional unit-distance optimizer skips them.
+
+`Layout2d::bond_crossings()` exposes explicit front/back bond IDs. Refinement
+does not rotate or reflect the perspective cage or report its authored crossing
+as an unresolved overlap; unrelated accidental crossings remain diagnostic.
+Copying only the position map loses this presentation metadata; clone the layout
+to preserve it. Arbitrary intersections in manual coordinates never acquire an
+automatic front/back order. Only source-supplied stereo may produce wedges.
+
+All exact mappings compete within the shared ring budget. Flat poses try six
+rigid orientations; perspective poses retain their preferred view. Exterior positions
+are preferred for substituted/labeled atoms. One
+existing articulation is retained exactly, including spiro entry; multiple-entry
+fitting and general cage embedding are not implemented. Multiple internal
+substituents may still cause final crowding/crossing diagnostics, and glyph
+collision avoidance is not guaranteed. See `tests/fixtures/cages.smi` and the
+batch tool's `examples.yaml` for executable inputs.
+These perspective views specifically address ST-3.1 and the recognition/legibility goals
+of [GR-3.3.4](https://iupac.qmul.ac.uk/drawing/drawing.html); this is not a claim
+that every output of the drawing library satisfies all IUPAC recommendations.
 
 Substituents at fused junctions use the exterior gap between ring neighbors.
 Only a separately connected, already placed parent occupies that gap; having
@@ -411,7 +464,7 @@ rejects caller coordinates that flatten or invert an annotated double bond.
 Partial/unpaired directions and cumulated stereo remain unsupported; no CIP
 E/Z labels are assigned. Supplied aromatic facts are retained in the source graph; layout and
 depiction share a detached integer-bond adapter, not separate display guesses.
-Future work includes broader aromatic chemistry, cage bridge layouts, exact label-aware refinement, further stereo
+Future work includes broader aromatic chemistry, further cage families and unsaturated cores, exact label-aware refinement, further stereo
 depiction, complex text shaping, and raster export.
 
 Tetrahedral `@`/`@@` and `@TH1`/`@TH2` preserve relative configuration through

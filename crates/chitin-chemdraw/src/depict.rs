@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 mod aromatic;
 mod bonds;
 mod color;
+mod crossings;
 mod hydrogens;
 mod labels;
 mod stereo;
@@ -105,6 +106,9 @@ impl Default for DepictOptions {
 /// Information that cannot be drawn faithfully by the current depiction profile.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DepictError {
+  /// Authored perspective order no longer matches two proper single-bond strokes.
+  #[error("invalid perspective crossing at bond {0}")]
+  Perspective(BondId),
   /// Supplied coordinates invert or flatten an annotated double bond.
   #[error("cannot depict double-bond configuration at bond {0}")]
   DoubleBondStereo(BondId),
@@ -356,6 +360,8 @@ fn clip(start: Point, end: Point, bounds: Option<LabelBounds>) -> Option<Point> 
 /// `chiral_hydrogens` can display a declared H at an annotated carbon as a
 /// separate label and C–H wedge. These primitives use `Source::AttachedHydrogen`
 /// and do not allocate graph handles or change hydrogen counts.
+/// Authored layout crossings cut the rear single-bond stroke, leaving the front
+/// continuous. Cuts are generic scene geometry and work on transparent output.
 ///
 /// # Errors
 /// Rejects coordinate-coverage mismatch, unknown required facts, known radicals,
@@ -459,6 +465,7 @@ fn depict_validated(
     options,
     &mut primitives,
   )?;
+  crossings::apply(graph, layout, &points, options, &mut primitives)?;
   primitives.extend(aromatic.circles.into_iter().map(Primitive::Circle));
   for attached in attached {
     primitives.extend(attached.wedge);

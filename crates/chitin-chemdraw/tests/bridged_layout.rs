@@ -189,8 +189,8 @@ fn equal_shortest_bridges_should_close_without_coincident_atoms_or_crossings() -
 }
 
 #[test]
-fn cages_should_still_report_the_typed_embedding_boundary() -> TestResult {
-  for source in ["C1C2CC3CC1CC(C2)C3", "C12C3C4C1C5C2C3C45"] {
+fn unmatched_polycycles_should_still_report_the_typed_embedding_boundary() -> TestResult {
+  for source in ["C1CC2C3CCC1C23", "C12=C3C4C1C5C2C3C45"] {
     let graph = read_smiles(source)?.into_graph();
     assert!(matches!(
       layout::generate(&graph, &LayoutOptions::default()),

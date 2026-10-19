@@ -43,6 +43,8 @@ struct Model {
   hydroxyls: Vec<terminal::Hydroxyl>,
   /// Dense axis/reference quadruples with required, coordinate-independent sides.
   double_stereo: Vec<([usize; 4], chitin_chem::DoubleBondRelation)>,
+  /// Ordered foreground/background edge rows authored by a perspective template.
+  perspective: Vec<(usize, usize)>,
 }
 
 impl Model {
@@ -129,6 +131,7 @@ impl Model {
       linear,
       hydroxyls,
       double_stereo,
+      perspective: Vec::new(),
     }
   }
 
@@ -184,7 +187,7 @@ impl Model {
   /// Measures nearby geometry with unit-cell broad-phase pruning.
   ///
   /// # Parameters
-  /// - `points`: complete component coordinates with unit skeleton edges.
+  /// - `points`: complete normalized component coordinates, including rigid projections.
   /// - `threshold`: reportable atom-center distance, independent of cost weights.
   /// - `budget`: candidate work accounting; inspection uses an unlimited budget.
   ///
@@ -193,7 +196,17 @@ impl Model {
   /// penalty. `None` abandons a candidate before budget overspending. Grid costs
   /// are local for ordinary drawings, but dense overlap can still be quadratic.
   fn measure(&self, points: &[Point], threshold: f64, budget: &mut Budget) -> Option<Quality> {
-    quality::measure(points, &self.segments, threshold, budget)
+    let mut quality = quality::measure(points, &self.segments, threshold, budget)?;
+    if !budget.charge(self.perspective.len()) {
+      return None;
+    }
+    for &(front, back) in &self.perspective {
+      let pair = (front.min(back), front.max(back));
+      if quality.crossings.remove(&pair) {
+        quality.cost = (quality.cost - 8.).max(0.);
+      }
+    }
+    Some(quality)
   }
 }
 
@@ -284,6 +297,20 @@ fn improve_branches(
       let Some((branch, moving, fixed)) = model.branch(edge, budget) else {
         return true;
       };
+      // Perspective templates have a preferred upright view. A complete cage
+      // must not be mirrored/rotated merely to remove an authored crossing.
+      if !budget.charge(branch.len() * model.perspective.len() * 4) {
+        return true;
+      }
+      if model.perspective.iter().any(|&(front, back)| {
+        model.edges[front]
+          .ends
+          .iter()
+          .chain(&model.edges[back].ends)
+          .any(|node| branch.contains(node))
+      }) {
+        continue;
+      }
       if branch.len() == 1 {
         continue;
       }
@@ -369,12 +396,28 @@ pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &Layou
   let mut cursor = 0.;
   layout.diagnostics.clear();
   for component in graph.connected_components() {
-    let model = Model::new(graph, component, rings.bridges());
+    let mut model = Model::new(graph, component, rings.bridges());
+    for crossing in &layout.crossings {
+      let front = model.edges.iter().position(|edge| edge.id == crossing.front);
+      let back = model.edges.iter().position(|edge| edge.id == crossing.back);
+      match (front, back) {
+        (Some(front), Some(back)) => model.perspective.push((front, back)),
+        (None, None) => {}
+        _ => return Err(Error::Invariant(model.ids[0])),
+      }
+    }
     let mut points: Vec<_> = model
       .ids
       .iter()
       .map(|id| layout.positions.get(id).copied().ok_or(Error::Invariant(*id)))
       .collect::<Result<_, _>>()?;
+    for &(front, back) in &model.perspective {
+      let [a, b] = model.edges[front].ends;
+      let [c, d] = model.edges[back].ends;
+      if !quality::crosses(points[a], points[b], points[c], points[d]) {
+        return Err(Error::Invariant(model.ids[a]));
+      }
+    }
     if !exhausted && options.refinement_passes > 0 {
       exhausted = improve(&model, &mut points, options, &mut budget);
     }
@@ -397,7 +440,9 @@ pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &Layou
       )?
       .exhausted;
     }
-    orient(&mut points);
+    if model.perspective.is_empty() {
+      orient(&mut points);
+    }
     let quality = model
       .measure(&points, options.minimum_spacing, &mut Budget(usize::MAX))
       .ok_or(Error::CoordinateRange)?;
@@ -438,6 +483,30 @@ mod tests {
   use chitin_chem::io::smiles::read_smiles;
 
   type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+  #[test]
+  fn authored_crossing_should_not_suppress_other_accidental_intersections() -> TestResult {
+    let graph = read_smiles("CC.CC.CC.CC")?.into_graph();
+    let ids = graph.atoms().map(|(id, _)| id).collect();
+    let rings = analyze_rings(&graph)?;
+    let mut model = Model::new(&graph, ids, rings.bridges());
+    model.perspective.push((0, 1));
+    let points = [
+      Point::new(-1., -1.),
+      Point::new(1., 1.),
+      Point::new(-1., 1.),
+      Point::new(1., -1.),
+      Point::new(3., -1.),
+      Point::new(5., 1.),
+      Point::new(3., 1.),
+      Point::new(5., -1.),
+    ];
+    let quality = model
+      .measure(&points, 0.55, &mut Budget(usize::MAX))
+      .ok_or("measurement failed")?;
+    assert_eq!(quality.crossings, BTreeSet::from([(2, 3)]));
+    Ok(())
+  }
 
   #[test]
   fn folded_chain_should_improve_without_stretching_bonds() -> TestResult {

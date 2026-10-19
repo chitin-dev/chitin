@@ -229,13 +229,16 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
   let rings = Rings::new(graph, &topology, &mut ring_work)?;
   let mut embedded = vec![false; rings.len()];
   let mut positions = vec![None; topology.ids.len()];
+  let mut crossings = Vec::new();
   for component in &topology.components {
     let root = *component.first().ok_or(Error::CoordinateRange)?;
     let mut grid = Grid::default();
     let mut pending = VecDeque::new();
     if let Some(seed) = rings.seed(component) {
       embedded[seed] = true;
-      for (node, point, heading) in rings.embed(seed, &positions, component, 0., &mut ring_work)? {
+      let placed = rings.embed(seed, &positions, component, 0., &mut ring_work)?;
+      crossings.extend(placed.crossings);
+      for (node, point, heading) in placed.atoms {
         place(node, point, &mut positions, &mut grid)?;
         pending.push_back(Branch {
           node,
@@ -263,7 +266,9 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
           continue;
         }
         embedded[index] = true;
-        for (node, point, heading) in rings.embed(index, &positions, component, branch.heading, &mut ring_work)? {
+        let placed = rings.embed(index, &positions, component, branch.heading, &mut ring_work)?;
+        crossings.extend(placed.crossings);
+        for (node, point, heading) in placed.atoms {
           if positions[node].is_some() {
             if node == branch.node {
               branch.heading = heading;
@@ -306,6 +311,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
     .map(|(i, &id)| position(&positions, &topology, i).map(|p| (id, p)))
     .collect::<Result<BTreeMap<_, _>, _>>()?;
   let mut result = Layout2d::from_positions(positions)?;
+  result.crossings = crossings;
   super::alkenes::enforce(graph, &mut result, options.stereo_budget)?;
   // Placement-time contacts can disappear after whole-branch refinement. Report
   // only the final geometry, not obsolete pairs collected during expansion.

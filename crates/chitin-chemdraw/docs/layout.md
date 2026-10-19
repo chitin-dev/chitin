@@ -164,11 +164,77 @@ The projected unit-distance optimizer skips any component containing shortened
 bonds; rigid discrete refinement still preserves them. Standalone `optimize`
 continues to reject nonunit input rather than silently stretching a bridge.
 
-Higher-rank cages and multi-anchor entry remain unsupported. No physical
+Other higher-rank blocks and multi-anchor entry are not handled by this path model. No physical
 conformation, over/under crossing, or tetrahedral configuration is inferred.
 Source stereochemistry is left to the existing validation and depiction stages.
 Interior-bridge substituents can still cause crossings;
 remaining crowding/crossings are reported normally, not hidden by this solver.
+
+## Saturated cage templates
+
+`rings::cages` is a separate complete-block model. The first authored core
+topologies are a once-subdivided tetrahedral graph (adamantane: 10 vertices,
+12 edges, rank 3) and the cube graph (cubane: 8 vertices, 12 edges, rank 5).
+Size and rank are only a prefilter. A bounded most-constrained-vertex search
+enumerates exact template-to-source bijections, comparing assigned edges and
+nonedges. Template adjacency is independent of elements and source handle
+allocation. Only block edges participate, and every core bond must be single.
+External isotope/charge/element/stereo facts are never replaced by template data.
+
+The parent adamantane pose is a chair-based perspective view with one ordered
+crossing, following [ST-3.1](https://iupac.qmul.ac.uk/drawing/stereo.html) and the
+recognition goals of [GR-3.3.4](https://iupac.qmul.ac.uk/drawing/drawing.html).
+This view is used for neutral, isotope-free, nonradical carbon cores with at most
+one externally decorated core site, no supplied core tetrahedral descriptors,
+and no constrained alkene in that component. Undecorated heterocages additionally
+qualify when every complete template mapping gives the same atomic attributes
+at each template vertex. This preserves full core automorphism symmetry, rather
+than merely matching element counts or degrees; all comparisons consume the
+shared work budget. Asymmetric or externally decorated heterocages remain flat.
+Other variants retain the original
+nonperspective pose to avoid implying an unspecified absolute configuration
+(ST-3.2). This is a conservative sufficient condition, not a complete CIP or
+potential-stereogenicity analysis. Cubane follows the same eligibility policy,
+using two offset square faces and four parallel oblique joining edges. Two
+ordered crossings cut rear face edges, not front edges or vertex connections.
+Its nested-square layout remains the fallback for uncertain variants.
+
+The chair has a continuous front strut and a rear chair edge requiring a gap;
+the cube has two such front/rear edge pairs. Templates return a list rather than
+assuming a single crossing for every cage family.
+`Layout2d::bond_crossings()` records those original edge IDs. `depict::crossings`
+validates a proper, nonincident single-bond crossing, then cuts the rear scene
+line around the intersection after label/color clipping. The removed half-length
+is `stroke_width * (1.5 / abs(sin(angle)) + 0.5)`; after round caps the visible
+gap is at least three stroke widths, exceeding the two-width minimum. No white
+background patch is used. Front strokes, remaining endpoint colors, caps and
+source identities are preserved. Invalid/stale metadata fails explicitly.
+
+Authored coordinates are normalized to **mean** core edge length one; individual
+lengths deliberately vary. These are drawings, not physical conformations.
+The camera does not install wedge/hash bonds or source stereo descriptors.
+
+All exact mappings (24 for the first core, 48 for the second) are considered.
+Flat poses try six rotations; perspective poses retain an upright preferred view.
+Each external attachment contributes a penalty of 10 when its
+host occupies an inner vertex; non-C/H labels contribute 1. This mapping cost
+is added to ordinary center overlap cost, encouraging decorated atoms onto the
+outer face without claiming a global label-aware optimum. One fixed entry
+anchor is translated exactly; two or more entry anchors return a typed ring
+error rather than stretching a pose. External headings use actual incident
+bond rays. Matching, snapshots, scores and heading scans share the ring budget.
+
+The existing rigid refinement stage retains all projected lengths. It excludes
+the authored crossing from overlap penalties and diagnostics, not other edge
+crossings. Whole-branch proposals that move the perspective cage are skipped,
+and components with perspective crossings are not rotated for horizontal packing.
+The authored crossing is verified geometrically before final inspection.
+Automatic
+unit-distance optimization skips components containing nonunit core edges, and
+standalone `optimize` still rejects those snapshots. Unmatched polycycles,
+unsaturated cores and larger fused-cage blocks are not advertised as supported.
+Source tetrahedral marks remain the responsibility of the existing depiction
+stage; no extra stereochemical descriptors are installed by a template.
 
 `layout::refinement` then searches whole-branch transformations across **single
 bridges only**. Cyclic edges and multiple bonds are never cut for refinement.
@@ -335,7 +401,11 @@ that does not imply a collision-free global drawing.
 The separate `symmetric_bridges.smi` corpus verifies tied-path projections,
 shortened bond bounds, distinct visible vertices, stereo, and optimizer isolation.
 
-Next stages: cage constrained embedding/templates, nonregular fused
+The separate `cages.smi` corpus covers supported core substitutions, heteroatoms,
+isotope/charge labels, source stereo and spiro entry. Matching tests additionally
+reject a nonisomorphic graph with the same size/rank/degree sequence.
+
+Next stages: further cage families and unsaturated cores, nonregular fused
 embedding, exact label-aware refinement, and richer quality reporting.
 Aromaticity/stereochemistry require corresponding chemical representation and
 parser support first; lowercase SMILES is not silently converted to uppercase.

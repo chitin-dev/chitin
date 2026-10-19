@@ -20,6 +20,10 @@ smiles:
   - 'Cc1ccc(cc1Nc2nccc(n2)-c3cccnc3)NC(=O)c4ccc(cc4)CN5CCN(CC5)C'
   - 'c1cc(sc1)C(=O)c2c3cc(ccc3n(c2O)C(=O)N)Cl'
   - 'CC1CC2(C(OC(C1)(O2)CCCCCCCC(CC3C(C(C(C(O3)(CC(C(C)C=CC(CCC(C(C4CC(C(C(O4)CC(C(CC5C(C(C(C(O5)CC(C=CC=CCC(C(C(CC=CC(=C)CCC(C(C(C(C)CC6C(C(C(C(O6)C=CC(C(CC7CC8CC(O7)C(O8)CCC9C(CC(O9)CN)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)CC(C)CCCCCC(C(C(C(C(C1C(C(C(C(O1)CC(C(C(=CC(CC(C)C(C(=O)NC=CC(=O)NCCCO)O)O)C)O)O)O)O)O)O)O)O)O)O)C'
+  - 'CN[C@H](CC(C)C)C(=O)N[C@H]1C(=O)N[C@@H](CC(N)=O)C(=O)N[C@H]2C(=O)N[C@H]3C(=O)N[C@H](C(=O)N[C@H](C(=O)O)c4cc(O)cc(O)c4-c4cc3ccc4O)[C@H](O)c3ccc(c(Cl)c3)Oc3cc2cc(c3O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O[C@H]2C[C@](C)(N)[C@H](O)[C@H](C)O2)Oc2ccc(cc2Cl)[C@H]1O'
+  - '[H][C@]12[C@H](OC(=O)c3ccccc3)[C@]3(O)C[C@H](OC(=O)[C@H](O)[C@@H](NC(=O)c4ccccc4)c4ccccc4)C(C)=C([C@@H](OC(C)=O)C(=O)[C@]1(C)[C@@H](O)C[C@H]1OC[C@]12OC(C)=O)C3(C)C'
+  - 'CC[C@@H]1[C@@H]([C@@H]([C@H](C(=O)[C@@H](C[C@@]([C@@H]([C@H]([C@@H]([C@H](C(=O)O1)C)O[C@H]2C[C@@]([C@H]([C@@H](O2)C)O)(C)O)C)O[C@H]3[C@@H]([C@H](C[C@H](O3)C)N(C)C)O)(C)O)C)C)O)C'
+  - 'CO[C@H]1[C@@H](C[C@@H]2CN3CCc4c([nH]c5cc(OC)ccc45)[C@H]3C[C@@H]2[C@@H]1C(=O)OC)OC(=O)c6cc(OC)c(OC)c(OC)c6'
 
   # Fixed layout cases from crates/chitin-chemdraw/tests/fixtures/layout.tsv.
   # Fused and bridged ring layouts.
@@ -61,3 +65,13 @@ smiles:
   - 'C13(CCCC3)CC2CCC1CC2'  # spiro-linked ring and symmetric bridge block
   - 'C1CC2CCC1CC2CC3CC4CCC3CC4'  # two bridge blocks connected through a carbon chain
   - 'O=C(O)C12CCCC(CCC1)CCC2'  # larger three-equal-path bridge with carboxyl
+
+  # Saturated cage templates use planar projections with unequal bond lengths.
+  - 'C1C2CC3CC1CC(C2)C3'  # adamantane core
+  - 'NC12CC3CC(CC(C3)C1)C2'  # amino-substituted adamantane
+  - 'O=C(O)C12CC3CC(CC(C3)C1)C2'  # carboxyl-substituted adamantane
+  - 'C[C@H](N)C12CC3CC(CC(C3)C1)C2'  # external supplied stereocenter
+  - 'C1N2CN3CN1CN(C2)C3'  # nitrogen-replaced adamantane topology
+  - 'C12C3C4C1C5C2C3C45'  # cubane core
+  - 'O=C(O)C12C3C4C1C5C2C3C45'  # carboxyl-substituted cubane
+  - 'O=C(Nc1ccccc1)C12C3C4C1C5C2C3C45'  # cubane with aromatic amide

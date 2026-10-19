@@ -1,5 +1,5 @@
 //! Detached normalized coordinates: x-right, y-up, with nominal unit bonds.
-//! Symmetric bridged blocks may shorten interior bonds for a distinct projection.
+//! Symmetric bridges and supported cage cores allow unequal projected bond lengths.
 //!
 //! Domain ring blocks constrain rigid polygon seeds; branch expansion is followed
 //! by bounded overlap refinement. Layout constraints never assign aromaticity.
@@ -65,7 +65,7 @@ pub enum LayoutDiagnostic {
     /// Second input handle in the same graph.
     b: AtomId,
   },
-  /// Two nonincident skeleton edges still cross after bounded refinement.
+  /// Two nonincident skeleton edges have an unresolved, unannotated crossing.
   CrossingBonds {
     /// First input edge handle.
     a: BondId,
@@ -76,6 +76,19 @@ pub enum LayoutDiagnostic {
   RefinementBudgetExhausted,
   /// Projected search exhausted its separate allowance; the best validated layout remains.
   OptimizationBudgetExhausted,
+}
+
+/// Intentional perspective crossing, distinct from an unresolved layout overlap.
+///
+/// The rear bond must have a visible gap at the proper intersection. These
+/// source identities survive rigid layout transforms and never create a vertex
+/// or a chemical stereo descriptor. Caller-supplied positions have no crossings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BondCrossing {
+  /// Continuous foreground bond.
+  pub front: BondId,
+  /// Background bond interrupted around the crossing.
+  pub back: BondId,
 }
 
 /// Layout cannot provide coordinates without dropping or inventing information.
@@ -144,6 +157,8 @@ pub struct Layout2d {
   bounds: Option<Bounds>,
   /// Placement quality reports, distinct from unsupported-model failures.
   diagnostics: Vec<LayoutDiagnostic>,
+  /// Explicit authored over/under presentation, not inferred from arbitrary overlaps.
+  crossings: Vec<BondCrossing>,
 }
 
 impl Layout2d {
@@ -155,6 +170,8 @@ impl Layout2d {
   /// # Returns
   /// A finite coordinate snapshot with no automatic quality diagnostics. Empty
   /// input has no bounds; graph membership is checked later by depiction.
+  /// No perspective order is inferred. Clone an automatic layout to retain
+  /// its authored crossings rather than copying only its position map.
   ///
   /// # Errors
   /// Rejects nonfinite coordinates or overflowing aggregate extents.
@@ -164,6 +181,7 @@ impl Layout2d {
       positions,
       bounds,
       diagnostics: Vec::new(),
+      crossings: Vec::new(),
     })
   }
   /// Returns one input atom's normalized position.
@@ -182,6 +200,10 @@ impl Layout2d {
   pub fn diagnostics(&self) -> &[LayoutDiagnostic] {
     &self.diagnostics
   }
+  /// Returns intentional perspective crossings to be rendered with rear-bond gaps.
+  pub fn bond_crossings(&self) -> &[BondCrossing] {
+    &self.crossings
+  }
 }
 
 /// Generates nominal-unit coordinates without changing topology or chemical facts.
@@ -193,12 +215,14 @@ impl Layout2d {
 /// # Returns
 /// Deterministic positions for every live atom. Chains use zigzag placement,
 /// triple/cumulated-double degree-two centers are linear, and supported ring
-/// blocks use polygon, macrocycle, or supported bridge-path constraints. Whole-branch
+/// blocks use polygon, macrocycle, bridge-path or supported cage constraints. Whole-branch
 /// transforms, terminal hydroxyl adjustments and bounded projected refinement
 /// improve overlap with unit-bond constraints. Unresolved crowding/crossings remain diagnostic;
 /// this is not a global optimum or label-collision-free guarantee.
 /// Symmetric bridges retain unit outer arcs but may shorten the interior path;
-/// such components skip the optional unit-distance projected optimizer. Discrete
+/// saturated adamantane/cubane cores use exact topology templates with
+/// mean core length one, not unit individual edges. These components skip the
+/// optional unit-distance projected optimizer. Discrete
 /// rigid refinement still preserves their initial lengths and ring geometry.
 /// Aromatic input uses a detached, bounded C/N/O/S Kekulé representation shared
 /// with depiction. This does not perceive aromaticity or modify input facts.

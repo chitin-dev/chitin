@@ -1,10 +1,10 @@
-//! Cyclic blocks dispatched to polygons, macrocycles, or bridge-path geometry.
+//! Cyclic blocks dispatched to polygons, macrocycles, bridge paths or cage cores.
 //!
 //! Domain blocks own topological boundaries. Each cyclic block is embedded as a
 //! whole before external branches expand, so local traversal order cannot seed a
 //! second fused face as an unrelated spiro ring. All shared anchors remain fixed.
 
-use super::{LayoutError as Error, placement::Topology};
+use super::{BondCrossing, LayoutError as Error, placement::Topology};
 use crate::geometry::Point;
 use chitin_chem::{AtomId, MolecularGraph, perception::analyze_rings};
 use std::{
@@ -14,6 +14,7 @@ use std::{
 };
 
 mod bridged;
+mod cages;
 mod constraints;
 mod fused_macrocycles;
 mod geometry;
@@ -39,6 +40,8 @@ impl Work {
 
 /// Geometry selected from topology, rather than forcing every block into polygons.
 enum Model {
+  /// Exact saturated cage core with a planar, unequal-length projection.
+  Cage(cages::Cage),
   /// Edge-fused regular polygons and their incident faces at each vertex.
   Polygons {
     /// Selected face cycles and their edge-sharing graph.
@@ -52,6 +55,24 @@ enum Model {
   Macrocycle(macrocycles::Macrocycle),
   /// One macrocycle and one small face sharing exactly one skeleton edge.
   FusedMacrocycle(fused_macrocycles::FusedMacrocycle),
+}
+
+/// Complete block coordinates and explicitly authored perspective presentation.
+pub(super) struct Placement {
+  /// Every original block row, final position and outward attachment heading.
+  pub(super) atoms: Vec<(usize, Point, f64)>,
+  /// Proper crossings that require a rear-bond gap, not a diagnostic suppression rule.
+  pub(super) crossings: Vec<BondCrossing>,
+}
+
+impl Placement {
+  /// Wraps a nonperspective block without inventing crossing order.
+  fn flat(atoms: Vec<(usize, Point, f64)>) -> Self {
+    Self {
+      atoms,
+      crossings: Vec::new(),
+    }
+  }
 }
 
 /// One biconnected cyclic block, embedded atomically before branch expansion.
@@ -109,7 +130,9 @@ impl Rings {
     let indices: BTreeMap<_, _> = topology.ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
     let mut systems = Vec::new();
     for block in report.blocks().iter().filter(|block| block.cycle_rank() > 0) {
-      let model = if let Some(bridge) = Bridged::new(graph, block, &indices, work)? {
+      let model = if let Some(cage) = cages::Cage::new(graph, block, &indices, work)? {
+        Model::Cage(cage)
+      } else if let Some(bridge) = Bridged::new(graph, block, &indices, work)? {
         Model::Bridged(bridge)
       } else {
         let constraints = Constraints::new(graph, block, &indices, work)?;
@@ -142,6 +165,7 @@ impl Rings {
     }
     systems.sort_by(|a, b| {
       let largest = |system: &System| match &system.model {
+        Model::Cage(model) => model.len(),
         Model::Polygons { constraints, .. } => constraints.faces.iter().map(Vec::len).max().unwrap_or(0),
         Model::Bridged(bridge) => bridge.perimeter_len(),
         Model::Macrocycle(model) => model.len(),
@@ -207,18 +231,27 @@ impl Rings {
     component: &[usize],
     heading: f64,
     work: &mut Work,
-  ) -> Result<Vec<(usize, Point, f64)>, Error> {
+  ) -> Result<Placement, Error> {
     let system = &self.systems[index];
     let constraints = match &system.model {
+      Model::Cage(model) => {
+        return model.embed(&system.atoms, positions, component, heading, work, system.source);
+      }
       Model::Polygons { constraints, .. } => constraints,
       Model::Bridged(bridge) => {
-        return bridge.embed(&system.atoms, positions, component, heading, work, system.source);
+        return bridge
+          .embed(&system.atoms, positions, component, heading, work, system.source)
+          .map(Placement::flat);
       }
       Model::Macrocycle(model) => {
-        return model.embed(positions, component, heading, work, system.source);
+        return model
+          .embed(positions, component, heading, work, system.source)
+          .map(Placement::flat);
       }
       Model::FusedMacrocycle(model) => {
-        return model.embed(&system.atoms, positions, component, heading, work, system.source);
+        return model
+          .embed(&system.atoms, positions, component, heading, work, system.source)
+          .map(Placement::flat);
       }
     };
     work.charge(system.atoms.len() + constraints.faces.iter().map(Vec::len).sum::<usize>())?;
@@ -256,7 +289,7 @@ impl Rings {
         system.outward(node, &points, &centers, work)?,
       ));
     }
-    Ok(result)
+    Ok(Placement::flat(result))
   }
 }
 

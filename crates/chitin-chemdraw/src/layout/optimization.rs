@@ -311,7 +311,7 @@ pub(super) fn component(
   if options.iterations == 0 || options.work_budget == 0 || (only_large_cycles && quality.cost < 1e-12) {
     return Ok(outcome);
   }
-  // Automatic bridge projections deliberately shorten some ring bonds. The
+  // Automatic bridge/cage projections deliberately vary some ring bonds. The
   // unit-distance solver must not expand them or move their pinned neighbors.
   // Standalone optimize still rejects nonunit input at its public boundary.
   if only_large_cycles
