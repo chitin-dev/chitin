@@ -24,6 +24,9 @@ mod macrocycles;
 use bridged::Bridged;
 use constraints::Constraints;
 
+/// Component size above which ring pose repair is attempted.
+const LARGE_COMPONENT: usize = 150;
+
 /// Shared work allowance for ring discovery, assembly, and geometric trials.
 pub(super) struct Work(usize);
 
@@ -125,6 +128,8 @@ pub(super) struct Rings {
   systems: Vec<System>,
   /// Block indices sharing each atom, including spiro articulations.
   pub(super) membership: Vec<Vec<usize>>,
+  /// Complete skeleton edges in dense-row order, used by pose repair.
+  edges: Vec<[usize; 2]>,
 }
 
 impl Rings {
@@ -198,13 +203,23 @@ impl Rings {
       };
       largest(b).cmp(&largest(a)).then(a.atoms.cmp(&b.atoms))
     });
+    let mut edges = Vec::new();
+    for (_, bond) in graph.bonds() {
+      let [a, b] = bond.atoms();
+      let (a, b) = (indices[&a], indices[&b]);
+      edges.push([a.min(b), a.max(b)]);
+    }
     let mut membership = vec![Vec::new(); topology.ids.len()];
     for (index, system) in systems.iter().enumerate() {
       for &node in &system.atoms {
         membership[node].push(index);
       }
     }
-    Ok(Self { systems, membership })
+    Ok(Self {
+      systems,
+      membership,
+      edges,
+    })
   }
 
   /// Returns the highest-priority cyclic block in a component, if present.
@@ -338,7 +353,18 @@ impl Rings {
         best = Some(embedding);
       }
     }
-    let Embedding { points, centers } = best.ok_or_else(|| system.unsupported())?;
+    let mut embedding = best.ok_or_else(|| system.unsupported())?;
+    let faces: Vec<[usize; 2]> = constraints
+      .faces
+      .iter()
+      .flat_map(|face| face.iter().zip(face.iter().cycle().skip(1)).map(|(&a, &b)| [a, b]))
+      .collect();
+    // Only very large flexible components pay for this extra trial; smaller
+    // drawings keep their established pose and refinement behavior.
+    if positions.len() > LARGE_COMPONENT {
+      system.relax_pose(&mut embedding, positions, &faces, &self.edges, work)?;
+    }
+    let Embedding { points, centers } = embedding;
     let mut result = Vec::new();
     for &node in &system.atoms {
       result.push((
@@ -352,6 +378,141 @@ impl Rings {
 }
 
 impl System {
+  /// Rotates a newly placed ring about its single anchor to restore clearance.
+  ///
+  /// A ring with one already placed vertex is free to rotate around it: every
+  /// bond length and face angle is preserved. Greedy face assembly does not see
+  /// the acyclic chains that were expanded before the ring, so a canonical
+  /// orientation can put a ring atom on top of a chain atom. The fine search is
+  /// bounded, deterministic, and only runs for very large flexible components
+  /// whose assembled pose is actually in contact. Fused rings with two or more
+  /// anchors are never rotated.
+  fn relax_pose(
+    &self,
+    embedding: &mut Embedding,
+    old: &[Option<Point>],
+    faces: &[[usize; 2]],
+    edges: &[[usize; 2]],
+    work: &mut Work,
+  ) -> Result<(), Error> {
+    let anchors: Vec<_> = self.atoms.iter().copied().filter(|&row| old[row].is_some()).collect();
+    if anchors.len() != 1 {
+      return Ok(());
+    }
+    let anchor = anchors[0];
+    let Some(origin) = old[anchor] else {
+      return Ok(());
+    };
+    work.charge(self.atoms.len() + old.len())?;
+    let clearance = |points: &[Option<Point>]| {
+      let mut nearest = f64::INFINITY;
+      for &row in &self.atoms {
+        if row == anchor {
+          continue;
+        }
+        let Some(point) = points[row] else {
+          continue;
+        };
+        for (other, &candidate) in old.iter().enumerate() {
+          if self.atoms.contains(&other) {
+            continue;
+          }
+          if let Some(candidate) = candidate {
+            nearest = nearest.min(point.distance(candidate));
+          }
+        }
+      }
+      nearest
+    };
+    let current = clearance(&embedding.points);
+    if current >= 0.55 {
+      return Ok(());
+    }
+    let mut best = (current, 0_f64);
+    for step in -90..=90 {
+      let angle = step as f64 * PI / 180.;
+      let (sin, cos) = angle.sin_cos();
+      let at = |row: usize| -> Option<Point> {
+        if !self.atoms.contains(&row) {
+          return old[row];
+        }
+        let point = embedding.points[row]?;
+        if row == anchor {
+          return Some(point);
+        }
+        let (dx, dy) = (point.x - origin.x, point.y - origin.y);
+        Some(origin.translated(cos * dx - sin * dy, sin * dx + cos * dy))
+      };
+      let mut nearest = f64::INFINITY;
+      for &row in &self.atoms {
+        if row == anchor {
+          continue;
+        }
+        let Some(point) = at(row) else {
+          continue;
+        };
+        for (other, &candidate) in old.iter().enumerate() {
+          if self.atoms.contains(&other) {
+            continue;
+          }
+          if let Some(candidate) = candidate {
+            nearest = nearest.min(point.distance(candidate));
+          }
+        }
+      }
+      if nearest <= current + 1e-9 {
+        continue;
+      }
+      let mut crossed = false;
+      for &[a, b] in faces {
+        let (Some(first), Some(second)) = (at(a), at(b)) else {
+          continue;
+        };
+        for &[c, d] in edges {
+          if self.atoms.contains(&c) && self.atoms.contains(&d) {
+            continue;
+          }
+          let (Some(third), Some(fourth)) = (at(c), at(d)) else {
+            continue;
+          };
+          if super::quality::crosses(first, second, third, fourth) {
+            crossed = true;
+            break;
+          }
+        }
+        if crossed {
+          break;
+        }
+      }
+      if crossed {
+        continue;
+      }
+      if nearest > best.0 {
+        best = (nearest, angle);
+      }
+    }
+    if best.0 <= current + 0.2 {
+      return Ok(());
+    }
+    work.charge(self.atoms.len() + old.len())?;
+    let (sin, cos) = best.1.sin_cos();
+    let rotate = |point: Point| {
+      let (dx, dy) = (point.x - origin.x, point.y - origin.y);
+      origin.translated(cos * dx - sin * dy, sin * dx + cos * dy)
+    };
+    for &row in &self.atoms {
+      if row != anchor
+        && let Some(point) = embedding.points[row]
+      {
+        embedding.points[row] = Some(rotate(point));
+      }
+    }
+    for center in &mut embedding.centers {
+      *center = rotate(*center);
+    }
+    Ok(())
+  }
+
   /// Returns a source-located failure of the current regular-polygon model.
   fn unsupported(&self) -> Error {
     Error::RingSystem {

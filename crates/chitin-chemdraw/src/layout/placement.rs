@@ -11,6 +11,9 @@ use std::{
   f64::consts::PI,
 };
 
+/// Atom count above which wide terminal-ligand searches are attempted.
+const LARGE_COMPONENT: usize = 150;
+
 /// Temporary adjacency view; dense indices never replace domain handles.
 pub(super) struct Topology {
   /// Original graph handles, in stable iteration order.
@@ -139,18 +142,21 @@ fn place(node: usize, point: Point, positions: &mut [Option<Point>], grid: &mut 
 /// recognizable angle. The pass is deliberately last: it repairs residual
 /// contacts of whole-branch placement without reshuffling any subtree.
 fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Option<Point>]) -> Result<(), Error> {
+  // The wide search is only justified for very large flexible inputs; smaller
+  // drawings keep the established local angle policy and pose selection.
+  let wide = positions.len() > LARGE_COMPONENT;
   for node in 0..positions.len() {
     let (Some(point), 1) = (positions[node], topology.neighbors[node].len()) else {
       continue;
     };
     let (parent, _) = topology.neighbors[node][0];
-    // A saturated parent or a ring vertex may give a crowded ligand more room.
-    // An acyclic multiple-bond center may not: its 120-degree sectors are a
-    // fixed chemical projection, so rotating there would falsify the drawing.
+    // A multiple-bond center fixes its substituent sectors. The narrow policy
+    // keeps its ring exception for aromatic hydroxyls; the wide search never
+    // rotates a double-bond reference, because that can invert E/Z.
     if topology.neighbors[parent]
       .iter()
       .any(|&(_, order)| order != BondOrder::Single)
-      && rings.membership[parent].is_empty()
+      && (wide || rings.membership[parent].is_empty())
     {
       continue;
     }
@@ -163,7 +169,7 @@ fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Op
     }
     let base = (point.y - origin.y).atan2(point.x - origin.x);
     let mut best = (before, nearest_atom(node, point, positions), point);
-    for step in 1..=4 {
+    for step in 1..=if wide { 18 } else { 4 } {
       for sign in [1., -1.] {
         let angle = base + sign * step as f64 * PI / 18.;
         let mut blocked = false;
@@ -173,7 +179,8 @@ fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Op
           }
           if let Some(placed) = positions[other] {
             let existing = (placed.y - origin.y).atan2(placed.x - origin.x);
-            if ((angle - existing + PI).rem_euclid(2. * PI) - PI).abs() < PI / 2.5 {
+            let limit = if wide { PI / 3. } else { PI / 2.5 };
+            if ((angle - existing + PI).rem_euclid(2. * PI) - PI).abs() < limit {
               blocked = true;
               break;
             }
@@ -183,10 +190,15 @@ fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Op
           continue;
         }
         let candidate = origin.translated(angle.cos(), angle.sin());
-        if near_bond(node, candidate, positions, topology) {
+        if wide && leaf_crosses(node, origin, candidate, positions, topology) {
           continue;
         }
         let pairs = close_pairs(node, candidate, positions);
+        // Wide repairs may graze a bond when that buys real atomic separation;
+        // the narrow policy keeps its original hard rejection.
+        if near_bond(node, candidate, positions, topology) && (!wide || pairs >= best.0) {
+          continue;
+        }
         let nearest = nearest_atom(node, candidate, positions);
         if pairs < best.0 || (pairs == best.0 && nearest > best.1 + 1e-9) {
           best = (pairs, nearest, candidate);
@@ -217,6 +229,21 @@ fn nearest_atom(node: usize, point: Point, positions: &[Option<Point>]) -> f64 {
     .filter(|&(other, _)| other != node)
     .filter_map(|(_, &candidate)| candidate.map(|other| point.distance(other)))
     .fold(f64::INFINITY, f64::min)
+}
+
+/// Reports whether the moved leaf bond would cross a nonincident bond.
+fn leaf_crosses(node: usize, origin: Point, point: Point, positions: &[Option<Point>], topology: &Topology) -> bool {
+  topology.neighbors.iter().enumerate().any(|(other, row)| {
+    if other == node {
+      return false;
+    }
+    let Some(first) = positions[other] else {
+      return false;
+    };
+    row.iter().any(|&(next, _)| {
+      next != node && positions[next].is_some_and(|second| super::quality::crosses(origin, point, first, second))
+    })
+  })
 }
 
 /// Reports whether a candidate leaf position grazes a nonincident bond.
@@ -618,6 +645,8 @@ fn embed(
   let mut result = Layout2d::from_positions(positions)?;
   result.crossings = crossings;
   super::alkenes::enforce(graph, &mut result, options.stereo_budget)?;
+  // E/Z repair can reflect a large side onto the rest of a long chain. Repair
+  // surviving contacts by rotating rigid acyclic halves around bridge bonds.
   // Placement-time contacts can disappear after whole-branch refinement. Report
   // only the final geometry, not obsolete pairs collected during expansion.
   Ok(result)
