@@ -137,15 +137,20 @@ fn place(node: usize, point: Point, positions: &mut [Option<Point>], grid: &mut 
 
 /// Rotates a crowded terminal ligand around its parent to restore clearance.
 ///
-/// Only a degree-one vertex moves. Its bond length is preserved by construction
-/// and the rotation is limited to forty degrees, so the parent keeps a
-/// recognizable angle. The pass is deliberately last: it repairs residual
-/// contacts of whole-branch placement without reshuffling any subtree.
-fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Option<Point>]) -> Result<(), Error> {
+/// Only a degree-one vertex moves; its bond length is preserved. Ordinary
+/// components allow forty-degree trials, very large components wider trials.
+/// Queries stay within this component: other fragments have not been packed
+/// yet and may legitimately occupy the same temporary coordinates.
+fn relax_terminal_leaves(
+  topology: &Topology,
+  rings: &Rings,
+  positions: &mut [Option<Point>],
+  component: &[usize],
+) -> Result<(), Error> {
   // The wide search is only justified for very large flexible inputs; smaller
   // drawings keep the established local angle policy and pose selection.
-  let wide = positions.len() > LARGE_COMPONENT;
-  for node in 0..positions.len() {
+  let wide = component.len() > LARGE_COMPONENT;
+  for &node in component {
     let (Some(point), 1) = (positions[node], topology.neighbors[node].len()) else {
       continue;
     };
@@ -163,12 +168,12 @@ fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Op
     let Some(origin) = positions[parent] else {
       continue;
     };
-    let before = close_pairs(node, point, positions);
+    let before = close_pairs(node, point, positions, component);
     if before == 0 {
       continue;
     }
     let base = (point.y - origin.y).atan2(point.x - origin.x);
-    let mut best = (before, nearest_atom(node, point, positions), point);
+    let mut best = (before, nearest_atom(node, point, positions, component), point);
     for step in 1..=if wide { 18 } else { 4 } {
       for sign in [1., -1.] {
         let angle = base + sign * step as f64 * PI / 18.;
@@ -190,22 +195,22 @@ fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Op
           continue;
         }
         let candidate = origin.translated(angle.cos(), angle.sin());
-        if wide && leaf_crosses(node, origin, candidate, positions, topology) {
+        if wide && leaf_crosses(node, origin, candidate, positions, topology, component) {
           continue;
         }
-        let pairs = close_pairs(node, candidate, positions);
+        let pairs = close_pairs(node, candidate, positions, component);
         // Wide repairs may graze a bond when that buys real atomic separation;
         // the narrow policy keeps its original hard rejection.
-        if near_bond(node, candidate, positions, topology) && (!wide || pairs >= best.0) {
+        if near_bond(node, candidate, positions, topology, component) && (!wide || pairs >= best.0) {
           continue;
         }
-        let nearest = nearest_atom(node, candidate, positions);
+        let nearest = nearest_atom(node, candidate, positions, component);
         if pairs < best.0 || (pairs == best.0 && nearest > best.1 + 1e-9) {
           best = (pairs, nearest, candidate);
         }
       }
     }
-    if best.0 < before || (best.0 == before && best.1 > nearest_atom(node, point, positions) + 1e-9) {
+    if best.0 < before || (best.0 == before && best.1 > nearest_atom(node, point, positions, component) + 1e-9) {
       positions[node] = Some(best.2);
     }
   }
@@ -213,49 +218,54 @@ fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Op
 }
 
 /// Counts other placed atoms closer than the crowding threshold.
-fn close_pairs(node: usize, point: Point, positions: &[Option<Point>]) -> usize {
-  positions
+fn close_pairs(node: usize, point: Point, positions: &[Option<Point>], component: &[usize]) -> usize {
+  component
     .iter()
-    .enumerate()
-    .filter(|&(other, candidate)| other != node && candidate.is_some_and(|other| point.distance(other) < 0.55))
+    .filter(|&&other| other != node && positions[other].is_some_and(|other| point.distance(other) < 0.55))
     .count()
 }
 
 /// Returns the nearest other placed atom distance.
-fn nearest_atom(node: usize, point: Point, positions: &[Option<Point>]) -> f64 {
-  positions
+fn nearest_atom(node: usize, point: Point, positions: &[Option<Point>], component: &[usize]) -> f64 {
+  component
     .iter()
-    .enumerate()
-    .filter(|&(other, _)| other != node)
-    .filter_map(|(_, &candidate)| candidate.map(|other| point.distance(other)))
+    .filter(|&&other| other != node)
+    .filter_map(|&other| positions[other].map(|other| point.distance(other)))
     .fold(f64::INFINITY, f64::min)
 }
 
 /// Reports whether the moved leaf bond would cross a nonincident bond.
-fn leaf_crosses(node: usize, origin: Point, point: Point, positions: &[Option<Point>], topology: &Topology) -> bool {
-  topology.neighbors.iter().enumerate().any(|(other, row)| {
+fn leaf_crosses(
+  node: usize,
+  origin: Point,
+  point: Point,
+  positions: &[Option<Point>],
+  topology: &Topology,
+  component: &[usize],
+) -> bool {
+  component.iter().any(|&other| {
     if other == node {
       return false;
     }
     let Some(first) = positions[other] else {
       return false;
     };
-    row.iter().any(|&(next, _)| {
+    topology.neighbors[other].iter().any(|&(next, _)| {
       next != node && positions[next].is_some_and(|second| super::quality::crosses(origin, point, first, second))
     })
   })
 }
 
 /// Reports whether a candidate leaf position grazes a nonincident bond.
-fn near_bond(node: usize, point: Point, positions: &[Option<Point>], topology: &Topology) -> bool {
-  topology.neighbors.iter().enumerate().any(|(other, row)| {
+fn near_bond(node: usize, point: Point, positions: &[Option<Point>], topology: &Topology, component: &[usize]) -> bool {
+  component.iter().any(|&other| {
     if other == node {
       return false;
     }
     let Some(origin) = positions[other] else {
       return false;
     };
-    row.iter().any(|&(next, _)| {
+    topology.neighbors[other].iter().any(|&(next, _)| {
       next != node
         && positions[next].is_some_and(|beyond| super::quality::segment_distance(point, origin, beyond) < 0.15)
     })
@@ -634,8 +644,8 @@ fn embed(
         });
       }
     }
+    relax_terminal_leaves(topology, rings, &mut positions, component)?;
   }
-  relax_terminal_leaves(topology, rings, &mut positions)?;
   let positions = topology
     .ids
     .iter()

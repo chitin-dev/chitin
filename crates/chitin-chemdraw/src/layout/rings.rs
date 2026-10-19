@@ -27,6 +27,9 @@ use constraints::Constraints;
 /// Component size above which ring pose repair is attempted.
 const LARGE_COMPONENT: usize = 150;
 
+/// Work kept outside optional pose searches for subsequent required placement.
+const PLACEMENT_RESERVE: usize = 120_000;
+
 /// Shared work allowance for ring discovery, assembly, and geometric trials.
 pub(super) struct Work(usize);
 
@@ -46,6 +49,38 @@ impl Work {
   /// Returns the still-unspent allowance for optional bounded trials.
   pub(super) const fn remaining(&self) -> usize {
     self.0
+  }
+
+  /// Runs an optional search without lending it the required-placement reserve.
+  ///
+  /// # Parameters
+  /// - `reserve`: allowance unavailable to this trial, even if the trial fails.
+  /// - `search`: isolated work using a child allowance; commit geometry only
+  ///   after all fallible work succeeds, or return a detached candidate.
+  ///
+  /// # Returns
+  /// The completed value, or `None` if no work is available or the child runs
+  /// out. Only work actually charged to the child is deducted from the parent.
+  ///
+  /// # Errors
+  /// Non-budget errors propagate after accounting for the consumed work.
+  fn optional<T>(
+    &mut self,
+    reserve: usize,
+    search: impl FnOnce(&mut Self) -> Result<T, Error>,
+  ) -> Result<Option<T>, Error> {
+    let allowance = self.0.saturating_sub(reserve);
+    if allowance == 0 {
+      return Ok(None);
+    }
+    let mut child = Self::new(allowance);
+    let result = search(&mut child);
+    self.0 -= allowance - child.0;
+    match result {
+      Ok(value) => Ok(Some(value)),
+      Err(Error::RingSearchBudgetExceeded) => Ok(None),
+      Err(error) => Err(error),
+    }
   }
 
   /// Charges before work starts; exhaustion never permits partial geometry.
@@ -191,6 +226,13 @@ impl Rings {
         source: block.atoms()[0],
         rank: block.cycle_rank(),
       });
+    }
+    // Discover and seed every block before optional folding can spend work.
+    // Otherwise a first flexible block could starve a later required one.
+    for system in &mut systems {
+      if let Model::General(model) = &mut system.model {
+        model.prepare_folds(work)?;
+      }
     }
     systems.sort_by(|a, b| {
       let largest = |system: &System| match &system.model {
@@ -361,8 +403,10 @@ impl Rings {
       .collect();
     // Only very large flexible components pay for this extra trial; smaller
     // drawings keep their established pose and refinement behavior.
-    if positions.len() > LARGE_COMPONENT {
-      system.relax_pose(&mut embedding, positions, &faces, &self.edges, work)?;
+    if component.len() > LARGE_COMPONENT {
+      work.optional(PLACEMENT_RESERVE, |trial| {
+        system.relax_pose(&mut embedding, positions, &faces, &self.edges, component, trial)
+      })?;
     }
     let Embedding { points, centers } = embedding;
     let mut result = Vec::new();
@@ -393,6 +437,7 @@ impl System {
     old: &[Option<Point>],
     faces: &[[usize; 2]],
     edges: &[[usize; 2]],
+    component: &[usize],
     work: &mut Work,
   ) -> Result<(), Error> {
     let anchors: Vec<_> = self.atoms.iter().copied().filter(|&row| old[row].is_some()).collect();
@@ -404,6 +449,28 @@ impl System {
       return Ok(());
     };
     work.charge(self.atoms.len() + old.len())?;
+    // Masks avoid repeated linear membership checks in the candidate scans.
+    // The fixed obstacle set excludes other, still-unpacked components.
+    work.charge(old.len() + component.len() + self.atoms.len() + edges.len())?;
+    let mut inside = vec![false; old.len()];
+    for &row in &self.atoms {
+      inside[row] = true;
+    }
+    let mut active = vec![false; old.len()];
+    for &row in component {
+      active[row] = true;
+    }
+    let fixed: Vec<_> = component
+      .iter()
+      .filter(|&&row| !inside[row])
+      .filter_map(|&row| old[row])
+      .collect();
+    let external: Vec<_> = edges
+      .iter()
+      .copied()
+      .filter(|&[a, b]| active[a] && active[b] && !(inside[a] && inside[b]))
+      .collect();
+    work.charge(self.atoms.len() * (fixed.len() + 1))?;
     let clearance = |points: &[Option<Point>]| {
       let mut nearest = f64::INFINITY;
       for &row in &self.atoms {
@@ -413,13 +480,8 @@ impl System {
         let Some(point) = points[row] else {
           continue;
         };
-        for (other, &candidate) in old.iter().enumerate() {
-          if self.atoms.contains(&other) {
-            continue;
-          }
-          if let Some(candidate) = candidate {
-            nearest = nearest.min(point.distance(candidate));
-          }
+        for &candidate in &fixed {
+          nearest = nearest.min(point.distance(candidate));
         }
       }
       nearest
@@ -430,10 +492,11 @@ impl System {
     }
     let mut best = (current, 0_f64);
     for step in -90..=90 {
+      work.charge(self.atoms.len() * (fixed.len() + 1))?;
       let angle = step as f64 * PI / 180.;
       let (sin, cos) = angle.sin_cos();
       let at = |row: usize| -> Option<Point> {
-        if !self.atoms.contains(&row) {
+        if !inside[row] {
           return old[row];
         }
         let point = embedding.points[row]?;
@@ -451,13 +514,8 @@ impl System {
         let Some(point) = at(row) else {
           continue;
         };
-        for (other, &candidate) in old.iter().enumerate() {
-          if self.atoms.contains(&other) {
-            continue;
-          }
-          if let Some(candidate) = candidate {
-            nearest = nearest.min(point.distance(candidate));
-          }
+        for &candidate in &fixed {
+          nearest = nearest.min(point.distance(candidate));
         }
       }
       if nearest <= current + 1e-9 {
@@ -465,13 +523,12 @@ impl System {
       }
       let mut crossed = false;
       for &[a, b] in faces {
+        work.charge(1)?;
         let (Some(first), Some(second)) = (at(a), at(b)) else {
           continue;
         };
-        for &[c, d] in edges {
-          if self.atoms.contains(&c) && self.atoms.contains(&d) {
-            continue;
-          }
+        for &[c, d] in &external {
+          work.charge(1)?;
           let (Some(third), Some(fourth)) = (at(c), at(d)) else {
             continue;
           };
@@ -796,4 +853,109 @@ fn cell(point: Point) -> Result<(i64, i64), Error> {
 /// Returns the signed cross product locating a point relative to an edge.
 fn side(a: Point, b: Point, p: Point) -> f64 {
   (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+  #[test]
+  fn exhausted_optional_search_should_leave_the_reserve_available() -> TestResult {
+    let mut work = Work::new(100);
+    let result = work.optional(40, |child| {
+      assert_eq!(child.remaining(), 60);
+      child.charge(59)?;
+      child.charge(2)
+    })?;
+    assert_eq!(result, None);
+    assert_eq!(work.remaining(), 41);
+    work.charge(40)?;
+    Ok(())
+  }
+
+  #[test]
+  fn successful_optional_search_should_refund_its_unused_allowance() -> TestResult {
+    let mut work = Work::new(100);
+    let result = work.optional(40, |child| {
+      child.charge(10)?;
+      Ok(7)
+    })?;
+    assert_eq!(result, Some(7));
+    assert_eq!(work.remaining(), 90);
+    Ok(())
+  }
+
+  #[test]
+  fn optional_search_should_not_start_without_spare_work() -> TestResult {
+    let mut work = Work::new(30);
+    let mut called = false;
+    let result = work.optional(40, |_| {
+      called = true;
+      Ok(())
+    })?;
+    assert!(!called);
+    assert_eq!(result, None);
+    assert_eq!(work.remaining(), 30);
+    Ok(())
+  }
+
+  #[test]
+  fn optional_search_should_preserve_non_budget_errors() {
+    let mut work = Work::new(100);
+    let result: Result<Option<()>, Error> = work.optional(40, |child| {
+      child.charge(3)?;
+      Err(Error::CoordinateRange)
+    });
+    assert!(matches!(result, Err(Error::CoordinateRange)));
+    assert_eq!(work.remaining(), 97);
+  }
+
+  #[test]
+  fn ring_pose_trials_should_charge_scans_before_committing_geometry() -> TestResult {
+    let graph = chitin_chem::io::smiles::read_smiles("C1CC1C")?.into_graph();
+    let source = graph.atoms().next().map(|(id, _)| id).ok_or("missing atom")?;
+    let system = System {
+      model: Model::Polygons {
+        constraints: Constraints {
+          faces: vec![vec![0, 1, 2]],
+          neighbors: vec![vec![]],
+        },
+        incidence: BTreeMap::new(),
+      },
+      atoms: vec![0, 1, 2],
+      source,
+      rank: 1,
+    };
+    let origin = Point::new(0., 0.);
+    let obstacle = Point::new(1., 0.);
+    let old = vec![Some(origin), None, None, Some(obstacle)];
+    let points = vec![
+      Some(origin),
+      Some(obstacle),
+      Some(Point::new(0.5, 3_f64.sqrt() / 2.)),
+      Some(obstacle),
+    ];
+    let centers = vec![Point::new(0.5, 3_f64.sqrt() / 6.)];
+    let mut embedding = Embedding {
+      points: points.clone(),
+      centers: centers.clone(),
+    };
+    let faces = [[0, 1], [1, 2], [2, 0]];
+    let mut work = Work::new(100);
+    let result = work.optional(20, |child| {
+      system.relax_pose(&mut embedding, &old, &faces, &faces, &[0, 1, 2, 3], child)
+    })?;
+    assert_eq!(result, None);
+    assert!(work.remaining() >= 20);
+    assert_eq!(embedding.points, points);
+    assert_eq!(embedding.centers, centers);
+    let mut work = Work::new(10_000);
+    system.relax_pose(&mut embedding, &old, &faces, &faces, &[0, 1, 2, 3], &mut work)?;
+    assert!(work.remaining() < 10_000 - 181);
+    assert_ne!(embedding.points, points);
+    assert_eq!(embedding.points[0], Some(origin));
+    assert_eq!(embedding.points[3], Some(obstacle));
+    Ok(())
+  }
 }

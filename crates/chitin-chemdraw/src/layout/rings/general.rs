@@ -5,7 +5,7 @@
 //! search flexible paths. Every source edge participates in exact closure. This is a
 //! drawing objective, not a force field, stereo inference, or energy estimate.
 
-use super::{Error, Point, Work, constraints::Constraints, folding::Plan};
+use super::{Error, PLACEMENT_RESERVE, Point, Work, constraints::Constraints, folding::Plan};
 use chitin_chem::{AtomId, BondOrder, MolecularGraph, perception::RingBlock};
 use std::{
   collections::{BTreeMap, BTreeSet, VecDeque},
@@ -217,33 +217,38 @@ impl General {
       folding,
     };
     model.poses = model.candidates(work, block.atoms()[0], block.cycle_rank())?;
+    Ok(Some(model))
+  }
+
+  /// Adds complete compact poses after all blocks have their mandatory seeds.
+  ///
+  /// Each optional trial borrows only work above the placement reserve. Budget
+  /// exhaustion discards that trial, retaining every existing closed pose.
+  /// Other errors propagate; partially folded coordinates never enter `poses`.
+  pub(super) fn prepare_folds(&mut self, work: &mut Work) -> Result<(), Error> {
     // Folding is attempted only with a reserved remainder, so an ambitious
     // trial can never starve the mandatory placement that follows. Several
     // block seeds are folded because the best block-only pose is not
     // necessarily the one that leaves room for external branches.
-    if work.remaining() >= 120_000 {
-      let bases: Vec<Vec<Point>> = model.poses.iter().take(4).cloned().collect();
+    if work.remaining() > PLACEMENT_RESERVE {
+      let bases: Vec<Vec<Point>> = self.poses.iter().take(4).cloned().collect();
       let mut folded = Vec::new();
       for base in bases {
-        let before = model.pose_cost(&base);
-        match model.fold(&base, 0.999, work) {
-          Ok(Some(points)) => {
-            let after = model.pose_cost(&points);
-            if after + 1e-9 < before {
-              folded.push((after, points));
-            }
+        let before = self.pose_cost(&base);
+        if let Some(Some(points)) = work.optional(PLACEMENT_RESERVE, |trial| self.fold(&base, 0.999, trial))? {
+          let after = self.pose_cost(&points);
+          if after + 1e-9 < before {
+            folded.push((after, points));
           }
-          Ok(None) | Err(Error::RingSearchBudgetExceeded) => {}
-          Err(error) => return Err(error),
         }
       }
       folded.sort_by(|a, b| a.0.total_cmp(&b.0));
-      model.folded = folded.len();
+      self.folded = folded.len();
       for (_, points) in folded.into_iter().rev() {
-        model.poses.insert(0, points);
+        self.poses.insert(0, points);
       }
     }
-    Ok(Some(model))
+    Ok(())
   }
 
   /// Returns the largest basis cycle for placement priority.
@@ -556,10 +561,12 @@ impl General {
   /// Propagates work exhaustion before any trial can be accepted.
   fn fold(&self, base: &[Point], pressure: f64, work: &mut Work) -> Result<Option<Vec<Point>>, Error> {
     let n = base.len();
+    work.charge(n + self.edges.len())?;
     let mut distances: Vec<([usize; 2], f64)> = self.edges.iter().map(|&ends| (ends, 1.)).collect();
     for atoms in &self.folding.fragments {
       for (offset, &a) in atoms.iter().enumerate() {
         for &b in &atoms[offset + 1..] {
+          work.charge(1)?;
           distances.push(([a, b], base[a].distance(base[b])));
         }
       }
@@ -576,6 +583,7 @@ impl General {
       }
       for (offset, &a) in row.iter().enumerate() {
         for &b in &row[offset + 1..] {
+          work.charge(1)?;
           chords.push(([a, b], 3_f64.sqrt()));
         }
       }
@@ -583,7 +591,9 @@ impl General {
     let repel = 0.8;
     let mut points = base.to_vec();
     for _ in 0..240 {
-      work.charge(n + distances.len() + chords.len())?;
+      // Centroid and contraction traverse the points three times. Every pair
+      // and every projection is charged separately before its geometric work.
+      work.charge(3 * n)?;
       let count = n.max(1) as f64;
       let centroid = Point::new(
         points.iter().map(|point| point.x).sum::<f64>() / count,
@@ -594,6 +604,7 @@ impl General {
       }
       for a in 0..n {
         for b in a + 1..n {
+          work.charge(1)?;
           let dx = points[b].x - points[a].x;
           let dy = points[b].y - points[a].y;
           let distance = dx.hypot(dy);
@@ -606,6 +617,7 @@ impl General {
         }
       }
       for _ in 0..4 {
+        work.charge(distances.len() + chords.len())?;
         for &(ends, target) in &distances {
           project(&mut points, ends, target);
         }
@@ -758,4 +770,58 @@ fn perimeter(cycles: &[Vec<usize>]) -> Vec<usize> {
     }
   }
   if result.len() == rows.len() { result } else { Vec::new() }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+  #[test]
+  fn folding_should_charge_pair_repulsion_and_each_projection_sweep() -> TestResult {
+    let source = include_str!("../../../tests/fixtures/complex_rings.smi")
+      .lines()
+      .find(|line| !line.starts_with('#') && !line.is_empty())
+      .ok_or("missing fixture")?;
+    let source = chitin_chem::io::smiles::read_smiles(source)?.into_graph();
+    let graph = crate::chemical::integer_bonds(&source)?;
+    let indices = graph.atoms().enumerate().map(|(row, (id, _))| (id, row)).collect();
+    let report = chitin_chem::perception::analyze_rings(&graph)?;
+    let block = report
+      .blocks()
+      .iter()
+      .find(|block| block.cycle_rank() >= 3)
+      .ok_or("missing general block")?;
+    let model =
+      General::new(&graph, &source, block, &indices, &mut Work::new(4_000_000))?.ok_or("missing general model")?;
+    let base = model.poses.first().ok_or("missing closed pose")?;
+    let n = base.len();
+    let rigid_pairs: usize = model
+      .folding
+      .fragments
+      .iter()
+      .map(|rows| rows.len() * (rows.len() - 1) / 2)
+      .sum();
+    let mut degrees = vec![0; n];
+    for &[a, b] in &model.edges {
+      degrees[a] += 1;
+      degrees[b] += 1;
+    }
+    let angle_chords: usize = degrees
+      .iter()
+      .enumerate()
+      .filter(|&(row, _)| !model.linear[row])
+      .map(|(_, &degree)| degree * (degree - 1) / 2)
+      .sum();
+    let per_round = 3 * n + n * (n - 1) / 2 + 4 * (model.edges.len() + rigid_pairs + angle_chords);
+    let mut full = Work::new(4_000_000);
+    model.fold(base, 0.999, &mut full)?;
+    assert!(4_000_000 - full.remaining() >= 240 * per_round);
+    let mut limited = Work::new(100 * per_round);
+    assert!(matches!(
+      model.fold(base, 0.999, &mut limited),
+      Err(Error::RingSearchBudgetExceeded)
+    ));
+    Ok(())
+  }
 }

@@ -137,3 +137,39 @@ fn cross_linked_aromatic_islands_should_keep_regular_local_angles() -> TestResul
   }
   Ok(())
 }
+
+#[test]
+fn optional_folding_should_not_consume_the_required_placement_reserve() -> TestResult {
+  let graph = read_smiles(cases().next().ok_or("missing fixture")?)?.into_graph();
+  for budget in [2_000_000, 2_100_000, 2_200_000, 2_300_000, 4_000_000] {
+    let coordinates = layout::generate(
+      &graph,
+      &layout::LayoutOptions {
+        ring_search_budget: budget,
+        refinement_passes: 0,
+        ..Default::default()
+      },
+    )
+    .map_err(|error| format!("budget {budget}: {error}"))?;
+    assert_eq!(coordinates.positions().len(), graph.atom_count());
+    units(&graph, &coordinates)?;
+  }
+  Ok(())
+}
+
+#[test]
+fn optional_folding_should_wait_until_all_components_have_closed_ring_seeds() -> TestResult {
+  let source = cases().next().ok_or("missing fixture")?;
+  let graph = read_smiles(&format!("{source}.{source}"))?.into_graph();
+  let coordinates = layout::generate(
+    &graph,
+    &layout::LayoutOptions {
+      ring_search_budget: 4_000_000,
+      refinement_passes: 0,
+      ..Default::default()
+    },
+  )?;
+  assert_eq!(coordinates.positions().len(), graph.atom_count());
+  units(&graph, &coordinates)?;
+  Ok(())
+}

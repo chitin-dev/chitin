@@ -362,11 +362,18 @@ pass limit does not imply a global optimum either.
 
 `ring_search_budget` separately bounds discovery, path enumeration, cycle-vector
 elimination, incidence checks, scratch assembly, and initial scoring (default
-2,000,000 work units). It is shared across blocks and fragments. Unlike limited
+4,000,000 work units). It is shared across blocks and fragments. Unlike limited
 refinement, exhausted ring construction has no complete result to return and
 fails with `RingSearchBudgetExceeded`. Zero is invalid. Work units account for
 algorithmic visits and stored path/vector lengths, not elapsed CPU time; ordered
 map and sorting operations add logarithmic overhead.
+
+Required seeds for every block are constructed before optional compact folding.
+Optional folding and ring-pose trials use isolated child allowances with a
+120,000-unit parent reserve. Child exhaustion discards the unfinished trial, not
+the existing closed geometry; unused work remains available to the parent.
+Pairwise repulsion, every constraint-projection sweep, and each pose's distance
+and edge-crossing scans are charged before execution.
 
 Enumerating tied shortest paths can be exponential on unusual graphs. The budget
 bounds that enumeration rather than silently discarding alternatives. Selecting
@@ -380,6 +387,10 @@ resolved placement-time contacts are not reported as if still present. Fragments
 are scored separately, oriented horizontally in 30-degree increments, then
 repacked with the requested center-bound gap. This
 still does not account for wide labels between fragments.
+
+Before packing, clearance and terminal-leaf repair inspect only the current
+component. Unrelated fragments' overlapping provisional coordinates are not
+contacts, and wide-search thresholds use component size rather than graph size.
 
 ## Validation and remaining work
 

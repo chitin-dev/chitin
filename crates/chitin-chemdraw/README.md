@@ -34,6 +34,10 @@ expansion, and bounded local refinement:
 - ring systems are embedded through shared vertices and edges;
 - disconnected components are oriented and packed horizontally.
 
+Placement-time clearance uses only the current connected component. Other
+fragments may share temporary coordinates before packing; their atoms and bonds
+are not obstacles, and their sizes cannot activate a component's wide search.
+
 Fused systems are assembled as complete blocks, rather than being limited to
 two rings. Short independent cycles define polygon constraints; faces sharing
 an edge must occupy opposite sides, and every already known anchor must agree.
@@ -180,8 +184,14 @@ subject to this angle adjustment. Actual OH-label separation is regression-teste
 for the large polycycle; general label-aware optimization is not yet implemented.
 
 `LayoutOptions::ring_search_budget` bounds discovery and embedding work across
-all components (2,000,000 units by default). Exhaustion returns
+all components (4,000,000 units by default). Required-construction exhaustion returns
 `RingSearchBudgetExceeded`, not an unsupported-topology error or partial result.
+Every block receives its closed seeds before optional folding starts. Optional
+folding and ring-pose repair use child allowances that leave 120,000 work units
+unavailable to the trial for subsequent placement. Failed trials retain the
+existing geometry; unused child work remains available to later searches.
+Pair repulsion, each projection sweep and candidate clearance/crossing scans
+are charged before execution.
 This is independent of `refinement_budget`, whose exhaustion retains a complete
 best-so-far layout with a diagnostic. See [layout constraints](docs/layout.md).
 
@@ -189,6 +199,11 @@ The algorithm is not a physical force-field simulation, canonicalization algorit
 template engine, or global collision-free optimizer. It returns diagnostics for
 remaining crowding or crossings. Caller-supplied `Layout2d` coordinates can
 bypass automatic layout restrictions.
+
+Label-only clearance may translate a printed element, but its original atom
+anchor must remain inside its padded clipping envelope. A shift cannot trade
+chemical connectivity for less text overlap. When no connected placement clears
+all labels, overlap may remain; the skeleton is never silently retargeted.
 
 ### Projected coordinate refinement
 

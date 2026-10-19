@@ -163,6 +163,11 @@ struct LabelBounds {
 }
 
 impl LabelBounds {
+  /// Keeps the atom anchor inside its own clipping envelope after a shift.
+  fn contains(self, point: Point) -> bool {
+    point.x >= self.min.x && point.x <= self.max.x && point.y >= self.min.y && point.y <= self.max.y
+  }
+
   /// Returns this envelope translated by one rigid label shift.
   fn shifted(self, x: f64, y: f64) -> Self {
     Self {
@@ -544,6 +549,11 @@ fn depict_validated(
     let mut best = Point::new(0., 0.);
     for candidate in label_shifts(options.font_size) {
       let moved = base.shifted(candidate.x, candidate.y);
+      // Bonds retain their source endpoints. A disconnected label is not a
+      // valid collision repair, even if it has a lower overlap score.
+      if !moved.contains(points[id]) {
+        continue;
+      }
       let mut cost = 0.05 * (candidate.x.abs() + candidate.y.abs()) / options.font_size.max(1.);
       for other in &occupied {
         let shared = overlap(moved, *other);
