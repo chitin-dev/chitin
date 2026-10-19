@@ -205,6 +205,28 @@ anchor must remain inside its padded clipping envelope. A shift cannot trade
 chemical connectivity for less text overlap. When no connected placement clears
 all labels, overlap may remain; the skeleton is never silently retargeted.
 
+### Long-backbone routing
+
+Large components can additionally use a separate bounded drawing stage after
+ordinary collision repair. Two breadth-first sweeps choose an approximate
+principal spine; this is not an exhaustive longest-simple-path calculation.
+Only source single-bond bridges split movable subtrees. Mirroring complete
+downstream sides preserves bond lengths, local angles, and rigid ring islands.
+Complete compact poses and a small beam of serpentine row guides compete; guides
+score committed substituents as well as the spine and are rejected if they add
+skeleton conflicts or fail supplied E/Z relations. A rejected guide leaves the
+valid compact or ordinary pose intact rather than forcing a row break.
+
+External ports on neutral saturated ring carbons may rotate by at most thirty
+degrees from port-stage entry, without changing ring geometry, ray order or
+alkene relations. Aromatic, carbonyl and heteroatom hosts are excluded. This
+does not provide a general label-collision-free guarantee or infer missing stereo.
+
+`LayoutOptions::backbone_budget` defaults to 2,000,000 work units, shared across
+components and layout alternatives. Zero disables this stage. It is separate
+from ordinary refinement so failed row guides cannot starve existing collision
+repair; partial or unscored candidates are never committed.
+
 ### Projected coordinate refinement
 
 After the discrete stages, crowded components with unit bonds and a cycle longer

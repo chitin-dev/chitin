@@ -34,6 +34,9 @@ pub struct LayoutOptions {
   /// Work units for candidate traversal/indexing/geometric tests, shared by fragments.
   /// Initial and final quality inspection are outside this optimization budget.
   pub refinement_budget: usize,
+  /// Shared work for optional long-backbone routing; zero disables this stage.
+  /// Independent of ordinary collision repair so failed guides cannot starve it.
+  pub backbone_budget: usize,
   /// Work units for required double-bond stereo constraints, independent of refinement.
   pub stereo_budget: usize,
   /// Projected coordinate search after discrete refinement; zero iterations disables it.
@@ -50,6 +53,7 @@ impl Default for LayoutOptions {
       ring_search_budget: 4_000_000,
       refinement_passes: 4,
       refinement_budget: 1_000_000,
+      backbone_budget: 2_000_000,
       stereo_budget: 1_000_000,
       optimization: optimization::OptimizationOptions::default(),
     }

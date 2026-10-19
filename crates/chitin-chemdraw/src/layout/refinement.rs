@@ -16,6 +16,7 @@ use std::{
   f64::consts::PI,
 };
 
+mod backbone;
 mod terminal;
 
 /// Additional host-angle freedom for whole-block ring candidate search only.
@@ -51,6 +52,8 @@ struct Model {
   linear: Vec<bool>,
   /// Neutral saturated carbon attachment hosts permit bounded drawing-angle flex.
   flexible_hosts: Vec<bool>,
+  /// Neutral saturated ring carbons eligible for bounded external-port repair.
+  ring_ports: Vec<bool>,
   /// Eligible saturated-carbon hydroxyls; ring oxygens and carbonyls are excluded.
   hydroxyls: Vec<terminal::Hydroxyl>,
   /// Dense axis/reference quadruples with required, coordinate-independent sides.
@@ -117,7 +120,7 @@ impl Model {
         row.len() == 2 && (row.contains(&BondOrder::Triple) || row.iter().all(|&order| order == BondOrder::Double))
       })
       .collect();
-    let flexible_hosts = ids
+    let flexible_hosts: Vec<bool> = ids
       .iter()
       .enumerate()
       .map(|(i, &id)| {
@@ -129,6 +132,11 @@ impl Model {
               && atom.unpaired_electrons().is_none_or(|count| count == 0)
           })
       })
+      .collect();
+    let ring_ports = flexible_hosts
+      .iter()
+      .enumerate()
+      .map(|(row, &eligible)| eligible && rows[row].iter().any(|&e| !edges[e].movable))
       .collect();
     let hydroxyls = terminal::collect(graph, &ids, &indices);
     let double_stereo = graph
@@ -155,6 +163,7 @@ impl Model {
       rows,
       linear,
       flexible_hosts,
+      ring_ports,
       hydroxyls,
       double_stereo,
       perspective: Vec::new(),
@@ -489,6 +498,7 @@ pub(super) fn run(
   options: &LayoutOptions,
   budget: &mut Budget,
   projected_budget: &mut Budget,
+  backbone_budget: &mut Budget,
   attachments: AttachmentPolicy,
 ) -> Result<(), Error> {
   let rings = analyze_rings(graph)?;
@@ -524,6 +534,9 @@ pub(super) fn run(
     }
     if !exhausted && options.refinement_passes > 0 {
       exhausted = improve(&model, &mut points, options, budget);
+    }
+    if options.refinement_passes > 0 && backbone_budget.0 > 0 {
+      backbone::route(&model, &mut points, options, backbone_budget);
     }
     if !projected_exhausted
       && options.refinement_passes > 0

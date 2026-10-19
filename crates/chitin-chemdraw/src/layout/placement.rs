@@ -412,6 +412,7 @@ pub(super) fn generate(
   let rings = Rings::new(graph, source, &topology, &mut ring_work)?;
   let mut refinement_work = super::quality::Budget(options.refinement_budget);
   let mut optimization_work = super::quality::Budget(options.optimization.work_budget);
+  let mut backbone_work = super::quality::Budget(options.backbone_budget);
   let attachment_policy = if rings.variants() > 1 {
     super::refinement::AttachmentPolicy::Saturated
   } else {
@@ -432,6 +433,7 @@ pub(super) fn generate(
         options,
         &mut refinement_work,
         &mut optimization_work,
+        &mut backbone_work,
         attachment_policy,
       )?;
       let clean = !candidate.diagnostics().iter().any(|d| {
@@ -469,6 +471,7 @@ pub(super) fn generate(
     options,
     &mut refinement_work,
     &mut optimization_work,
+    &mut backbone_work,
     attachment_policy,
   )?;
   if options.refinement_passes > 0
@@ -488,6 +491,7 @@ pub(super) fn generate(
         options,
         &mut refinement_work,
         &mut optimization_work,
+        &mut backbone_work,
         attachment_policy,
       )?;
       let candidate_cost = complete_cost(graph, &candidate, &mut ring_work)?.0;

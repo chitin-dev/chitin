@@ -368,6 +368,15 @@ fails with `RingSearchBudgetExceeded`. Zero is invalid. Work units account for
 algorithmic visits and stored path/vector lengths, not elapsed CPU time; ordered
 map and sorting operations add logarithmic overhead.
 
+`backbone_budget` independently bounds optional routing of long, bridge-rich
+components after ordinary collision repair (default 2,000,000; zero disables).
+The allowance is shared across components and candidate layouts, not restarted
+per row guide. Complete subtree reflections preserve bond lengths and ring
+geometry. A separate external-port repair permits at most thirty degrees of
+host-angle change at neutral saturated ring carbons, with ray-order and E/Z
+guards. Unfinished guides retain the already validated ordinary/compact pose;
+this stage never consumes the work reserved for ordinary refinement.
+
 Required seeds for every block are constructed before optional compact folding.
 Optional folding and ring-pose trials use isolated child allowances with a
 120,000-unit parent reserve. Child exhaustion discards the unfinished trial, not
