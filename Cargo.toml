@@ -5,6 +5,8 @@ members = [
   "crates/chitin-cli",
   "crates/chitin-bio",
   "crates/chitin-bio-macros",
+  "crates/chitin-chem",
+  "crates/chitin-chemdraw",
   "crates/chitin-utils",
   "crates/chitin-databases",
   "crates/chitin-desktop",
@@ -14,6 +16,7 @@ members = [
   "crates/chitin-wgpu",
   "crates/chitin-wasm",
   "tools/chitin-mmcif-schema",
+  "tools/chitin-chemdraw-batch",
 ]
 resolver = "2"
 

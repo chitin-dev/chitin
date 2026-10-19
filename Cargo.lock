@@ -831,6 +831,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "chitin-chem"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "chitin-chemdraw"
+version = "0.1.0"
+dependencies = [
+ "chitin-chem",
+ "thiserror 2.0.20",
+ "ttf-parser",
+]
+
+[[package]]
+name = "chitin-chemdraw-batch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chitin-chem",
+ "chitin-chemdraw",
+ "serde",
+ "serde_yaml",
+ "tempfile",
+]
+
+[[package]]
 name = "chitin-command"
 version = "0.1.0"
 dependencies = [

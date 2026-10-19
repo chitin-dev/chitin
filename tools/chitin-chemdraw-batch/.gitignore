@@ -1,0 +1,3 @@
+# Local batch renderings, not source fixtures.
+/generated/
+.env*

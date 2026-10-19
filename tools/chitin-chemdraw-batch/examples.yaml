@@ -1,0 +1,100 @@
+# Relative paths resolve from this YAML file, not the process working directory.
+output_dir: generated
+depict:
+  aromatic_style: circle  # Default kekule; fused/unsuitable rings fall back.
+  # Default palette colors labels and each bond's nearest endpoint half.
+  color_scheme: element
+  bond_color_style: split  # Use uniform for foreground-only bonds.
+  # element_colors: {O: '#dc2828', N: '#3058d8'}
+  explicit_chiral_hydrogens: false
+  stroke_width: 1.6
+  # Optional font file, relative to this YAML; the default is bundled Noto Sans.
+  # font: {path: fonts/labels.ttf, face_index: 0}
+svg:
+  padding: 12
+  transparent: false
+smiles:
+  # Successful but deliberately difficult layouts. These cases are intended
+  # to expose crowding and weak visual composition, not parser failures.
+  - 'C(C)(C)(C)(C)(C)'  # high-degree central atom
+  - 'CC(C)(C)C(C)(C)C(C)(C)C(C)(C)C'  # repeated quaternary branch points
+  - 'C1(C)C(C)C(C)C(C)C(C)C(C)C1'  # densely substituted macrocycle
+  - 'Cc1c(C)c(C)c(C)c(C)c1C'  # heavily substituted aromatic ring
+  - 'C1(C)C2CC3CC1CC(C2)C3'  # compact substituted cage
+  - 'CC(C)(C)C(=O)N(C)C(C)(C)C(=O)N(C)C(C)(C)C(=O)N(C)C'  # crowded amide branches
+  - 'C1CC(C2CC(C3CC(C4CC(C5CCCCC5)C4)C3)C2)C1'  # nested ring crowding
+
+  - 'CCO'
+  - 'CC(=O)Oc1ccccc1C(=O)O'
+  - 'C[C@]12CC[C@H]3[C@@H](CCC4=CC(=O)CC[C@@]34C)[C@@H]1CC[C@@H]2O'
+  - 'Cc1ccc(cc1Nc2nccc(n2)-c3cccnc3)NC(=O)c4ccc(cc4)CN5CCN(CC5)C'
+  - 'c1cc(sc1)C(=O)c2c3cc(ccc3n(c2O)C(=O)N)Cl'
+  - 'CC1CC2(C(OC(C1)(O2)CCCCCCCC(CC3C(C(C(C(O3)(CC(C(C)C=CC(CCC(C(C4CC(C(C(O4)CC(C(CC5C(C(C(C(O5)CC(C=CC=CCC(C(C(CC=CC(=C)CCC(C(C(C(C)CC6C(C(C(C(O6)C=CC(C(CC7CC8CC(O7)C(O8)CCC9C(CC(O9)CN)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)O)CC(C)CCCCCC(C(C(C(C(C1C(C(C(C(O1)CC(C(C(=CC(CC(C)C(C(=O)NC=CC(=O)NCCCO)O)O)C)O)O)O)O)O)O)O)O)O)O)C'
+  - 'CN[C@H](CC(C)C)C(=O)N[C@H]1C(=O)N[C@@H](CC(N)=O)C(=O)N[C@H]2C(=O)N[C@H]3C(=O)N[C@H](C(=O)N[C@H](C(=O)O)c4cc(O)cc(O)c4-c4cc3ccc4O)[C@H](O)c3ccc(c(Cl)c3)Oc3cc2cc(c3O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O[C@H]2C[C@](C)(N)[C@H](O)[C@H](C)O2)Oc2ccc(cc2Cl)[C@H]1O'
+  - '[H][C@]12[C@H](OC(=O)c3ccccc3)[C@]3(O)C[C@H](OC(=O)[C@H](O)[C@@H](NC(=O)c4ccccc4)c4ccccc4)C(C)=C([C@@H](OC(C)=O)C(=O)[C@]1(C)[C@@H](O)C[C@H]1OC[C@]12OC(C)=O)C3(C)C'
+  - 'CC[C@@H]1[C@@H]([C@@H]([C@H](C(=O)[C@@H](C[C@@]([C@@H]([C@H]([C@@H]([C@H](C(=O)O1)C)O[C@H]2C[C@@]([C@H]([C@@H](O2)C)O)(C)O)C)O[C@H]3[C@@H]([C@H](C[C@H](O3)C)N(C)C)O)(C)O)C)C)O)C'
+  - 'CO[C@H]1[C@@H](C[C@@H]2CN3CCc4c([nH]c5cc(OC)ccc45)[C@H]3C[C@@H]2[C@@H]1C(=O)OC)OC(=O)c6cc(OC)c(OC)c(OC)c6'
+
+  # Fixed layout cases from crates/chitin-chemdraw/tests/fixtures/layout.tsv.
+  # Fused and bridged ring layouts.
+  - 'C1=CC=C2C=C3C=CC=CC3=CC2=C1'  # anthracene
+  - 'C1=CC=C2C(=C1)C=CC1=CC=CC=C12'  # phenanthrene
+  - 'C1CCC2C(C1)CCC1C2CCC2CCCC12'  # mixed_five_six
+  - 'CC(=O)OC1=CC=C2C=C3C=CC=CC3=CC2=C1'  # substituted_fused
+  - 'c1ccc2ccccc2c1'  # aromatic_naphthalene
+  - 'c1ccc2[nH]ccc2c1'  # aromatic_indole
+  - 'C1CCC2(CC1)CCCC2'  # spiro
+  - 'CC1CC2COC(C1)O2'  # asymmetric_bridge
+  # Symmetric bridge projections keep outer bonds unit length and shorten the interior.
+  - 'C1C2CC1C2'  # three equally short bridges
+  - 'C1CC2CC1C2'  # two equally short bridges
+  - 'C1CC2CCC1CC2'  # three equal longer bridges
+  - 'C1CN2CCN1CC2'  # heteroatom bridgeheads
+  # Even macrocycles use closed lattice/strip candidates with exact unit edges.
+  - 'C1CCCCCCCCCCC1'  # 12-membered macrocycle
+  - 'C1CCCCCCCCCCCCC1'  # 14-membered macrocycle
+  - 'C1CCCCCCCCCCCCCCC1'  # 16-membered macrocycle
+  - 'C1CCCCCCCCCCCCCCCCC1'  # 18-membered macrocycle
+  # Odd macrocycles use nonlattice end-cap candidates with exact unit edges.
+  - 'C1CCCCCCCCCCCC1'  # 13-membered macrocycle
+  - 'C1CCCCCCCCCCCCCC1'  # 15-membered macrocycle
+  - 'C1CCCCCCCCCCCCCCCC1'  # 17-membered macrocycle
+  # Combined ring and stereochemical layouts.
+  - 'CC1([C@@H](N2[C@H](S1)[C@@H](C2=O)NC(=O)Cc3ccccc3)C(=O)O)C'  # penicillin
+  - 'C/1=C/CCCCCC1'  # cyclic_cis
+  - 'F/C=C/C=C\Cl'  # conjugated_mixed
+  - 'c1ccccc1/C=C\O'  # aromatic_alkene
+  - 'F/C=C/[C@H](Cl)Br'  # alkene_tetrahedral
+
+  # Complex symmetric bridge examples; these are layout inputs, not named drugs.
+  - 'O=C(O)C12CC(c3ccc(F)cc3)(C1)C2'  # aromatic and carboxyl bridgehead substituents
+  - 'O=C(Nc1ccccc1)C12CCC(CO)(CC1)CC2'  # equal longer bridges, amide and hydroxymethyl
+  - 'CCOC(=O)C1CC2CCC1CC2Oc3ccc(Cl)cc3'  # ester and chlorophenoxy substituents
+  - 'CC(=O)N[C@H]1CC2CC1C2'  # supplied tetrahedral configuration
+  - 'O=C(O)C1SC2CCC1CC2Nc3nccnc3'  # sulfur bridge, carboxyl and nitrogen heterocycle
+  - 'C13(CCCC3)CC2CCC1CC2'  # spiro-linked ring and symmetric bridge block
+  - 'C1CC2CCC1CC2CC3CC4CCC3CC4'  # two bridge blocks connected through a carbon chain
+  - 'O=C(O)C12CCCC(CCC1)CCC2'  # larger three-equal-path bridge with carboxyl
+
+  # Saturated cage templates use planar projections with unequal bond lengths.
+  - 'C1C2CC3CC1CC(C2)C3'  # adamantane core
+  - 'NC12CC3CC(CC(C3)C1)C2'  # amino-substituted adamantane
+  - 'O=C(O)C12CC3CC(CC(C3)C1)C2'  # carboxyl-substituted adamantane
+  - 'C[C@H](N)C12CC3CC(CC(C3)C1)C2'  # external supplied stereocenter
+  - 'C1N2CN3CN1CN(C2)C3'  # nitrogen-replaced adamantane topology
+  - 'C12C3C4C1C5C2C3C45'  # cubane core
+  - 'O=C(O)C12C3C4C1C5C2C3C45'  # carboxyl-substituted cubane
+  - 'O=C(Nc1ccccc1)C12C3C4C1C5C2C3C45'  # cubane with aromatic amide
+
+  # Dense cyclic peptide: open-center folded outlines leave room for substituents.
+  - 'CC(C)C[C@H](N1C)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H]([C@H](O)[C@H](C)C/C=C/C)C(=O)N[C@@H](CC)C(=O)N(C)CC(=O)N(C)[C@@H](CC(C)C)C(=O)N[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C(=O)N[C@@H](C)C(=O)N[C@H](C)C(=O)N(C)[C@H](C1=O)CC(C)C'  # cyclosporine
+
+  # Synthetic dense macrocycles; topology/layout cases, not named natural products.
+  - 'N1(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C1=O'  # synthetic cyclic nonapeptide; 27-membered ring, N-methylated
+  - 'N1(C)[C@@H](C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C(C)C)C1=O'  # synthetic cyclic decapeptide; 30-membered ring, mixed side chains
+  - 'N1(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C1=O'  # synthetic cyclic dodecapeptide; 36-membered ring, N-methylated
+  - 'N1[C@@H](C)C(=O)N[C@@H](CC)C(=O)N[C@@H](C(C)C)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](CO)C(=O)N[C@@H](C)C(=O)N[C@@H](CC)C(=O)N[C@@H](CO)C(=O)N[C@@H](C(C)C)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](C)C(=O)N[C@@H](CC)C(=O)N[C@@H](CO)C1=O'  # synthetic cyclic tridecapeptide; 39-membered ring with NH labels
+  - 'O1[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C1=O'  # synthetic hydroxylated macrocyclic polyester; 25-membered ring
+  - 'O1[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C1=O'  # synthetic hydroxylated macrocyclic polyester; 30-membered ring
+  - 'C1(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C1O'  # dense hydroxylated 25-membered ring; odd-size layout stress case
+  - 'C1(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C1O'  # dense hydroxylated 26-membered ring; even-size layout stress case

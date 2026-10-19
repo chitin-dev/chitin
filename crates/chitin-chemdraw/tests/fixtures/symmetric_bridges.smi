@@ -1,0 +1,14 @@
+# Tied shortest paths: short, partially symmetric, fully symmetric, heteroatoms,
+# substitution and source tetrahedral stereo. Interior bonds may be shortened.
+C1C2CC1C2
+C1CC2CC1C2
+C1CC2CCC1CC2
+C1CN2CCN1CC2
+C1SC2CCC1CC2
+CC1CC2CCC1CC2
+N[C@H]1CC2CC1C2
+C1=CC2CCC1CC2
+C/1=C/C2CCC1CC2
+C1CCC2CCCC1CCC2
+CCC1CC2CCC1CC2
+C13(CCCC3)CC2CCC1CC2
