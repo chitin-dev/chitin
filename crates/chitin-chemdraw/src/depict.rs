@@ -162,6 +162,85 @@ struct LabelBounds {
   max: Point,
 }
 
+impl LabelBounds {
+  /// Returns this envelope translated by one rigid label shift.
+  fn shifted(self, x: f64, y: f64) -> Self {
+    Self {
+      min: Point::new(self.min.x + x, self.min.y + y),
+      max: Point::new(self.max.x + x, self.max.y + y),
+    }
+  }
+
+  /// Returns the envelope area used to normalize overlap penalties.
+  fn area(self) -> f64 {
+    (self.max.x - self.min.x).max(0.) * (self.max.y - self.min.y).max(0.)
+  }
+}
+
+/// Returns the axis-aligned overlap area of two label envelopes.
+fn overlap(first: LabelBounds, second: LabelBounds) -> f64 {
+  let width = (first.max.x.min(second.max.x) - first.min.x.max(second.min.x)).max(0.);
+  let height = (first.max.y.min(second.max.y) - first.min.y.max(second.min.y)).max(0.);
+  width * height
+}
+
+/// Reports whether a line segment enters an enlarged label envelope.
+fn segment_enters(start: Point, end: Point, bounds: LabelBounds, margin: f64) -> bool {
+  let (min, max) = (
+    Point::new(bounds.min.x - margin, bounds.min.y - margin),
+    Point::new(bounds.max.x + margin, bounds.max.y + margin),
+  );
+  let (dx, dy) = (end.x - start.x, end.y - start.y);
+  let (mut low, mut high): (f64, f64) = (0., 1.);
+  for (direction, offset) in [
+    (-dx, start.x - min.x),
+    (dx, max.x - start.x),
+    (-dy, start.y - min.y),
+    (dy, max.y - start.y),
+  ] {
+    if direction.abs() < 1e-12 {
+      if offset < 0. {
+        return false;
+      }
+      continue;
+    }
+    let ratio = offset / direction;
+    if direction < 0. {
+      low = low.max(ratio);
+    } else {
+      high = high.min(ratio);
+    }
+    if low > high {
+      return false;
+    }
+  }
+  true
+}
+
+/// Returns deterministic candidate label shifts around an atom anchor.
+///
+/// The first candidate is the unmodified centered placement, so an uncrowded
+/// drawing is bit-for-bit unchanged. Later candidates move by fractions of the
+/// font size and are accepted only when they remove a bond or label overlap.
+fn label_shifts(size: f64) -> Vec<Point> {
+  let radius = size * 0.55;
+  vec![
+    Point::new(0., 0.),
+    Point::new(radius, 0.),
+    Point::new(-radius, 0.),
+    Point::new(0., radius),
+    Point::new(0., -radius),
+    Point::new(radius, radius),
+    Point::new(radius, -radius),
+    Point::new(-radius, radius),
+    Point::new(-radius, -radius),
+    Point::new(2. * radius, 0.),
+    Point::new(-2. * radius, 0.),
+    Point::new(0., 2. * radius),
+    Point::new(0., -2. * radius),
+  ]
+}
+
 /// Resolved label geometry, separate from charge/H input facts and visual sizing.
 struct LabelPlacement {
   /// Atom anchor after scaling and the y-up to y-down transform.
@@ -431,9 +510,12 @@ fn depict_validated(
     }
   }
   let recipes = labels::prepare(graph, options)?;
-  let mut labels = Vec::new();
-  let mut envelopes = BTreeMap::new();
   let expanded = hydrogens::centers(graph, options);
+  // Measure every label once at its atom anchor. The runs translate rigidly with
+  // the anchor, so a crowded label can be tested at candidate shifts without
+  // rebuilding its glyphs or changing its chemical content.
+  let mut measured = Vec::new();
+  let mut scratch = Vec::new();
   for (&id, recipe) in &recipes {
     let mut neighbor_x = 0.;
     for (neighbor, _) in graph.neighbors(id)? {
@@ -442,16 +524,75 @@ fn depict_validated(
         neighbor_x += (points[&neighbor].x - points[&id].x) / distance;
       }
     }
+    let hydrogen_left = neighbor_x > 1e-10;
+    let bounds = label(
+      &mut scratch,
+      recipe,
+      LabelPlacement {
+        center: points[&id],
+        hydrogen_left,
+      },
+      options,
+    )?;
+    scratch.clear();
+    measured.push((id, recipe, hydrogen_left, bounds));
+  }
+  let mut shifts = BTreeMap::new();
+  let mut occupied: Vec<LabelBounds> = Vec::new();
+  for (id, _, _, base) in &measured {
+    let mut best_cost = f64::INFINITY;
+    let mut best = Point::new(0., 0.);
+    for candidate in label_shifts(options.font_size) {
+      let moved = base.shifted(candidate.x, candidate.y);
+      let mut cost = 0.05 * (candidate.x.abs() + candidate.y.abs()) / options.font_size.max(1.);
+      for other in &occupied {
+        let shared = overlap(moved, *other);
+        if shared > 0. {
+          cost += 4. * shared / moved.area().max(1.);
+        }
+      }
+      for (_, bond) in graph.bonds() {
+        let [a, b] = bond.atoms();
+        if a == *id || b == *id {
+          continue;
+        }
+        if let (Some(&start), Some(&end)) = (points.get(&a), points.get(&b))
+          && segment_enters(start, end, moved, 1.)
+        {
+          cost += 3.;
+        }
+      }
+      for (&other, &point) in &points {
+        if other == *id {
+          continue;
+        }
+        if point.x >= moved.min.x && point.x <= moved.max.x && point.y >= moved.min.y && point.y <= moved.max.y {
+          cost += 0.5;
+        }
+      }
+      if cost + 1e-12 < best_cost {
+        best_cost = cost;
+        best = candidate;
+      }
+    }
+    shifts.insert(*id, best);
+    occupied.push(base.shifted(best.x, best.y));
+  }
+  let mut labels = Vec::new();
+  let mut envelopes = BTreeMap::new();
+  for (id, recipe, hydrogen_left, _) in &measured {
+    let shift = shifts[id];
+    let center = points[id].translated(shift.x, shift.y);
     let bounds = label(
       &mut labels,
       recipe,
       LabelPlacement {
-        center: points[&id],
-        hydrogen_left: neighbor_x > 1e-10,
+        center,
+        hydrogen_left: *hydrogen_left,
       },
       options,
     )?;
-    envelopes.insert(id, bounds);
+    envelopes.insert(*id, bounds);
   }
   let attached = hydrogens::plan(graph, &points, &envelopes, &expanded, options)?;
   let aromatic = aromatic::plan(source_graph, &points, &envelopes, &attached, options)?;

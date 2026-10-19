@@ -41,7 +41,7 @@ This supports linear/angular six-membered systems and compatible mixed five-/
 six-membered systems. Nonmanifold face incidence and incompatible regular-polygon
 closures still return `LayoutError::RingSystem`.
 
-Simple macrocycles of at least 12 atoms use closed nonregular outlines rather
+Simple macrocycles of at least 9 atoms use closed nonregular outlines rather
 than nearly straight regular-polygon corners. Even rings retain their lattice
 candidates first. Five-/seven-sided end caps and hexagonal extensions provide
 odd sizes; six-/eight-sided caps diversify even turn patterns. The cap faces
@@ -59,7 +59,37 @@ One entry anchor in either face is retained exactly. Multiple fused caps,
 macrocycle-to-macrocycle fusion, general cage embedding, and all possible cyclic
 stereo configurations are not covered by this candidate family. Construction,
 validation and scoring share the ring-search budget; exhaustion never publishes
-a partial ring. Small rings below 12 retain their regular-polygon model.
+a partial ring. Simple rings of at most eight atoms retain regular polygons.
+
+### Folded paths in mixed polycycles
+
+Higher-rank blocks with an eight-or-larger independent cycle use a bounded
+whole-block model after specialized cage and bridge recognition. Short-cycle
+edges form rigid islands; each remaining edge belongs to exactly one maximal
+connecting path. Shared junctions have one coordinate, not independent copies
+that can disagree at closure. Supplied aromatic islands retain regular chords
+using original chemical markers, even after detached integer-bond resolution.
+
+Distance-based seeds place the junctions, then explicit folded-path searches
+try alternating turns with fixed endpoints and rigid islands. A beam of six
+walks and overlapping windows of at most ten edges bound the search. The last
+two unit steps close analytically by circle intersection; infeasible walks are
+discarded instead of stretching bonds or introducing fictitious bend atoms.
+Simple macrocycles additionally combine five- through eight-sided construction
+faces into mixed-turn closed outlines, allowing reentrant corners at odd sizes.
+
+Candidates cannot introduce new skeleton crossings or center collisions during
+path folding. Complete molecules, including substituents, are ranked before
+bounded branch refinement. Saturated-carbon attachments may adjust their host
+angles by at most 30 degrees; aromatic and multiple-bond hosts remain protected.
+All candidates share the existing work budgets. Unresolved geometric limitations
+remain diagnostics, not claims of chemical invalidity or a global optimum.
+Dense substitution can still favor the retained convex fallback over a folded
+outline; this avoids forcing a fold that collides with external groups. Skeleton
+clearance is checked separately from text-label collision avoidance.
+This model does not infer perspective or stereochemistry. General blocks with
+cyclic E/Z constraints still require a dedicated supported stereo model; simple
+and edge-fused macrocycles keep their explicit source E/Z validation.
 
 Bicyclic bridged blocks use a separate path model: two degree-three bridgeheads
 joined by three internally disjoint paths. With a uniquely shortest path, every
