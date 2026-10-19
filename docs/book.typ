@@ -21,6 +21,15 @@
     #prefix-chapter("src/architecture/bio/mmcif-schema.typ")[PDBx/mmCIF dictionary model]
     #prefix-chapter("src/architecture/bio/structure.typ")[Structure model contract]
 
+    = Chemical graph and format architecture
+    #prefix-chapter("src/architecture/chem/overview.typ")[Chemical graph model]
+    #prefix-chapter("src/architecture/chem/formats.typ")[Chemical formats]
+    #prefix-chapter("src/architecture/chem/smiles-compatibility.typ")[SMILES compatibility]
+
+    = 2D chemical drawing architecture
+    #prefix-chapter("src/architecture/chemdraw/overview.typ")[Drawing pipeline]
+    #prefix-chapter("src/architecture/chemdraw/layout.typ")[Layout algorithms]
+
     = `chitin-desktop` architecture
     #prefix-chapter("src/architecture/desktop/command-panel.typ")[Command panel]
   ],
