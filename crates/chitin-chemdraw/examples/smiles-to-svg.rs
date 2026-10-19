@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut font_index = 0;
   let source = loop {
     let argument = args.next().ok_or(
-      "usage: smiles_to_svg [--font-file path] [--font-index n] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--bond-color-style split|uniform] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
+      "usage: smiles-to-svg [--font-file path] [--font-index n] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--bond-color-style split|uniform] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
     )?;
     match argument.as_str() {
       "--font-file" => {

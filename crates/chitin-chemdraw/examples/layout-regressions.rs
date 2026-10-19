@@ -13,7 +13,7 @@ use chitin_chemdraw::{depict, layout, svg};
 /// unsupported depiction, and filesystem errors instead of omitting a case.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut args = std::env::args().skip(1);
-  let directory = std::path::PathBuf::from(args.next().ok_or("usage: layout_regressions <output-directory>")?);
+  let directory = std::path::PathBuf::from(args.next().ok_or("usage: layout-regressions <output-directory>")?);
   if args.next().is_some() {
     return Err("too many arguments".into());
   }

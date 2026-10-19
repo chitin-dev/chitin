@@ -32,7 +32,7 @@ fn export(
 /// conversion, and filesystem failures instead of silently skipping a case.
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut args = std::env::args().skip(1);
-  let directory = std::path::PathBuf::from(args.next().ok_or("usage: optimize_coordinates <output-directory>")?);
+  let directory = std::path::PathBuf::from(args.next().ok_or("usage: optimize-coordinates <output-directory>")?);
   if args.next().is_some() {
     return Err("too many arguments".into());
   }
