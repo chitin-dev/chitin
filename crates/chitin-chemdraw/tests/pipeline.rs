@@ -142,7 +142,7 @@ fn fragments_should_be_packed_without_changing_internal_geometry() -> TestResult
 
 #[test]
 fn unsupported_ring_blocks_and_unknown_orders_should_fail_explicitly_in_auto_layout() -> TestResult {
-  for source in ["C1C2CC1C2", "C1CC2C3CCC1C23"] {
+  for source in ["C1C2CC3CC1CC(C2)C3", "C1CC2C3CCC1C23"] {
     let graph = read_smiles(source)?.into_graph();
     assert!(matches!(
       layout::generate(&graph, &LayoutOptions::default()),

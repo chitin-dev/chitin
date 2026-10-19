@@ -3,7 +3,7 @@
 //! Callers keep graph ownership and explicitly pin source atom handles. Search
 //! never constructs missing rings, edits chemistry, packs fragments, or silently
 //! weakens unit-bond constraints. Automatic embedding invokes the same solver
-//! only for crowded components containing a cycle longer than eight edges.
+//! only for crowded unit-bond components containing a cycle longer than eight edges.
 
 use super::{
   Layout2d, LayoutDiagnostic,
@@ -309,6 +309,17 @@ pub(super) fn component(
     exhausted: false,
   };
   if options.iterations == 0 || options.work_budget == 0 || (only_large_cycles && quality.cost < 1e-12) {
+    return Ok(outcome);
+  }
+  // Automatic bridge projections deliberately shorten some ring bonds. The
+  // unit-distance solver must not expand them or move their pinned neighbors.
+  // Standalone optimize still rejects nonunit input at its public boundary.
+  if only_large_cycles
+    && model
+      .edges
+      .iter()
+      .any(|&[a, b]| (points[a].distance(points[b]) - 1.).abs() > BOND_TOLERANCE)
+  {
     return Ok(outcome);
   }
   if !model.prepare(scope.graph, points, scope.bridges, budget) {

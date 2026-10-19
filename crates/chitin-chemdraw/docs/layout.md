@@ -148,11 +148,26 @@ regular-face interior angles. Path detection, root solving, temporary snapshots,
 scoring, and heading scans consume the shared ring-search budget; the current
 heading scans are quadratic in block size, but budgeted.
 
-Equal shortest paths would occupy identical arcs in this model and are explicitly
-unsupported, as are higher-rank cages and multi-anchor entry. They need a flexible
-chain/constrained embedding model. No physical conformation, over/under crossing,
-or tetrahedral configuration is inferred. Source stereochemistry is left to the
-existing depiction stage. Interior-bridge substituents can still cause crossings;
+Tied shortest paths instead use an explicit drawing projection. The least
+substituted shortest path is selected as the interior bridge, with stable atom
+identity breaking ties. Its transverse arc coordinates are compressed by one of
+0.20, 0.35, or 0.50; the bridgehead gap is 0.70, 0.60, or 0.80 times its edge
+count. Both outer arcs retain unit chords; interior bonds may shorten to between
+0.55 and 1 nominal units. Three two-edge unit paths cannot have distinct internal
+vertices in the plane, since two unit circles have at most two intersections.
+The shortened arc retains a visible bend, including the one-atom bridge.
+
+Before scoring, budgeted pair/segment tests reject atom separations below 0.55,
+nonincident vertex-to-edge clearance below 0.08, and proper edge crossings. The
+same rigid-anchor placement and whole-block commit apply to accepted projections.
+The projected unit-distance optimizer skips any component containing shortened
+bonds; rigid discrete refinement still preserves them. Standalone `optimize`
+continues to reject nonunit input rather than silently stretching a bridge.
+
+Higher-rank cages and multi-anchor entry remain unsupported. No physical
+conformation, over/under crossing, or tetrahedral configuration is inferred.
+Source stereochemistry is left to the existing validation and depiction stages.
+Interior-bridge substituents can still cause crossings;
 remaining crowding/crossings are reported normally, not hidden by this solver.
 
 `layout::refinement` then searches whole-branch transformations across **single
@@ -202,7 +217,7 @@ Other extended stereochemistry remains unsupported.
 ## Projected coordinate search
 
 `layout::optimization` owns a separate complete-coordinate solver. After discrete
-refinement, automatic placement invokes it for crowded components containing a
+refinement, automatic placement invokes it for crowded unit-bond components containing a
 nonbridge edge whose shortest alternate path has more than seven edges. A
 bounded BFS per cyclic edge detects short-cycle witnesses; their vertices stay
 fixed as existing small-ring templates. The standalone `optimize` entry point
@@ -317,8 +332,10 @@ Bridge regressions cover asymmetric bicyclic paths, heteroatoms, explicit chiral
 H, linked/spiro entry, exact unit closures, sparse handles, reordered edges, shared
 work budgets, and the supplied large polycycle. Its complete export is tested;
 that does not imply a collision-free global drawing.
+The separate `symmetric_bridges.smi` corpus verifies tied-path projections,
+shortened bond bounds, distinct visible vertices, stereo, and optimizer isolation.
 
-Next stages: symmetric/cage constrained embedding/templates, nonregular fused
+Next stages: cage constrained embedding/templates, nonregular fused
 embedding, exact label-aware refinement, and richer quality reporting.
 Aromaticity/stereochemistry require corresponding chemical representation and
 parser support first; lowercase SMILES is not silently converted to uppercase.

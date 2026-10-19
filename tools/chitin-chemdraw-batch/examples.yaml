@@ -31,6 +31,11 @@ smiles:
   - 'c1ccc2[nH]ccc2c1'  # aromatic_indole
   - 'C1CCC2(CC1)CCCC2'  # spiro
   - 'CC1CC2COC(C1)O2'  # asymmetric_bridge
+  # Symmetric bridge projections keep outer bonds unit length and shorten the interior.
+  - 'C1C2CC1C2'  # three equally short bridges
+  - 'C1CC2CC1C2'  # two equally short bridges
+  - 'C1CC2CCC1CC2'  # three equal longer bridges
+  - 'C1CN2CCN1CC2'  # heteroatom bridgeheads
   # Even macrocycles use closed lattice/strip candidates with exact unit edges.
   - 'C1CCCCCCCCCCC1'  # 12-membered macrocycle
   - 'C1CCCCCCCCCCCCC1'  # 14-membered macrocycle
@@ -46,3 +51,13 @@ smiles:
   - 'F/C=C/C=C\Cl'  # conjugated_mixed
   - 'c1ccccc1/C=C\O'  # aromatic_alkene
   - 'F/C=C/[C@H](Cl)Br'  # alkene_tetrahedral
+
+  # Complex symmetric bridge examples; these are layout inputs, not named drugs.
+  - 'O=C(O)C12CC(c3ccc(F)cc3)(C1)C2'  # aromatic and carboxyl bridgehead substituents
+  - 'O=C(Nc1ccccc1)C12CCC(CO)(CC1)CC2'  # equal longer bridges, amide and hydroxymethyl
+  - 'CCOC(=O)C1CC2CCC1CC2Oc3ccc(Cl)cc3'  # ester and chlorophenoxy substituents
+  - 'CC(=O)N[C@H]1CC2CC1C2'  # supplied tetrahedral configuration
+  - 'O=C(O)C1SC2CCC1CC2Nc3nccnc3'  # sulfur bridge, carboxyl and nitrogen heterocycle
+  - 'C13(CCCC3)CC2CCC1CC2'  # spiro-linked ring and symmetric bridge block
+  - 'C1CC2CCC1CC2CC3CC4CCC3CC4'  # two bridge blocks connected through a carbon chain
+  - 'O=C(O)C12CCCC(CCC1)CCC2'  # larger three-equal-path bridge with carboxyl

@@ -1,7 +1,8 @@
 //! Bounded planar embedding of bicyclic blocks with three bridgehead paths.
 //!
 //! Nonregular arcs replace incompatible regular faces, but every skeleton edge
-//! remains unit length. This is drawing geometry, not a 3D conformation or a
+//! remains unit length for asymmetric paths. Tied shortest paths use a bounded
+//! shortened interior projection. This is not a 3D conformation or a
 //! stereochemical assignment. Cages and degenerate path families stay explicit
 //! unsupported cases rather than being flattened onto coincident atoms.
 
@@ -14,9 +15,11 @@ use chitin_chem::{AtomId, MolecularGraph, perception::RingBlock};
 
 use super::{Error, Point, Work, score};
 
+mod symmetric;
+
 /// Three complete, internally disjoint bridgehead-to-bridgehead paths.
 pub(super) struct Bridged {
-  /// Global dense rows, ordered by length then stable atom identity.
+  /// Global dense rows, ordered by length, tied-path substitution and atom identity.
   paths: [Vec<usize>; 3],
 }
 
@@ -87,6 +90,31 @@ impl Bridged {
     if visited.len() != block.atoms().len() {
       return Err(Error::Invariant(block.atoms()[0]));
     }
+    if paths[0].len() == paths[1].len() {
+      // Put the least substituted tied path inside, where outward attachment
+      // space is limited. Asymmetric path ordering remains unchanged.
+      work.charge(block.atoms().len().saturating_mul(8))?;
+      let attachments: BTreeMap<_, _> = block
+        .atoms()
+        .iter()
+        .map(|&id| {
+          let row = indices[&id];
+          Ok((row, graph.neighbors(id)?.len() - rows[&row].len()))
+        })
+        .collect::<Result<_, Error>>()?;
+      let count = |path: &[usize]| {
+        path[1..path.len() - 1]
+          .iter()
+          .map(|node| attachments[node])
+          .sum::<usize>()
+      };
+      paths.sort_by(|a, b| {
+        a.len()
+          .cmp(&b.len())
+          .then_with(|| count(a).cmp(&count(b)))
+          .then(a.cmp(b))
+      });
+    }
     let paths = paths.try_into().map_err(|_| Error::Invariant(block.atoms()[0]))?;
     Ok(Some(Self { paths }))
   }
@@ -96,7 +124,7 @@ impl Bridged {
     self.paths[1].len() + self.paths[2].len() - 2
   }
 
-  /// Places two outer arcs and a strictly shorter interior bridge atomically.
+  /// Places two outer arcs and one distinct interior bridge atomically.
   ///
   /// # Parameters
   /// - `atoms`, `old`, `component`: shared global dense namespace and fixed anchors.
@@ -105,14 +133,13 @@ impl Bridged {
   /// - `source`: original block locator for an unsupported result.
   ///
   /// # Returns
-  /// Complete positions and attachment headings. Three bridgehead separations,
-  /// two interior sides and six rigid orientations are scored deterministically.
-  /// All arcs close on the same two endpoints with unit chords; known anchors
-  /// are translated exactly, never relaxed or overwritten.
+  /// Complete positions and attachment headings. Bounded bridgehead separations,
+  /// interior projections, sides and rigid orientations are scored deterministically.
+  /// Outer arcs close with unit chords. Tied shortest paths shorten only the
+  /// interior bridge to avoid coincident atoms; known anchors stay exact.
   ///
   /// # Errors
-  /// Equal shortest paths currently need a more general flexible-chain solver;
-  /// they are rejected rather than superimposed. Multiple fixed block anchors,
+  /// Degenerate projections, multiple fixed block anchors,
   /// inconsistent geometry and exhausted work also return explicit errors.
   pub(super) fn embed(
     &self,
@@ -127,9 +154,7 @@ impl Bridged {
       atom: source,
       cycles: 2,
     };
-    if self.paths[0].len() == self.paths[1].len() {
-      return Err(unsupported());
-    }
+    let symmetric = self.paths[0].len() == self.paths[1].len();
     work.charge(atoms.len())?;
     let anchors: Vec<_> = atoms.iter().copied().filter(|&node| old[node].is_some()).collect();
     if anchors.len() > 1 {
@@ -137,48 +162,62 @@ impl Bridged {
     }
     let mut best = None;
     let mut best_cost = f64::INFINITY;
-    for ratio in [0.85, 0.70, 0.95] {
+    let ratios = if symmetric {
+      [0.70, 0.60, 0.80]
+    } else {
+      [0.85, 0.70, 0.95]
+    };
+    let compressions: &[f64] = if symmetric { &[0.20, 0.35, 0.50] } else { &[1.] };
+    for ratio in ratios {
       let distance = (self.paths[0].len() - 1) as f64 * ratio;
       for interior_side in [1., -1.] {
-        let mut local = BTreeMap::new();
-        for (i, path) in self.paths.iter().enumerate() {
-          let sign = if i == 0 {
-            interior_side
-          } else if i == 1 {
-            1.
+        for &compression in compressions {
+          let mut local = BTreeMap::new();
+          for (i, path) in self.paths.iter().enumerate() {
+            let sign = if i == 0 {
+              interior_side
+            } else if i == 1 {
+              1.
+            } else {
+              -1.
+            };
+            let arc = arc(path.len() - 1, distance, sign, work)?;
+            for (&node, mut point) in path.iter().zip(arc) {
+              if i == 0 {
+                point.y *= compression;
+              }
+              local.insert(node, point);
+            }
+          }
+          if symmetric && !symmetric::separated(&self.paths, &local, work)? {
+            continue;
+          }
+          let anchor = anchors.first().copied();
+          let origin = anchor.map_or(Point::new(0., 0.), |node| local[&node]);
+          let target = anchor.and_then(|node| old[node]).unwrap_or(Point::new(0., 0.));
+          let center = Point::new(
+            local.values().map(|p| p.x).sum::<f64>() / local.len() as f64,
+            local.values().map(|p| p.y).sum::<f64>() / local.len() as f64,
+          );
+          let base = if anchor.is_some() {
+            heading - (center.y - origin.y).atan2(center.x - origin.x)
           } else {
-            -1.
+            0.
           };
-          let arc = arc(path.len() - 1, distance, sign, work)?;
-          for (&node, point) in path.iter().zip(arc) {
-            local.insert(node, point);
-          }
-        }
-        let anchor = anchors.first().copied();
-        let origin = anchor.map_or(Point::new(0., 0.), |node| local[&node]);
-        let target = anchor.and_then(|node| old[node]).unwrap_or(Point::new(0., 0.));
-        let center = Point::new(
-          local.values().map(|p| p.x).sum::<f64>() / local.len() as f64,
-          local.values().map(|p| p.y).sum::<f64>() / local.len() as f64,
-        );
-        let base = if anchor.is_some() {
-          heading - (center.y - origin.y).atan2(center.x - origin.x)
-        } else {
-          0.
-        };
-        for rotation in [0., PI / 3., -PI / 3., 2. * PI / 3., -2. * PI / 3., PI] {
-          work.charge(old.len() + atoms.len())?;
-          let angle = base + rotation;
-          let (sin, cos) = angle.sin_cos();
-          let mut points = old.to_vec();
-          for (&node, point) in &local {
-            let (x, y) = (point.x - origin.x, point.y - origin.y);
-            points[node] = Some(old[node].unwrap_or(target.translated(x * cos - y * sin, x * sin + y * cos)));
-          }
-          let cost = score(atoms, &points, old, component, work)?;
-          if cost + 1e-10 < best_cost {
-            best_cost = cost;
-            best = Some(points);
+          for rotation in [0., PI / 3., -PI / 3., 2. * PI / 3., -2. * PI / 3., PI] {
+            work.charge(old.len() + atoms.len())?;
+            let angle = base + rotation;
+            let (sin, cos) = angle.sin_cos();
+            let mut points = old.to_vec();
+            for (&node, point) in &local {
+              let (x, y) = (point.x - origin.x, point.y - origin.y);
+              points[node] = Some(old[node].unwrap_or(target.translated(x * cos - y * sin, x * sin + y * cos)));
+            }
+            let cost = score(atoms, &points, old, component, work)?;
+            if cost + 1e-10 < best_cost {
+              best_cost = cost;
+              best = Some(points);
+            }
           }
         }
       }
@@ -197,14 +236,21 @@ impl Bridged {
       .collect()
   }
 
-  /// Verifies all path closures and unit edges before any coordinates escape.
+  /// Verifies closure and unit outer edges, allowing only a projected inner path.
   fn validate(&self, points: &[Option<Point>], source: AtomId, work: &mut Work) -> Result<(), Error> {
-    for path in &self.paths {
+    for (index, path) in self.paths.iter().enumerate() {
       work.charge(path.len())?;
       for edge in path.windows(2) {
         let a = points[edge[0]].ok_or(Error::Invariant(source))?;
         let b = points[edge[1]].ok_or(Error::Invariant(source))?;
-        if !a.is_finite() || !b.is_finite() || (a.distance(b) - 1.).abs() > 1e-8 {
+        let length = a.distance(b);
+        let projected = index == 0 && self.paths[0].len() == self.paths[1].len();
+        let valid = if projected {
+          (0.55..=1. + 1e-8).contains(&length)
+        } else {
+          (length - 1.).abs() <= 1e-8
+        };
+        if !a.is_finite() || !b.is_finite() || !valid {
           return Err(Error::RingSystem {
             atom: source,
             cycles: 2,

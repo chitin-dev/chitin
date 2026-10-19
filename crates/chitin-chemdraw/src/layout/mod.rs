@@ -1,4 +1,5 @@
-//! Detached normalized coordinates: x-right, y-up, with unit-length bonds.
+//! Detached normalized coordinates: x-right, y-up, with nominal unit bonds.
+//! Symmetric bridged blocks may shorten interior bonds for a distinct projection.
 //!
 //! Domain ring blocks constrain rigid polygon seeds; branch expansion is followed
 //! by bounded overlap refinement. Layout constraints never assign aromaticity.
@@ -39,7 +40,7 @@ pub struct LayoutOptions {
 }
 
 impl Default for LayoutOptions {
-  /// Uses unit geometry, 4096 atoms, and bounded ring discovery and refinement.
+  /// Uses nominal unit geometry, 4096 atoms, and bounded ring/refinement work.
   fn default() -> Self {
     Self {
       component_gap: 3.,
@@ -183,7 +184,7 @@ impl Layout2d {
   }
 }
 
-/// Generates unit-bond coordinates without changing topology or chemical facts.
+/// Generates nominal-unit coordinates without changing topology or chemical facts.
 ///
 /// # Parameters
 /// - `graph`: possibly disconnected input with integer or supported aromatic bonds.
@@ -196,6 +197,9 @@ impl Layout2d {
 /// transforms, terminal hydroxyl adjustments and bounded projected refinement
 /// improve overlap with unit-bond constraints. Unresolved crowding/crossings remain diagnostic;
 /// this is not a global optimum or label-collision-free guarantee.
+/// Symmetric bridges retain unit outer arcs but may shorten the interior path;
+/// such components skip the optional unit-distance projected optimizer. Discrete
+/// rigid refinement still preserves their initial lengths and ring geometry.
 /// Aromatic input uses a detached, bounded C/N/O/S Kekulé representation shared
 /// with depiction. This does not perceive aromaticity or modify input facts.
 ///

@@ -28,7 +28,7 @@ The automatic layout is a deterministic, rule-based graph embedding algorithm.
 It uses biconnected ring blocks, regular polygon seeds, iterative branch
 expansion, and bounded local refinement:
 
-- single bonds use unit lengths and constrained angle slots;
+- single bonds use nominal unit lengths and constrained angle slots;
 - triple and cumulated-double centers remain linear;
 - branches are placed with local overlap and crossing penalties;
 - ring systems are embedded through shared vertices and edges;
@@ -62,12 +62,25 @@ validation and scoring share the ring-search budget; exhaustion never publishes
 a partial ring. Small rings below 12 retain their regular-polygon model.
 
 Bicyclic bridged blocks use a separate path model: two degree-three bridgeheads
-joined by three internally disjoint paths. A uniquely shortest path lies inside
-two longer outer arcs; every edge retains unit length and both endpoints close
-exactly. Multiple orientations and bridgehead separations are scored against the
-component. Equal shortest paths and higher-rank cages remain unsupported by this
-model; it does not invent 3D geometry or stereo from ring topology. Attachments
-on an interior bridge can still produce crossings reported by quality diagnostics.
+joined by three internally disjoint paths. With a uniquely shortest path, every
+edge retains unit length and both endpoints close exactly. When shortest paths
+tie, a least-substituted shortest path becomes the interior bridge. A bounded
+transverse compression separates it from the two unit-edge outer arcs, with
+interior bonds between 0.55 and 1 drawing units. This deliberate shortening is
+necessary for short symmetric bridges: three two-edge unit paths would require
+three distinct intersections of two unit circles, which cannot exist in a plane.
+The bridge retains a visible bend rather than hiding an atom on a straight bond.
+Coincident centers, vertices on nonincident edges and internal crossings reject
+a candidate before placement; trials share the ring-search budget. Examples
+include `C1C2CC1C2`, `C1CC2CCC1CC2`, and `C1CN2CCN1CC2`.
+
+Multiple orientations and bridgehead separations are scored against the
+component. Discrete refinement preserves the projected lengths. The optional
+unit-distance optimizer skips components containing shortened bonds; standalone
+`optimization::optimize` retains its strict unit-input contract and rejects them.
+Higher-rank cages remain unsupported; the model does not invent 3D geometry or
+stereo from ring topology. Attachments on an interior bridge can still produce
+crossings reported by quality diagnostics.
 
 Substituents at fused junctions use the exterior gap between ring neighbors.
 Only a separately connected, already placed parent occupies that gap; having
@@ -96,8 +109,8 @@ bypass automatic layout restrictions.
 
 ### Projected coordinate refinement
 
-After the discrete stages, crowded components with a cycle longer than eight
-edges can use bounded projected descent. Ring closure and unit source bonds are
+After the discrete stages, crowded components with unit bonds and a cycle longer
+than eight edges can use bounded projected descent. Ring closure and unit source bonds are
 hard constraints (`optimization::BOND_TOLERANCE = 1e-9`); configured source
 double-bond relations and explicit pins cannot be inverted or moved. Existing
 small-cycle templates (3–8 edges) remain fixed. Multiple-bond centers and supplied
@@ -398,7 +411,7 @@ rejects caller coordinates that flatten or invert an annotated double bond.
 Partial/unpaired directions and cumulated stereo remain unsupported; no CIP
 E/Z labels are assigned. Supplied aromatic facts are retained in the source graph; layout and
 depiction share a detached integer-bond adapter, not separate display guesses.
-Future work includes broader aromatic chemistry, symmetric/cage bridge layouts, exact label-aware refinement, further stereo
+Future work includes broader aromatic chemistry, cage bridge layouts, exact label-aware refinement, further stereo
 depiction, complex text shaping, and raster export.
 
 Tetrahedral `@`/`@@` and `@TH1`/`@TH2` preserve relative configuration through
@@ -469,11 +482,14 @@ cargo run -p chitin-chemdraw --example layout_regressions -- \
 Inspect the generated SVGs as well as the tests. Other regressions cover multi-
 anchor closure, incompatible closures, spiro/linked attachments, sparse handles,
 bond insertion-order changes, shared budgets, and an iterative 128-ring strip.
+`tests/fixtures/symmetric_bridges.smi` separately covers shortened bridge
+projections, heteroatoms, substitution and supplied stereo without applying the
+unit-only corpus contract to projected interior bonds.
 
 ## Inspired by
 
 The macrocycle candidate strategy is informed by
 [typed-smiles](https://github.com/GeronimoCastano/typed-smiles): separate closed
 outline construction, cyclic assignment, and stereochemical validation. Chitin's
-implementation uses its own immutable graph models, exact unit-edge contract,
+macrocycle implementation uses its own immutable graph models, exact unit edges,
 explicit work budgets, and typed failures; no external engine is invoked.
