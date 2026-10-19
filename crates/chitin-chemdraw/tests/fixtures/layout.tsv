@@ -43,3 +43,6 @@ macrocycle_three_doubles	C/1=C\CC/C=C/CC/C=C\CCCCC1	1
 macrocycle_odd_fused	C1CCCCCCCCCCC2CCCCC12	2
 macrocycle_even_fused	C1CCCCCCCCCC2CCCCC12	2
 macrocycle_fused_shared_stereo	C1CCCCCCCCCC/C2CCCC\C1=2	2
+macrocycle_nine	C1CCCCCCCC1	1
+macrocycle_ten	C1CCCCCCCCC1	1
+macrocycle_eleven	C1CCCCCCCCCC1	1

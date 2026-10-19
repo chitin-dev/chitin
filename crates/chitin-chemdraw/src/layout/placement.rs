@@ -132,6 +132,109 @@ fn place(node: usize, point: Point, positions: &mut [Option<Point>], grid: &mut 
   Ok(())
 }
 
+/// Rotates a crowded terminal ligand around its parent to restore clearance.
+///
+/// Only a degree-one vertex moves. Its bond length is preserved by construction
+/// and the rotation is limited to forty degrees, so the parent keeps a
+/// recognizable angle. The pass is deliberately last: it repairs residual
+/// contacts of whole-branch placement without reshuffling any subtree.
+fn relax_terminal_leaves(topology: &Topology, rings: &Rings, positions: &mut [Option<Point>]) -> Result<(), Error> {
+  for node in 0..positions.len() {
+    let (Some(point), 1) = (positions[node], topology.neighbors[node].len()) else {
+      continue;
+    };
+    let (parent, _) = topology.neighbors[node][0];
+    // A saturated parent or a ring vertex may give a crowded ligand more room.
+    // An acyclic multiple-bond center may not: its 120-degree sectors are a
+    // fixed chemical projection, so rotating there would falsify the drawing.
+    if topology.neighbors[parent]
+      .iter()
+      .any(|&(_, order)| order != BondOrder::Single)
+      && rings.membership[parent].is_empty()
+    {
+      continue;
+    }
+    let Some(origin) = positions[parent] else {
+      continue;
+    };
+    let before = close_pairs(node, point, positions);
+    if before == 0 {
+      continue;
+    }
+    let base = (point.y - origin.y).atan2(point.x - origin.x);
+    let mut best = (before, nearest_atom(node, point, positions), point);
+    for step in 1..=4 {
+      for sign in [1., -1.] {
+        let angle = base + sign * step as f64 * PI / 18.;
+        let mut blocked = false;
+        for &(other, _) in &topology.neighbors[parent] {
+          if other == node {
+            continue;
+          }
+          if let Some(placed) = positions[other] {
+            let existing = (placed.y - origin.y).atan2(placed.x - origin.x);
+            if ((angle - existing + PI).rem_euclid(2. * PI) - PI).abs() < PI / 2.5 {
+              blocked = true;
+              break;
+            }
+          }
+        }
+        if blocked {
+          continue;
+        }
+        let candidate = origin.translated(angle.cos(), angle.sin());
+        if near_bond(node, candidate, positions, topology) {
+          continue;
+        }
+        let pairs = close_pairs(node, candidate, positions);
+        let nearest = nearest_atom(node, candidate, positions);
+        if pairs < best.0 || (pairs == best.0 && nearest > best.1 + 1e-9) {
+          best = (pairs, nearest, candidate);
+        }
+      }
+    }
+    if best.0 < before || (best.0 == before && best.1 > nearest_atom(node, point, positions) + 1e-9) {
+      positions[node] = Some(best.2);
+    }
+  }
+  Ok(())
+}
+
+/// Counts other placed atoms closer than the crowding threshold.
+fn close_pairs(node: usize, point: Point, positions: &[Option<Point>]) -> usize {
+  positions
+    .iter()
+    .enumerate()
+    .filter(|&(other, candidate)| other != node && candidate.is_some_and(|other| point.distance(other) < 0.55))
+    .count()
+}
+
+/// Returns the nearest other placed atom distance.
+fn nearest_atom(node: usize, point: Point, positions: &[Option<Point>]) -> f64 {
+  positions
+    .iter()
+    .enumerate()
+    .filter(|&(other, _)| other != node)
+    .filter_map(|(_, &candidate)| candidate.map(|other| point.distance(other)))
+    .fold(f64::INFINITY, f64::min)
+}
+
+/// Reports whether a candidate leaf position grazes a nonincident bond.
+fn near_bond(node: usize, point: Point, positions: &[Option<Point>], topology: &Topology) -> bool {
+  topology.neighbors.iter().enumerate().any(|(other, row)| {
+    if other == node {
+      return false;
+    }
+    let Some(origin) = positions[other] else {
+      return false;
+    };
+    row.iter().any(|&(next, _)| {
+      next != node
+        && positions[next].is_some_and(|beyond| super::quality::segment_distance(point, origin, beyond) < 0.15)
+    })
+  })
+}
+
 /// Chooses between angle-preserving mirrored assignments of a sibling group.
 ///
 /// Linear degree-two geometry is constrained rather than rotated to avoid crowds.
@@ -145,9 +248,10 @@ fn place(node: usize, point: Point, positions: &mut [Option<Point>], grid: &mut 
 ///   parent; neighbor count alone cannot establish exterior-sector occupancy.
 ///
 /// # Returns
-/// The lowest-cost candidate among at most two mirror assignments, with ties retaining
-/// earlier candidates. This local heuristic does not optimize label envelopes
-/// or certify that bond crossings are absent.
+/// The lowest-cost candidate among mirrored assignments and, for rotatable ring
+/// attachments, fine whole-group rotations. Ties retain earlier candidates.
+/// This local heuristic does not optimize label envelopes or certify that bond
+/// crossings are absent.
 ///
 /// # Errors
 /// Propagates invalid occupied positions or spatial-index coordinate failures.
@@ -187,25 +291,62 @@ fn candidates(
   };
   let mut best = Vec::new();
   let mut best_cost = f64::INFINITY;
-  for (attempt, sign) in [1., -1.].into_iter().take(if linear { 1 } else { 2 }).enumerate() {
-    let mut group = Vec::new();
-    let mut cost = attempt as f64 * 0.0001;
-    for ((node, _), offset) in children.iter().zip(&offsets) {
-      let angle = branch.heading + sign * offset;
-      let point = origin.translated(angle.cos(), angle.sin());
-      for other in grid.nearby(point)? {
-        let distance = point.distance(position(positions, topology, other)?);
-        cost += (0.95 - distance).max(0.).powi(2);
+  // The canonical assignment is evaluated first. Ring attachments additionally
+  // try fine whole-group rotations, which pay a bend penalty and therefore only
+  // win when they remove a real contact.
+  let mut rotations: Vec<f64> = vec![0.];
+  let mut index = 0;
+  while index < rotations.len() {
+    let rotation = rotations[index];
+    for (attempt, sign) in [1., -1.].into_iter().take(if linear { 1 } else { 2 }).enumerate() {
+      let mut group = Vec::new();
+      let mut cost = attempt as f64 * 0.0001 + 0.6 * rotation * rotation;
+      for ((node, _), offset) in children.iter().zip(&offsets) {
+        let angle = branch.heading + rotation + sign * offset;
+        let point = origin.translated(angle.cos(), angle.sin());
+        if rotation.abs() > 1e-9 {
+          for &(other, _) in row {
+            if other == *node || positions[other].is_none() {
+              continue;
+            }
+            let placed = position(positions, topology, other)?;
+            let existing = (placed.y - origin.y).atan2(placed.x - origin.x);
+            let delta = (angle - existing + PI).rem_euclid(2. * PI) - PI;
+            if delta.abs() < PI / 3. {
+              cost += 4. * (PI / 3. - delta.abs()).powi(2);
+            }
+          }
+        }
+        for other in grid.nearby(point)? {
+          if other == branch.node {
+            continue;
+          }
+          let distance = point.distance(position(positions, topology, other)?);
+          cost += (0.95 - distance).max(0.).powi(2);
+        }
+        for &(_, sibling, _) in &group {
+          cost += (0.95 - point.distance(sibling)).max(0.).powi(2);
+        }
+        group.push((*node, point, angle));
       }
-      for &(_, sibling, _) in &group {
-        cost += (0.95 - point.distance(sibling)).max(0.).powi(2);
+      if cost < best_cost {
+        best = group;
+        best_cost = cost;
       }
-      group.push((*node, point, angle));
     }
-    if cost < best_cost {
-      best = group;
-      best_cost = cost;
+    // Ring attachments may rotate even when aromatic Kekule bonds make the
+    // parent look unsaturated; an acyclic multiple-bond center may not, because
+    // its 120-degree sectors are a fixed chemical projection.
+    let rotatable =
+      row.iter().all(|&(_, order)| order == BondOrder::Single) || !rings.membership[branch.node].is_empty();
+    if index == 0 && !branch.radial && rotatable && !linear {
+      for step in 1..=6 {
+        let angle = step as f64 * PI / 12.;
+        rotations.push(angle);
+        rotations.push(-angle);
+      }
     }
+    index += 1;
   }
   Ok(best)
 }
@@ -213,7 +354,8 @@ fn candidates(
 /// Embeds supported components, expands their trees, then refines and packs them.
 ///
 /// # Parameters
-/// - `graph`: source graph, never mutated or sanitized during placement.
+/// - `graph`: detached integer-bond graph; handles match the source exactly.
+/// - `source`: original chemical facts, including supplied aromatic markers.
 /// - `options`: already validated by the public layout entry point.
 ///
 /// # Returns
@@ -223,10 +365,172 @@ fn candidates(
 /// # Errors
 /// Returns typed unsupported-topology, resource, or coordinate failures. No input
 /// facts are mutated and partially placed components are never returned.
-pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, Error> {
+pub(super) fn generate(
+  graph: &MolecularGraph,
+  source: &MolecularGraph,
+  options: &LayoutOptions,
+) -> Result<Layout2d, Error> {
   let topology = Topology::new(graph)?;
   let mut ring_work = super::rings::Work::new(options.ring_search_budget);
-  let rings = Rings::new(graph, &topology, &mut ring_work)?;
+  let rings = Rings::new(graph, source, &topology, &mut ring_work)?;
+  let mut refinement_work = super::quality::Budget(options.refinement_budget);
+  let mut optimization_work = super::quality::Budget(options.optimization.work_budget);
+  let attachment_policy = if rings.variants() > 1 {
+    super::refinement::AttachmentPolicy::Saturated
+  } else {
+    super::refinement::AttachmentPolicy::Rigid
+  };
+  // A compact folded macrocycle is a deliberate drawing choice, but only when
+  // the complete molecule is conflict-free. Those poses are tried first and
+  // cost no more than a bounded share of the shared refinement allowance.
+  if options.refinement_passes > 0 {
+    for variant in 0..rings.folded().min(3) {
+      if refinement_work.0 < 200_000 {
+        break;
+      }
+      let mut candidate = embed(graph, &topology, &rings, &mut ring_work, options, variant)?;
+      super::refinement::run(
+        graph,
+        &mut candidate,
+        options,
+        &mut refinement_work,
+        &mut optimization_work,
+        attachment_policy,
+      )?;
+      let clean = !candidate.diagnostics().iter().any(|d| {
+        matches!(
+          d,
+          super::LayoutDiagnostic::CrowdedAtoms { .. } | super::LayoutDiagnostic::CrossingBonds { .. }
+        )
+      });
+      if clean {
+        return Ok(candidate);
+      }
+    }
+  }
+  let mut result = embed(graph, &topology, &rings, &mut ring_work, options, 0)?;
+  // Rank complete molecules before spending the shared refinement allowance.
+  // Ring-only scores cannot see collisions with the expanded substituents.
+  let mut alternatives = Vec::new();
+  if options.refinement_passes > 0 && rings.variants() > 1 {
+    let (cost, conflicts) = complete_cost(graph, &result, &mut ring_work)?;
+    // A clean initial pose needs no alternative enumeration. In particular,
+    // long unsubstituted macrocycles must not pay for twelve identical scans.
+    if conflicts {
+      alternatives.push((cost, result));
+      for variant in 1..rings.variants() {
+        let candidate = embed(graph, &topology, &rings, &mut ring_work, options, variant)?;
+        alternatives.push((complete_cost(graph, &candidate, &mut ring_work)?.0, candidate));
+      }
+      alternatives.sort_by(|a, b| b.0.total_cmp(&a.0));
+      result = alternatives.pop().ok_or(Error::CoordinateRange)?.1;
+    }
+  }
+  super::refinement::run(
+    graph,
+    &mut result,
+    options,
+    &mut refinement_work,
+    &mut optimization_work,
+    attachment_policy,
+  )?;
+  if options.refinement_passes > 0
+    && rings.variants() > 1
+    && result.diagnostics().iter().any(|d| {
+      matches!(
+        d,
+        super::LayoutDiagnostic::CrowdedAtoms { .. } | super::LayoutDiagnostic::CrossingBonds { .. }
+      )
+    })
+  {
+    let mut cost = complete_cost(graph, &result, &mut ring_work)?.0;
+    while let Some((_, mut candidate)) = alternatives.pop() {
+      super::refinement::run(
+        graph,
+        &mut candidate,
+        options,
+        &mut refinement_work,
+        &mut optimization_work,
+        attachment_policy,
+      )?;
+      let candidate_cost = complete_cost(graph, &candidate, &mut ring_work)?.0;
+      if candidate_cost + 1e-10 < cost {
+        result = candidate;
+        cost = candidate_cost;
+      }
+      if !result.diagnostics().iter().any(|d| {
+        matches!(
+          d,
+          super::LayoutDiagnostic::CrowdedAtoms { .. } | super::LayoutDiagnostic::CrossingBonds { .. }
+        )
+      }) {
+        break;
+      }
+    }
+  }
+  Ok(result)
+}
+
+/// Scores complete fragments, so external groups influence ring-pose selection.
+///
+/// Trials share the ring work allowance; authored perspective crossings are
+/// removed only by their exact source identities, never by geometry alone.
+///
+/// # Parameters
+/// - `graph`, `layout`: matching source topology and complete coordinates.
+/// - `work`: shared ring allowance, including final quality inspection.
+///
+/// # Returns
+/// Drawing cost and whether unresolved skeleton conflicts require alternatives.
+/// Text-label collisions are outside this atom-center and bond evaluator.
+///
+/// # Errors
+/// Propagates work exhaustion before accepting an unscored candidate.
+fn complete_cost(
+  graph: &MolecularGraph,
+  layout: &Layout2d,
+  work: &mut super::rings::Work,
+) -> Result<(f64, bool), Error> {
+  let mut cost = 0.;
+  let mut conflicts = false;
+  for component in graph.connected_components() {
+    let indices: BTreeMap<_, _> = component.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    let points: Vec<_> = component.iter().map(|id| layout.positions[id]).collect();
+    let bonds: Vec<_> = graph
+      .bonds()
+      .filter_map(|(id, b)| {
+        let [a, b] = b.atoms();
+        Some((id, [*indices.get(&a)?, *indices.get(&b)?]))
+      })
+      .collect();
+    let edges: Vec<_> = bonds.iter().map(|(_, ends)| *ends).collect();
+    let quality = work.measure(&points, &edges)?;
+    let mut crossings = quality.crossings.len();
+    cost += quality.cost + 10. * quality.crowds.len() as f64 + 100. * quality.crossings.len() as f64;
+    for crossing in &layout.crossings {
+      let a = bonds.iter().position(|(id, _)| *id == crossing.front);
+      let b = bonds.iter().position(|(id, _)| *id == crossing.back);
+      if let (Some(a), Some(b)) = (a, b)
+        && quality.crossings.contains(&(a.min(b), a.max(b)))
+      {
+        cost -= 108.;
+        crossings -= 1;
+      }
+    }
+    conflicts |= !quality.crowds.is_empty() || crossings > 0;
+  }
+  Ok((cost.max(0.), conflicts))
+}
+
+/// Expands every branch of one finite ring-pose combination before scoring it.
+fn embed(
+  graph: &MolecularGraph,
+  topology: &Topology,
+  rings: &Rings,
+  ring_work: &mut super::rings::Work,
+  options: &LayoutOptions,
+  variant: usize,
+) -> Result<Layout2d, Error> {
   let mut embedded = vec![false; rings.len()];
   let mut positions = vec![None; topology.ids.len()];
   let mut crossings = Vec::new();
@@ -236,7 +540,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
     let mut pending = VecDeque::new();
     if let Some(seed) = rings.seed(component) {
       embedded[seed] = true;
-      let placed = rings.embed(seed, &positions, component, 0., &mut ring_work)?;
+      let placed = rings.embed(seed, &positions, component, 0., ring_work, variant)?;
       crossings.extend(placed.crossings);
       for (node, point, heading) in placed.atoms {
         place(node, point, &mut positions, &mut grid)?;
@@ -266,7 +570,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
           continue;
         }
         embedded[index] = true;
-        let placed = rings.embed(index, &positions, component, branch.heading, &mut ring_work)?;
+        let placed = rings.embed(index, &positions, component, branch.heading, ring_work, variant)?;
         crossings.extend(placed.crossings);
         for (node, point, heading) in placed.atoms {
           if positions[node].is_some() {
@@ -293,7 +597,7 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
       if children.is_empty() {
         continue;
       }
-      for (node, point, heading) in candidates(&topology, &positions, &grid, &branch, &children, &rings)? {
+      for (node, point, heading) in candidates(topology, &positions, &grid, &branch, &children, rings)? {
         place(node, point, &mut positions, &mut grid)?;
         pending.push_back(Branch {
           node,
@@ -304,17 +608,17 @@ pub(super) fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Resul
       }
     }
   }
+  relax_terminal_leaves(topology, rings, &mut positions)?;
   let positions = topology
     .ids
     .iter()
     .enumerate()
-    .map(|(i, &id)| position(&positions, &topology, i).map(|p| (id, p)))
+    .map(|(i, &id)| position(&positions, topology, i).map(|p| (id, p)))
     .collect::<Result<BTreeMap<_, _>, _>>()?;
   let mut result = Layout2d::from_positions(positions)?;
   result.crossings = crossings;
   super::alkenes::enforce(graph, &mut result, options.stereo_budget)?;
   // Placement-time contacts can disappear after whole-branch refinement. Report
   // only the final geometry, not obsolete pairs collected during expansion.
-  super::refinement::run(graph, &mut result, options)?;
   Ok(result)
 }

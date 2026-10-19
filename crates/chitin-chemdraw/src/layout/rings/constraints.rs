@@ -30,6 +30,27 @@ struct BlockGraph {
 }
 
 impl Constraints {
+  /// Finds an independent cycle basis without imposing regular polygon incidence.
+  ///
+  /// General block embedding shares the same bounded discovery as the polygon
+  /// solver, but shared paths are not confused with invalid source topology.
+  /// Returned vertices use global layout rows. Graph and work errors propagate.
+  pub(super) fn cycles(
+    graph: &MolecularGraph,
+    block: &RingBlock,
+    indices: &BTreeMap<AtomId, usize>,
+    work: &mut Work,
+  ) -> Result<Vec<Vec<usize>>, Error> {
+    let model = BlockGraph::new(graph, block, indices, work)?;
+    Ok(
+      model
+        .basis(block.cycle_rank(), work)?
+        .into_iter()
+        .map(|cycle| cycle.into_iter().map(|row| model.global[row]).collect())
+        .collect(),
+    )
+  }
+
   /// Selects a complete short-cycle basis and validates edge-fused incidence.
   ///
   /// # Parameters
@@ -51,27 +72,13 @@ impl Constraints {
     indices: &BTreeMap<AtomId, usize>,
     work: &mut Work,
   ) -> Result<Self, Error> {
-    work.charge(block.atoms().len() + block.bonds().len())?;
-    let local: BTreeMap<_, _> = block.atoms().iter().enumerate().map(|(i, &id)| (id, i)).collect();
-    let mut rows = vec![Vec::new(); local.len()];
-    let mut edges = Vec::new();
-    for &id in block.bonds() {
-      let [a, b] = graph.bond(id).ok_or(chitin_chem::GraphError::MissingBond(id))?.atoms();
-      let ends = [local[&a], local[&b]];
-      rows[ends[0]].push((ends[1], edges.len()));
-      rows[ends[1]].push((ends[0], edges.len()));
-      edges.push(ends);
-    }
-    for row in &mut rows {
-      row.sort_unstable();
-    }
-    let model = BlockGraph {
-      ids: block.atoms().to_vec(),
-      global: block.atoms().iter().map(|id| indices[id]).collect(),
-      edges,
-      rows,
-    };
+    let model = BlockGraph::new(graph, block, indices, work)?;
     let faces = model.basis(block.cycle_rank(), work)?;
+    Self::validate(model, faces, block, work)
+  }
+
+  /// Retains the strict edge-fused assumptions of the regular polygon solver.
+  fn validate(model: BlockGraph, faces: Vec<Vec<usize>>, block: &RingBlock, work: &mut Work) -> Result<Self, Error> {
     let unsupported = || Error::RingSystem {
       atom: block.atoms()[0],
       cycles: block.cycle_rank(),
@@ -85,6 +92,18 @@ impl Constraints {
         vertex_faces[a].push(i);
       }
     }
+    Self::incidence(model, faces, owners, vertex_faces, unsupported, work)
+  }
+
+  /// Validates face sharing separately from graph discovery.
+  fn incidence(
+    model: BlockGraph,
+    faces: Vec<Vec<usize>>,
+    owners: BTreeMap<(usize, usize), Vec<usize>>,
+    vertex_faces: Vec<Vec<usize>>,
+    unsupported: impl Fn() -> Error,
+    work: &mut Work,
+  ) -> Result<Self, Error> {
     if owners.len() != model.edges.len() || owners.values().any(|row| row.len() > 2) {
       return Err(unsupported());
     }
@@ -136,6 +155,34 @@ impl Constraints {
 }
 
 impl BlockGraph {
+  /// Builds one charged adjacency snapshot for either embedding family.
+  fn new(
+    graph: &MolecularGraph,
+    block: &RingBlock,
+    indices: &BTreeMap<AtomId, usize>,
+    work: &mut Work,
+  ) -> Result<Self, Error> {
+    work.charge(block.atoms().len() + block.bonds().len())?;
+    let local: BTreeMap<_, _> = block.atoms().iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    let mut rows = vec![Vec::new(); local.len()];
+    let mut edges = Vec::new();
+    for &id in block.bonds() {
+      let [a, b] = graph.bond(id).ok_or(chitin_chem::GraphError::MissingBond(id))?.atoms();
+      let ends = [local[&a], local[&b]];
+      rows[ends[0]].push((ends[1], edges.len()));
+      rows[ends[1]].push((ends[0], edges.len()));
+      edges.push(ends);
+    }
+    for row in &mut rows {
+      row.sort_unstable();
+    }
+    Ok(Self {
+      ids: block.atoms().to_vec(),
+      global: block.atoms().iter().map(|id| indices[id]).collect(),
+      edges,
+      rows,
+    })
+  }
   /// Finds independent short cycles, retaining a spanning-tree fallback for rank completeness.
   ///
   /// Unicyclic blocks take one linear walk. Multi-cycle blocks enumerate tied

@@ -13,7 +13,7 @@ use super::{Budget, LayoutOptions, Model, Point, Quality, segment_distance};
 /// A leaf whose placement can change without moving any skeleton vertex.
 pub(super) struct Hydroxyl {
   /// Dense terminal oxygen row.
-  leaf: usize,
+  pub(super) leaf: usize,
   /// Dense saturated carbon row; this is the fixed rotation pivot.
   host: usize,
   /// Other carbon ligands whose projected directions constrain the trial.

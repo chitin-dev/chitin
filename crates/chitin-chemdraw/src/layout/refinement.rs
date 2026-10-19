@@ -1,8 +1,9 @@
 //! Bounded, deterministic branch search over complete molecular coordinates.
 //!
 //! Only single-bond bridges split movable branches. Rigid branch transforms
-//! preserve angle magnitudes; terminal hydroxyl clearance has a separate bounded
-//! saturated-carbon angle policy. Every transform preserves all bond lengths
+//! preserve angle magnitudes; flexible ring candidates and terminal hydroxyl
+//! clearance allow separately bounded saturated-carbon host-angle adjustments.
+//! Every transform preserves all bond lengths
 //! and ring geometry. Linear triple/cumulated-double centers are protected.
 //! This is drawing optimization, not a force field or chemical-energy model.
 
@@ -16,6 +17,15 @@ use std::{
 };
 
 mod terminal;
+
+/// Additional host-angle freedom for whole-block ring candidate search only.
+#[derive(Clone, Copy)]
+pub(super) enum AttachmentPolicy {
+  /// Preserve the established rigid branch policy for ordinary layouts.
+  Rigid,
+  /// Permit bounded saturated-carbon host-angle trials around flexible blocks.
+  Saturated,
+}
 
 /// One dense skeleton edge, retaining its original graph identity.
 struct Edge {
@@ -39,6 +49,8 @@ struct Model {
   rows: Vec<Vec<usize>>,
   /// Whether branch rotation at each atom would violate a linear center.
   linear: Vec<bool>,
+  /// Neutral saturated carbon attachment hosts permit bounded drawing-angle flex.
+  flexible_hosts: Vec<bool>,
   /// Eligible saturated-carbon hydroxyls; ring oxygens and carbonyls are excluded.
   hydroxyls: Vec<terminal::Hydroxyl>,
   /// Dense axis/reference quadruples with required, coordinate-independent sides.
@@ -105,6 +117,19 @@ impl Model {
         row.len() == 2 && (row.contains(&BondOrder::Triple) || row.iter().all(|&order| order == BondOrder::Double))
       })
       .collect();
+    let flexible_hosts = ids
+      .iter()
+      .enumerate()
+      .map(|(i, &id)| {
+        orders[i].iter().all(|&order| order == BondOrder::Single)
+          && graph.atom(id).is_some_and(|atom| {
+            atom.element() == chitin_chem::Element::Carbon
+              && atom.formal_charge() == Some(0)
+              && !atom.is_aromatic()
+              && atom.unpaired_electrons().is_none_or(|count| count == 0)
+          })
+      })
+      .collect();
     let hydroxyls = terminal::collect(graph, &ids, &indices);
     let double_stereo = graph
       .double_bond_stereos()
@@ -129,10 +154,48 @@ impl Model {
       segments,
       rows,
       linear,
+      flexible_hosts,
       hydroxyls,
       double_stereo,
       perspective: Vec::new(),
     }
+  }
+
+  /// Bounds host angles against stage entry, never against accumulated proposals.
+  ///
+  /// Internal branch geometry remains rigid. Only saturated carbon hosts qualify;
+  /// planar multiple-bond centers cannot trade their angles for less crowding.
+  /// Preserving ray order also avoids passing through a degenerate stereo view.
+  fn preserves_host_angles(&self, host: usize, initial: &[Point], candidate: &[Point]) -> bool {
+    let neighbors: Vec<_> = self.rows[host]
+      .iter()
+      .map(|&edge| {
+        let [a, b] = self.edges[edge].ends;
+        if a == host { b } else { a }
+      })
+      .collect();
+    for (i, &a) in neighbors.iter().enumerate() {
+      for &b in &neighbors[i + 1..] {
+        let angle = |points: &[Point]| {
+          let center = points[host];
+          let u = points[a];
+          let v = points[b];
+          let cross = (u.x - center.x) * (v.y - center.y) - (u.y - center.y) * (v.x - center.x);
+          let cosine = ((u.x - center.x) * (v.x - center.x) + (u.y - center.y) * (v.y - center.y))
+            / (u.distance(center) * v.distance(center));
+          (cosine.clamp(-1., 1.).acos(), cross)
+        };
+        let (before, side) = angle(initial);
+        let (after, actual) = angle(candidate);
+        if (after - before).abs() > PI / 6. + 1e-8
+          || after < before.min(PI / 3.) - 1e-8
+          || (side.abs() > 1e-8 && side * actual <= 0.)
+        {
+          return false;
+        }
+      }
+    }
+    true
   }
 
   /// Rejects optional moves that would invert or flatten a required alkene.
@@ -282,8 +345,9 @@ fn improve_branches(
   options: &LayoutOptions,
   budget: &mut Budget,
 ) -> bool {
+  let initial = points.clone();
   for _ in 0..options.refinement_passes {
-    if current.cost < 1e-12 {
+    if current.cost < 1e-12 || (current.crowds.is_empty() && current.crossings.is_empty()) {
       return false;
     }
     let mut changed = false;
@@ -311,7 +375,20 @@ fn improve_branches(
       }) {
         continue;
       }
-      if branch.len() == 1 {
+      let flexible =
+        model.flexible_hosts[fixed] && !model.hydroxyls.iter().any(|h| branch.len() == 1 && h.leaf == moving);
+      if branch.len() == 1 && !flexible {
+        continue;
+      }
+      // Rigidly moving both atoms of a crowded pair cannot separate them.
+      // Focus scarce trials on cuts that actually change a reported contact.
+      if !current.crowds.is_empty()
+        && current.crossings.is_empty()
+        && !current
+          .crowds
+          .iter()
+          .any(|&(a, b)| branch.contains(&a) != branch.contains(&b))
+      {
         continue;
       }
       let origin = points[moving];
@@ -320,29 +397,41 @@ fn improve_branches(
       let mut best = None;
       let mut best_cost = current.cost;
       let mut exhausted = false;
-      for transform in 0..if model.linear[moving] { 1 } else { 3 } {
+      for transform in 0..if flexible {
+        7
+      } else if model.linear[moving] {
+        1
+      } else {
+        3
+      } {
         if !budget.charge(points.len() + branch.len()) {
           exhausted = true;
           break;
         }
         let mut candidate = points.clone();
+        let pivot = if transform >= 3 { points[fixed] } else { origin };
         for &node in &branch {
-          let dx = points[node].x - origin.x;
-          let dy = points[node].y - origin.y;
+          let dx = points[node].x - pivot.x;
+          let dy = points[node].y - pivot.y;
           let (x, y) = if transform == 0 {
             let (sin, cos) = (2. * angle).sin_cos();
             (cos * dx + sin * dy, sin * dx - cos * dy)
-          } else {
+          } else if transform < 3 {
             let (sin, cos) = (if transform == 1 { 2. * PI / 3. } else { -2. * PI / 3. }).sin_cos();
             (cos * dx - sin * dy, sin * dx + cos * dy)
+          } else {
+            let angle = [PI / 12., -PI / 12., PI / 6., -PI / 6.][transform - 3];
+            let (sin, cos) = angle.sin_cos();
+            (cos * dx - sin * dy, sin * dx + cos * dy)
           };
-          candidate[node] = origin.translated(x, y);
+          candidate[node] = pivot.translated(x, y);
         }
         if !budget.charge(model.rows[moving].len() + model.double_stereo.len()) {
           exhausted = true;
           break;
         }
-        if !model.preserves_attachment_angles(moving, fixed, points, &candidate)
+        if (transform < 3 && !model.preserves_attachment_angles(moving, fixed, points, &candidate))
+          || (transform >= 3 && !model.preserves_host_angles(fixed, &initial, &candidate))
           || !model.preserves_double_stereo(&candidate)
         {
           continue;
@@ -353,13 +442,20 @@ fn improve_branches(
         };
         if quality.cost + 1e-10 < best_cost {
           best_cost = quality.cost;
+          let clear = quality.crowds.is_empty() && quality.crossings.is_empty();
           best = Some((candidate, quality));
+          if clear {
+            break;
+          }
         }
       }
       if let Some((candidate, quality)) = best {
         *points = candidate;
         *current = quality;
         changed = true;
+        if current.crowds.is_empty() && current.crossings.is_empty() {
+          return false;
+        }
       }
       if exhausted {
         // Retain the best fully scored candidate even if a later trial could
@@ -387,16 +483,24 @@ fn improve_branches(
 ///
 /// # Errors
 /// Reports graph/coordinate invariants; no graph facts are changed.
-pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &LayoutOptions) -> Result<(), Error> {
+pub(super) fn run(
+  graph: &MolecularGraph,
+  layout: &mut Layout2d,
+  options: &LayoutOptions,
+  budget: &mut Budget,
+  projected_budget: &mut Budget,
+  attachments: AttachmentPolicy,
+) -> Result<(), Error> {
   let rings = analyze_rings(graph)?;
-  let mut budget = Budget(options.refinement_budget);
-  let mut projected_budget = Budget(options.optimization.work_budget);
   let mut projected_exhausted = false;
   let mut exhausted = false;
   let mut cursor = 0.;
   layout.diagnostics.clear();
   for component in graph.connected_components() {
     let mut model = Model::new(graph, component, rings.bridges());
+    if matches!(attachments, AttachmentPolicy::Rigid) {
+      model.flexible_hosts.fill(false);
+    }
     for crossing in &layout.crossings {
       let front = model.edges.iter().position(|edge| edge.id == crossing.front);
       let back = model.edges.iter().position(|edge| edge.id == crossing.back);
@@ -419,7 +523,7 @@ pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &Layou
       }
     }
     if !exhausted && options.refinement_passes > 0 {
-      exhausted = improve(&model, &mut points, options, &mut budget);
+      exhausted = improve(&model, &mut points, options, budget);
     }
     if !projected_exhausted
       && options.refinement_passes > 0
@@ -435,7 +539,7 @@ pub(super) fn run(graph: &MolecularGraph, layout: &mut Layout2d, options: &Layou
         &model.ids,
         &mut points,
         &options.optimization,
-        &mut projected_budget,
+        projected_budget,
         true,
       )?
       .exhausted;

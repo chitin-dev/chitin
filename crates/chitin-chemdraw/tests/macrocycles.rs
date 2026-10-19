@@ -44,7 +44,12 @@ fn even_macrocycles_should_have_visible_bends_and_exact_closed_unit_edges() -> T
         let a = neighbors[0].ok_or("missing neighbor")?;
         let b = neighbors[1].ok_or("missing neighbor")?;
         let dot = (a.x - p.x) * (b.x - p.x) + (a.y - p.y) * (b.y - p.y);
-        assert!((dot + 0.5).abs() < 1e-8, "size {size}: bond angle cosine {dot}");
+        // Mixed auxiliary faces also produce composite reentrant angles;
+        // every corner must remain visibly bent, not a parity shortcut.
+        assert!(
+          (-3_f64.sqrt() / 2. - 1e-8..=0.5 + 1e-8).contains(&dot),
+          "size {size}: bond angle cosine {dot}"
+        );
       }
       assert_eq!(coordinates, layout::generate(&graph, &options)?);
     }
@@ -69,6 +74,7 @@ fn cyclic_double_bond_candidates_should_preserve_source_and_exocyclic_references
     "C/1=C\\CC/C=C/CCCCCCCCC1",
     "C/1=C\\CC/C=C/CC/C=C\\CCCCC1",
     "C1CCCCCCCCCC/C2CCCC\\C1=2",
+    "C1CCCCCCCCCC/C2CCCC/C1=2",
   ] {
     let graph = read_smiles(source)?.into_graph();
     let before = graph.clone();
@@ -132,7 +138,7 @@ fn macrocycles_should_support_linked_and_spiro_entry_without_moving_fixed_anchor
 
 #[test]
 fn small_rings_should_keep_the_existing_regular_polygon_model() -> TestResult {
-  for size in [5, 6, 9, 10, 11] {
+  for size in 3..=8 {
     let graph = read_smiles(&format!("C1{}1", "C".repeat(size - 1)))?.into_graph();
     let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
     unit_edges(&graph, &coordinates)?;
@@ -144,6 +150,31 @@ fn small_rings_should_keep_the_existing_regular_polygon_model() -> TestResult {
       let b = neighbors[1].ok_or("missing neighbor")?;
       assert!(((a.x - p.x) * (b.x - p.x) + (a.y - p.y) * (b.y - p.y) - expected).abs() < 1e-8);
     }
+  }
+  Ok(())
+}
+
+#[test]
+fn nine_through_eleven_membered_rings_should_use_closed_reentrant_outlines() -> TestResult {
+  for size in 9..=11 {
+    let graph = read_smiles(&format!("C1{}1", "C".repeat(size - 1)))?.into_graph();
+    let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
+    unit_edges(&graph, &coordinates)?;
+    assert!(coordinates.diagnostics().is_empty());
+    let points: Vec<_> = graph
+      .atoms()
+      .map(|(id, _)| coordinates.position(id).ok_or("missing center"))
+      .collect::<Result<_, _>>()?;
+    let turns: Vec<_> = (0..size)
+      .map(|i| {
+        let a = points[(i + size - 1) % size];
+        let c = points[i];
+        let b = points[(i + 1) % size];
+        (c.x - a.x) * (b.y - c.y) - (c.y - a.y) * (b.x - c.x)
+      })
+      .collect();
+    assert!(turns.iter().any(|&turn| turn > 1e-8));
+    assert!(turns.iter().any(|&turn| turn < -1e-8));
   }
   Ok(())
 }
@@ -277,13 +308,12 @@ fn fused_macrocycles_should_cover_supported_small_face_sizes() -> TestResult {
 }
 
 #[test]
-fn unsatisfied_shared_double_relation_should_remain_an_explicit_layout_failure() -> TestResult {
+fn mixed_turn_candidates_should_satisfy_the_previously_unavailable_shared_double_relation() -> TestResult {
   let graph = read_smiles("C1CCCCCCCCCC/C2CCCC/C1=2")?.into_graph();
   let before = graph.clone();
-  assert!(matches!(
-    layout::generate(&graph, &LayoutOptions::default()),
-    Err(layout::LayoutError::DoubleBondStereo(_))
-  ));
+  let positions = layout::generate(&graph, &LayoutOptions::default())?;
+  unit_edges(&graph, &positions)?;
+  depict::depict(&graph, &positions, &Default::default())?;
   assert_eq!(graph, before);
   Ok(())
 }

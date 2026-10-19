@@ -61,9 +61,9 @@ impl FusedMacrocycle {
       return Ok(None);
     }
     let (a, b) = (&constraints.faces[0], &constraints.faces[1]);
-    let (face, cap) = if a.len() >= 12 && (3..=8).contains(&b.len()) {
+    let (face, cap) = if a.len() >= 9 && (3..=8).contains(&b.len()) {
       (a, b)
-    } else if b.len() >= 12 && (3..=8).contains(&a.len()) {
+    } else if b.len() >= 9 && (3..=8).contains(&a.len()) {
       (b, a)
     } else {
       return Ok(None);

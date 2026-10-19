@@ -16,7 +16,9 @@ use std::{
 mod bridged;
 mod cages;
 mod constraints;
+mod folding;
 mod fused_macrocycles;
+mod general;
 mod geometry;
 mod macrocycles;
 use bridged::Bridged;
@@ -26,9 +28,21 @@ use constraints::Constraints;
 pub(super) struct Work(usize);
 
 impl Work {
+  /// Measures one complete trial while charging the same shared ring allowance.
+  pub(super) fn measure(&mut self, points: &[Point], edges: &[[usize; 2]]) -> Result<super::quality::Quality, Error> {
+    let mut budget = super::quality::Budget(self.0);
+    let result = super::quality::measure(points, edges, 0.55, &mut budget);
+    self.0 = budget.0;
+    result.ok_or(Error::RingSearchBudgetExceeded)
+  }
   /// Creates one allowance for all ring systems in an automatic layout.
   pub(super) const fn new(limit: usize) -> Self {
     Self(limit)
+  }
+
+  /// Returns the still-unspent allowance for optional bounded trials.
+  pub(super) const fn remaining(&self) -> usize {
+    self.0
   }
 
   /// Charges before work starts; exhaustion never permits partial geometry.
@@ -40,6 +54,8 @@ impl Work {
 
 /// Geometry selected from topology, rather than forcing every block into polygons.
 enum Model {
+  /// Rigid islands and folded paths, seeded and closed as one complete block.
+  General(general::General),
   /// Exact saturated cage core with a planar, unequal-length projection.
   Cage(cages::Cage),
   /// Edge-fused regular polygons and their incident faces at each vertex.
@@ -116,6 +132,7 @@ impl Rings {
   ///
   /// # Parameters
   /// - `graph`, `topology`: identical immutable input and dense row mapping.
+  /// - `source`: original markers retained across integer-bond resolution.
   /// - `work`: shared discovery, cycle-reduction, and constraint budget.
   ///
   /// # Returns
@@ -124,7 +141,12 @@ impl Rings {
   ///
   /// # Errors
   /// Rejects unsupported cyclic topology, invalid references, or exhausted work.
-  pub(super) fn new(graph: &MolecularGraph, topology: &Topology, work: &mut Work) -> Result<Self, Error> {
+  pub(super) fn new(
+    graph: &MolecularGraph,
+    source: &MolecularGraph,
+    topology: &Topology,
+    work: &mut Work,
+  ) -> Result<Self, Error> {
     work.charge(graph.atom_count() + graph.bond_count())?;
     let report = analyze_rings(graph)?;
     let indices: BTreeMap<_, _> = topology.ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
@@ -134,9 +156,11 @@ impl Rings {
         Model::Cage(cage)
       } else if let Some(bridge) = Bridged::new(graph, block, &indices, work)? {
         Model::Bridged(bridge)
+      } else if let Some(model) = general::General::new(graph, source, block, &indices, work)? {
+        Model::General(model)
       } else {
         let constraints = Constraints::new(graph, block, &indices, work)?;
-        if constraints.faces.len() == 1 && constraints.faces[0].len() >= 12 {
+        if constraints.faces.len() == 1 && constraints.faces[0].len() >= 9 {
           Model::Macrocycle(macrocycles::Macrocycle::new(
             graph,
             &constraints.faces[0],
@@ -165,6 +189,7 @@ impl Rings {
     }
     systems.sort_by(|a, b| {
       let largest = |system: &System| match &system.model {
+        Model::General(model) => model.len(),
         Model::Cage(model) => model.len(),
         Model::Polygons { constraints, .. } => constraints.faces.iter().map(Vec::len).max().unwrap_or(0),
         Model::Bridged(bridge) => bridge.perimeter_len(),
@@ -194,6 +219,33 @@ impl Rings {
   /// Returns the number of rigid cyclic systems.
   pub(super) fn len(&self) -> usize {
     self.systems.len()
+  }
+
+  /// Returns how many leading alternatives are compact folded macrocycles.
+  pub(super) fn folded(&self) -> usize {
+    self
+      .systems
+      .iter()
+      .filter_map(|system| match &system.model {
+        Model::General(model) => Some(model.folded_variants()),
+        _ => None,
+      })
+      .max()
+      .unwrap_or(0)
+  }
+
+  /// Returns a bounded retry count only for flexible whole-block outlines.
+  pub(super) fn variants(&self) -> usize {
+    self
+      .systems
+      .iter()
+      .map(|system| match &system.model {
+        Model::General(model) => model.variants(),
+        Model::Macrocycle(_) => 12,
+        _ => 1,
+      })
+      .max()
+      .unwrap_or(1)
   }
 
   /// Tests whether adjacent vertices share a rigid cyclic block.
@@ -231,9 +283,15 @@ impl Rings {
     component: &[usize],
     heading: f64,
     work: &mut Work,
+    variant: usize,
   ) -> Result<Placement, Error> {
     let system = &self.systems[index];
     let constraints = match &system.model {
+      Model::General(model) => {
+        return model
+          .embed(positions, work, system.source, system.rank, variant)
+          .map(Placement::flat);
+      }
       Model::Cage(model) => {
         return model.embed(&system.atoms, positions, component, heading, work, system.source);
       }
@@ -245,7 +303,7 @@ impl Rings {
       }
       Model::Macrocycle(model) => {
         return model
-          .embed(positions, component, heading, work, system.source)
+          .embed(positions, component, heading, work, system.source, variant)
           .map(Placement::flat);
       }
       Model::FusedMacrocycle(model) => {

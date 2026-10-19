@@ -307,7 +307,7 @@ fn a_crowded_macrocycle_should_allow_joint_coordinate_adjustment() -> TestResult
 }
 
 #[test]
-fn automatic_projected_refinement_should_improve_a_crowded_macrocycle() -> TestResult {
+fn automatic_projected_refinement_should_improve_remaining_macrocycle_crowding() -> TestResult {
   for branch in ["(C)", "(CC)"] {
     let source = format!("C1{branch}{}C1{branch}", format!("C{branch}").repeat(10));
     let graph = read_smiles(&source)?.into_graph();
@@ -325,10 +325,16 @@ fn automatic_projected_refinement_should_improve_a_crowded_macrocycle() -> TestR
     let after_cost = optimization::optimize(&graph, &after, &BTreeSet::new(), &inspection)?
       .report
       .initial_geometry_cost;
-    assert!(
-      after_cost + 1e-8 < before_cost,
-      "{branch}: {before_cost} -> {after_cost}"
-    );
+    // A convex seed may already separate every substituent. Require strict
+    // improvement only while there is actual geometry cost left to remove.
+    if before_cost > 1e-8 {
+      assert!(
+        after_cost + 1e-8 < before_cost,
+        "{branch}: {before_cost} -> {after_cost}"
+      );
+    } else {
+      assert!(after_cost <= 1e-8, "{branch}: {before_cost} -> {after_cost}");
+    }
     units(&graph, &after)?;
     assert_eq!(after, layout::generate(&graph, &LayoutOptions::default())?);
   }

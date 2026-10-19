@@ -40,6 +40,8 @@ pub(super) struct Macrocycle {
   attachments: Vec<usize>,
   /// Required configurations whose axis is an edge of this simple ring.
   requirements: Vec<Requirement>,
+  /// Validated closed-walk shapes are cached across complete-layout retries.
+  outlines: Vec<Vec<Point>>,
 }
 
 impl Macrocycle {
@@ -50,7 +52,7 @@ impl Macrocycle {
   /// - `work`: shared allowance for topology and stereo inspection.
   ///
   /// # Returns
-  /// An independent model for one unicyclic block of at least 12 atoms.
+  /// An independent model for one unicyclic block of at least nine atoms.
   /// Exocyclic stereo references invert the corresponding ring-neighbor side.
   ///
   /// # Errors
@@ -111,10 +113,26 @@ impl Macrocycle {
         expected,
       });
     }
+    let mut outlines = outlines(face.len(), work)?;
+    outlines.extend(caps::mixed(face.len(), work)?);
+    if face.len() <= 24 && attachments.iter().filter(|&&count| count > 0).count() * 2 >= face.len() {
+      let n = face.len();
+      work.charge(n)?;
+      let radius = 1. / (2. * (PI / n as f64).sin());
+      outlines.push(
+        (0..n)
+          .map(|i| {
+            let angle = 2. * PI * i as f64 / n as f64;
+            Point::new(radius * angle.cos(), radius * angle.sin())
+          })
+          .collect(),
+      );
+    }
     Ok(Self {
       face: face.to_vec(),
       attachments,
       requirements,
+      outlines,
     })
   }
 
@@ -145,27 +163,31 @@ impl Macrocycle {
     heading: f64,
     work: &mut Work,
     source: AtomId,
+    variant: usize,
   ) -> Result<Vec<(usize, Point, f64)>, Error> {
-    let mut best = None;
-    let mut best_cost = f64::INFINITY;
+    let mut candidates = Vec::new();
     self.visit(old, heading, work, source, |candidate, work| {
       work.charge(old.len() + candidate.len())?;
       let mut points = old.to_vec();
       for &(row, point, _) in candidate {
         points[row] = Some(point);
       }
-      let cost = score(&self.face, &points, old, component, work)? + self.attachment_cost(candidate);
-      if cost + 1e-10 < best_cost {
-        work.charge(candidate.len())?;
-        best_cost = cost;
-        best = Some(candidate.to_vec());
-      }
+      let cost =
+        score(&self.face, &points, old, component, work)? + self.attachment_cost(candidate) + turn_penalty(candidate);
+      work.charge(candidate.len())?;
+      candidates.push((cost, candidate.to_vec()));
       Ok(())
     })?;
-    best.ok_or(Error::RingSystem {
-      atom: source,
-      cycles: 1,
-    })
+    candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let index = (variant * candidates.len().saturating_sub(1) / 11).min(candidates.len().saturating_sub(1));
+    candidates
+      .into_iter()
+      .nth(index)
+      .map(|(_, points)| points)
+      .ok_or(Error::RingSystem {
+        atom: source,
+        cycles: 1,
+      })
   }
 
   /// Streams complete rigid candidates to a consumer without retaining all poses.
@@ -208,7 +230,7 @@ impl Macrocycle {
     let anchor = anchors.first().copied();
     let mut emitted = false;
     let mut failed_bond = None;
-    for outline in outlines(n, work)? {
+    for outline in &self.outlines {
       for reverse in [false, true] {
         for offset in 0..n {
           work.charge(n + self.requirements.len())?;
@@ -288,6 +310,20 @@ impl Macrocycle {
       .map(|i| self.attachments[i] as f64 * 0.1)
       .sum()
   }
+}
+
+/// Gives mixed-turn folds priority over near-straight convex fallback shapes.
+fn turn_penalty(points: &[(usize, Point, f64)]) -> f64 {
+  let n = points.len();
+  (0..n)
+    .map(|i| {
+      let a = points[(i + n - 1) % n].1;
+      let c = points[i].1;
+      let b = points[(i + 1) % n].1;
+      let cosine = ((a.x - c.x) * (b.x - c.x) + (a.y - c.y) * (b.y - c.y)) / (a.distance(c) * b.distance(c));
+      if cosine < -3_f64.sqrt() / 2. - 1e-8 { 5. } else { 0. }
+    })
+    .sum()
 }
 
 /// Returns up to two simple lattice boundaries of the requested exact size.
@@ -434,7 +470,7 @@ mod tests {
     let mut old = vec![None; ids.len()];
     let anchor = Point::new(42.125, -7.25);
     old[4] = Some(anchor);
-    let points = model.embed(&old, &face, 0.7, &mut work, ids[0])?;
+    let points = model.embed(&old, &face, 0.7, &mut work, ids[0], 0)?;
     assert_eq!(
       points.iter().find(|&&(row, _, _)| row == 4).map(|&(_, p, _)| p),
       Some(anchor)
@@ -461,7 +497,7 @@ mod tests {
       })
       .collect();
     assert!(
-      matches!(model.embed(&vec![None;n], &face, 0., &mut work, ids[0]), Err(Error::DoubleBondStereo(id)) if id == bond)
+      matches!(model.embed(&vec![None;n], &face, 0., &mut work, ids[0], 0), Err(Error::DoubleBondStereo(id)) if id == bond)
     );
     Ok(())
   }

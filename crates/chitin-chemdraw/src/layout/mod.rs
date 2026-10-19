@@ -25,8 +25,9 @@ pub struct LayoutOptions {
   pub minimum_spacing: f64,
   /// Maximum input vertex count; exceeding this returns an error, never truncation.
   pub max_atoms: usize,
-  /// Work units for ring-cycle discovery, constraint assembly, and rigid embedding.
-  /// Exceeding this budget returns an error, never a partially drawn ring system.
+  /// Work units for ring-cycle discovery, constraint assembly, rigid embedding,
+  /// and compact folding. Exceeding this budget returns an error, never a
+  /// partially drawn ring system.
   pub ring_search_budget: usize,
   /// Maximum discrete passes; zero disables all optional refinement stages.
   pub refinement_passes: usize,
@@ -46,7 +47,7 @@ impl Default for LayoutOptions {
       component_gap: 3.,
       minimum_spacing: 0.55,
       max_atoms: 4096,
-      ring_search_budget: 2_000_000,
+      ring_search_budget: 4_000_000,
       refinement_passes: 4,
       refinement_budget: 1_000_000,
       stereo_budget: 1_000_000,
@@ -215,7 +216,8 @@ impl Layout2d {
 /// # Returns
 /// Deterministic positions for every live atom. Chains use zigzag placement,
 /// triple/cumulated-double degree-two centers are linear, and supported ring
-/// blocks use polygon, macrocycle, bridge-path or supported cage constraints. Whole-branch
+/// blocks use polygon, folded macrocycle/polycycle paths, bridge-path or supported
+/// cage constraints. Whole-branch
 /// transforms, terminal hydroxyl adjustments and bounded projected refinement
 /// improve overlap with unit-bond constraints. Unresolved crowding/crossings remain diagnostic;
 /// this is not a global optimum or label-collision-free guarantee.
@@ -229,7 +231,7 @@ impl Layout2d {
 ///
 /// # Errors
 /// Rejects invalid options, exceeded budgets, unsupported bond labels, and any
-/// ring blocks incompatible with shared-edge regular-polygon constraints.
+/// ring blocks incompatible with the supported polygon/path/template models.
 /// Connected independent rings, spiro systems, and compatible multi-ring fused
 /// systems are supported. Ring work exhaustion is distinct from unsupported
 /// geometry. No partial layout is returned.
@@ -254,5 +256,5 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
     });
   }
   let resolved = crate::chemical::integer_bonds(graph)?;
-  placement::generate(&resolved, options)
+  placement::generate(&resolved, graph, options)
 }

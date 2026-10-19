@@ -13,4 +13,3 @@ unsaturated_adamantane_core	C1=C2CC3CC1CC(C2)C3	layout_ring
 unsaturated_cubane_core	C12=C3C4C1C5C2C3C45	layout_ring
 symmetric_bridge_stereo_candidate_limit	C/1=C\C2CCC1CC2	layout_stereo
 aromatic_boron	b1ccccc1	layout_aromatic
-shared_ring_stereo_candidate_limit	C1CCCCCCCCCC/C2CCCC/C1=2	layout_stereo
