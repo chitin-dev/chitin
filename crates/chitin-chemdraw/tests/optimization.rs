@@ -40,6 +40,7 @@ fn units(graph: &MolecularGraph, coordinates: &Layout2d) -> TestResult {
 fn crowded_branches_should_improve_with_pinned_hosts_and_unit_bonds() -> TestResult {
   let (graph, initial, ids) = folded()?;
   let before = graph.clone();
+  let initial_before = initial.clone();
   let anchors = BTreeSet::from([ids[1], ids[2]]);
   let result = optimization::optimize(&graph, &initial, &anchors, &OptimizationOptions::default())?;
   assert!(
@@ -61,7 +62,7 @@ fn crowded_branches_should_improve_with_pinned_hosts_and_unit_bonds() -> TestRes
   }
   units(&graph, &result.layout)?;
   assert_eq!(graph, before);
-  assert_eq!(initial, folded()?.1);
+  assert_eq!(initial, initial_before);
   assert_eq!(
     result,
     optimization::optimize(
@@ -130,7 +131,9 @@ fn independent_fragments_should_not_be_repacked_or_dragged_by_search() -> TestRe
   let graph = read_smiles("OCCO.CC")?.into_graph();
   let ids: Vec<_> = graph.atoms().map(|(id, _)| id).collect();
   let (_, folded, _) = folded()?;
-  let mut points = folded.positions().clone();
+  // Transfer template geometry onto this graph's handles explicitly.
+  let mut points: std::collections::BTreeMap<_, _> =
+    ids.iter().copied().zip(folded.positions().values().copied()).collect();
   points.insert(ids[4], Point::new(10.125, 7.25));
   points.insert(ids[5], Point::new(11.125, 7.25));
   let initial = Layout2d::from_positions(points)?;

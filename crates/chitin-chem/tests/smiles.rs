@@ -102,7 +102,14 @@ fn brackets_must_not_inherit_the_bare_atom_hydrogen_or_radical_policy() -> TestR
   let bare = read_smiles("C")?;
   let bracket = read_smiles("[C]")?;
   let explicit_zero = read_smiles("[CH0]")?;
-  assert_eq!(bracket.graph(), explicit_zero.graph());
+  // Independent parses have distinct runtime identities; compare atomic facts.
+  assert!(
+    bracket
+      .graph()
+      .atoms()
+      .map(|(_, atom)| atom)
+      .eq(explicit_zero.graph().atoms().map(|(_, atom)| atom))
+  );
   let model = ValenceModel::MainGroupClosedShellV1;
   let bare_report = analyze_valence(bare.graph(), model)?;
   let bracket_report = analyze_valence(bracket.graph(), model)?;

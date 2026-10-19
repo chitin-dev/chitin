@@ -3,32 +3,39 @@
 //! IDs are graph-local handles, not dense indices or reaction atom-map numbers.
 //! Deletions do not renumber survivors or reuse handles. Cloning preserves the
 //! handle namespace for a snapshot; unrelated graphs require an explicit mapping.
+//! Equality, ordering, and hashing include process-local provenance. The numeric
+//! `value()` alone is not a complete identity or a persistent serialization key.
+//! Snapshots share allocation cursors, so their local serials may contain gaps.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
   fmt,
+  sync::Arc,
 };
 
 use crate::{Atom, Bond, BondOrder, ImplicitHydrogenPolicy, StereoError, StereoLigand, TetrahedralStereo};
 
 mod double_bond;
+mod identity;
+
+use identity::{Handle, IdentityAllocator};
 
 /// Generates distinct opaque handle types without exposing raw-ID construction.
 macro_rules! graph_id {
   ($name:ident, $description:literal) => {
     #[doc = $description]
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct $name(u64);
+    pub struct $name(Handle);
 
     impl $name {
-      /// Returns the graph-local handle value, not a dense table index.
+      /// Returns the local serial, excluding provenance; not an index or complete identity.
       pub const fn value(self) -> u64 {
-        self.0
+        self.0.serial
       }
     }
 
     impl fmt::Display for $name {
-      /// Formats the local numeric handle, not a global chemical identity.
+      /// Formats runtime provenance and serial, not a persistent chemical identity.
       fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(formatter)
       }
@@ -66,7 +73,7 @@ pub enum GraphError {
     /// Second requested endpoint.
     b: AtomId,
   },
-  /// The monotonic atom or bond counter cannot allocate another handle.
+  /// A namespace, atom, or bond counter cannot allocate another handle.
   #[error("graph identifier counter exhausted")]
   IdentifierExhausted,
 }
@@ -88,7 +95,11 @@ struct Vertex {
 /// storage prevents dangling endpoints, asymmetric adjacency, and ID mutation.
 /// Iteration is deterministic by increasing handle, not chemically canonical.
 /// This baseline uses ordered maps; it does not claim dense-array performance.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// Clones retain existing handles and share only ID allocation, never molecular
+/// storage. New handles cannot collide across divergent clones. Equality compares
+/// lineage and live data, not allocation cursors or chemical isomorphism.
+#[derive(Debug, Clone, Default)]
 pub struct MolecularGraph {
   /// Live vertices only; removal does not compact their handles.
   atoms: BTreeMap<AtomId, Vertex>,
@@ -98,11 +109,21 @@ pub struct MolecularGraph {
   tetrahedral: BTreeMap<AtomId, TetrahedralStereo>,
   /// Relative alkene configurations, invalidated by endpoint coordination edits.
   double_bond_stereo: BTreeMap<BondId, crate::DoubleBondStereo>,
-  /// Next candidate handle; never decremented after deletion.
-  next_atom: u64,
-  /// Independent monotonic bond-handle namespace.
-  next_bond: u64,
+  /// Shared by snapshots so independent edits cannot mint the same new identity.
+  identity: Arc<IdentityAllocator>,
 }
+
+impl PartialEq for MolecularGraph {
+  fn eq(&self, other: &Self) -> bool {
+    Arc::ptr_eq(&self.identity, &other.identity)
+      && self.atoms == other.atoms
+      && self.bonds == other.bonds
+      && self.tetrahedral == other.tetrahedral
+      && self.double_bond_stereo == other.double_bond_stereo
+  }
+}
+
+impl Eq for MolecularGraph {}
 
 impl MolecularGraph {
   /// Creates an empty graph with its own local ID namespace.
@@ -202,7 +223,7 @@ impl MolecularGraph {
   /// # Errors
   /// Returns [`GraphError::IdentifierExhausted`] rather than reusing an old ID.
   pub fn add_atom(&mut self, atom: Atom) -> Result<AtomId, GraphError> {
-    let id = AtomId(allocate_id(&mut self.next_atom)?);
+    let id = AtomId(self.identity.atom()?);
     self.atoms.insert(
       id,
       Vertex {
@@ -255,7 +276,7 @@ impl MolecularGraph {
     if vertex.neighbors.contains_key(&b) {
       return Err(GraphError::DuplicateBond { a, b });
     }
-    let id = BondId(allocate_id(&mut self.next_bond)?);
+    let id = BondId(self.identity.bond()?);
     self.tetrahedral.remove(&a);
     self.tetrahedral.remove(&b);
     self.clear_double_stereo_at(&[a, b]);
@@ -394,24 +415,6 @@ impl MolecularGraph {
   }
 }
 
-/// Reserves one monotonic handle without changing the counter on overflow.
-///
-/// # Parameters
-/// - `counter`: next unused value in one atom or bond namespace.
-///
-/// # Returns
-/// The previous counter value, after successfully advancing the allocation cursor.
-/// `u64::MAX` remains the exhausted sentinel rather than an allocatable handle.
-///
-/// # Errors
-/// Returns `IdentifierExhausted` before any write if incrementing would overflow.
-fn allocate_id(counter: &mut u64) -> Result<u64, GraphError> {
-  let next = counter.checked_add(1).ok_or(GraphError::IdentifierExhausted)?;
-  let id = *counter;
-  *counter = next;
-  Ok(id)
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -419,10 +422,11 @@ mod tests {
 
   #[test]
   fn exhausted_atom_ids_should_fail_without_mutation() {
-    let mut graph = MolecularGraph {
-      next_atom: u64::MAX,
-      ..Default::default()
-    };
+    let mut graph = MolecularGraph::new();
+    graph
+      .identity
+      .next_atom
+      .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
     let before = graph.clone();
     assert_eq!(
       graph.add_atom(Atom::new(Element::Carbon)),
@@ -433,10 +437,11 @@ mod tests {
 
   #[test]
   fn exhausted_bond_ids_should_not_leave_partial_adjacency() -> Result<(), GraphError> {
-    let mut graph = MolecularGraph {
-      next_bond: u64::MAX,
-      ..Default::default()
-    };
+    let mut graph = MolecularGraph::new();
+    graph
+      .identity
+      .next_bond
+      .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
     let a = graph.add_atom(Atom::new(Element::Carbon))?;
     let b = graph.add_atom(Atom::new(Element::Oxygen))?;
     let before = graph.clone();

@@ -14,6 +14,24 @@ use std::collections::BTreeMap;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[test]
+fn coordinates_should_reject_an_independent_graph_but_accept_its_snapshot() -> TestResult {
+  let graph = read_smiles("CO")?.into_graph();
+  let unrelated = read_smiles("CO")?.into_graph();
+  let positions = layout::generate(&graph, &LayoutOptions::default())?;
+  let first = graph.atoms().next().ok_or("missing atom")?.0;
+  let options = DepictOptions::default();
+  assert_eq!(
+    depict::depict(&unrelated, &positions, &options),
+    Err(DepictError::UnexpectedPosition(first))
+  );
+  assert_eq!(
+    depict::depict(&graph.clone(), &positions, &options)?,
+    depict::depict(&graph, &positions, &options)?
+  );
+  Ok(())
+}
+
 /// Runs automatic embedding and depiction, asserting that no source facts change.
 fn drawing(source: &str) -> Result<Drawing, Box<dyn std::error::Error>> {
   let graph = read_smiles(source)?.into_graph();

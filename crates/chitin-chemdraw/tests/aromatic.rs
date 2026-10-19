@@ -99,7 +99,15 @@ fn aromatic_failures_should_be_typed_in_layout_and_manual_coordinate_depiction()
       "{source}"
     );
     let template = read_smiles(if graph.atom_count() == 5 { "C1CCCC1" } else { "C1CCCCC1" })?.into_graph();
-    let coordinates = layout::generate(&template, &LayoutOptions::default())?;
+    let template_coordinates = layout::generate(&template, &LayoutOptions::default())?;
+    // The template is independently parsed: transfer positions explicitly, not IDs.
+    let coordinates = layout::Layout2d::from_positions(
+      graph
+        .atoms()
+        .map(|(id, _)| id)
+        .zip(template_coordinates.positions().values().copied())
+        .collect(),
+    )?;
     assert!(
       matches!(
         depict::depict(&graph, &coordinates, &DepictOptions::default()),
