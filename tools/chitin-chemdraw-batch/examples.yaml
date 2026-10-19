@@ -14,6 +14,16 @@ svg:
   padding: 12
   transparent: false
 smiles:
+  # Successful but deliberately difficult layouts. These cases are intended
+  # to expose crowding and weak visual composition, not parser failures.
+  - 'C(C)(C)(C)(C)(C)'  # high-degree central atom
+  - 'CC(C)(C)C(C)(C)C(C)(C)C(C)(C)C'  # repeated quaternary branch points
+  - 'C1(C)C(C)C(C)C(C)C(C)C(C)C1'  # densely substituted macrocycle
+  - 'Cc1c(C)c(C)c(C)c(C)c1C'  # heavily substituted aromatic ring
+  - 'C1(C)C2CC3CC1CC(C2)C3'  # compact substituted cage
+  - 'CC(C)(C)C(=O)N(C)C(C)(C)C(=O)N(C)C(C)(C)C(=O)N(C)C'  # crowded amide branches
+  - 'C1CC(C2CC(C3CC(C4CC(C5CCCCC5)C4)C3)C2)C1'  # nested ring crowding
+
   - 'CCO'
   - 'CC(=O)Oc1ccccc1C(=O)O'
   - 'C[C@]12CC[C@H]3[C@@H](CCC4=CC(=O)CC[C@@]34C)[C@@H]1CC[C@@H]2O'
@@ -75,3 +85,16 @@ smiles:
   - 'C12C3C4C1C5C2C3C45'  # cubane core
   - 'O=C(O)C12C3C4C1C5C2C3C45'  # carboxyl-substituted cubane
   - 'O=C(Nc1ccccc1)C12C3C4C1C5C2C3C45'  # cubane with aromatic amide
+
+  # Dense cyclic peptide: open-center folded outlines leave room for substituents.
+  - 'CC(C)C[C@H](N1C)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H]([C@H](O)[C@H](C)C/C=C/C)C(=O)N[C@@H](CC)C(=O)N(C)CC(=O)N(C)[C@@H](CC(C)C)C(=O)N[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C(=O)N[C@@H](C)C(=O)N[C@H](C)C(=O)N(C)[C@H](C1=O)CC(C)C'  # cyclosporine
+
+  # Synthetic dense macrocycles; topology/layout cases, not named natural products.
+  - 'N1(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C1=O'  # synthetic cyclic nonapeptide; 27-membered ring, N-methylated
+  - 'N1(C)[C@@H](C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C(C)C)C1=O'  # synthetic cyclic decapeptide; 30-membered ring, mixed side chains
+  - 'N1(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C(=O)N(C)[C@@H](CO)C(=O)N(C)[C@@H](C(C)C)C(=O)N(C)[C@@H](CC(C)C)C(=O)N(C)[C@@H](C)C(=O)N(C)[C@@H](CC)C1=O'  # synthetic cyclic dodecapeptide; 36-membered ring, N-methylated
+  - 'N1[C@@H](C)C(=O)N[C@@H](CC)C(=O)N[C@@H](C(C)C)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](CO)C(=O)N[C@@H](C)C(=O)N[C@@H](CC)C(=O)N[C@@H](CO)C(=O)N[C@@H](C(C)C)C(=O)N[C@@H](CC(C)C)C(=O)N[C@@H](C)C(=O)N[C@@H](CC)C(=O)N[C@@H](CO)C1=O'  # synthetic cyclic tridecapeptide; 39-membered ring with NH labels
+  - 'O1[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C1=O'  # synthetic hydroxylated macrocyclic polyester; 25-membered ring
+  - 'O1[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C1=O'  # synthetic hydroxylated macrocyclic polyester; 30-membered ring
+  - 'C1(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C1O'  # dense hydroxylated 25-membered ring; odd-size layout stress case
+  - 'C1(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C1O'  # dense hydroxylated 26-membered ring; even-size layout stress case
