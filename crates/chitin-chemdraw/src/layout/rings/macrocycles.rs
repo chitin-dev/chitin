@@ -15,6 +15,7 @@ use super::{Error, Point, Work, score, side};
 use crate::stereo_geometry::relation;
 
 mod caps;
+mod open;
 
 /// Integer axial cell coordinates and doubled lattice vertex coordinates.
 type Pair = (i32, i32);
@@ -115,6 +116,12 @@ impl Macrocycle {
     }
     let mut outlines = outlines(face.len(), work)?;
     outlines.extend(caps::mixed(face.len(), work)?);
+    // Dense substitution needs more than a narrow strip: inward-facing groups
+    // require a genuine central cavity. Complete-molecule scoring still decides
+    // which outline is useful; sparse rings retain their existing candidates.
+    if attachments.iter().filter(|&&count| count > 0).count() * 2 >= face.len() {
+      outlines.extend(open::outlines(face.len(), work)?);
+    }
     if face.len() <= 24 && attachments.iter().filter(|&&count| count > 0).count() * 2 >= face.len() {
       let n = face.len();
       work.charge(n)?;
