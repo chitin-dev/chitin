@@ -1,0 +1,7 @@
+# name<TAB>SMILES<TAB>atom count<TAB>bond count
+# Perspective/face-backed layouts allow unequal projected edge lengths; keep
+# them separate from the exact unit-edge planar corpus in layout.tsv.
+unsaturated_prismane	C12=C3C1C1C2C31	6	9
+unsaturated_cubane	C12=C3C4C1C5C2C3C45	8	12
+fullerene_c60	c12c3c4c5c1c6c7c8c2c9c1c3c2c3c4c4c%10c5c5c6c6c7c7c%11c8c9c8c9c1c2c1c2c3c4c3c4c%10c5c5c6c6c7c7c%11c8c8c9c1c1c2c3c2c4c5c6c3c7c8c1c23	60	90
+saturated_c60_topology	C12C3C4C5C1C6C7C8C2C9C1C3C2C3C4C4C%10C5C5C6C6C7C7C%11C8C9C8C9C1C2C1C2C3C4C3C4C%10C5C5C6C6C7C7C%11C8C8C9C1C1C2C3C2C4C5C6C3C7C8C1C23	60	90

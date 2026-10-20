@@ -45,33 +45,113 @@ pub(super) fn plan(
   bridges: &BTreeSet<BondId>,
   expanded_hydrogens: &BTreeSet<AtomId>,
 ) -> Result<BTreeMap<BondId, Mark>, Error> {
+  let centers: Vec<_> = graph
+    .tetrahedral_centers()
+    .filter(|(center, _)| !expanded_hydrogens.contains(center))
+    .collect();
   let mut marks = BTreeMap::new();
-  for (center, stereo) in graph.tetrahedral_centers() {
-    if expanded_hydrogens.contains(&center) {
+  // The common case has a first-fit assignment; only pay for search when an
+  // edge conflict or a degenerate choice forces a different bond.
+  if greedy(graph, points, bridges, &centers, &mut marks).is_ok() {
+    return Ok(marks);
+  }
+  marks.clear();
+  let mut nodes = 0_usize;
+  assign(graph, points, bridges, &centers, 0, &mut marks, &mut nodes)?;
+  Ok(marks)
+}
+
+/// Assigns the first usable unused bond to each center in order.
+fn greedy(
+  graph: &MolecularGraph,
+  points: &BTreeMap<AtomId, Point>,
+  bridges: &BTreeSet<BondId>,
+  centers: &[(AtomId, &TetrahedralStereo)],
+  marks: &mut BTreeMap<BondId, Mark>,
+) -> Result<(), Error> {
+  for &(center, stereo) in centers {
+    let mut chosen = None;
+    for (ligand, edge) in candidates(graph, bridges, center) {
+      if marks.contains_key(&edge) {
+        continue;
+      }
+      let Some(solid) = solid_for(stereo, points[&center], points, StereoLigand::Atom(ligand), None)? else {
+        continue;
+      };
+      chosen = Some((edge, ligand, solid));
+      break;
+    }
+    let Some((edge, ligand, solid)) = chosen else {
+      return Err(Error::Stereo(center));
+    };
+    marks.insert(edge, Mark { center, ligand, solid });
+  }
+  Ok(())
+}
+
+/// Returns the preferred bond order for one center's wedge.
+fn candidates(graph: &MolecularGraph, bridges: &BTreeSet<BondId>, center: AtomId) -> Vec<(AtomId, BondId)> {
+  let mut rows: Vec<_> = graph
+    .neighbors(center)
+    .into_iter()
+    .flatten()
+    .filter(|(neighbor, _)| graph.tetrahedral(*neighbor).is_none())
+    .collect();
+  if rows.is_empty() && graph.neighbors(center).into_iter().flatten().count() >= 4 {
+    // A four-ligand center inside a fully annotated cage has no non-center
+    // ligand; a bond between centers may carry the mark. Three-ligand centers
+    // still require an expanded hydrogen rather than an ambiguous wedge.
+    rows = graph.neighbors(center).into_iter().flatten().collect();
+  }
+  rows.sort_by_key(|&(neighbor, edge)| {
+    (
+      !bridges.contains(&edge),
+      graph.neighbors(neighbor).map_or(usize::MAX, |row| row.len()),
+      neighbor,
+    )
+  });
+  rows
+}
+
+/// Assigns one unused bond to each center, backtracking on a conflicting edge.
+///
+/// # Parameters
+/// - `centers`: stable supplied order, possibly longer than one branch.
+/// - `index`: next center to mark.
+/// - `marks`: bonds already carrying a wedge, updated in place.
+/// - `nodes`: bounded search counter; exhaustion fails rather than dropping a
+///   supplied configuration.
+fn assign(
+  graph: &MolecularGraph,
+  points: &BTreeMap<AtomId, Point>,
+  bridges: &BTreeSet<BondId>,
+  centers: &[(AtomId, &TetrahedralStereo)],
+  index: usize,
+  marks: &mut BTreeMap<BondId, Mark>,
+  nodes: &mut usize,
+) -> Result<(), Error> {
+  if index == centers.len() {
+    return Ok(());
+  }
+  *nodes += 1;
+  if *nodes > 65_536 {
+    return Err(Error::Stereo(centers[index].0));
+  }
+  let (center, stereo) = centers[index];
+  for (ligand, edge) in candidates(graph, bridges, center) {
+    if marks.contains_key(&edge) {
       continue;
     }
-    let mut candidates: Vec<_> = graph
-      .neighbors(center)?
-      .filter(|(neighbor, _)| graph.tetrahedral(*neighbor).is_none())
-      .collect();
-    candidates.sort_by_key(|&(neighbor, edge)| {
-      (
-        !bridges.contains(&edge),
-        graph.neighbors(neighbor).map_or(usize::MAX, |row| row.len()),
-        neighbor,
-      )
-    });
-    let mut chosen = None;
-    for (ligand, edge) in candidates {
-      if let Some(solid) = solid_for(stereo, points[&center], points, StereoLigand::Atom(ligand), None)? {
-        chosen = Some((edge, Mark { center, ligand, solid }));
-        break;
-      }
+    let Some(solid) = solid_for(stereo, points[&center], points, StereoLigand::Atom(ligand), None)? else {
+      continue;
+    };
+    marks.insert(edge, Mark { center, ligand, solid });
+    if assign(graph, points, bridges, centers, index + 1, marks, nodes).is_ok() {
+      return Ok(());
     }
-    let (edge, mark) = chosen.ok_or(Error::Stereo(center))?;
-    marks.insert(edge, mark);
+    marks.remove(&edge);
   }
-  Ok(marks)
+  Err(Error::Stereo(center))
 }
 
 /// Determines a wedge's polarity for either an actual atom or a displayed H.

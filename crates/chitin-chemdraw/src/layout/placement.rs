@@ -575,6 +575,7 @@ fn embed(
   let mut embedded = vec![false; rings.len()];
   let mut positions = vec![None; topology.ids.len()];
   let mut crossings = Vec::new();
+  let mut depths = BTreeMap::new();
   for component in &topology.components {
     let root = *component.first().ok_or(Error::CoordinateRange)?;
     let mut grid = Grid::default();
@@ -583,6 +584,7 @@ fn embed(
       embedded[seed] = true;
       let placed = rings.embed(seed, &positions, component, 0., ring_work, variant)?;
       crossings.extend(placed.crossings);
+      depths.extend(placed.depths.into_iter().map(|(row, depth)| (topology.ids[row], depth)));
       for (node, point, heading) in placed.atoms {
         place(node, point, &mut positions, &mut grid)?;
         pending.push_back(Branch {
@@ -613,6 +615,7 @@ fn embed(
         embedded[index] = true;
         let placed = rings.embed(index, &positions, component, branch.heading, ring_work, variant)?;
         crossings.extend(placed.crossings);
+        depths.extend(placed.depths.into_iter().map(|(row, depth)| (topology.ids[row], depth)));
         for (node, point, heading) in placed.atoms {
           if positions[node].is_some() {
             if node == branch.node {
@@ -658,6 +661,7 @@ fn embed(
     .collect::<Result<BTreeMap<_, _>, _>>()?;
   let mut result = Layout2d::from_positions(positions)?;
   result.crossings = crossings;
+  result.depths = depths;
   super::alkenes::enforce(graph, &mut result, options.stereo_budget)?;
   // E/Z repair can reflect a large side onto the rest of a long chain. Repair
   // surviving contacts by rotating rigid acyclic halves around bridge bonds.

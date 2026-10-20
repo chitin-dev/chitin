@@ -85,14 +85,15 @@ pub enum LayoutDiagnostic {
 
 /// Intentional perspective crossing, distinct from an unresolved layout overlap.
 ///
-/// The rear bond must have a visible gap at the proper intersection. These
+/// Template rear bonds have visible gaps; dense spatial cores retain all bond
+/// strokes and use their camera depths for front/back opacity cues. These
 /// source identities survive rigid layout transforms and never create a vertex
 /// or a chemical stereo descriptor. Caller-supplied positions have no crossings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BondCrossing {
   /// Continuous foreground bond.
   pub front: BondId,
-  /// Background bond interrupted around the crossing.
+  /// Background bond, interrupted or depth-cued according to the layout model.
   pub back: BondId,
 }
 
@@ -164,6 +165,8 @@ pub struct Layout2d {
   diagnostics: Vec<LayoutDiagnostic>,
   /// Explicit authored over/under presentation, not inferred from arbitrary overlaps.
   crossings: Vec<BondCrossing>,
+  /// Camera-space drawing depth for spatial cores only; never chemical z coordinates.
+  depths: BTreeMap<AtomId, f64>,
 }
 
 impl Layout2d {
@@ -187,6 +190,7 @@ impl Layout2d {
       bounds,
       diagnostics: Vec::new(),
       crossings: Vec::new(),
+      depths: BTreeMap::new(),
     })
   }
   /// Returns one input atom's normalized position.
@@ -205,9 +209,13 @@ impl Layout2d {
   pub fn diagnostics(&self) -> &[LayoutDiagnostic] {
     &self.diagnostics
   }
-  /// Returns intentional perspective crossings to be rendered with rear-bond gaps.
+  /// Returns intentional perspective crossings for gap or camera-depth rendering.
   pub fn bond_crossings(&self) -> &[BondCrossing] {
     &self.crossings
+  }
+  /// Returns drawing-only camera depth; positive values face the viewer.
+  pub fn drawing_depths(&self) -> &BTreeMap<AtomId, f64> {
+    &self.depths
   }
 }
 

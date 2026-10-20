@@ -1,0 +1,31 @@
+# Focused projection review without rerunning or overwriting the main batch.
+# Filenames use the one-based order below; output is covered by /generated/ ignore.
+# Success means export completed, not that perspective or chemistry was validated.
+# These include regression cases for previously unsupported unsaturated/dense
+# shells. Synthetic topologies do not assert stable molecular species.
+output_dir: generated/cages
+depict:
+  aromatic_style: kekule
+  color_scheme: element
+  bond_color_style: split
+  explicit_chiral_hydrogens: false
+  stroke_width: 1.6
+svg:
+  padding: 12
+  transparent: false
+smiles:
+  # Small saturated cages, followed by labels and mixed planar/cage fragments.
+  - 'C12C3C1C1C2C31'  # 0001: prismane
+  - 'CC12C3C1C1C2C31'  # 0002: methyl-substituted prismane
+  - 'O=C(O)C12C3C1C1C2C31'  # 0003: carboxyl-substituted prismane
+  - 'O=C(Nc1ccccc1)C12C3C1C1C2C31'  # 0004: prismane with aromatic amide
+  - 'C12C3C4C5C1C6C7C2C8C3C9C4C1C5C6C2C7C8C9C12'  # 0005: dodecahedrane
+  - 'NC12C3C4C5C1C6C7C2C8C3C9C4C1C5C6C2C7C8C9C12'  # 0006: amino-substituted dodecahedrane
+  - 'C12C3C1C1C2C31CC45C6C4C4C5C64'  # 0007: two prismane cores linked by methylene
+  # Saturated templates provide a visual baseline for unsaturated variants.
+  - 'C12C3C4C1C5C2C3C45'  # 0008: cubane
+  - 'C12=C3C1C1C2C31'  # 0009: synthetic unsaturated prismane topology
+  - 'C12=C3C4C1C5C2C3C45'  # 0010: synthetic unsaturated cubane topology
+  # Dense-cage boundary cases: compare identical connectivity, not chemical identity.
+  - 'c12c3c4c5c1c6c7c8c2c9c1c3c2c3c4c4c%10c5c5c6c6c7c7c%11c8c9c8c9c1c2c1c2c3c4c3c4c%10c5c5c6c6c7c7c%11c8c8c9c1c1c2c3c2c4c5c6c3c7c8c1c23'  # 0011: C60 fullerene; rigid camera projection with front/back depth cues
+  - 'C12C3C4C5C1C6C7C8C2C9C1C3C2C3C4C4C%10C5C5C6C6C7C7C%11C8C9C8C9C1C2C1C2C3C4C3C4C%10C5C5C6C6C7C7C%11C8C8C9C1C1C2C3C2C4C5C6C3C7C8C1C23'  # 0012: synthetic saturated counterpart; dense-projection stress case

@@ -226,7 +226,11 @@ impl Cage {
         });
       }
     }
-    Ok(Placement { atoms, crossings })
+    Ok(Placement {
+      atoms,
+      crossings,
+      depths: Vec::new(),
+    })
   }
 
   /// Resolves every source location and a largest free angular attachment sector.

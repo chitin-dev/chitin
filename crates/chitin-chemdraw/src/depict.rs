@@ -19,6 +19,7 @@ mod color;
 mod crossings;
 mod hydrogens;
 mod labels;
+mod spatial;
 mod stereo;
 
 pub use aromatic::AromaticStyle;
@@ -446,6 +447,8 @@ fn clip(start: Point, end: Point, bounds: Option<LabelBounds>) -> Option<Point> 
 /// and do not allocate graph handles or change hydrogen counts.
 /// Authored layout crossings cut the rear single-bond stroke, leaving the front
 /// continuous. Cuts are generic scene geometry and work on transparent output.
+/// Dense spatial cores instead retain every single/double stroke and multiply
+/// source alpha by camera depth; no background mask or stereo is inferred.
 ///
 /// # Errors
 /// Rejects coordinate-coverage mismatch, unknown required facts, known radicals,
@@ -623,5 +626,6 @@ fn depict_validated(
     labels.push(Primitive::Text(attached.label));
   }
   primitives.extend(labels);
+  spatial::apply(graph, layout, &mut primitives);
   Ok(Drawing::new(primitives)?)
 }

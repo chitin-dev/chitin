@@ -21,6 +21,7 @@ mod fused_macrocycles;
 mod general;
 mod geometry;
 mod macrocycles;
+mod projection;
 use bridged::Bridged;
 use constraints::Constraints;
 
@@ -105,6 +106,8 @@ enum Model {
   },
   /// Three internally disjoint paths between two bridgeheads.
   Bridged(Bridged),
+  /// Compact cage with validated perspective or face-unfolded shell geometry.
+  Projected(projection::Projection),
   /// A simple macrocycle with nonregular, closed unit-edge candidates.
   Macrocycle(macrocycles::Macrocycle),
   /// One macrocycle and one small face sharing exactly one skeleton edge.
@@ -117,6 +120,8 @@ pub(super) struct Placement {
   pub(super) atoms: Vec<(usize, Point, f64)>,
   /// Proper crossings that require a rear-bond gap, not a diagnostic suppression rule.
   pub(super) crossings: Vec<BondCrossing>,
+  /// Global atom rows and camera-space depth for genuine spatial projections.
+  pub(super) depths: Vec<(usize, f64)>,
 }
 
 impl Placement {
@@ -125,6 +130,7 @@ impl Placement {
     Self {
       atoms,
       crossings: Vec::new(),
+      depths: Vec::new(),
     }
   }
 }
@@ -196,6 +202,10 @@ impl Rings {
         Model::Cage(cage)
       } else if let Some(bridge) = Bridged::new(graph, block, &indices, work)? {
         Model::Bridged(bridge)
+      } else if let Some(Some(projected)) = work.optional(150_000, |child| {
+        projection::Projection::new(graph, block, &indices, child)
+      })? {
+        Model::Projected(projected)
       } else if let Some(model) = general::General::new(graph, source, block, &indices, work)? {
         Model::General(model)
       } else {
@@ -240,6 +250,7 @@ impl Rings {
         Model::Cage(model) => model.len(),
         Model::Polygons { constraints, .. } => constraints.faces.iter().map(Vec::len).max().unwrap_or(0),
         Model::Bridged(bridge) => bridge.perimeter_len(),
+        Model::Projected(model) => model.len(),
         Model::Macrocycle(model) => model.len(),
         Model::FusedMacrocycle(model) => model.len(),
       };
@@ -298,6 +309,7 @@ impl Rings {
       .iter()
       .map(|system| match &system.model {
         Model::General(model) => model.variants(),
+        Model::Projected(model) => model.variants(),
         Model::Macrocycle(_) => 12,
         _ => 1,
       })
@@ -357,6 +369,9 @@ impl Rings {
         return bridge
           .embed(&system.atoms, positions, component, heading, work, system.source)
           .map(Placement::flat);
+      }
+      Model::Projected(model) => {
+        return model.embed(positions, work, system.source, system.rank, variant);
       }
       Model::Macrocycle(model) => {
         return model

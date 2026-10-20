@@ -33,6 +33,37 @@ fn batch_should_generate_numbered_svgs_relative_to_yaml() -> Result<()> {
 }
 
 #[test]
+fn formerly_rejected_cages_should_all_complete_the_real_batch() -> Result<()> {
+  let root = tempfile::tempdir()?;
+  let config = root.path().join("cages.yaml");
+  let mut yaml = String::from("output_dir: cages\nsmiles:\n");
+  let mut count = 0;
+  for line in include_str!("../../../crates/chitin-chemdraw/tests/fixtures/cages.tsv")
+    .lines()
+    .filter(|line| !line.is_empty() && !line.starts_with('#'))
+  {
+    let fields: Vec<_> = line.split('\t').collect();
+    let [_, source, _, _] = fields.as_slice() else {
+      anyhow::bail!("invalid cage fixture");
+    };
+
+
+    yaml.push_str(&format!("  - '{source}'\n"));
+    count += 1;
+  }
+  assert_eq!(count, 4);
+  fs::write(&config, yaml)?;
+  let output = invoke(&config, false)?;
+  assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+  assert!(String::from_utf8_lossy(&output.stdout).contains("4 generated, 0 failed"));
+  for index in 1..=count {
+    let svg = fs::read_to_string(root.path().join(format!("cages/{index:04}.svg")))?;
+    assert!(svg.starts_with("<svg "));
+  }
+  Ok(())
+}
+
+#[test]
 fn custom_font_should_resolve_from_yaml_and_change_rendered_outlines() -> Result<()> {
   let root = tempfile::tempdir()?;
   let directory = root.path().join("configs");
