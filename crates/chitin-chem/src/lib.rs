@@ -28,6 +28,7 @@
 
 mod atom;
 mod bond;
+pub mod coordination;
 mod element;
 mod graph;
 mod hydrogen;

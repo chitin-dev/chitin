@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use super::{Error, Point, Work};
 
-mod search;
+use super::super::walks as search;
 
 /// A source-vertex walk, with closure represented once rather than duplicated.
 pub(super) struct Path {

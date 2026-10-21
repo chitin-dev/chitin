@@ -29,6 +29,7 @@ pub mod depict;
 pub mod font;
 pub mod geometry;
 pub mod layout;
+pub mod pipeline;
 pub mod scene;
 pub mod svg;
 

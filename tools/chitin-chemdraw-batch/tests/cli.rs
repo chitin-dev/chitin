@@ -33,6 +33,21 @@ fn batch_should_generate_numbered_svgs_relative_to_yaml() -> Result<()> {
 }
 
 #[test]
+fn coupled_polycycle_and_explicit_site_should_complete_without_contact_warnings() -> Result<()> {
+  let root = tempfile::tempdir()?;
+  let config = root.path().join("complex.yaml");
+  fs::write(&config, include_str!("../complex-examples.yaml"))?;
+  let output = invoke(&config, false)?;
+  assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+  assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
+  for number in [1, 2, 3] {
+    let text = fs::read_to_string(root.path().join(format!("generated/complex/{number:04}.svg")))?;
+    assert!(text.starts_with("<svg "));
+  }
+  Ok(())
+}
+
+#[test]
 fn formerly_rejected_cages_should_all_complete_the_real_batch() -> Result<()> {
   let root = tempfile::tempdir()?;
   let config = root.path().join("cages.yaml");
@@ -46,7 +61,6 @@ fn formerly_rejected_cages_should_all_complete_the_real_batch() -> Result<()> {
     let [_, source, _, _] = fields.as_slice() else {
       anyhow::bail!("invalid cage fixture");
     };
-
 
     yaml.push_str(&format!("  - '{source}'\n"));
     count += 1;

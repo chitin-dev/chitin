@@ -19,7 +19,14 @@ fn unannotated_large_polyol_should_reduce_footprint_without_new_crossings() -> T
   let after = layout::generate(&graph, &Default::default())?;
   let a = before.bounds().ok_or("missing before bounds")?;
   let b = after.bounds().ok_or("missing after bounds")?;
-  assert!(b.width() * b.height() < a.width() * a.height());
+  assert!(
+    b.width() * b.height() < a.width() * a.height(),
+    "{}x{} -> {}x{}",
+    a.width(),
+    a.height(),
+    b.width(),
+    b.height()
+  );
   assert!(
     !after
       .diagnostics()

@@ -1,0 +1,19 @@
+# Focused coupled-ring and explicitly declared coordination regressions.
+# Atom ordinals are zero-based parsed-source order; entry numbers are one-based.
+# The Fe declaration changes drawing constraints, never source bonds or charges.
+output_dir: generated/complex
+layout:
+  coordination:
+    - entry: 2
+      center_atom: 3
+      attachment_length: 1.4
+      # Set to zero to compare against closure without anchored-backbone routing.
+      routing_budget: 4000000
+    - entry: 3
+      center_atom: 4
+smiles:
+  - 'CC1C(C(=O)OC2C(C(C3(C(C(=O)C4C(C3(C2(C)O)OC4(COC(=O)C5=C1N=CC=C5)C)O)OC(=O)C)COC(=O)C)OC(=O)C)OC(=O)C)C'
+  - 'CC1=[O][Fe]2345[O]=C(N(CCCC6NC(=O)C(NC(=O)C(CCCN1O5)NC(=O)CNC(=O)CNC(=O)CNC6=O)CCCN(C(=[O]3)C)O4)O2)C'
+  # Three independent bidentate ligands isolate the compact-core candidate model.
+  # Connectivity-only example: no metal-centered configuration is supplied.
+  - 'O1CCO[Fe]123(OCCO2)OCCO3'

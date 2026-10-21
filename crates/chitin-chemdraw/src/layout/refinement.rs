@@ -1,10 +1,12 @@
 //! Bounded, deterministic branch search over complete molecular coordinates.
 //!
-//! Only single-bond bridges split movable branches. Rigid branch transforms
+//! Single-bond bridges split movable branches; two-anchor separators additionally
+//! allow complete ring fragments to reflect about their shared attachment axis.
+//! Rigid branch transforms
 //! preserve angle magnitudes; flexible ring candidates and terminal hydroxyl
 //! clearance allow separately bounded saturated-carbon host-angle adjustments.
 //! Every transform preserves all bond lengths
-//! and ring geometry. Linear triple/cumulated-double centers are protected.
+//! and internal fragment geometry. Linear triple/cumulated-double centers are protected.
 //! This is drawing optimization, not a force field or chemical-energy model.
 
 use super::quality::{self, Budget, Quality, segment_distance};
@@ -17,6 +19,7 @@ use std::{
 };
 
 mod backbone;
+mod hinges;
 mod terminal;
 
 /// Additional host-angle freedom for whole-block ring candidate search only.
@@ -50,6 +53,8 @@ struct Model {
   rows: Vec<Vec<usize>>,
   /// Whether branch rotation at each atom would violate a linear center.
   linear: Vec<bool>,
+  /// Two-anchor flips cannot change multiple-bond or supplied stereo centers.
+  hinge_hosts: Vec<bool>,
   /// Neutral saturated carbon attachment hosts permit bounded drawing-angle flex.
   flexible_hosts: Vec<bool>,
   /// Neutral saturated ring carbons eligible for bounded external-port repair.
@@ -60,9 +65,20 @@ struct Model {
   double_stereo: Vec<([usize; 4], chitin_chem::DoubleBondRelation)>,
   /// Ordered foreground/background edge rows authored by a perspective template.
   perspective: Vec<(usize, usize)>,
+  /// Host-relative label envelopes in normalized y-up units; no font dependency.
+  labels: Vec<(usize, [Point; 2])>,
 }
 
 impl Model {
+  /// Reserves coupled-ring repair only for blocks not owned by simple-ring models.
+  fn restrict_hinges(&mut self, rings: &chitin_chem::perception::RingTopology) {
+    for (row, &id) in self.ids.iter().enumerate() {
+      self.hinge_hosts[row] &= rings
+        .blocks()
+        .iter()
+        .any(|block| block.cycle_rank() >= 3 && block.atoms().contains(&id));
+    }
+  }
   /// Checks the angles at the only boundary where a rigid branch transform can change them.
   ///
   /// # Parameters
@@ -138,6 +154,11 @@ impl Model {
       .enumerate()
       .map(|(row, &eligible)| eligible && rows[row].iter().any(|&e| !edges[e].movable))
       .collect();
+    let hinge_hosts = ids
+      .iter()
+      .enumerate()
+      .map(|(row, &id)| graph.tetrahedral(id).is_none() && orders[row].iter().all(|&order| order == BondOrder::Single))
+      .collect();
     let hydroxyls = terminal::collect(graph, &ids, &indices);
     let double_stereo = graph
       .double_bond_stereos()
@@ -162,11 +183,13 @@ impl Model {
       segments,
       rows,
       linear,
+      hinge_hosts,
       flexible_hosts,
       ring_ports,
       hydroxyls,
       double_stereo,
       perspective: Vec::new(),
+      labels: Vec::new(),
     }
   }
 
@@ -278,6 +301,26 @@ impl Model {
         quality.cost = (quality.cost - 8.).max(0.);
       }
     }
+    for (i, &(host, bounds)) in self.labels.iter().enumerate() {
+      if !budget.charge(self.edges.len() + self.labels.len()) {
+        return None;
+      }
+      let bounds = bounds.map(|p| p.translated(points[host].x, points[host].y));
+      for edge in &self.edges {
+        let [a, b] = edge.ends;
+        if a != host && b != host && crate::geometry::segment_enters_box(points[a], points[b], bounds, 0.04) {
+          quality.cost += 5.;
+          quality.label_contacts += 1;
+        }
+      }
+      for &(other, region) in &self.labels[i + 1..] {
+        let [min, max] = region.map(|p| p.translated(points[other].x, points[other].y));
+        if bounds[0].x < max.x && bounds[1].x > min.x && bounds[0].y < max.y && bounds[1].y > min.y {
+          quality.cost += 5.;
+          quality.label_contacts += 1;
+        }
+      }
+    }
     Some(quality)
   }
 }
@@ -332,12 +375,98 @@ fn improve(model: &Model, points: &mut Vec<Point>, options: &LayoutOptions, budg
     return false;
   }
   let reserve = if model.hydroxyls.is_empty() { 0 } else { budget.0 / 4 };
+  let hinge_reserve = if (current.crossings.is_empty() && current.label_contacts == 0)
+    || !model.perspective.is_empty()
+    || !model.hinge_hosts.iter().any(|&eligible| eligible)
+  {
+    0
+  } else {
+    budget.0 / 3
+  };
+  budget.0 -= hinge_reserve;
   budget.0 -= reserve;
   let exhausted = improve_branches(model, points, &mut current, options, budget);
+  let mut hinges = Budget(hinge_reserve);
+  let hinge_exhausted = hinges::improve(model, points, &mut current, options, &mut hinges);
+  budget.0 += hinges.0;
   let mut local = Budget(reserve);
   let local_exhausted = terminal::improve(model, points, &mut current, options, &mut local);
   budget.0 += local.0;
-  exhausted || local_exhausted
+  exhausted || hinge_exhausted || local_exhausted
+}
+
+/// Repairs automatic geometry using host-relative, font-independent envelopes.
+///
+/// # Parameters
+/// - `graph`, `layout`: matching complete automatic geometry and source handles.
+/// - `regions`: measured host-relative boxes in normalized y-up units.
+/// - `options`, `allowance`: geometric constraints and independent label-repair work.
+///
+/// # Returns
+/// Only fully scored, lower-cost geometry is committed. Actual font measurement
+/// belongs to the rendering pipeline; this layer consumes normalized rectangles.
+/// Existing perspective metadata is never altered by label feedback.
+///
+/// # Errors
+/// Reports missing coordinates or nonfinite bounds, never a partial component.
+pub(crate) fn clear_labels(
+  graph: &MolecularGraph,
+  layout: &mut Layout2d,
+  regions: &BTreeMap<AtomId, [Point; 2]>,
+  options: &LayoutOptions,
+  allowance: usize,
+) -> Result<(), Error> {
+  if regions.is_empty()
+    || !layout.crossings.is_empty()
+    || !layout.depths.is_empty()
+    || allowance == 0
+    || options.refinement_passes == 0
+  {
+    return Ok(());
+  }
+  let rings = analyze_rings(graph)?;
+  let mut budget = Budget(allowance);
+  for component in graph.connected_components() {
+    let mut model = Model::new(graph, component, rings.bridges());
+    model.restrict_hinges(&rings);
+    model.flexible_hosts.fill(false);
+    model.labels = model
+      .ids
+      .iter()
+      .enumerate()
+      .filter_map(|(row, id)| regions.get(id).map(|&bounds| (row, bounds)))
+      .collect();
+    let mut points: Vec<_> = model.ids.iter().map(|id| layout.positions[id]).collect();
+    improve(&model, &mut points, options, &mut budget);
+    let quality = model
+      .measure(&points, options.minimum_spacing, &mut Budget(usize::MAX))
+      .ok_or(Error::CoordinateRange)?;
+    layout.diagnostics.retain(|d| match d {
+      LayoutDiagnostic::CrowdedAtoms { a, .. } => !model.ids.contains(a),
+      LayoutDiagnostic::CrossingBonds { a, .. } => !model.edges.iter().any(|edge| edge.id == *a),
+      _ => true,
+    });
+    layout
+      .diagnostics
+      .extend(quality.crowds.into_iter().map(|(a, b)| LayoutDiagnostic::CrowdedAtoms {
+        a: model.ids[a],
+        b: model.ids[b],
+      }));
+    layout.diagnostics.extend(
+      quality
+        .crossings
+        .into_iter()
+        .map(|(a, b)| LayoutDiagnostic::CrossingBonds {
+          a: model.edges[a].id,
+          b: model.edges[b].id,
+        }),
+    );
+    for (&id, point) in model.ids.iter().zip(points) {
+      layout.positions.insert(id, point);
+    }
+  }
+  layout.bounds = Bounds::from_points(layout.positions.values().copied())?;
+  Ok(())
 }
 
 /// Optimizes one component by best-improving rigid branch transforms.
@@ -356,7 +485,7 @@ fn improve_branches(
 ) -> bool {
   let initial = points.clone();
   for _ in 0..options.refinement_passes {
-    if current.cost < 1e-12 || (current.crowds.is_empty() && current.crossings.is_empty()) {
+    if current.cost < 1e-12 || current.clear() {
       return false;
     }
     let mut changed = false;
@@ -451,7 +580,7 @@ fn improve_branches(
         };
         if quality.cost + 1e-10 < best_cost {
           best_cost = quality.cost;
-          let clear = quality.crowds.is_empty() && quality.crossings.is_empty();
+          let clear = quality.clear();
           best = Some((candidate, quality));
           if clear {
             break;
@@ -462,7 +591,7 @@ fn improve_branches(
         *points = candidate;
         *current = quality;
         changed = true;
-        if current.crowds.is_empty() && current.crossings.is_empty() {
+        if current.clear() {
           return false;
         }
       }
@@ -508,6 +637,7 @@ pub(super) fn run(
   layout.diagnostics.clear();
   for component in graph.connected_components() {
     let mut model = Model::new(graph, component, rings.bridges());
+    model.restrict_hinges(&rings);
     if matches!(attachments, AttachmentPolicy::Rigid) {
       model.flexible_hosts.fill(false);
     }

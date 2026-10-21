@@ -1,0 +1,17 @@
+# Official October 2026 lite CSV; canonical_smiles retains supplied @ and / stereo.
+# Download/unzip the source under benchmarks/data/coconut-2026-10 first.
+dataset: COCONUT
+version: "2026-10"
+license: CC0-1.0
+source_url: https://coconut.s3.uni-jena.de/prod/downloads/2026-10/coconut_csv_lite-10-2026.zip
+input: ../data/coconut-2026-10/coconut_csv_lite-10-2026.csv
+output: ../results/coconut-2026-10-seed-20261020-10k-001
+delimiter: ","
+headers: true
+smiles_column: canonical_smiles
+id_column: identifier
+sample_size: 10000
+seed: 20261020
+timeout_seconds: 5
+max_atoms: 4096
+save_svg_count: 100

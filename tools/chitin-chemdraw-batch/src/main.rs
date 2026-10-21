@@ -5,7 +5,7 @@ use std::{env, ffi::OsString, fs, io::Write, path::Path, process::ExitCode};
 use anyhow::{Context, Result, bail, ensure};
 
 use chitin_chem::io::smiles::read_smiles;
-use chitin_chemdraw::{depict, layout, svg};
+use chitin_chemdraw::{depict, layout, pipeline, svg};
 
 mod config;
 
@@ -53,7 +53,8 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
   for (index, source) in config.smiles.iter().enumerate() {
     let number = index + 1;
     let output = destination.join(format!("{number:04}.svg"));
-    let result = render(source, number, &depiction, &framing).and_then(|svg| publish(&output, &svg, overwrite));
+    let result =
+      render(source, number, &depiction, &framing, &config.layout).and_then(|svg| publish(&output, &svg, overwrite));
     match result {
       Ok(()) => println!("[{number}] {}", output.display()),
       Err(error) => {
@@ -71,15 +72,30 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
 ///
 /// # Errors
 /// Propagates source, layout, depiction, and SVG errors without creating a file.
-fn render(source: &str, number: usize, depiction: &depict::DepictOptions, framing: &svg::SvgOptions) -> Result<String> {
+fn render(
+  source: &str,
+  number: usize,
+  depiction: &depict::DepictOptions,
+  framing: &svg::SvgOptions,
+  policy: &config::LayoutConfig,
+) -> Result<String> {
   ensure!(!source.trim().is_empty(), "empty SMILES");
   let graph = read_smiles(source).context("parse SMILES")?.into_graph();
-  let coordinates = layout::generate(&graph, &layout::LayoutOptions::default()).context("generate layout")?;
-  if !coordinates.diagnostics().is_empty() {
-    eprintln!("[{number}] layout diagnostics: {:?}", coordinates.diagnostics());
+  let layout_options = layout::LayoutOptions::default();
+  let rendered = if let Some((site, options)) = policy.site(number, &graph)? {
+    let coordinates = layout::coordination::generate(&graph, &site, &layout_options, &options)
+      .context("generate declared coordination layout")?;
+    pipeline::finish(&graph, coordinates, &layout_options, depiction).context("finish coordination drawing")?
+  } else {
+    pipeline::generate(&graph, &layout_options, depiction).context("generate layout and drawing")?
+  };
+  if !rendered.layout.diagnostics().is_empty() {
+    eprintln!("[{number}] layout diagnostics: {:?}", rendered.layout.diagnostics());
   }
-  let drawing = depict::depict(&graph, &coordinates, depiction).context("depict molecule")?;
-  svg::export(&drawing, framing).context("export SVG")
+  if !rendered.contacts.is_empty() {
+    eprintln!("[{number}] drawing contacts: {:?}", rendered.contacts);
+  }
+  svg::export(&rendered.drawing, framing).context("export SVG")
 }
 
 /// Publishes a completed SVG from a temporary file in the destination directory.

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "benchmarks/chitin-chemdraw",
   "crates/chitin-builtin-shell",
   "crates/chitin-command",
   "crates/chitin-cli",

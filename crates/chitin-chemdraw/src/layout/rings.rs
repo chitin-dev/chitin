@@ -85,7 +85,7 @@ impl Work {
   }
 
   /// Charges before work starts; exhaustion never permits partial geometry.
-  fn charge(&mut self, units: usize) -> Result<(), Error> {
+  pub(super) fn charge(&mut self, units: usize) -> Result<(), Error> {
     self.0 = self.0.checked_sub(units).ok_or(Error::RingSearchBudgetExceeded)?;
     Ok(())
   }

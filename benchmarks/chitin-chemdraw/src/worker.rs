@@ -1,0 +1,154 @@
+//! Disposable per-molecule workers: stage timings exclude process startup and QA.
+
+use crate::{
+  dataset::Case,
+  metrics,
+  quality::{self, Features, Metrics},
+  scene_quality,
+};
+use anyhow::{Context, Result, ensure};
+use chitin_chem::io::smiles::read_smiles;
+use chitin_chemdraw::{
+  depict::{self, DepictOptions},
+  layout::{self, LayoutOptions},
+  svg::{self, SvgOptions},
+};
+use serde::{Deserialize, Serialize};
+use std::{
+  collections::BTreeMap,
+  io::{self, Write},
+  path::PathBuf,
+  time::Instant,
+};
+
+/// Parent-owned options; artifact names never contain untrusted dataset IDs.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Request {
+  pub case: Case,
+  pub max_atoms: usize,
+  pub svg_path: Option<PathBuf>,
+}
+
+/// Durable per-case result, including failures and separate stage timings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Record {
+  pub case: Case,
+  pub status: String,
+  pub stage: String,
+  pub error: Option<String>,
+  pub timings_ms: BTreeMap<String, f64>,
+  pub wall_ms: f64,
+  pub metrics: Option<Metrics>,
+  pub svg_bytes: Option<usize>,
+  pub atom_count: Option<usize>,
+  pub bond_count: Option<usize>,
+  pub features: Option<Features>,
+}
+
+/// Line-framed worker protocol; a stage marker survives timeout or process death.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum Event {
+  Checkpoint { record: Box<Record> },
+  Finished { record: Box<Record> },
+}
+
+impl Record {
+  /// Starts a case with no claimed timings or quality measurements.
+  pub fn pending(case: Case) -> Self {
+    Self {
+      case,
+      status: "error".into(),
+      stage: "worker_start".into(),
+      error: None,
+      timings_ms: BTreeMap::new(),
+      wall_ms: 0.,
+      metrics: None,
+      svg_bytes: None,
+      atom_count: None,
+      bond_count: None,
+      features: None,
+    }
+  }
+
+  /// Announces a stage before entering fallible or potentially expensive work.
+  fn timed<T>(&mut self, stage: &str, run: impl FnOnce() -> Result<T>) -> Result<T> {
+    self.stage = stage.into();
+    // Preserve completed timings and parsed size even when this stage times out.
+    emit(&Event::Checkpoint {
+      record: Box::new(self.clone()),
+    })?;
+    let start = Instant::now();
+    let result = run();
+    self
+      .timings_ms
+      .insert(stage.into(), start.elapsed().as_secs_f64() * 1000.);
+    result
+  }
+}
+
+/// Flushes one complete protocol record, including the final error payload.
+fn emit(event: &Event) -> Result<()> {
+  let mut output = io::stdout().lock();
+  serde_json::to_writer(&mut output, event)?;
+  writeln!(output)?;
+  output.flush()?;
+  Ok(())
+}
+
+/// Runs the default planar/perspective auto selector without optional label feedback.
+///
+/// Each phase is measured independently. QA happens only after SVG export and
+/// does not affect generated coordinates. Tetrahedral depiction parity is not
+/// independently verified by this first benchmark; its source count is recorded.
+pub fn run() -> Result<()> {
+  let request: Request = serde_json::from_reader(io::stdin().lock())?;
+  let mut record = Record::pending(request.case.clone());
+  let result = execute(&request, &mut record);
+  match result {
+    Ok(()) => {
+      record.status = "success".into();
+    }
+    Err(error) => {
+      record.error = Some(format!("{error:#}"));
+    }
+  }
+  emit(&Event::Finished {
+    record: Box::new(record),
+  })
+}
+
+/// Executes immutable chemistry, automatic geometry, depiction, export and QA.
+fn execute(request: &Request, record: &mut Record) -> Result<()> {
+  let graph = record.timed("parse", || {
+    ensure!(!request.case.smiles.trim().is_empty(), "empty SMILES field");
+    Ok(read_smiles(&request.case.smiles)?.into_graph())
+  })?;
+  record.atom_count = Some(graph.atom_count());
+  record.bond_count = Some(graph.bond_count());
+  record.features = Some(record.timed("characterize", || quality::characterize(&graph))?);
+  let options = LayoutOptions {
+    max_atoms: request.max_atoms,
+    ..Default::default()
+  };
+  let coordinates = record.timed("layout", || Ok(layout::generate(&graph, &options)?))?;
+  let drawing = record.timed("depict", || {
+    Ok(depict::depict(&graph, &coordinates, &DepictOptions::default())?)
+  })?;
+  let document = record.timed("svg", || Ok(svg::export(&drawing, &SvgOptions::default())?))?;
+  record.svg_bytes = Some(document.len());
+  if let Some(path) = &request.svg_path {
+    // Artifacts are outside export timings; create_new prevents accidental overwrite.
+    record.timed("artifact", || {
+      let mut file = std::fs::File::create_new(path).context("create SVG artifact")?;
+      file.write_all(document.as_bytes())?;
+      Ok(())
+    })?;
+  }
+  record.metrics = Some(record.timed("quality", || {
+    let mut result = metrics::measure(&graph, &coordinates)?;
+    scene_quality::measure(&graph, &drawing, &mut result)?;
+    Ok(result)
+  })?);
+  Ok(())
+}

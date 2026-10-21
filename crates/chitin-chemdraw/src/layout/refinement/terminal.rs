@@ -18,6 +18,8 @@ pub(super) struct Hydroxyl {
   host: usize,
   /// Other carbon ligands whose projected directions constrain the trial.
   neighbors: Vec<usize>,
+  /// No supplied center configuration constrains a different projected exit sector.
+  reorientable: bool,
 }
 
 /// Selects conservative candidates from supplied facts, never inferring a ring H.
@@ -65,6 +67,7 @@ pub(super) fn collect(graph: &MolecularGraph, ids: &[AtomId], indices: &BTreeMap
         leaf,
         host: indices[&host],
         neighbors: other,
+        reorientable: graph.tetrahedral(host).is_none(),
       });
     }
   }
@@ -87,10 +90,11 @@ impl Hydroxyl {
     }
     let p = points[self.leaf];
     Some(
-      points
-        .iter()
-        .enumerate()
-        .any(|(i, &q)| i != self.leaf && i != self.host && p.distance(q) < 0.95)
+      !model.labels.is_empty()
+        || points
+          .iter()
+          .enumerate()
+          .any(|(i, &q)| i != self.leaf && i != self.host && p.distance(q) < 0.95)
         || model.edges.iter().any(|edge| {
           let [a, b] = edge.ends;
           a != self.leaf && b != self.leaf && segment_distance(p, points[a], points[b]) < 0.25
@@ -126,7 +130,9 @@ impl Hydroxyl {
 ///
 /// # Returns
 /// Whether the budget was exhausted. Trials rotate a single O about its carbon
-/// by ±15°/±30° from the initial ray. Only a strictly lower complete geometry
+/// by ±15°/±30° from the initial ray. For an unannotated host, an actual crossing
+/// or measured label contact may additionally try a free exit-sector bisector,
+/// always at least 60° away from the other ligands. Only a lower complete geometry
 /// score without new proper crossings is committed. Failed/partial scoring never
 /// publishes a candidate; label positions and chemical facts are not edited.
 pub(super) fn improve(
@@ -160,7 +166,28 @@ pub(super) fn improve(
       let mut best = None;
       let mut best_cost = current.cost;
       let mut exhausted = false;
-      for angle in [PI / 12., -PI / 12., PI / 6., -PI / 6.] {
+      let mut turns = vec![PI / 12., -PI / 12., PI / 6., -PI / 6.];
+      let escaping = hydroxyl.reorientable
+        && (model.labels.iter().any(|&(row, _)| row == hydroxyl.leaf)
+          || current.crossings.iter().any(|&(a, b)| {
+            model.edges[a].ends.contains(&hydroxyl.leaf) || model.edges[b].ends.contains(&hydroxyl.leaf)
+          }));
+      if escaping {
+        // A trapped exit cannot always escape through small perturbations. Try
+        // free angular-sector bisectors without moving any ring or other ligand.
+        let mut rays: Vec<_> = hydroxyl
+          .neighbors
+          .iter()
+          .map(|&row| (points[row].y - origin.y).atan2(points[row].x - origin.x))
+          .collect();
+        rays.sort_by(f64::total_cmp);
+        let initial = vector.y.atan2(vector.x);
+        for (i, &ray) in rays.iter().enumerate() {
+          let gap = (rays[(i + 1) % rays.len()] - ray).rem_euclid(2. * PI);
+          turns.push(ray + gap / 2. - initial);
+        }
+      }
+      for angle in turns {
         if !budget.charge(points.len() + hydroxyl.neighbors.len() + model.double_stereo.len()) {
           exhausted = true;
           break;
@@ -168,7 +195,13 @@ pub(super) fn improve(
         let (sin, cos) = angle.sin_cos();
         let mut candidate = points.clone();
         candidate[hydroxyl.leaf] = origin.translated(cos * vector.x - sin * vector.y, sin * vector.x + cos * vector.y);
-        if !hydroxyl.permitted(&original, &candidate) || !model.preserves_double_stereo(&candidate) {
+        let permitted = hydroxyl.permitted(&original, &candidate)
+          || (escaping
+            && hydroxyl
+              .neighbors
+              .iter()
+              .all(|&neighbor| hydroxyl.angle(&candidate, neighbor) >= PI / 3. - 1e-8));
+        if !permitted || !model.preserves_double_stereo(&candidate) {
           continue;
         }
         let Some(quality) = model.measure(&candidate, options.minimum_spacing, budget) else {

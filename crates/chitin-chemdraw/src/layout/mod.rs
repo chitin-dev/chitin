@@ -10,11 +10,14 @@ use std::collections::BTreeMap;
 
 mod alkenes;
 mod angles;
+pub mod coordination;
 pub mod optimization;
 mod placement;
 mod quality;
 mod refinement;
 mod rings;
+mod walks;
+pub(crate) use refinement::clear_labels;
 
 /// Resource, spacing, and bounded refinement policy for deterministic layout.
 #[derive(Debug, Clone, PartialEq)]

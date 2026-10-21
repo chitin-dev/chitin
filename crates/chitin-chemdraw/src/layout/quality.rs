@@ -28,6 +28,15 @@ pub(super) struct Quality {
   pub(super) crowds: Vec<(usize, usize)>,
   /// Nonincident edge indices with a proper crossing.
   pub(super) crossings: BTreeSet<(usize, usize)>,
+  /// Measured label contacts added only by the optional rendering feedback stage.
+  pub(super) label_contacts: usize,
+}
+
+impl Quality {
+  /// Returns whether every reported geometry and supplied label contact is clear.
+  pub(super) fn clear(&self) -> bool {
+    self.crowds.is_empty() && self.crossings.is_empty() && self.label_contacts == 0
+  }
 }
 
 /// Measures complete unit-bond geometry with unit-cell broad-phase pruning.

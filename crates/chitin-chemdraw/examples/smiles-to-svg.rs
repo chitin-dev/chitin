@@ -1,7 +1,7 @@
 //! File-writing example; orchestration stays outside layout, scene, and SVG modules.
 
 use chitin_chem::io::smiles::read_smiles;
-use chitin_chemdraw::{depict, layout, svg};
+use chitin_chemdraw::{depict, layout, pipeline, svg};
 
 /// Runs the explicit graph -> coordinates -> scene -> export pipeline.
 ///
@@ -12,11 +12,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut options = depict::DepictOptions::default();
   let mut font_file = None;
   let mut font_index = 0;
+  let mut coordination_center = None;
   let source = loop {
     let argument = args.next().ok_or(
-      "usage: smiles-to-svg [--font-file path] [--font-index n] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--bond-color-style split|uniform] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
+      "usage: smiles-to-svg [--font-file path] [--font-index n] [--coordination-center zero-based-atom-ordinal] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--bond-color-style split|uniform] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
     )?;
     match argument.as_str() {
+      "--coordination-center" => {
+        coordination_center = Some(
+          args
+            .next()
+            .ok_or("--coordination-center requires a zero-based atom ordinal")?
+            .parse::<usize>()?,
+        );
+      }
       "--font-file" => {
         font_file = Some(args.next().ok_or("--font-file requires a font path")?);
       }
@@ -62,12 +71,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     return Err("--font-index requires --font-file".into());
   }
   let graph = read_smiles(&source)?.into_graph();
-  let coordinates = layout::generate(&graph, &layout::LayoutOptions::default())?;
-  if !coordinates.diagnostics().is_empty() {
-    eprintln!("layout diagnostics: {:?}", coordinates.diagnostics());
+  let layout_options = layout::LayoutOptions::default();
+  let rendered = if let Some(ordinal) = coordination_center {
+    let center = graph
+      .atoms()
+      .nth(ordinal)
+      .map(|(id, _)| id)
+      .ok_or("coordination center ordinal is outside the parsed source")?;
+    let site =
+      chitin_chem::coordination::CoordinationSite::new(&graph, center, graph.neighbors(center)?.map(|(_, edge)| edge))?;
+    let coordinates = layout::coordination::generate(&graph, &site, &layout_options, &Default::default())?;
+    pipeline::finish(&graph, coordinates, &layout_options, &options)?
+  } else {
+    pipeline::generate(&graph, &layout_options, &options)?
+  };
+  if !rendered.layout.diagnostics().is_empty() {
+    eprintln!("layout diagnostics: {:?}", rendered.layout.diagnostics());
   }
-  let drawing = depict::depict(&graph, &coordinates, &options)?;
-  let output = svg::export(&drawing, &svg::SvgOptions::default())?;
+  if !rendered.contacts.is_empty() {
+    eprintln!("drawing contacts: {:?}", rendered.contacts);
+  }
+  let output = svg::export(&rendered.drawing, &svg::SvgOptions::default())?;
   std::fs::write(path, output)?;
   Ok(())
 }

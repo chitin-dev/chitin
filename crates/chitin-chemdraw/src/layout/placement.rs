@@ -427,6 +427,12 @@ pub(super) fn generate(
         break;
       }
       let mut candidate = embed(graph, &topology, &rings, &mut ring_work, options, variant)?;
+      // A conflicting compact pose must compete with all complete alternatives
+      // before spending repair work. Otherwise the first speculative pose can
+      // consume the entire shared allowance and starve the best-ranked one.
+      if complete_cost(graph, &candidate, &mut ring_work)?.1 {
+        continue;
+      }
       super::refinement::run(
         graph,
         &mut candidate,
