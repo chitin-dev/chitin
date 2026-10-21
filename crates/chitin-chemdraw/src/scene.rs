@@ -38,7 +38,7 @@ impl Color {
 }
 
 /// Optional link to chemical input; handles remain scoped to that input graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Source {
   /// A depiction-only attached H and its bond, identified by its host atom.
   /// No atom/bond handle is allocated and no source graph vertex is implied.

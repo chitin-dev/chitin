@@ -17,7 +17,7 @@ mod quality;
 mod refinement;
 mod rings;
 mod walks;
-pub(crate) use refinement::clear_labels;
+pub(crate) use refinement::{clear_labels, contact_counts, terminal_label_trials};
 
 /// Resource, spacing, and bounded refinement policy for deterministic layout.
 #[derive(Debug, Clone, PartialEq)]
