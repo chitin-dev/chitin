@@ -26,6 +26,9 @@ pub struct Config {
   pub timeout_seconds: u64,
   pub max_atoms: usize,
   pub save_svg_count: usize,
+  /// Explicit opt-in to rendered-label repair; historical configs remain unchanged.
+  #[serde(default)]
+  pub label_feedback: bool,
 }
 
 /// Original data-record identity; row numbers exclude comments and the header.
@@ -138,6 +141,7 @@ mod tests {
       timeout_seconds: 1,
       max_atoms: 100,
       save_svg_count: 0,
+      label_feedback: false,
     };
     let first = sample(&config)?;
     assert_eq!(first, sample(&config)?);

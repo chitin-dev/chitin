@@ -45,6 +45,7 @@ fn reports_failures_without_discarding_source_records() -> Result<()> {
   assert!(directory.path().join("results/svg/00000001.svg").is_file());
   // Lazy previews must execute the measured renderer, not a subsequently rebuilt target.
   let manifest: Value = serde_json::from_slice(&fs::read(directory.path().join("results/manifest.json"))?)?;
+  assert_eq!(manifest["label_feedback"], false);
   assert_eq!(manifest["renderer_executable"], "renderer");
   assert_eq!(
     fs::read(directory.path().join("results/renderer"))?,
@@ -57,6 +58,62 @@ fn reports_failures_without_discarding_source_records() -> Result<()> {
       .output()?
       .status
       .success()
+  );
+  Ok(())
+}
+
+#[test]
+fn label_feedback_should_be_explicit_and_reproducible_in_the_frozen_worker() -> Result<()> {
+  let directory = tempfile::tempdir()?;
+  fs::write(
+    directory.path().join("cases.csv"),
+    "id,smiles\ncompact,COC(=O)[C@H](OC(C)=O)C1=CC=C(N)C=C1C(=O)O\n",
+  )?;
+  let config = serde_json::json!({
+    "dataset": "test", "version": "1", "license": "test", "source_url": "test",
+    "input": "cases.csv", "output": "results", "delimiter": ",", "headers": true,
+    "smiles_column": "smiles", "id_column": "id", "sample_size": 0, "seed": 1,
+    "timeout_seconds": 5, "max_atoms": 100, "save_svg_count": 1, "label_feedback": true
+  });
+  let path = directory.path().join("config.yaml");
+  fs::write(&path, serde_json::to_vec(&config)?)?;
+  let output = Command::new(env!("CARGO_BIN_EXE_chitin-chemdraw-benchmark"))
+    .arg(&path)
+    .output()?;
+  assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+  let manifest: Value = serde_json::from_slice(&fs::read(directory.path().join("results/manifest.json"))?)?;
+  assert_eq!(manifest["label_feedback"], true);
+  assert_eq!(manifest["config"]["label_feedback"], true);
+  assert!(
+    manifest["pipeline"]
+      .as_str()
+      .is_some_and(|text| text.contains("pipeline::finish"))
+  );
+  let line = fs::read_to_string(directory.path().join("results/cases.jsonl"))?;
+  let record: Value = serde_json::from_str(line.trim())?;
+  assert!(record["timings_ms"]["depict_feedback"].is_number());
+  assert!(record["timings_ms"]["depict"].is_null());
+
+  let replay = directory.path().join("replay.svg");
+  let mut child = Command::new(directory.path().join("results/renderer"))
+    .arg("--worker")
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::piped())
+    .spawn()?;
+  {
+    use std::io::Write;
+    let mut input = child
+      .stdin
+      .take()
+      .ok_or_else(|| anyhow::anyhow!("missing worker input"))?;
+    input.write_all(&serde_json::to_vec(&serde_json::json!({
+      "case": record["case"], "max_atoms": 100, "svg_path": replay, "label_feedback": true
+    }))?)?;
+  }
+  assert!(child.wait_with_output()?.status.success());
+  assert_eq!(
+    fs::read(replay)?,
+    fs::read(directory.path().join("results/svg/00000001.svg"))?
   );
   Ok(())
 }

@@ -122,6 +122,69 @@ impl Hydroxyl {
   }
 }
 
+/// Enumerates terminal-label and pendant C–O turns without selecting a proxy winner.
+///
+/// Only measured-contact leaves qualify. The caller charges every complete
+/// geometry score and re-depicts retained proposals with the final font.
+/// Exhaustion returns complete trials only; at most eight snapshots are kept.
+pub(super) fn label_trials(model: &Model, points: &[Point], leaves: &[usize], budget: &mut Budget) -> Vec<Vec<Point>> {
+  let mut trials = Vec::new();
+  for hydroxyl in &model.hydroxyls {
+    if !leaves.contains(&hydroxyl.leaf) {
+      continue;
+    }
+    let origin = points[hydroxyl.host];
+    let p = points[hydroxyl.leaf];
+    for turn in [PI / 12., -PI / 12., PI / 6., -PI / 6.] {
+      if !budget.charge(points.len() + hydroxyl.neighbors.len() + model.double_stereo.len()) {
+        return trials;
+      }
+      let (sin, cos) = turn.sin_cos();
+      let mut candidate = points.to_vec();
+      candidate[hydroxyl.leaf] = origin.translated(
+        (p.x - origin.x) * cos - (p.y - origin.y) * sin,
+        (p.x - origin.x) * sin + (p.y - origin.y) * cos,
+      );
+      if hydroxyl.permitted(points, &candidate) && model.preserves_double_stereo(&candidate) {
+        trials.push(candidate);
+        if trials.len() == 8 {
+          return trials;
+        }
+      }
+    }
+    if let [anchor] = hydroxyl.neighbors.as_slice()
+      && model.ring_ports[*anchor]
+      && model.rows[hydroxyl.host].iter().all(|&edge| model.edges[edge].movable)
+    {
+      // A pendant C–O pair may need to move together: rotating O alone can
+      // clear its glyph while leaving two atom centers too close. The ring
+      // stays fixed and the internal chain angle is exactly preserved.
+      let origin = points[*anchor];
+      for turn in [PI / 12., -PI / 12., PI / 6., -PI / 6.] {
+        if !budget.charge(points.len() + model.rows[*anchor].len().pow(2) + model.double_stereo.len()) {
+          return trials;
+        }
+        let (sin, cos) = turn.sin_cos();
+        let mut candidate = points.to_vec();
+        for row in [hydroxyl.host, hydroxyl.leaf] {
+          let p = points[row];
+          candidate[row] = origin.translated(
+            (p.x - origin.x) * cos - (p.y - origin.y) * sin,
+            (p.x - origin.x) * sin + (p.y - origin.y) * cos,
+          );
+        }
+        if model.preserves_host_angles(*anchor, points, &candidate) && model.preserves_double_stereo(&candidate) {
+          trials.push(candidate);
+          if trials.len() == 8 {
+            return trials;
+          }
+        }
+      }
+    }
+  }
+  trials
+}
+
 /// Gives congested hydroxyls a bounded local search from reserved work.
 ///
 /// # Parameters
@@ -182,6 +245,16 @@ pub(super) fn improve(
           .collect();
         rays.sort_by(f64::total_cmp);
         let initial = vector.y.atan2(vector.x);
+        if model.preserve_chain_angles && rays.len() == 1 {
+          // A one-ligand host has two ideal chain exits and a reflected exit
+          // with its original angle. The empty-sector midpoint alone is 180°
+          // and can be less feasible than every one of these alternatives.
+          turns.extend([
+            rays[0] + 2. * PI / 3. - initial,
+            rays[0] - 2. * PI / 3. - initial,
+            2. * (rays[0] - initial),
+          ]);
+        }
         for (i, &ray) in rays.iter().enumerate() {
           let gap = (rays[(i + 1) % rays.len()] - ray).rem_euclid(2. * PI);
           turns.push(ray + gap / 2. - initial);
@@ -201,7 +274,15 @@ pub(super) fn improve(
               .neighbors
               .iter()
               .all(|&neighbor| hydroxyl.angle(&candidate, neighbor) >= PI / 3. - 1e-8));
-        if !permitted || !model.preserves_double_stereo(&candidate) {
+        // Label feedback has an immutable outer geometry gate. Reject a worse
+        // chain angle here too, so an infeasible local optimum cannot hide a
+        // slightly costlier valid candidate from that final gate.
+        let chain_angle = !model.preserve_chain_angles
+          || hydroxyl.neighbors.len() != 1
+          || model.rows[hydroxyl.host].iter().any(|&edge| !model.edges[edge].movable)
+          || (hydroxyl.angle(&candidate, hydroxyl.neighbors[0]) - 2. * PI / 3.).abs()
+            <= (hydroxyl.angle(&original, hydroxyl.neighbors[0]) - 2. * PI / 3.).abs() + 1e-7;
+        if !permitted || !chain_angle || !model.preserves_double_stereo(&candidate) {
           continue;
         }
         let Some(quality) = model.measure(&candidate, options.minimum_spacing, budget) else {
@@ -247,6 +328,44 @@ mod tests {
       model,
       vec![oxygen, Point::new(-0.5, 0.), Point::new(0.5, 0.), oxygen],
     ))
+  }
+
+  #[test]
+  fn pendant_pair_trials_should_keep_the_ring_and_internal_chain_angle_fixed() -> TestResult {
+    let graph = read_smiles("OCC1CCCCC1")?.into_graph();
+    let layout = crate::layout::generate(&graph, &LayoutOptions::default())?;
+    let ids: Vec<_> = graph.atoms().map(|(id, _)| id).collect();
+    let model = Model::new(&graph, ids.clone(), analyze_rings(&graph)?.bridges());
+    let original: Vec<_> = ids.iter().map(|id| layout.positions()[id]).collect();
+    let trials = label_trials(&model, &original, &[0], &mut Budget(1_000_000));
+    let pair_trials: Vec<_> = trials
+      .iter()
+      .filter(|points| points[1].distance(original[1]) > 1e-8)
+      .collect();
+    assert!(!pair_trials.is_empty());
+    for points in pair_trials {
+      assert_eq!(&points[2..], &original[2..]);
+      for edge in &model.edges {
+        let [a, b] = edge.ends;
+        assert!((points[a].distance(points[b]) - original[a].distance(original[b])).abs() < 1e-8);
+      }
+      assert!((model.hydroxyls[0].angle(points, 2) - model.hydroxyls[0].angle(&original, 2)).abs() < 1e-8);
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn exact_label_neighborhood_should_be_bounded_and_move_only_the_requested_leaf() -> TestResult {
+    let (_, model, original) = folded()?;
+    assert!(label_trials(&model, &original, &[0], &mut Budget(0)).is_empty());
+    assert!(label_trials(&model, &original, &[], &mut Budget(1_000_000)).is_empty());
+    let trials = label_trials(&model, &original, &[0], &mut Budget(1_000_000));
+    assert!(!trials.is_empty() && trials.len() <= 8);
+    for candidate in trials {
+      assert_eq!(&candidate[1..], &original[1..]);
+      assert!((candidate[0].distance(candidate[1]) - original[0].distance(original[1])).abs() < 1e-10);
+    }
+    Ok(())
   }
 
   #[test]

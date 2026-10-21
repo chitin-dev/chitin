@@ -27,6 +27,9 @@ pub struct Request {
   pub case: Case,
   pub max_atoms: usize,
   pub svg_path: Option<PathBuf>,
+  /// Must match the recorded pipeline when reproducing a historical drawing.
+  #[serde(default)]
+  pub label_feedback: bool,
 }
 
 /// Durable per-case result, including failures and separate stage timings.
@@ -43,6 +46,9 @@ pub struct Record {
   pub atom_count: Option<usize>,
   pub bond_count: Option<usize>,
   pub features: Option<Features>,
+  /// Classified drawing failure; absent in historical records or other failures.
+  #[serde(default)]
+  pub stereo_failure: Option<String>,
 }
 
 /// Line-framed worker protocol; a stage marker survives timeout or process death.
@@ -68,6 +74,7 @@ impl Record {
       atom_count: None,
       bond_count: None,
       features: None,
+      stereo_failure: None,
     }
   }
 
@@ -96,7 +103,7 @@ fn emit(event: &Event) -> Result<()> {
   Ok(())
 }
 
-/// Runs the default planar/perspective auto selector without optional label feedback.
+/// Runs the recorded planar/perspective selector and explicit label-feedback policy.
 ///
 /// Each phase is measured independently. QA happens only after SVG export and
 /// does not affect generated coordinates. Tetrahedral depiction parity is not
@@ -110,11 +117,29 @@ pub fn run() -> Result<()> {
       record.status = "success".into();
     }
     Err(error) => {
+      record.stereo_failure = stereo_failure(&error).map(String::from);
       record.error = Some(format!("{error:#}"));
     }
   }
   emit(&Event::Finished {
     record: Box::new(record),
+  })
+}
+
+/// Reads typed failure reasons through direct, contextual and transparent errors.
+fn stereo_failure(error: &anyhow::Error) -> Option<&'static str> {
+  error.chain().find_map(|cause| {
+    // Transparent wrappers delegate their source chain; inspect the wrapper too.
+    let depiction = cause.downcast_ref::<depict::DepictError>().or_else(|| match cause
+      .downcast_ref::<chitin_chemdraw::pipeline::RenderError>(
+    ) {
+      Some(chitin_chemdraw::pipeline::RenderError::Depict(error)) => Some(error),
+      _ => None,
+    });
+    match depiction {
+      Some(depict::DepictError::StereoAssignment { reason, .. }) => Some(reason.code()),
+      _ => None,
+    }
   })
 }
 
@@ -132,9 +157,22 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
     ..Default::default()
   };
   let coordinates = record.timed("layout", || Ok(layout::generate(&graph, &options)?))?;
-  let drawing = record.timed("depict", || {
-    Ok(depict::depict(&graph, &coordinates, &DepictOptions::default())?)
-  })?;
+  let (coordinates, drawing) = if request.label_feedback {
+    let result = record.timed("depict_feedback", || {
+      Ok(chitin_chemdraw::pipeline::finish(
+        &graph,
+        coordinates,
+        &options,
+        &DepictOptions::default(),
+      )?)
+    })?;
+    (result.layout, result.drawing)
+  } else {
+    let drawing = record.timed("depict", || {
+      Ok(depict::depict(&graph, &coordinates, &DepictOptions::default())?)
+    })?;
+    (coordinates, drawing)
+  };
   let document = record.timed("svg", || Ok(svg::export(&drawing, &SvgOptions::default())?))?;
   record.svg_bytes = Some(document.len());
   if let Some(path) = &request.svg_path {
@@ -151,4 +189,38 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
     Ok(result)
   })?);
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn transparent_pipeline_errors_should_retain_stereo_failure_codes() -> Result<()> {
+    let graph = read_smiles("[C@](F)(Cl)(Br)I")?.into_graph();
+    let positions = graph
+      .atoms()
+      .enumerate()
+      .map(|(index, (id, _))| (id, chitin_chemdraw::geometry::Point::new(index as f64, 0.)))
+      .collect();
+    let coordinates = layout::Layout2d::from_positions(positions)?;
+    let error = depict::depict(&graph, &coordinates, &DepictOptions::default())
+      .err()
+      .context("expected degenerate projection")?;
+    assert!(matches!(
+      error,
+      depict::DepictError::StereoAssignment {
+        reason: depict::StereoFailureReason::DegenerateProjection,
+        ..
+      }
+    ));
+    let wrapped = anyhow::Error::new(chitin_chemdraw::pipeline::RenderError::from(error));
+    assert_eq!(stereo_failure(&wrapped), Some("degenerate_projection"));
+    assert_eq!(
+      stereo_failure(&wrapped.context("render case")),
+      Some("degenerate_projection")
+    );
+    assert_eq!(stereo_failure(&anyhow::anyhow!("other failure")), None);
+    Ok(())
+  }
 }

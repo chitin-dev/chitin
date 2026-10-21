@@ -1,12 +1,24 @@
 //! Final clearance for terminal substituents on saturated ring carbons.
 //!
-//! A leaf group rotates rigidly about its host after backbone routing. No ring
-//! vertex or growing subtree moves, so these trials cannot redirect later tree
-//! placement. Geometry, angle-order and source alkene guards remain mandatory.
+//! Terminal exits move about their host after backbone routing. Rigid-group
+//! repair runs first; remaining conflicts may use single-exit turns or paired
+//! spreading. No ring vertex or growing subtree moves. Geometry, angle-order
+//! and source alkene guards remain mandatory.
 
 use std::f64::consts::PI;
 
 use super::{Budget, LayoutOptions, Model, Point, Quality};
+
+/// Successive neighborhoods, ordered to retain the established rigid solution.
+#[derive(Clone, Copy)]
+enum Motion {
+  /// Rotate every terminal neighbor by the same angle.
+  Rigid,
+  /// Adjust one terminal neighbor while leaving its siblings fixed.
+  Single,
+  /// Rotate two terminal neighbors in opposite directions.
+  Spread,
+}
 
 /// Clears complete terminal exit groups using only remaining shared search work.
 ///
@@ -15,8 +27,9 @@ use super::{Budget, LayoutOptions, Model, Point, Quality};
 /// - `options`, `budget`: existing pass limit and unspent refinement allowance.
 ///
 /// # Returns
-/// Whether work ran out. Only ±15°/±30° rotations from stage entry are tried;
-/// multiple terminal neighbors move together to retain their mutual angles.
+/// Whether work ran out. Rigid-group trials complete before any independent
+/// exit adjustment spends remaining work. All turns stay within ±30° of stage
+/// entry; independent exits additionally obey the original host-angle limits.
 /// Accepted candidates cannot increase any hard-contact count. Ring/nonterminal
 /// coordinates and bond lengths remain exact; no new stereo facts are assigned.
 pub(super) fn improve(
@@ -33,74 +46,95 @@ pub(super) fn improve(
     return true;
   }
   let original = points.clone();
-  for _ in 0..options.refinement_passes {
-    let mut changed = false;
-    for (host, &eligible) in model.ring_ports.iter().enumerate() {
-      if !eligible {
-        continue;
-      }
-      if !budget.charge(model.rows[host].len()) {
-        return true;
-      }
-      let leaves: Vec<_> = model.rows[host]
-        .iter()
-        .filter_map(|&edge| {
-          let [a, b] = model.edges[edge].ends;
-          let leaf = if a == host { b } else { a };
-          (model.edges[edge].movable && model.rows[leaf].len() == 1).then_some(leaf)
-        })
-        .collect();
-      if leaves.is_empty() {
-        continue;
-      }
-      // Unrelated leaf groups cannot remove a reported hard contact. Keep the
-      // scarce full-component measurements for exits that actually participate.
-      let contacts = current.crowds.len() * 2 + current.atom_edges.len() * 3 + current.crossings.len() * 4;
-      if !budget.charge(contacts.saturating_mul(leaves.len())) {
-        return true;
-      }
-      if !model.affects_contacts(&leaves, current) {
-        continue;
-      }
-      let mut best = None;
-      let mut exhausted = false;
-      for angle in [PI / 12., -PI / 12., PI / 6., -PI / 6.] {
-        if !budget.charge(points.len() + leaves.len() + model.rows[host].len().pow(2) + model.double_stereo.len()) {
-          exhausted = true;
-          break;
-        }
-        let mut candidate = points.clone();
-        let origin = original[host];
-        let (sin, cos) = angle.sin_cos();
-        for &leaf in &leaves {
-          let (x, y) = (original[leaf].x - origin.x, original[leaf].y - origin.y);
-          candidate[leaf] = origin.translated(cos * x - sin * y, sin * x + cos * y);
-        }
-        if !model.preserves_host_angles(host, &original, &candidate) || !model.preserves_double_stereo(&candidate) {
+  for motion in [Motion::Rigid, Motion::Single, Motion::Spread] {
+    for _ in 0..options.refinement_passes {
+      let mut changed = false;
+      for (host, &eligible) in model.ring_ports.iter().enumerate() {
+        if !eligible {
           continue;
         }
-        let Some(quality) = model.measure(&candidate, options.minimum_spacing, budget) else {
-          exhausted = true;
-          break;
+        if !budget.charge(model.rows[host].len()) {
+          return true;
+        }
+        let leaves: Vec<_> = model.rows[host]
+          .iter()
+          .filter_map(|&edge| {
+            let [a, b] = model.edges[edge].ends;
+            let leaf = if a == host { b } else { a };
+            (model.edges[edge].movable && model.rows[leaf].len() == 1).then_some(leaf)
+          })
+          .collect();
+        if leaves.is_empty() {
+          continue;
+        }
+        let targets = match motion {
+          Motion::Rigid => 1,
+          Motion::Single if leaves.len() > 1 => leaves.len(),
+          Motion::Spread if leaves.len() == 2 => 1,
+          _ => continue,
         };
-        if quality.improves(best.as_ref().map_or(&*current, |(_, previous)| previous)) {
-          best = Some((candidate, quality));
+        // Unrelated leaf groups cannot remove a reported hard contact. Keep the
+        // scarce full-component measurements for exits that actually participate.
+        let contacts = current.crowds.len() * 2 + current.atom_edges.len() * 3 + current.crossings.len() * 4;
+        if !budget.charge(contacts.saturating_mul(leaves.len())) {
+          return true;
+        }
+        if !model.affects_contacts(&leaves, current) {
+          continue;
+        }
+        let mut best = None;
+        let mut exhausted = false;
+        for target in 0..targets {
+          for angle in [PI / 12., -PI / 12., PI / 6., -PI / 6.] {
+            if !budget.charge(points.len() + leaves.len() + model.rows[host].len().pow(2) + model.double_stereo.len()) {
+              exhausted = true;
+              break;
+            }
+            let mut candidate = points.clone();
+            let origin = original[host];
+            for (index, &leaf) in leaves.iter().enumerate() {
+              if matches!(motion, Motion::Single) && index != target {
+                continue;
+              }
+              let turn = if matches!(motion, Motion::Spread) && index == 1 {
+                -angle
+              } else {
+                angle
+              };
+              let (sin, cos) = turn.sin_cos();
+              let (x, y) = (original[leaf].x - origin.x, original[leaf].y - origin.y);
+              candidate[leaf] = origin.translated(cos * x - sin * y, sin * x + cos * y);
+            }
+            if !model.preserves_host_angles(host, &original, &candidate) || !model.preserves_double_stereo(&candidate) {
+              continue;
+            }
+            let Some(quality) = model.measure(&candidate, options.minimum_spacing, budget) else {
+              exhausted = true;
+              break;
+            };
+            if quality.improves(best.as_ref().map_or(&*current, |(_, previous)| previous)) {
+              best = Some((candidate, quality));
+            }
+          }
+          if exhausted {
+            break;
+          }
+        }
+        if let Some((candidate, quality)) = best {
+          *points = candidate;
+          *current = quality;
+          changed = true;
+          if current.clear() {
+            return false;
+          }
+        }
+        if exhausted {
+          return true;
         }
       }
-      if let Some((candidate, quality)) = best {
-        *points = candidate;
-        *current = quality;
-        changed = true;
-        if current.clear() {
-          return false;
-        }
+      if !changed {
+        break;
       }
-      if exhausted {
-        return true;
-      }
-    }
-    if !changed {
-      break;
     }
   }
   false
@@ -182,6 +216,60 @@ mod tests {
       &mut Budget(1)
     ));
     assert_eq!(points, original);
+    Ok(())
+  }
+
+  #[test]
+  fn independent_exits_should_clear_a_contact_that_rigid_turns_cannot_remove() -> TestResult {
+    let graph = read_smiles("CC1(C)CCC1.C.C")?.into_graph();
+    let rings = analyze_rings(&graph)?;
+    let ids = graph.atoms().map(|(id, _)| id).collect();
+    let model = Model::new(&graph, ids, rings.bridges());
+    let a = 3_f64.sqrt() / 2.;
+    let (c, b) = (5. * PI / 18.).sin_cos();
+    // The isolated points stand in for two fixed, distant-branch obstacles.
+    // Both terminal exits initially sit 30 degrees from the exterior bisector.
+    let original = vec![
+      Point::new(a, 0.5),
+      Point::new(0., 0.),
+      Point::new(a, -0.5),
+      Point::new(-b, c),
+      Point::new(-2. * b, 0.),
+      Point::new(-b, -c),
+      Point::new(1.3, 0.3),
+      Point::new(1.3, -0.3),
+    ];
+    for angle in [PI / 12., -PI / 12., PI / 6., -PI / 6.] {
+      let mut candidate = original.clone();
+      let (sin, cos) = angle.sin_cos();
+      for leaf in [0, 2] {
+        let p = original[leaf];
+        candidate[leaf] = Point::new(cos * p.x - sin * p.y, sin * p.x + cos * p.y);
+      }
+      let quality = model
+        .measure(&candidate, 0.55, &mut Budget(usize::MAX))
+        .ok_or("measurement failed")?;
+      assert!(
+        !quality.crowds.is_empty(),
+        "a rigid turn unexpectedly clears both exits"
+      );
+    }
+    let mut points = original.clone();
+    let mut current = model
+      .measure(&points, 0.55, &mut Budget(usize::MAX))
+      .ok_or("measurement failed")?;
+    improve(
+      &model,
+      &mut points,
+      &mut current,
+      &LayoutOptions::default(),
+      &mut Budget(1_000_000),
+    );
+    assert!(current.clear());
+    assert!(model.preserves_host_angles(1, &original, &points));
+    for row in 3..points.len() {
+      assert_eq!(points[row], original[row]);
+    }
     Ok(())
   }
 }

@@ -1,0 +1,2 @@
+# A long branched peptide whose existing chain-angle deviations must not grow.
+CC[C@@](C)(NC(=O)[C@H](CC(C)C)NC(=O)CNC(=O)[C@@](C)(CC)NC(=O)C(C)(C)NC(=O)C(C)(C)NC(=O)C(C)(C)NC(=O)[C@H](CC1=CC=CC=C1)NC(C)=O)C(=O)NC(C)(C)C(=O)N1C[C@H](O)C[C@H]1C(=O)N[C@@H](CCC(N)=O)C(=O)N[C@](C)(CC)C(=O)N1C[C@H](O)C[C@H]1C(=O)NC(C)(C)C(=O)N1CCC[C@H]1C(=O)N[C@@H](CO)CC1=CC=CC=C1

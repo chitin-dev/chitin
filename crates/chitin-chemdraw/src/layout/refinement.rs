@@ -19,9 +19,11 @@ use std::{
 };
 
 mod backbone;
+mod combinations;
 mod hinges;
 mod ports;
 mod terminal;
+mod trials;
 
 /// Additional host-angle freedom for whole-block ring candidate search only.
 #[derive(Clone, Copy)]
@@ -68,6 +70,8 @@ struct Model {
   perspective: Vec<(usize, usize)>,
   /// Host-relative label envelopes in normalized y-up units; no font dependency.
   labels: Vec<(usize, [Point; 2])>,
+  /// Final label-feedback proposals cannot worsen the scored acyclic chain angles.
+  preserve_chain_angles: bool,
 }
 
 impl Model {
@@ -191,6 +195,7 @@ impl Model {
       double_stereo,
       perspective: Vec::new(),
       labels: Vec::new(),
+      preserve_chain_angles: false,
     }
   }
 
@@ -428,9 +433,11 @@ fn improve(model: &Model, points: &mut Vec<Point>, options: &LayoutOptions, budg
 /// - `options`, `allowance`: geometric constraints and independent label-repair work.
 ///
 /// # Returns
-/// Only fully scored, lower-cost geometry is committed. Actual font measurement
-/// belongs to the rendering pipeline; this layer consumes normalized rectangles.
-/// Existing perspective metadata is never altered by label feedback.
+/// Updates `layout` with the bounded combined-search proposal and returns the
+/// preceding local-search proposal separately. Rendering must compare both to
+/// its original champion: proxy improvement does not certify final text layout.
+/// Actual font measurement belongs to that caller; this layer consumes only
+/// normalized rectangles. Existing perspective metadata is never altered.
 ///
 /// # Errors
 /// Reports missing coordinates or nonfinite bounds, never a partial component.
@@ -440,14 +447,14 @@ pub(crate) fn clear_labels(
   regions: &BTreeMap<AtomId, [Point; 2]>,
   options: &LayoutOptions,
   allowance: usize,
-) -> Result<(), Error> {
+) -> Result<Option<Layout2d>, Error> {
   if regions.is_empty()
     || !layout.crossings.is_empty()
     || !layout.depths.is_empty()
     || allowance == 0
     || options.refinement_passes == 0
   {
-    return Ok(());
+    return Ok(None);
   }
   let rings = analyze_rings(graph)?;
   let mut budget = Budget(allowance);
@@ -455,6 +462,7 @@ pub(crate) fn clear_labels(
     let mut model = Model::new(graph, component, rings.bridges());
     model.restrict_hinges(&rings);
     model.flexible_hosts.fill(false);
+    model.preserve_chain_angles = true;
     model.labels = model
       .ids
       .iter()
@@ -466,32 +474,154 @@ pub(crate) fn clear_labels(
     let quality = model
       .measure(&points, options.minimum_spacing, &mut Budget(usize::MAX))
       .ok_or(Error::CoordinateRange)?;
-    layout.diagnostics.retain(|d| match d {
-      LayoutDiagnostic::CrowdedAtoms { a, .. } => !model.ids.contains(a),
-      LayoutDiagnostic::CrossingBonds { a, .. } => !model.edges.iter().any(|edge| edge.id == *a),
-      _ => true,
-    });
-    layout
-      .diagnostics
-      .extend(quality.crowds.into_iter().map(|(a, b)| LayoutDiagnostic::CrowdedAtoms {
-        a: model.ids[a],
-        b: model.ids[b],
-      }));
-    layout.diagnostics.extend(
-      quality
-        .crossings
-        .into_iter()
-        .map(|(a, b)| LayoutDiagnostic::CrossingBonds {
-          a: model.edges[a].id,
-          b: model.edges[b].id,
-        }),
-    );
-    for (&id, point) in model.ids.iter().zip(points) {
-      layout.positions.insert(id, point);
-    }
+    publish_labels(&model, &points, &quality, layout);
   }
   layout.bounds = Bounds::from_points(layout.positions.values().copied())?;
-  Ok(())
+  // Complete every component's established repair before optional search can
+  // consume its remaining work. A speculative first component must not starve
+  // another component or change the independent local-search proposal.
+  let local = layout.clone();
+  for component in graph.connected_components() {
+    if !budget.charge(component.len() + graph.bond_count()) {
+      break;
+    }
+    let mut model = Model::new(graph, component, rings.bridges());
+    model.labels = model
+      .ids
+      .iter()
+      .enumerate()
+      .filter_map(|(row, id)| regions.get(id).map(|&bounds| (row, bounds)))
+      .collect();
+    let mut points: Vec<_> = model.ids.iter().map(|id| layout.positions[id]).collect();
+    let Some(mut quality) = model.measure(&points, options.minimum_spacing, &mut budget) else {
+      break;
+    };
+    combinations::improve(&model, &mut points, &mut quality, options, &mut budget);
+    publish_labels(&model, &points, &quality, layout);
+  }
+  layout.bounds = Bounds::from_points(layout.positions.values().copied())?;
+  Ok(Some(local))
+}
+
+/// Supplies a bounded local neighborhood for final, exact rendered-label ranking.
+///
+/// # Parameters
+/// - `graph`, `layout`: immutable chemistry and current complete champion.
+/// - `labels`: source hosts participating in actual label/stroke contacts.
+/// - `options`, `allowance`: unchanged spacing and a separate bounded work pool.
+///
+/// # Returns
+/// At most eight complete layouts, differing only at eligible terminal hydroxyl
+/// labels involved in measured contacts. Every component diagnostic is refreshed
+/// before a proposal leaves this stage. No font or depiction type is imported.
+///
+/// # Errors
+/// Propagates inconsistent topology or unrepresentable extents. Work exhaustion
+/// returns only complete candidates already prepared, without mutating input.
+pub(crate) fn terminal_label_trials(
+  graph: &MolecularGraph,
+  layout: &Layout2d,
+  labels: &BTreeSet<AtomId>,
+  options: &LayoutOptions,
+  allowance: usize,
+) -> Result<Vec<Layout2d>, Error> {
+  if allowance == 0 || labels.is_empty() || !layout.crossings.is_empty() || !layout.depths.is_empty() {
+    return Ok(Vec::new());
+  }
+  let mut budget = Budget(allowance);
+  if !budget.charge(graph.atom_count() + graph.bond_count()) {
+    return Ok(Vec::new());
+  }
+  let rings = analyze_rings(graph)?;
+  let mut trials = Vec::new();
+  for component in graph.connected_components() {
+    if !component.iter().any(|id| labels.contains(id)) {
+      continue;
+    }
+    if !budget.charge(component.len() + graph.bond_count()) {
+      break;
+    }
+    let model = Model::new(graph, component, rings.bridges());
+    let points: Vec<_> = model.ids.iter().map(|id| layout.positions[id]).collect();
+    let leaves: Vec<_> = model
+      .ids
+      .iter()
+      .enumerate()
+      .filter_map(|(row, id)| labels.contains(id).then_some(row))
+      .collect();
+    for candidate in terminal::label_trials(&model, &points, &leaves, &mut budget) {
+      let Some(quality) = model.measure(&candidate, options.minimum_spacing, &mut budget) else {
+        return Ok(trials);
+      };
+      if !budget.charge(layout.positions.len()) {
+        return Ok(trials);
+      }
+      let mut trial = layout.clone();
+      publish_labels(&model, &candidate, &quality, &mut trial);
+      trial.bounds = Bounds::from_points(trial.positions.values().copied())?;
+      trials.push(trial);
+      if trials.len() == 8 {
+        return Ok(trials);
+      }
+    }
+  }
+  Ok(trials)
+}
+
+/// Publishes only a complete, fully measured component into one detached proposal.
+fn publish_labels(model: &Model, points: &[Point], quality: &Quality, layout: &mut Layout2d) {
+  layout.diagnostics.retain(|d| match d {
+    LayoutDiagnostic::CrowdedAtoms { a, .. } => !model.ids.contains(a),
+    LayoutDiagnostic::CrossingBonds { a, .. } => !model.edges.iter().any(|edge| edge.id == *a),
+    _ => true,
+  });
+  layout
+    .diagnostics
+    .extend(quality.crowds.iter().map(|&(a, b)| LayoutDiagnostic::CrowdedAtoms {
+      a: model.ids[a],
+      b: model.ids[b],
+    }));
+  layout
+    .diagnostics
+    .extend(quality.crossings.iter().map(|&(a, b)| LayoutDiagnostic::CrossingBonds {
+      a: model.edges[a].id,
+      b: model.edges[b].id,
+    }));
+  for (&id, &point) in model.ids.iter().zip(points) {
+    layout.positions.insert(id, point);
+  }
+}
+
+/// Rechecks complete geometry for final rendered-candidate acceptance.
+///
+/// # Returns
+/// Atom-center, atom-edge and proper-crossing counts in normalized layout units.
+/// Authored perspective crossings are excluded only by their exact source IDs.
+/// This is not the independent benchmark's tolerance-based ink/edge evaluator.
+///
+/// # Errors
+/// Rejects missing source coordinates and unrepresentable geometry. Depiction
+/// validates source coverage before this read-only assessment is requested.
+pub(crate) fn contact_counts(graph: &MolecularGraph, layout: &Layout2d, spacing: f64) -> Result<[usize; 3], Error> {
+  let ids: Vec<_> = graph.atoms().map(|(id, _)| id).collect();
+  let mut model = Model::new(graph, ids, &BTreeSet::new());
+  for crossing in &layout.crossings {
+    if let (Some(front), Some(back)) = (
+      model.edges.iter().position(|edge| edge.id == crossing.front),
+      model.edges.iter().position(|edge| edge.id == crossing.back),
+    ) {
+      model.perspective.push((front, back));
+    }
+  }
+  let points = model
+    .ids
+    .iter()
+    .map(|id| layout.positions.get(id).copied().ok_or(Error::Invariant(*id)))
+    .collect::<Result<Vec<_>, _>>()?;
+  let quality = model
+    .measure(&points, spacing, &mut Budget(usize::MAX))
+    .ok_or(Error::CoordinateRange)?;
+  Ok([quality.crowds.len(), quality.atom_edges.len(), quality.crossings.len()])
 }
 
 /// Optimizes one component by best-improving rigid branch transforms.
@@ -560,6 +690,9 @@ fn improve_branches(
       let mut best = None;
       let mut best_cost = current.cost;
       let mut exhausted = false;
+      // Singleton and two-point branches frequently yield identity/duplicate
+      // poses. Larger bent fragments rarely do; avoid caching whole subtrees.
+      let mut tried = (branch.len() <= 2).then(trials::Trials::default);
       for transform in 0..if flexible {
         7
       } else if model.linear[moving] {
@@ -598,6 +731,16 @@ fn improve_branches(
           || !model.preserves_double_stereo(&candidate)
         {
           continue;
+        }
+        if let Some(tried) = &mut tried {
+          match tried.insert(&branch, points, &candidate, budget) {
+            Some(true) => {}
+            Some(false) => continue,
+            None => {
+              exhausted = true;
+              break;
+            }
+          }
         }
         let Some(quality) = model.measure(&candidate, options.minimum_spacing, budget) else {
           exhausted = true;

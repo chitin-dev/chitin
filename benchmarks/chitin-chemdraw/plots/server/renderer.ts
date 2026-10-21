@@ -175,7 +175,12 @@ async function renderWorker(binary: string, corpus: Corpus, row: number, destina
   );
   child.stdin.on("error", () => {});
   child.stdin.end(
-    JSON.stringify({ case: record.case, max_atoms: corpus.manifest.config.max_atoms, svg_path: temporary }),
+    JSON.stringify({
+      case: record.case,
+      max_atoms: corpus.manifest.config.max_atoms,
+      label_feedback: corpus.manifest.label_feedback ?? false,
+      svg_path: temporary,
+    }),
   );
   try {
     await new Promise<void>((resolve, reject) => {
@@ -225,7 +230,13 @@ export async function renderSvg(corpus: Corpus, row: number, mode: "snapshot" | 
   // A run can be replaced on disk; row identity alone is not a cache identity.
   const record = await readRecord(corpus, row);
   const inputHash = createHash("sha256")
-    .update(JSON.stringify({ case: record.case, max_atoms: corpus.manifest.config.max_atoms }))
+    .update(
+      JSON.stringify({
+        case: record.case,
+        max_atoms: corpus.manifest.config.max_atoms,
+        label_feedback: corpus.manifest.label_feedback ?? false,
+      }),
+    )
     .digest("hex");
   const artifact = `${row}-${inputHash}`;
   const destination = join(directory, `${artifact}.svg`);

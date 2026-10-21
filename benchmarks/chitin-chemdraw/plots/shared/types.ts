@@ -18,6 +18,7 @@ export interface CaseRecord {
   status: string;
   stage: string;
   error: string | null;
+  stereo_failure?: string | null;
   features: Features | null;
   metrics: {
     version: string;
@@ -46,6 +47,7 @@ export interface Manifest {
   renderer_executable?: string;
   input_sha256: string;
   quality_spec_sha256?: string;
+  label_feedback?: boolean;
   config: { dataset: string; version: string; input: string; max_atoms: number; seed: number; timeout_seconds: number };
 }
 export interface RunInfo {

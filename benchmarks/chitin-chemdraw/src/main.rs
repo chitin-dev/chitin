@@ -96,9 +96,13 @@ fn main() -> Result<()> {
       .find_map(|line| line.strip_prefix("model name").and_then(|value| value.split_once(':'))
         .map(|(_, model)| model.trim().to_owned()))),
     "os": std::env::consts::OS, "debug_assertions": cfg!(debug_assertions), "jobs": 1,
-    "pipeline": "parse -> characterize -> layout::generate -> depict::depict -> svg::export -> quality",
+    "pipeline": if config.label_feedback {
+      "parse -> characterize -> layout::generate -> pipeline::finish -> svg::export -> quality"
+    } else {
+      "parse -> characterize -> layout::generate -> depict::depict -> svg::export -> quality"
+    },
     "quality_spec_sha256": format!("{:x}", sha2::Sha256::digest(quality::SPECIFICATION.as_bytes())),
-    "label_feedback": false, "independent_stereo_validation": "double-bond relative-side only; tetrahedral not implemented",
+    "label_feedback": config.label_feedback, "independent_stereo_validation": "double-bond relative-side only; tetrahedral not implemented",
     "layout_options": format!("{:?}", chitin_chemdraw::layout::LayoutOptions {
       max_atoms: config.max_atoms, ..Default::default()
     }),
@@ -125,6 +129,7 @@ fn main() -> Result<()> {
         case,
         max_atoms: config.max_atoms,
         svg_path: artifact,
+        label_feedback: config.label_feedback,
       },
       config.timeout_seconds,
     )?;
