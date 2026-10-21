@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { SpatialGrid, symlog, inverseSymlog, quantile } from "../src/lib/geometry";
 import { derive } from "../src/lib/derive";
 import type { PlotData, PlotPoint } from "../shared/types";
+import { matchesPointQuery, scatterValue } from "../shared/plot-metrics";
 
 test("every coincident record remains selectable, with deterministic nearest ties", () => {
   const grid = new SpatialGrid();
@@ -23,6 +24,21 @@ test("cell boundaries and negative coordinates do not lose hits", () => {
   grid.add({ index: 1, x: 0, y: 0 });
   assert.deepEqual(grid.nearest(0, 0, 2), [1, 2, 3]);
   assert.equal(grid.inspect(0, 0, 2).count, 3);
+});
+
+test("scatter eligibility is metric-specific and preserves true zeroes", () => {
+  const point = { contacts: null, cavity: null, footprint: 0, roundness: 0.9 } as PlotPoint;
+  assert.equal(scatterValue(point, "contacts"), null);
+  assert.equal(scatterValue(point, "cavity"), null);
+  assert.equal(scatterValue(point, "footprint"), 0);
+  assert.equal(scatterValue(point, "roundness"), 0.9);
+});
+
+test("numeric source-row search does not accidentally match identifier digits", () => {
+  const point = { row: 619, id: "CNP0551778.1" } as PlotPoint;
+  assert.equal(matchesPointQuery(point, "619"), true);
+  assert.equal(matchesPointQuery({ ...point, row: 1, id: "CNP0000619.1" }, "619"), false);
+  assert.equal(matchesPointQuery(point, "cnp0551778"), true);
 });
 
 test("display transforms preserve zero and invert positive and negative values", () => {

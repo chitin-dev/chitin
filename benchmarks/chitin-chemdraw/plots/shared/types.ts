@@ -24,6 +24,19 @@ export interface CaseRecord {
     profile: string;
     measurements: Record<string, Observation>;
     readability_clear: boolean | null;
+    ring_geometry?: {
+      cavity_tolerance: number;
+      excluded_blocks: number;
+      faces: {
+        atoms: number[];
+        area: number;
+        perimeter: number;
+        isoperimetric_ratio: number;
+        cavity_radius: number;
+        cavity_upper_bound: number;
+        cavity_converged: boolean;
+      }[];
+    };
   } | null;
   timings_ms: Record<string, number>;
 }
@@ -55,6 +68,9 @@ export interface PlotPoint {
   length: number | null;
   angle: number | null;
   profile: string;
+  cavity?: number | null;
+  roundness?: number | null;
+  footprint?: number | null;
 }
 export interface MetricSummary {
   measured_cases: number;

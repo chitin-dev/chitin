@@ -2,7 +2,7 @@
 import { createReadStream } from "node:fs";
 import { open, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { CaseRecord, Manifest, PlotData, RunInfo } from "../shared/types";
+import type { CaseRecord, Manifest, PlotData, PlotPoint, RunInfo } from "../shared/types";
 import { resultsRoot, runDirectory } from "./paths";
 
 interface Offset {
@@ -32,7 +32,7 @@ export async function listRuns(): Promise<RunInfo[]> {
             stat(join(directory, "summary.json")),
             stat(join(directory, "cases.jsonl")),
           ]);
-          if (summary.quality_version !== "diagram-quality-v1") return null;
+          if (!["diagram-quality-v1", "diagram-quality-v2"].includes(summary.quality_version)) return null;
           return {
             id: entry.name,
             updated: metadata.mtimeMs,
@@ -106,22 +106,12 @@ async function indexRun(run: RunInfo): Promise<Corpus> {
     const outcome = `${record.status}:${record.stage}`;
     data.outcomes[outcome] = (data.outcomes[outcome] ?? 0) + 1;
     if (record.status !== "success" || !record.metrics || !record.features) continue;
-    if (record.metrics.version !== "diagram-quality-v1") throw new Error("Mixed metric protocols in one run");
+    if (record.metrics.version !== run.protocol) throw new Error("Mixed metric protocols in one run");
     data.completed++;
     data.clear += Number(record.metrics.readability_clear === true);
     const observations = record.metrics.measurements;
-    const value = (key: string) => (observations[key]?.state === "measured" ? observations[key].value : null);
-    const contacts = observations.nonbonded_atom_proximity;
-    data.points.push({
-      row: record.case.row,
-      id: record.case.id,
-      atoms: record.features.atoms,
-      rank: record.features.maximum_block_rank,
-      contacts: contacts?.state === "measured" ? contacts.violations : null,
-      length: value("relative_bond_length_rmse"),
-      angle: value("acyclic_carbon_angle_rmse_deg"),
-      profile: record.metrics.profile,
-    });
+    const point = compactPoint(record);
+    if (point) data.points.push(point);
     for (const [key, observation] of Object.entries(observations)) {
       const metric = (data.metrics[key] ??= {
         measured_cases: 0,
@@ -140,6 +130,27 @@ async function indexRun(run: RunInfo): Promise<Corpus> {
   }
   data.run = { ...run, cases: offsets.size, evaluated: data.completed };
   return { data, offsets, manifest, directory };
+}
+
+/** Historical records keep absent new measurements null, not fabricated zeroes. */
+export function compactPoint(record: CaseRecord): PlotPoint | null {
+  if (record.status !== "success" || !record.metrics || !record.features) return null;
+  const observations = record.metrics.measurements;
+  const value = (key: string) => (observations[key]?.state === "measured" ? observations[key].value : null);
+  const contacts = observations.nonbonded_atom_proximity;
+  return {
+    row: record.case.row,
+    id: record.case.id,
+    atoms: record.features.atoms,
+    rank: record.features.maximum_block_rank,
+    contacts: contacts?.state === "measured" ? contacts.violations : null,
+    length: value("relative_bond_length_rmse"),
+    angle: value("acyclic_carbon_angle_rmse_deg"),
+    profile: record.metrics.profile,
+    cavity: value("maximum_ring_cavity_radius"),
+    roundness: value("ring_isoperimetric_ratio"),
+    footprint: value("normalized_footprint"),
+  };
 }
 
 /** Exact byte reads avoid retaining every molecule's full annotation tree in RAM. */

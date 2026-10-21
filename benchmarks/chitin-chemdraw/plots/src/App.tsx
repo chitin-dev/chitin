@@ -4,7 +4,7 @@ import type { Derived } from "./lib/derive";
 import { Button } from "./components/ui/button";
 import { SelectField } from "./components/ui/select";
 import { Prevalence, LengthChart, AngleChart } from "./components/charts";
-import { Scatter } from "./components/scatter";
+import { InteractiveScatter } from "./components/interactive-scatter";
 import { Inspector } from "./components/inspector";
 import type { BenchmarkJob } from "../server/benchmark";
 
@@ -37,12 +37,9 @@ export default function App() {
   const [error, setError] = createSignal("");
   const [groups, setGroups] = createSignal([true, true, true, true]);
   const [selected, setSelected] = createSignal<number | null>(null);
-  const [candidates, setCandidates] = createSignal<number[]>([]);
-  const [query, setQuery] = createSignal("");
-  const [browse, setBrowse] = createSignal(false);
-  const [page, setPage] = createSignal(0);
   const [expanded, setExpanded] = createSignal(false);
   let worker: Worker | undefined;
+  const [workerReady, setWorkerReady] = createSignal(false);
   let requestId = 0;
   const selectedRun = createMemo(() => runs().find((run) => run.id === runId()));
   const groupCounts = createMemo(() => {
@@ -51,43 +48,24 @@ export default function App() {
     return counts;
   });
   const points = createMemo(() => data()?.points ?? []);
-  const rowMap = createMemo(() => new Map(points().map((point) => [point.row, point])));
-  const choices = createMemo(() => {
-    const q = query().trim().toLowerCase();
-    const base = q || browse() ? points() : candidates().flatMap((row) => rowMap().get(row) ?? []);
-    return base.filter(
-      (point) =>
-        point.contacts !== null &&
-        groups()[rankGroup(point.rank)] &&
-        (!q || point.id.toLowerCase().includes(q) || String(point.row) === q),
-    );
-  });
-  const pageCount = () => Math.ceil(choices().length / 12);
-  createEffect(() => {
-    query();
-    browse();
-    candidates();
-    groups();
-    setPage(0);
-  });
   createEffect(() => {
     const run = selectedRun();
-    if (!run || !worker) return;
+    if (!run || !workerReady() || !worker) return;
     setLoading(true);
     setError("");
     worker.postMessage({ id: ++requestId, run: run.id, revision: run.revision });
   });
   function selectRun(run: RunInfo) {
+    if (run.id === runId()) return;
     setFollowLatest(false);
     activateRun(run);
   }
   function activateRun(run: RunInfo) {
+    // Controlled select reconciliation can re-emit the same value without navigation.
+    if (run.id === runId()) return;
     batch(() => {
       setRunId(run.id);
       setSelected(null);
-      setCandidates([]);
-      setQuery("");
-      setBrowse(false);
       setData();
       setDerived();
     });
@@ -114,6 +92,7 @@ export default function App() {
       setError("Plot data worker failed. Refresh to reconnect.");
       setLoading(false);
     };
+    setWorkerReady(true);
     const events = new EventSource("/api/events");
     events.onmessage = (event) => {
       const state: { runs: RunInfo[]; sourceRevision: string; job: BenchmarkJob | null } = JSON.parse(event.data);
@@ -140,16 +119,6 @@ export default function App() {
       worker?.terminate();
     });
   });
-  function pick(indices: number[]) {
-    const rows = indices.map((index) => points()[index].row);
-    batch(() => {
-      setCandidates(rows);
-      setSelected(rows[0] ?? null);
-      setQuery("");
-      setBrowse(false);
-      setPage(0);
-    });
-  }
   async function rerun() {
     setStarting(true);
     try {
@@ -272,7 +241,7 @@ export default function App() {
                 <span class="badge">{selectedRun()?.protocol}</span>
               </div>
               <div class="legend">
-                <span>Maximum block rank · B–D</span>
+                <span>Maximum block rank · B–G</span>
                 <For each={GROUP_LABELS}>
                   {(label, index) => (
                     <button
@@ -309,81 +278,13 @@ export default function App() {
                       {expanded() ? "Compact plot" : "Expand plot"}
                     </Button>
                   </div>
-                  <Scatter points={points()} groups={groups()} selected={selected()} onPick={pick} />
-                  <div class="point-browser">
-                    <div class="point-search">
-                      <input
-                        class="input"
-                        aria-label="Find a molecule by ID or source row"
-                        placeholder="Find CNP ID or source row…"
-                        value={query()}
-                        onInput={(event) => {
-                          setQuery(event.currentTarget.value);
-                          setPage(0);
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setBrowse((value) => !value);
-                          setCandidates([]);
-                        }}
-                      >
-                        {browse() ? "Hide list" : "Browse all points"}
-                      </Button>
-                    </div>
-                    <Show when={query() || browse() || candidates().length}>
-                      <>
-                        <div class="point-list-heading">
-                          <span>
-                            {choices().length.toLocaleString()}{" "}
-                            {query() ? "matching points" : browse() ? "points" : "nearby candidates"}
-                          </span>
-                          <span>Every coincident record is selectable</span>
-                        </div>
-                        <div class="point-list">
-                          <For each={choices().slice(page() * 12, page() * 12 + 12)}>
-                            {(point) => (
-                              <button
-                                class="point-row"
-                                classList={{ selected: selected() === point.row }}
-                                onClick={() => setSelected(point.row)}
-                              >
-                                <i style={{ background: GROUP_COLORS[rankGroup(point.rank)] }} />
-                                <strong>{point.id}</strong>
-                                <span>row {point.row}</span>
-                                <span>
-                                  {point.atoms} atoms · {point.contacts} pairs
-                                </span>
-                              </button>
-                            )}
-                          </For>
-                        </div>
-                        <div class="point-pagination">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={page() <= 0}
-                            onClick={() => setPage((value) => value - 1)}
-                          >
-                            Previous
-                          </Button>
-                          <span>
-                            {pageCount() ? page() + 1 : 0} / {pageCount()}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={page() + 1 >= pageCount()}
-                            onClick={() => setPage((value) => value + 1)}
-                          >
-                            Next
-                          </Button>
-                        </div>
-                      </>
-                    </Show>
-                  </div>
+                  <InteractiveScatter
+                    metric="contacts"
+                    points={points()}
+                    groups={groups()}
+                    selected={selected()}
+                    onSelect={setSelected}
+                  />
                 </Panel>
                 <Panel
                   letter="C"
@@ -398,6 +299,60 @@ export default function App() {
                   subtitle="Applicable acyclic carbon centers · full measured distributions"
                 >
                   <AngleChart derived={derived()!} groups={groups()} />
+                </Panel>
+                <Panel
+                  letter="E"
+                  title="Maximum ring cavity radius"
+                  subtitle="Largest empty skeleton cavity / L · simple bounded planar faces"
+                >
+                  <InteractiveScatter
+                    metric="cavity"
+                    points={points()}
+                    groups={groups()}
+                    selected={selected()}
+                    onSelect={setSelected}
+                    historical={selectedRun()?.protocol === "diagram-quality-v1"}
+                  />
+                  <p class="chart-note">
+                    Search tolerance ≤ 0.02 L; incomplete searches and crossing blocks are excluded. Inspect the
+                    contributing ring size before comparing molecules.
+                  </p>
+                </Panel>
+                <Panel
+                  letter="F"
+                  title="Ring roundness"
+                  subtitle="Maximum Q = 4πA / P² · descriptive, not a pass/fail score"
+                >
+                  <InteractiveScatter
+                    metric="roundness"
+                    points={points()}
+                    groups={groups()}
+                    selected={selected()}
+                    onSelect={setSelected}
+                    historical={selectedRun()?.protocol === "diagram-quality-v1"}
+                  />
+                  <p class="chart-note">
+                    Q near one means round, not necessarily wrong. Ring atom ordinals, area and perimeter are available
+                    in the inspector.
+                  </p>
+                </Panel>
+                <Panel
+                  letter="G"
+                  title="Normalized drawing footprint"
+                  subtitle="Sum of component hull areas / (source atoms × L²) · planar only"
+                >
+                  <InteractiveScatter
+                    metric="footprint"
+                    points={points()}
+                    groups={groups()}
+                    selected={selected()}
+                    onSelect={setSelected}
+                    historical={selectedRun()?.protocol === "diagram-quality-v1"}
+                  />
+                  <p class="chart-note">
+                    Salt packing does not inflate component areas. Smaller is not always better: compactness must not
+                    introduce new collisions.
+                  </p>
                 </Panel>
               </div>
               <footer class="page-footer">

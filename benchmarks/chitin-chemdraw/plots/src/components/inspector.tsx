@@ -8,6 +8,7 @@ import { SelectField } from "./ui/select";
 export function Inspector(props: { run: string; row: number; sourceVersion: string; onClose: () => void }) {
   const [mode, setMode] = createSignal<"snapshot" | "current">("snapshot");
   const [zoom, setZoom] = createSignal(1);
+  const [visibleFaces, setVisibleFaces] = createSignal(6);
   let recordRequest: AbortController | undefined, renderRequest: AbortController | undefined;
   const [recordState, records] = createResource(
     () => ({ run: props.run, row: props.row }),
@@ -33,6 +34,7 @@ export function Inspector(props: { run: string; row: number; sourceVersion: stri
       renderRequest?.abort();
       renderRequest = new AbortController();
       setZoom(1);
+      setVisibleFaces(6);
       const response = await fetch(`/api/runs/${encodeURIComponent(key.run)}/render/${key.row}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Chitin-Client": "plots" },
@@ -175,17 +177,53 @@ export function Inspector(props: { run: string; row: number; sourceVersion: stri
               Source SMILES
             </label>
             <textarea id="selected-smiles" class="input smiles" value={entry().case.smiles} readOnly rows="3" />
+            <Show when={entry().metrics?.ring_geometry}>
+              {(geometry) => (
+                <details class="ring-details">
+                  <summary>Ring geometry · {geometry().faces.length} bounded faces</summary>
+                  <p class="chart-note">
+                    Areas in L²; perimeters and radii in L. Atom ordinals are zero-based source order. Excluded cyclic
+                    blocks: {geometry().excluded_blocks}.
+                  </p>
+                  <For each={geometry().faces.slice(0, visibleFaces())}>
+                    {(face, index) => (
+                      <div class="ring-face">
+                        <strong>
+                          Face {index() + 1} · {face.atoms.length} atoms
+                        </strong>
+                        <span>
+                          Q {face.isoperimetric_ratio.toPrecision(4)} · area {face.area.toPrecision(4)} · perimeter{" "}
+                          {face.perimeter.toPrecision(4)}
+                        </span>
+                        <span>
+                          Cavity [{face.cavity_radius.toPrecision(4)}, {face.cavity_upper_bound.toPrecision(4)}] L ·{" "}
+                          {face.cavity_converged ? "converged" : "budget exhausted"}
+                        </span>
+                        <small>Atoms: {face.atoms.join(", ")}</small>
+                      </div>
+                    )}
+                  </For>
+                  <Show when={visibleFaces() < geometry().faces.length}>
+                    <Button variant="ghost" size="sm" onClick={() => setVisibleFaces((count) => count + 6)}>
+                      Show more faces
+                    </Button>
+                  </Show>
+                </details>
+              )}
+            </Show>
             <h3 class="section-title">Historical measurements</h3>
             <p class="chart-note">Flags use the selected run’s metric protocol, not the preview renderer.</p>
             <div class="metric-table">
               <For each={Object.entries(entry().metrics?.measurements ?? {})}>
                 {([name, metric]) => (
                   <div class="metric-row">
-                    <div title={name}>
+                    <div title={metric.reason ?? name}>
                       {name.replaceAll("_", " ")}
                       <small>
                         {metric.state === "measured"
-                          ? `${metric.violations ?? "—"} flags / ${metric.eligible} eligible`
+                          ? metric.violations === null
+                            ? `${metric.eligible} eligible · descriptive`
+                            : `${metric.violations} flags / ${metric.eligible} eligible`
                           : metric.state.replaceAll("_", " ")}
                       </small>
                     </div>

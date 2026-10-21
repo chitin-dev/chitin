@@ -46,7 +46,7 @@ try {
   const state = await until(
     "return document.querySelector('canvas') && !document.querySelector('.loading-line') && {panels:document.querySelectorAll('.plot-panel').length, text:document.querySelector('.run-context')?.textContent}",
   );
-  assert.equal(state.panels, 4);
+  assert.equal(state.panels, 7);
   assert.equal(await execute("return document.querySelectorAll('.inspector img').length"), 0);
   console.log("Initial charts ready:", state);
   await mkdir(cacheRoot, { recursive: true });
@@ -127,6 +127,37 @@ try {
   await until("const img=document.querySelector('.inspector img');return img?.complete && img.naturalWidth > 0");
   const points = await execute("return document.querySelector('.point-list-heading')?.textContent");
   console.log("Point browser:", points);
+  if (plot.run.protocol === "diagram-quality-v2") {
+    const target =
+      plot.points.find((point) => point.id === "CNP0551778.1") ?? plot.points.find((point) => point.cavity != null);
+    assert.ok(target, "A measured ring fixture is required");
+    for (const metric of ["cavity", "roundness", "footprint"] as const) {
+      assert.equal(
+        await execute("return document.querySelector(`[data-metric='${arguments[0]}'] canvas`) !== null", [metric]),
+        true,
+      );
+      const input = await command(`${root}/element`, {
+        using: "css selector",
+        value: `[data-metric='${metric}'] input`,
+      });
+      await command(`${root}/element/${input["element-6066-11e4-a52e-4f735466cecf"]}/value`, {
+        text: String(target.row),
+      });
+      await until(`return document.querySelectorAll("[data-metric='${metric}'] .point-row").length === 1`);
+      await execute("document.querySelector(`[data-metric='${arguments[0]}'] .point-row`).click()", [metric]);
+      await until(`return document.querySelector('.inspector .eyebrow')?.textContent === 'SOURCE ROW ${target.row}'`);
+      await until("const img=document.querySelector('.inspector img');return img?.complete && img.naturalWidth > 0");
+      console.log(`${metric} point selection and SVG passed:`, target.id);
+    }
+    await execute(
+      "const details=document.querySelector('.ring-details');details.open=true;document.querySelector('[data-metric=cavity]').closest('.plot-panel').scrollIntoView({block:'start'})",
+    );
+    assert.ok(await execute("return document.querySelectorAll('.ring-face').length > 0"));
+    await writeFile(join(cacheRoot, "ring-metrics.png"), Buffer.from(await command(`${root}/screenshot`), "base64"));
+  } else {
+    assert.equal(await execute("return document.querySelectorAll('.metric-empty').length"), 3);
+    console.log("Legacy run: all three new metrics explicitly unavailable");
+  }
   const screenshot = await command(`${root}/screenshot`);
   await mkdir(cacheRoot, { recursive: true });
   await writeFile(join(cacheRoot, "browser-smoke.png"), Buffer.from(screenshot, "base64"));

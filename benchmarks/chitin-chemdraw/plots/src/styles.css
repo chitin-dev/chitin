@@ -1,5 +1,32 @@
 @import "tailwindcss";
 
+.metric-empty {
+  padding: 24px 4px;
+  min-height: 150px;
+  color: #737e8c;
+  line-height: 1.7;
+}
+.ring-details {
+  margin: 18px 0;
+  font-size: 12px;
+}
+.ring-details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.ring-face {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  border-top: 1px solid #e4e7eb;
+  padding: 10px 0;
+  overflow-wrap: anywhere;
+}
+.ring-face span,
+.ring-face small {
+  color: #737e8c;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -263,6 +290,7 @@ h1 {
   align-items: start;
 }
 .plot-panel {
+  scroll-margin-top: 78px;
   background: white;
   border: 1px solid #e3e7ec;
   border-radius: 8px;
@@ -381,7 +409,7 @@ h1 {
   grid-column: 1/-1;
   grid-row: 1;
 }
-.scatter-expanded .scatter-host {
+.scatter-expanded .scatter-panel .scatter-host {
   height: 530px;
 }
 .point-browser {

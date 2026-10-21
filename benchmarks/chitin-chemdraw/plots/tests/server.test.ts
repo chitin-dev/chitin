@@ -3,7 +3,8 @@ import { test } from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, isAbsolute } from "node:path";
-import { committedLines } from "../server/corpus";
+import { committedLines, compactPoint } from "../server/corpus";
+import type { CaseRecord } from "../shared/types";
 import { runDirectory, rowNumber, plotsRoot } from "../server/paths";
 import { RenderQueue, sourceRevision, watchSources } from "../server/renderer";
 
@@ -31,6 +32,33 @@ test("artifact paths reject traversal and malformed rows", () => {
   assert.equal(rowNumber("123"), 123);
   assert.ok(isAbsolute(plotsRoot));
   assert.ok(isAbsolute(runDirectory("coconut-10k")));
+});
+
+test("legacy measurements stay unknown while v2 measured zeroes stay numeric", () => {
+  const legacy = {
+    case: { row: 1, id: "test", smiles: "CCC" },
+    status: "success",
+    features: { atoms: 3, maximum_block_rank: 0 },
+    metrics: { profile: "planar", measurements: {} },
+  } as unknown as CaseRecord;
+  assert.equal(compactPoint(legacy)?.footprint, null);
+  assert.equal(compactPoint(legacy)?.cavity, null);
+  legacy.metrics!.measurements.normalized_footprint = {
+    state: "measured",
+    value: 0,
+    eligible: 3,
+    violations: null,
+    reason: null,
+  };
+  assert.equal(compactPoint(legacy)?.footprint, 0);
+  legacy.metrics!.measurements.maximum_ring_cavity_radius = {
+    state: "not_implemented",
+    value: null,
+    eligible: 2,
+    violations: null,
+    reason: "search budget",
+  };
+  assert.equal(compactPoint(legacy)?.cavity, null);
 });
 
 test("source edits invalidate preview revisions without rewriting historical results", async () => {

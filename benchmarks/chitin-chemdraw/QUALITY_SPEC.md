@@ -1,9 +1,14 @@
-# Diagram quality benchmark v1
+# Diagram quality benchmark v2
 
-Protocol: `diagram-quality-v1`; disk schema: `2`. This protocol evaluates
+Protocol: `diagram-quality-v2`; disk schema: `2`. This protocol evaluates
 single-molecule diagrams, including disconnected components, not reaction
 schemes. It produces a quality vector, not a weighted aesthetic score or
 chemical certificate.
+
+Version 2 adds the three descriptive planar whitespace measurements and
+`ring_geometry` provenance below. Existing v1 measurement formulas and basic
+readability criteria are unchanged. The web viewer accepts v1/v2 separately;
+missing historical measurements are unavailable, never inferred or zero-filled.
 
 ## Reproducibility
 
@@ -74,6 +79,52 @@ blocks are not forced into regular polygons. Block rank E-V+1 is not chemical
 ring count, and cyclic-block vertex count is not chemical ring size. This runner
 uses the ordinary auto-layout, not automatically inferred metal-coordination
 annotations.
+
+## Planar whitespace and footprint
+
+These measurements have no violation threshold and do not contribute to
+`readability_clear`. Larger cavities, rounder contours or larger hulls are not
+automatically incorrect. Compare identical inputs and inspect ring size and
+contact screens before assessing alternative layouts.
+
+Ring contours are the simple bounded faces of each vertex-biconnected cyclic
+block in its actual angular half-edge embedding. They are not a minimum cycle
+basis, all simple cycles, or a block's outer perimeter. For example, two fused
+rings yield two bounded faces, not an extra composite outer ring. The positive
+orientation is retained; its reverse exterior walk is discarded. Nonincident
+contacts at tolerance 1e-9 L, coincident adjacent rays, zero-length edges, or a
+face count different from the block rank make that block unassessed. If any
+cyclic block is unassessed, global ring maxima are `not_implemented`, not maxima
+over a silently reduced domain. Valid per-face details remain available.
+
+- `maximum_ring_cavity_radius`: maximum over bounded faces of the largest
+  in-face disk avoiding every source skeleton segment in that face's connected
+  component, divided by L. It measures skeleton whitespace, not ink clearance:
+  label outlines and stroke width are not obstacles. Other disconnected
+  components do not obstruct the face. Deterministic best-first square
+  subdivision uses the signed-clearance 1-Lipschitz upper bound; each face
+  receives at most 8192 cell evaluations and absolute error tolerance 0.02 L.
+  `value` is the maximum lower bound only when every face converged. Budget
+  exhaustion makes the scalar `not_implemented`; each face retains its lower
+  bound, upper bound and convergence flag. With no bounded faces, it is
+  `not_applicable`. `eligible` counts valid bounded faces.
+- `ring_isoperimetric_ratio`: maximum `4πA/P²` over bounded faces, with exact
+  polygon shoelace area A and source-segment perimeter P. Range [0,1] up to
+  floating-point clipping. `eligible` counts bounded faces. This can be
+  dominated by a small regular ring; it is not a macrocycle-specific quality
+  score.
+- `normalized_footprint`: sum of each connected component's source-atom convex
+  hull area divided by `N L²`, where N includes all source atoms. This refines a
+  single global hull to remove arbitrary salt-packing distance. Isolated atoms
+  and collinear components contribute zero area. `eligible` is N. Labels, stroke
+  widths and SVG padding are not included.
+
+All three exclude authored perspective layouts and layouts without a positive
+bond scale. `ring_geometry.faces` records the ordered zero-based source atom
+ordinals for each bounded face, A/L², P/L, Q, cavity bounds and convergence.
+These ordinals refer to source graph atom iteration order, not opaque handles.
+Statistics are molecule-weighted scalar distributions; individual face values
+are audit metadata, not extra molecules in the scatter plot.
 
 ## Missing evaluators and restricted readability
 

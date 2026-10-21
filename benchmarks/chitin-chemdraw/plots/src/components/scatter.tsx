@@ -1,6 +1,7 @@
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { GROUP_COLORS, rankGroup, type PlotPoint } from "../../shared/types";
-import { SpatialGrid, symlog, inverseSymlog, type View } from "@/lib/geometry";
+import { SpatialGrid, symlog, type View } from "@/lib/geometry";
+import { SCATTER_METRICS, scatterValue, scatterLabel, type ScatterMetric } from "../../shared/plot-metrics";
 import { Button } from "./ui/button";
 
 interface Prepared {
@@ -14,7 +15,11 @@ export function Scatter(props: {
   groups: boolean[];
   selected: number | null;
   onPick: (indices: number[]) => void;
+  metric?: ScatterMetric;
 }) {
+  const metric = () => props.metric ?? "contacts";
+  const definition = () => SCATTER_METRICS[metric()];
+  const transform = (value: number) => (definition().linear ? value : symlog(value));
   let host!: HTMLDivElement, canvas!: HTMLCanvasElement, overlay!: HTMLCanvasElement;
   let width = 600,
     height = 410,
@@ -95,8 +100,8 @@ export function Scatter(props: {
       context.fillText(String(value), x, height - margin.bottom + 19);
     }
     context.textAlign = "right";
-    for (const value of [0, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000]) {
-      const y = screen({ x: 0, y: symlog(value), index: 0, group: 0 }).y;
+    for (const value of definition().ticks) {
+      const y = screen({ x: 0, y: transform(value), index: 0, group: 0 }).y;
       if (y < margin.top || y > height - margin.bottom) continue;
       context.beginPath();
       context.moveTo(margin.left, y);
@@ -118,7 +123,7 @@ export function Scatter(props: {
     context.save();
     context.translate(14, margin.top + plotHeight() / 2);
     context.rotate(-Math.PI / 2);
-    context.fillText("Close nonbonded atom pairs · symlog", 0, 0);
+    context.fillText(definition().axis, 0, 0);
     context.restore();
     context.save();
     context.beginPath();
@@ -179,8 +184,9 @@ export function Scatter(props: {
       ymax = 1;
     for (let index = 0; index < points.length; index++) {
       const record = points[index];
-      if (record.contacts === null || record.atoms <= 0) continue;
-      const point = { index, x: Math.log10(record.atoms), y: symlog(record.contacts), group: rankGroup(record.rank) };
+      const value = scatterValue(record, metric());
+      if (value === null || record.atoms <= 0) continue;
+      const point = { index, x: Math.log10(record.atoms), y: transform(value), group: rankGroup(record.rank) };
       prepared.push(point);
       byRow.set(record.row, point);
       byIndex.set(point.index, point);
@@ -251,7 +257,7 @@ export function Scatter(props: {
           class="scatter-layer"
           tabIndex={0}
           role="img"
-          aria-label="B. Interactive molecular-size scatter plot. Drag to pan, Control-wheel to zoom. Search below to access any molecule."
+          aria-label={`${definition().label}. Interactive molecular-size scatter plot. Drag to pan, Control-wheel to zoom. Search below to access any molecule.`}
           onDblClick={reset}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
@@ -289,7 +295,7 @@ export function Scatter(props: {
                   ? {
                       x: Math.min(x + 12, width - 235),
                       y: Math.max(0, y - 58),
-                      text: `${point.id} · ${point.atoms} atoms · ${point.contacts} pairs${hit.count > 1 ? ` · ${hit.count} nearby: click to inspect all` : ""}`,
+                      text: `${point.id} · ${point.atoms} atoms · ${scatterLabel(point, metric())}${hit.count > 1 ? ` · ${hit.count} nearby: click to inspect all` : ""}`,
                     }
                   : undefined,
               );

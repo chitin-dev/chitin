@@ -27,7 +27,7 @@ fn reports_failures_without_discarding_source_records() -> Result<()> {
   assert_eq!(summary["cases"], 3);
   assert_eq!(summary["success"], 1);
   assert_eq!(summary["outcomes"]["error:parse"], 2);
-  assert_eq!(summary["quality_version"], "diagram-quality-v1");
+  assert_eq!(summary["quality_version"], "diagram-quality-v2");
   assert_eq!(summary["quality"]["selected_cases"], 3);
   assert_eq!(summary["quality"]["generated_cases"], 1);
   assert_eq!(

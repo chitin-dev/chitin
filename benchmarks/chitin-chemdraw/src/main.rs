@@ -8,6 +8,7 @@ mod dataset;
 mod metrics;
 mod quality;
 mod report;
+mod ring_geometry;
 mod scene_quality;
 mod worker;
 

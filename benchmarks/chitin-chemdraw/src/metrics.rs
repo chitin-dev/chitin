@@ -39,6 +39,7 @@ pub fn measure(graph: &MolecularGraph, coordinates: &Layout2d) -> Result<Metrics
     features: quality::characterize(graph)?,
     measurements: BTreeMap::new(),
     readability_clear: None,
+    ring_geometry: None,
   };
   let connected: BTreeSet<_> = edges.iter().map(|(_, [a, b])| ((*a).min(*b), (*a).max(*b))).collect();
   let mut atom_pairs = (0, 0);
@@ -167,6 +168,7 @@ pub fn measure(graph: &MolecularGraph, coordinates: &Layout2d) -> Result<Metrics
     "component_radius_gyration".into(),
     component_extent(graph, points, scale)?,
   );
+  crate::ring_geometry::measure(graph, points, scale, perspective, &mut result)?;
   ensure!(
     result
       .measurements
@@ -314,7 +316,7 @@ pub(crate) fn point_segment(p: Point, a: Point, b: Point) -> f64 {
 }
 
 /// Proper crossing or a scale-relative endpoint/collinear contact.
-fn segments_contact(a: Point, b: Point, c: Point, d: Point, epsilon: f64) -> bool {
+pub(crate) fn segments_contact(a: Point, b: Point, c: Point, d: Point, epsilon: f64) -> bool {
   let side = |a: Point, b: Point, p: Point| (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
   side(a, b, c) * side(a, b, d) < 0. && side(c, d, a) * side(c, d, b) < 0.
     || [(a, c, d), (b, c, d), (c, a, b), (d, a, b)]
