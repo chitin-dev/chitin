@@ -132,7 +132,10 @@ fn degenerate_coordinates_should_not_silently_drop_supplied_stereo() -> TestResu
     .collect();
   assert!(matches!(
     depict::depict(&graph, &Layout2d::from_positions(points)?, &geometry_options()),
-    Err(depict::DepictError::Stereo(_))
+    Err(depict::DepictError::StereoAssignment {
+      reason: depict::StereoFailureReason::DegenerateProjection,
+      ..
+    })
   ));
   Ok(())
 }

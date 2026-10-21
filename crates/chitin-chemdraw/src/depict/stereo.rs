@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use chitin_chem::{AtomId, BondId, MolecularGraph, StereoLigand, TetrahedralStereo, TetrahedralWinding};
 
-use super::{DepictError as Error, DepictOptions, LabelBounds, clip, color::BondPaint};
+use super::{DepictError as Error, DepictOptions, LabelBounds, StereoFailureReason, clip, color::BondPaint};
 use crate::{
   geometry::Point,
   scene::{Line, LineCap, Polygon, Primitive, Source},
@@ -50,12 +50,33 @@ pub(super) fn plan(
     .filter(|(center, _)| !expanded_hydrogens.contains(center))
     .collect();
   let mut marks = BTreeMap::new();
-  // The common case has a first-fit assignment; only pay for search when an
-  // edge conflict or a degenerate choice forces a different bond.
+  // Preserve the common first-fit path without repeating projection tests.
+  // Classifying exceptional failures must not tax every successful drawing.
   if greedy(graph, points, bridges, &centers, &mut marks).is_ok() {
     return Ok(marks);
   }
   marks.clear();
+  // Classify intrinsic failure before combinatorial assignment: backtracking
+  // cannot create an eligible bond or repair a collapsed local projection.
+  for &(center, stereo) in &centers {
+    let candidates = candidates(graph, bridges, center);
+    if candidates.is_empty() {
+      return Err(Error::StereoAssignment {
+        atom: center,
+        reason: StereoFailureReason::NoEligibleBond,
+      });
+    }
+    let mut usable = false;
+    for (ligand, _) in candidates {
+      usable |= solid_for(stereo, points[&center], points, StereoLigand::Atom(ligand), None)?.is_some();
+    }
+    if !usable {
+      return Err(Error::StereoAssignment {
+        atom: center,
+        reason: StereoFailureReason::DegenerateProjection,
+      });
+    }
+  }
   let mut nodes = 0_usize;
   assign(graph, points, bridges, &centers, 0, &mut marks, &mut nodes)?;
   Ok(marks)
@@ -82,7 +103,10 @@ fn greedy(
       break;
     }
     let Some((edge, ligand, solid)) = chosen else {
-      return Err(Error::Stereo(center));
+      return Err(Error::StereoAssignment {
+        atom: center,
+        reason: StereoFailureReason::ConflictingBonds,
+      });
     };
     marks.insert(edge, Mark { center, ligand, solid });
   }
@@ -135,7 +159,10 @@ fn assign(
   }
   *nodes += 1;
   if *nodes > 65_536 {
-    return Err(Error::Stereo(centers[index].0));
+    return Err(Error::StereoAssignment {
+      atom: centers[index].0,
+      reason: StereoFailureReason::AssignmentBudget,
+    });
   }
   let (center, stereo) = centers[index];
   for (ligand, edge) in candidates(graph, bridges, center) {
@@ -146,12 +173,23 @@ fn assign(
       continue;
     };
     marks.insert(edge, Mark { center, ligand, solid });
-    if assign(graph, points, bridges, centers, index + 1, marks, nodes).is_ok() {
-      return Ok(());
+    match assign(graph, points, bridges, centers, index + 1, marks, nodes) {
+      Ok(()) => return Ok(()),
+      Err(
+        error @ Error::StereoAssignment {
+          reason: StereoFailureReason::AssignmentBudget,
+          ..
+        },
+      ) => return Err(error),
+      Err(Error::StereoAssignment { .. }) => {}
+      Err(error) => return Err(error),
     }
     marks.remove(&edge);
   }
-  Err(Error::Stereo(center))
+  Err(Error::StereoAssignment {
+    atom: center,
+    reason: StereoFailureReason::ConflictingBonds,
+  })
 }
 
 /// Determines a wedge's polarity for either an actual atom or a displayed H.

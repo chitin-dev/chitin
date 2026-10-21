@@ -129,8 +129,8 @@ impl LayoutConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct DepictConfig {
-  /// Expand declared H only on annotated tetrahedral carbon centers.
-  explicit_chiral_hydrogens: bool,
+  /// Explicit true/false retain all/none; omission inherits selective expansion.
+  explicit_chiral_hydrogens: Option<bool>,
   /// Element palette shared by labels and endpoint-colored bonds.
   color_scheme: Scheme,
   /// Independent choice between uniform foreground and endpoint-colored halves.
@@ -178,10 +178,10 @@ impl DepictConfig {
         AromaticConfig::Kekule => AromaticStyle::Kekule,
         AromaticConfig::Circle => AromaticStyle::Circle,
       },
-      chiral_hydrogens: if self.explicit_chiral_hydrogens {
-        ChiralHydrogenMode::Explicit
-      } else {
-        ChiralHydrogenMode::Implicit
+      chiral_hydrogens: match self.explicit_chiral_hydrogens {
+        Some(true) => ChiralHydrogenMode::Explicit,
+        Some(false) => ChiralHydrogenMode::Implicit,
+        None => defaults.chiral_hydrogens,
       },
       bond_length: self.bond_length.unwrap_or(defaults.bond_length),
       font_size: self.font_size.unwrap_or(defaults.font_size),
@@ -275,6 +275,20 @@ mod tests {
         serde_yaml::from_str(&format!("smiles: ['O[Fe]O']\nlayout:\n  coordination: {declarations}"))?;
       assert!(config.destination(Path::new("test.yaml")).is_err());
     }
+    Ok(())
+  }
+
+  #[test]
+  fn declared_h_overrides_should_preserve_explicit_false_and_true() -> Result<()> {
+    for (flag, mode) in [
+      (false, ChiralHydrogenMode::Implicit),
+      (true, ChiralHydrogenMode::Explicit),
+    ] {
+      let config: Config =
+        serde_yaml::from_str(&format!("smiles: ['C']\ndepict: {{explicit_chiral_hydrogens: {flag}}}"))?;
+      assert_eq!(config.depict.options(Path::new("job.yaml"))?.chiral_hydrogens, mode);
+    }
+    assert_eq!(DepictOptions::default().chiral_hydrogens, ChiralHydrogenMode::Auto);
     Ok(())
   }
 

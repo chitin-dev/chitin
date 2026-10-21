@@ -29,10 +29,42 @@ pub use labels::measurement_requests;
 /// Display policy for one declared H on an annotated tetrahedral carbon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChiralHydrogenMode {
+  /// Expand a declared H only when no permitted source bond can carry its mark.
+  /// Otherwise preserve the ordinary skeletal depiction without extra labels.
+  Auto,
   /// Keep attached H skeletal and put the wedge on an existing graph bond.
   Implicit,
   /// Draw a separate H label and C–H wedge without adding graph entities.
   Explicit,
+}
+
+/// Machine-readable reason why a supplied tetrahedral center cannot be drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum StereoFailureReason {
+  /// The drawing policy permits no source bond at this center to carry a wedge.
+  #[error("no eligible source bond")]
+  NoEligibleBond,
+  /// Every eligible ligand produces a degenerate signed-volume projection.
+  #[error("degenerate ligand projection")]
+  DegenerateProjection,
+  /// Individually usable choices cannot be assigned without sharing a marked bond.
+  #[error("conflicting stereobond assignments")]
+  ConflictingBonds,
+  /// Bounded assignment search ended without proving a complete assignment.
+  #[error("stereobond assignment budget exhausted")]
+  AssignmentBudget,
+}
+
+impl StereoFailureReason {
+  /// Returns a stable diagnostic key independent of atom handles and wording.
+  pub const fn code(self) -> &'static str {
+    match self {
+      Self::NoEligibleBond => "no_eligible_bond",
+      Self::DegenerateProjection => "degenerate_projection",
+      Self::ConflictingBonds => "conflicting_bonds",
+      Self::AssignmentBudget => "assignment_budget",
+    }
+  }
 }
 
 /// Policy for obtaining label H counts; explicit H vertices are never collapsed.
@@ -77,6 +109,7 @@ pub struct DepictOptions {
   /// Explicit H-resolution model; no domain facts are overwritten.
   pub hydrogens: HydrogenMode,
   /// Whether annotated carbon's declared H becomes a separate drawn ligand.
+  /// Defaults to selective expansion when no permitted source wedge is usable.
   /// Explicit graph H vertices are unaffected and are never drawn twice.
   pub chiral_hydrogens: ChiralHydrogenMode,
 }
@@ -99,7 +132,7 @@ impl Default for DepictOptions {
       element_colors: BTreeMap::new(),
       aromatic_style: AromaticStyle::Kekule,
       hydrogens: HydrogenMode::Infer(ValenceModel::SmilesOrganicV1),
-      chiral_hydrogens: ChiralHydrogenMode::Implicit,
+      chiral_hydrogens: ChiralHydrogenMode::Auto,
     }
   }
 }
@@ -116,6 +149,14 @@ pub enum DepictError {
   /// The supplied local stereo cannot be shown unambiguously in these coordinates.
   #[error("cannot depict tetrahedral configuration at atom {0}")]
   Stereo(AtomId),
+  /// A source-bond wedge assignment failed for a classified reason.
+  #[error("cannot assign tetrahedral mark at atom {atom}: {reason}")]
+  StereoAssignment {
+    /// Original stereocenter, never a generated depiction-only atom.
+    atom: AtomId,
+    /// Distinguishes model policy, projection, assignment conflict and resources.
+    reason: StereoFailureReason,
+  },
   /// Supplied aromatic facts cannot be assigned by the restricted domain model.
   #[error(transparent)]
   Kekule(#[from] chitin_chem::perception::KekuleError),
@@ -445,6 +486,8 @@ fn clip(start: Point, end: Point, bounds: Option<LabelBounds>) -> Option<Point> 
 /// `chiral_hydrogens` can display a declared H at an annotated carbon as a
 /// separate label and C–H wedge. These primitives use `Source::AttachedHydrogen`
 /// and do not allocate graph handles or change hydrogen counts.
+/// The default expands only centers without a usable permitted source wedge; strict
+/// skeletal and unconditional declared-H modes remain explicitly selectable.
 /// Authored layout crossings cut the rear single-bond stroke, leaving the front
 /// continuous. Cuts are generic scene geometry and work on transparent output.
 /// Dense spatial cores instead retain every single/double stroke and multiply
@@ -517,8 +560,8 @@ fn depict_validated(
       return Err(DepictError::DoubleBondStereo(id));
     }
   }
-  let recipes = labels::prepare(graph, options)?;
-  let expanded = hydrogens::centers(graph, options);
+  let expanded = hydrogens::projected_centers(graph, &points, options)?;
+  let recipes = labels::prepare(graph, options, &expanded)?;
   // Measure every label once at its atom anchor. The runs translate rigidly with
   // the anchor, so a crowded label can be tested at candidate shifts without
   // rebuilding its glyphs or changing its chemical content.
