@@ -109,7 +109,12 @@ fn backbone_routing_should_reduce_footprint_without_deforming_rings_or_stereo() 
   let after = layout::generate(&graph, &Default::default())?;
   let a = before.bounds().ok_or("missing initial bounds")?;
   let b = after.bounds().ok_or("missing final bounds")?;
-  assert!(b.width() * b.height() < a.width() * a.height() * 0.85);
+  assert!(
+    b.width() * b.height() < a.width() * a.height() * 0.85,
+    "unrouted area {} -> routed area {}",
+    a.width() * a.height(),
+    b.width() * b.height()
+  );
   let crowds = |layout: &layout::Layout2d| {
     layout
       .diagnostics()
@@ -117,7 +122,14 @@ fn backbone_routing_should_reduce_footprint_without_deforming_rings_or_stereo() 
       .filter(|d| matches!(d, LayoutDiagnostic::CrowdedAtoms { .. }))
       .count()
   };
-  assert!(crowds(&after) < crowds(&before));
+  // Final terminal clearance also repairs the unrouted baseline. Routing must
+  // still shrink the drawing, but no longer needs to remove a remaining pair.
+  assert!(
+    crowds(&after) <= crowds(&before) && crowds(&after) <= 1,
+    "unrouted crowds {} -> routed crowds {}",
+    crowds(&before),
+    crowds(&after)
+  );
   assert!(
     !after
       .diagnostics()

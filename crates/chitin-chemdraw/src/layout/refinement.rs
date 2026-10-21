@@ -20,6 +20,7 @@ use std::{
 
 mod backbone;
 mod hinges;
+mod ports;
 mod terminal;
 
 /// Additional host-angle freedom for whole-block ring candidate search only.
@@ -277,6 +278,30 @@ impl Model {
     } else {
       Some(((0..self.ids.len()).filter(|&node| !seen[node]).collect(), b, a))
     }
+  }
+
+  /// Tests whether a rigid branch cut can change any currently reported contact.
+  ///
+  /// Distances and intersections wholly inside either rigid half are invariant.
+  /// Atom-edge contacts include all three rows, not just the edge's endpoints;
+  /// measured label contacts lack row provenance and conservatively keep trials.
+  fn affects_contacts(&self, branch: &[usize], current: &Quality) -> bool {
+    current.label_contacts > 0
+      || current
+        .crowds
+        .iter()
+        .any(|&(a, b)| branch.contains(&a) != branch.contains(&b))
+      || current.atom_edges.iter().any(|&(atom, edge)| {
+        let [a, b] = self.edges[edge].ends;
+        let moving = branch.contains(&atom);
+        moving != branch.contains(&a) || moving != branch.contains(&b)
+      })
+      || current.crossings.iter().any(|&(a, b)| {
+        let [first, second] = self.edges[a].ends;
+        [second, self.edges[b].ends[0], self.edges[b].ends[1]]
+          .iter()
+          .any(|row| branch.contains(row) != branch.contains(&first))
+      })
   }
 
   /// Measures nearby geometry with unit-cell broad-phase pruning.
@@ -690,9 +715,12 @@ pub(super) fn run(
     if model.perspective.is_empty() {
       orient(&mut points);
     }
-    let quality = model
+    let mut quality = model
       .measure(&points, options.minimum_spacing, &mut Budget(usize::MAX))
       .ok_or(Error::CoordinateRange)?;
+    if options.refinement_passes > 0 && model.perspective.is_empty() {
+      exhausted |= ports::improve(&model, &mut points, &mut quality, options, budget);
+    }
     for (a, b) in quality.crowds {
       layout.diagnostics.push(LayoutDiagnostic::CrowdedAtoms {
         a: model.ids[a],

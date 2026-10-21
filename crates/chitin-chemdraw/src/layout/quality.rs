@@ -26,6 +26,8 @@ pub(super) struct Quality {
   pub(super) cost: f64,
   /// Atom pairs closer than the caller's reporting threshold.
   pub(super) crowds: Vec<(usize, usize)>,
+  /// Atom/edge rows within the hard clearance, excluding incident endpoints.
+  pub(super) atom_edges: Vec<(usize, usize)>,
   /// Nonincident edge indices with a proper crossing.
   pub(super) crossings: BTreeSet<(usize, usize)>,
   /// Measured label contacts added only by the optional rendering feedback stage.
@@ -35,7 +37,29 @@ pub(super) struct Quality {
 impl Quality {
   /// Returns whether every reported geometry and supplied label contact is clear.
   pub(super) fn clear(&self) -> bool {
-    self.crowds.is_empty() && self.crossings.is_empty() && self.label_contacts == 0
+    self.crowds.is_empty() && self.atom_edges.is_empty() && self.crossings.is_empty() && self.label_contacts == 0
+  }
+
+  /// Accepts hard-contact improvements before comparing soft clearance costs.
+  ///
+  /// Every reported contact count must be nonincreasing. This prevents a better
+  /// aggregate clearance score from buying a new atom collision or crossing.
+  /// Equal contact counts require a strictly lower soft cost to avoid drift.
+  pub(super) fn improves(&self, previous: &Self) -> bool {
+    let counts = [
+      self.crowds.len(),
+      self.crossings.len(),
+      self.atom_edges.len(),
+      self.label_contacts,
+    ];
+    let before = [
+      previous.crowds.len(),
+      previous.crossings.len(),
+      previous.atom_edges.len(),
+      previous.label_contacts,
+    ];
+    counts.iter().zip(before).all(|(&after, before)| after <= before)
+      && (counts != before || self.cost + 1e-10 < previous.cost)
   }
 }
 
@@ -104,7 +128,13 @@ pub(super) fn measure(
       }
       let [a, b] = segments[edge];
       if a != i && b != i {
-        quality.cost += 4. * (0.25 - segment_distance(point, points[a], points[b])).max(0.).powi(2);
+        let distance = segment_distance(point, points[a], points[b]);
+        quality.cost += 4. * (0.25 - distance).max(0.).powi(2);
+        // A soft clearance penalty alone cannot keep repair active: a contact
+        // at a bond interior need not produce a close atom pair or a crossing.
+        if distance < 0.15 {
+          quality.atom_edges.push((i, edge));
+        }
       }
     }
   }
@@ -146,4 +176,49 @@ pub(super) fn segment_distance(point: Point, a: Point, b: Point) -> f64 {
 pub(super) fn crosses(a: Point, b: Point, c: Point, d: Point) -> bool {
   let side = |p: Point, q: Point, r: Point| (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
   side(a, b, c) * side(a, b, d) < -1e-12 && side(c, d, a) * side(c, d, b) < -1e-12
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+  #[test]
+  fn an_atom_near_a_bond_interior_should_keep_repair_active() -> TestResult {
+    let points = [Point::new(0., 0.), Point::new(2., 0.), Point::new(1., 0.1)];
+    let quality = measure(&points, &[[0, 1]], 0.55, &mut Budget(usize::MAX)).ok_or("measurement failed")?;
+    assert!(quality.crowds.is_empty() && quality.crossings.is_empty());
+    assert_eq!(quality.atom_edges, [(2, 0)]);
+    assert!(!quality.clear());
+    Ok(())
+  }
+
+  #[test]
+  fn soft_clearance_should_not_trade_for_a_new_atom_collision() {
+    let before = Quality {
+      cost: 4.,
+      ..Default::default()
+    };
+    let after = Quality {
+      cost: 0.1,
+      crowds: vec![(0, 1)],
+      ..Default::default()
+    };
+    assert!(!after.improves(&before));
+  }
+
+  #[test]
+  fn removing_a_hard_contact_should_outweigh_a_soft_clearance_increase() {
+    let before = Quality {
+      cost: 0.1,
+      atom_edges: vec![(0, 1)],
+      ..Default::default()
+    };
+    let after = Quality {
+      cost: 0.2,
+      ..Default::default()
+    };
+    assert!(after.improves(&before));
+  }
 }
