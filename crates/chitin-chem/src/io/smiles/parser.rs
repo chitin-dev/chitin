@@ -281,6 +281,17 @@ pub(super) fn build(source: &str, tokens: Vec<Token>) -> Result<ParsedSmiles, Sm
     if let Some(slot) = hydrogen_slot {
       ligands.insert(slot, StereoLigand::Hydrogen);
     }
+    if ligands.len() == 3
+      && hydrogen_slot.is_none()
+      && result.graph.atom(id).is_some_and(|atom| {
+        matches!(
+          atom.element(),
+          crate::Element::Nitrogen | crate::Element::Phosphorus | crate::Element::Sulfur
+        )
+      })
+    {
+      ligands.push(StereoLigand::LonePair);
+    }
     let ligands: [_; 4] = ligands.try_into().map_err(|_| {
       error(
         span.clone(),

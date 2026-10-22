@@ -197,6 +197,9 @@ pub(super) fn plan(graph: &MolecularGraph) -> Result<Plan, Error> {
     for &(child, _) in &node.children {
       ligands.push(StereoLigand::Atom(nodes[child].id));
     }
+    if stereo.ligands().contains(&StereoLigand::LonePair) {
+      ligands.push(StereoLigand::LonePair);
+    }
     let ligands: [_; 4] = ligands.try_into().map_err(|_| StereoError::Coordination(node.id))?;
     let winding = stereo.reordered(ligands)?.winding();
     let facts = graph.atom(node.id).ok_or(GraphError::MissingAtom(node.id))?;

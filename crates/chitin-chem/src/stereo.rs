@@ -8,13 +8,16 @@ use crate::{AtomId, BondId, GraphError};
 mod double_bond;
 pub use double_bond::{DoubleBondRelation, DoubleBondStereo};
 
-/// One tetrahedral reference direction; virtual H is not a graph vertex.
+/// One tetrahedral reference direction; virtual ligands are not graph vertices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StereoLigand {
   /// An explicitly bonded atom in the same graph namespace.
   Atom(AtomId),
   /// Exactly one declared attached H on the center, distinct from an H vertex.
   Hydrogen,
+  /// Undrawn fourth direction at a three-coordinate pyramidal center.
+  /// Codec convention places this virtual reference last; it is never an atom.
+  LonePair,
 }
 
 /// Local winding, looking from the first ligand toward the center.
@@ -63,7 +66,7 @@ pub enum StereoError {
   /// A reference list contains duplicates or is not a permutation of another.
   #[error("invalid tetrahedral ligand permutation")]
   Ligands,
-  /// The center does not have four supported single-bond/H directions.
+  /// The center does not have four supported atom/H/lone-pair directions.
   #[error("unsupported tetrahedral coordination at atom {0}")]
   Coordination(AtomId),
   /// A referenced graph entity is not live.
@@ -86,7 +89,7 @@ impl TetrahedralStereo {
     Ok(Self { ligands, winding })
   }
 
-  /// Returns the ordered graph/H reference directions.
+  /// Returns the ordered atom/H/lone-pair reference directions.
   pub const fn ligands(&self) -> &[StereoLigand; 4] {
     &self.ligands
   }
