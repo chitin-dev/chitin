@@ -1,13 +1,14 @@
-# Diagram quality benchmark v2
+# Diagram quality benchmark v3
 
-Protocol: `diagram-quality-v2`; disk schema: `2`. This protocol evaluates
+Protocol: `diagram-quality-v3`; disk schema: `2`. This protocol evaluates
 single-molecule diagrams, including disconnected components, not reaction
 schemes. It produces a quality vector, not a weighted aesthetic score or
 chemical certificate.
 
-Version 2 adds the three descriptive planar whitespace measurements and
-`ring_geometry` provenance below. Existing v1 measurement formulas and basic
-readability criteria are unchanged. The web viewer accepts v1/v2 separately;
+Version 3 adds topology-defined large-cycle angle/turn measurements and
+`macrocycle_geometry` provenance. Version 2 added planar whitespace measurements
+and `ring_geometry`. Existing measurement formulas and basic
+readability criteria are unchanged. The web viewer accepts v1/v2/v3 separately;
 missing historical measurements are unavailable, never inferred or zero-filled.
 
 ## Reproducibility
@@ -24,6 +25,13 @@ The pipeline is parse, characterize, layout, depict, SVG export, independent QA.
 QA never changes the coordinates, and its time is excluded from generation
 stages. Single-case cold-process timings are descriptive, not controlled
 performance CIs.
+
+New case records also retain `constraint_closure`: whether coupled distance/alkene
+closure replaced an unsupported preferred embedding or repaired its cyclic
+configuration. Cohort reports count these separately. This provenance is not a
+quality exemption: all resulting coordinates, labels, contacts and bond sides
+undergo the same independent checks. A generated SVG is not a readability pass.
+Historical records lacking this field do not establish absence of fallback.
 
 ## Applicability and numerical policy
 
@@ -49,6 +57,67 @@ human-rated set. Relevant graphical principles are described by the
 Neither zero warnings nor a successful exporter establishes full compliance.
 
 ## Measurements
+
+### Large-cycle local geometry (v3)
+
+These measurements use source topology, not the validity of the drawn planar
+faces. They remain available for crossing layouts, without interpreting local
+turns as polygon interior angles. Explicit perspective layouts are inapplicable.
+
+Within each cyclic block with at least nine vertices, collect one deterministic
+shortest alternate path per edge and a spanning-tree fundamental cycle set.
+Sort cycles by length and source-ordinal traversal, then select an independent
+basis over GF(2). This is a short-first basis, not an exhaustive minimum basis,
+SSSR, a unique chemical ring set, or a claim that block size is ring size.
+Only selected cycles with at least nine vertices supply observations. Discovery
+has a shared 1,000,000-operation allowance and stored pairs are bounded at 8192
+per molecule. An excluded block makes the aggregate channels unavailable;
+partial local records retain their explicit exclusion count.
+
+Deduplicate each angle by center and unordered ligand pair. Deduplicate each
+adjacent-angle pair by its four source ordinals modulo path reversal; preserve
+the smallest selected large cycle that contains it. Source-order canonical
+traversal defines signs. Reversing a path maps (x,y) to (-y,-x); reflecting the
+drawing maps it to (-x,-y). Neither transformation implies stereo inversion.
+
+For A-B-C-D, turns are atan2(cross(AB,BC),dot(AB,BC)) and
+atan2(cross(BC,CD),dot(BC,CD)), using normalized rays, in [-180,180] degrees.
+Collapsed bonds produce missing turns, not numerical zeroes. The unsigned
+local bond angle is 180-abs(turn), even when the complete walk crosses itself.
+
+Centers are stratified as linear (incident triple or degree-two cumulene),
+junction (more than two block neighbors or more than four total neighbors),
+small_ring (the exact local ligand pair occurs in a selected cycle of size <=8),
+or ordinary path. Only ordinary paths receive the following drawing-angle and
+near-straight flags. This avoids penalizing required linearity and forcing a
+universal 120-degree rule onto bridgeheads. The ordinary drawing reference set
+is {108,120,900/7,135} degrees; it is not a prediction of physical hybridization.
+
+| Key | Definition |
+| --- | --- |
+| macrocycle_angle_coverage | Valid unique local angles / all unique local angles on selected large cycles; descriptive, not an error rate |
+| macrocycle_angle_deviation_rmse_deg | RMSE of distance to the nearest ordinary drawing reference angle; violations exceed 15 degrees |
+| macrocycle_angle_deviation_p95_deg | Nearest-rank 95th percentile of those absolute deviations |
+| macrocycle_near_linear_fraction | Ordinary valid local angles >=165 degrees / ordinary valid local angles |
+| macrocycle_longest_near_linear_run | Maximum cyclic contiguous count of ordinary near-straight centers over selected large cycles |
+| macrocycle_longest_same_turn_run | Maximum cyclic contiguous count of ordinary nonzero turns with the same sign; descriptive only |
+
+An empty domain is unavailable, not zero. Collapsed bonds reduce coverage and
+make aggregate distortion/run measurements unavailable. Junctions, small-ring
+centers, invalid angles and required linear centers break ordinary runs. Runs
+wrap across cycle ends but cannot exceed the cycle length. No fixed favored
+regions are asserted for the adjacent-turn density map: cycle size, closure,
+substitution, fusion and stereo constraints matter. Long same-sign runs are a
+diagnostic, not a universal violation. These channels do not change the existing
+basic readability screen or certify acceptable macrocycle layout.
+
+`macrocycle_geometry` stores exact source-ordinal paths, local classes, signed
+turns, selected cycle sizes/ranks, coverage and exclusion counts. The benchmark
+worker attaches source centers in scene units and the exact SVG viewBox so the
+viewer can overlay the historical path. Overlays are disabled on current
+algorithm previews; historical coordinates cannot annotate a different layout.
+
+### Existing scalar measurements
 
 | Key                           | Eligible objects and value                                                                                                                                                                        |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

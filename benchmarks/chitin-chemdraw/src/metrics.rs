@@ -40,6 +40,7 @@ pub fn measure(graph: &MolecularGraph, coordinates: &Layout2d) -> Result<Metrics
     measurements: BTreeMap::new(),
     readability_clear: None,
     ring_geometry: None,
+    macrocycle_geometry: None,
   };
   let connected: BTreeSet<_> = edges.iter().map(|(_, [a, b])| ((*a).min(*b), (*a).max(*b))).collect();
   let mut atom_pairs = (0, 0);
@@ -169,6 +170,7 @@ pub fn measure(graph: &MolecularGraph, coordinates: &Layout2d) -> Result<Metrics
     component_extent(graph, points, scale)?,
   );
   crate::ring_geometry::measure(graph, points, scale, perspective, &mut result)?;
+  crate::macrocycle_angles::measure(graph, coordinates, perspective, &mut result)?;
   ensure!(
     result
       .measurements

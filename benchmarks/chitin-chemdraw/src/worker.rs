@@ -49,6 +49,9 @@ pub struct Record {
   /// Classified drawing failure; absent in historical records or other failures.
   #[serde(default)]
   pub stereo_failure: Option<String>,
+  /// Required coupled closure was used; not a claim of readability or correctness.
+  #[serde(default)]
+  pub constraint_closure: Option<bool>,
 }
 
 /// Line-framed worker protocol; a stage marker survives timeout or process death.
@@ -75,6 +78,7 @@ impl Record {
       bond_count: None,
       features: None,
       stereo_failure: None,
+      constraint_closure: None,
     }
   }
 
@@ -157,6 +161,11 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
     ..Default::default()
   };
   let coordinates = record.timed("layout", || Ok(layout::generate(&graph, &options)?))?;
+  record.constraint_closure = Some(
+    coordinates
+      .diagnostics()
+      .contains(&layout::LayoutDiagnostic::ConstraintClosure),
+  );
   let (coordinates, drawing) = if request.label_feedback {
     let result = record.timed("depict_feedback", || {
       Ok(chitin_chemdraw::pipeline::finish(
@@ -174,6 +183,12 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
     (coordinates, drawing)
   };
   let document = record.timed("svg", || Ok(svg::export(&drawing, &SvgOptions::default())?))?;
+  record.constraint_closure = Some(
+    record.constraint_closure == Some(true)
+      || coordinates
+        .diagnostics()
+        .contains(&layout::LayoutDiagnostic::ConstraintClosure),
+  );
   record.svg_bytes = Some(document.len());
   if let Some(path) = &request.svg_path {
     // Artifacts are outside export timings; create_new prevents accidental overwrite.
@@ -186,6 +201,27 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
   record.metrics = Some(record.timed("quality", || {
     let mut result = metrics::measure(&graph, &coordinates)?;
     scene_quality::measure(&graph, &drawing, &mut result)?;
+    if let Some(geometry) = result.macrocycle_geometry.as_mut().filter(|g| !g.samples.is_empty())
+      && let Some(bounds) = drawing.bounds()
+    {
+      let length = DepictOptions::default().bond_length;
+      let padding = SvgOptions::default().padding;
+      geometry.scene = Some(crate::macrocycle_angles::SceneFrame {
+        positions: graph
+          .atoms()
+          .map(|(id, _)| {
+            let p = coordinates.positions()[&id];
+            [p.x * length, -p.y * length]
+          })
+          .collect(),
+        view_box: [
+          bounds.min().x - padding,
+          bounds.min().y - padding,
+          bounds.width().max(1.) + 2. * padding,
+          bounds.height().max(1.) + 2. * padding,
+        ],
+      });
+    }
     Ok(result)
   })?);
   Ok(())
@@ -194,6 +230,27 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn closure_provenance_should_round_trip_without_breaking_historical_records() -> Result<()> {
+    let mut record = Record::pending(Case {
+      row: 1,
+      id: "fixture".into(),
+      smiles: "CC".into(),
+    });
+    record.constraint_closure = Some(true);
+    let mut encoded = serde_json::to_value(&record)?;
+    assert_eq!(
+      serde_json::from_value::<Record>(encoded.clone())?.constraint_closure,
+      Some(true)
+    );
+    encoded
+      .as_object_mut()
+      .context("record must be an object")?
+      .remove("constraint_closure");
+    assert_eq!(serde_json::from_value::<Record>(encoded)?.constraint_closure, None);
+    Ok(())
+  }
 
   #[test]
   fn transparent_pipeline_errors_should_retain_stereo_failure_codes() -> Result<()> {

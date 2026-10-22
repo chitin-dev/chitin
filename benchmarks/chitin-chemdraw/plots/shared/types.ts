@@ -13,6 +13,39 @@ export interface Features {
   tetrahedral_centers: number;
   double_bond_descriptors: number;
 }
+export type CenterClass = "path" | "junction" | "linear" | "small_ring";
+export interface TurnSample {
+  atoms: [number, number, number, number];
+  turns: [number, number];
+  classes: [CenterClass, CenterClass];
+  cycle_size: number;
+  block_rank: number;
+}
+export interface SceneFrame {
+  positions: [number, number][];
+  view_box: [number, number, number, number];
+}
+export interface MacrocycleGeometry {
+  samples: TurnSample[];
+  selected_large_cycles: number;
+  excluded_blocks: number;
+  unique_angles: number;
+  valid_angles: number;
+  scene: SceneFrame | null;
+}
+/** Compact chart samples omit scene coordinates, SMILES and the full metric tree. */
+export interface TurnPoint {
+  row: number;
+  sample: number;
+  turns: [number, number];
+  classes: [CenterClass, CenterClass];
+  cycle_size: number;
+  rank: number;
+}
+export interface TurnSelection {
+  row: number;
+  sample: number;
+}
 export interface CaseRecord {
   case: { row: number; id: string; smiles: string };
   status: string;
@@ -38,6 +71,7 @@ export interface CaseRecord {
         cavity_converged: boolean;
       }[];
     };
+    macrocycle_geometry?: MacrocycleGeometry;
   } | null;
   timings_ms: Record<string, number>;
 }
@@ -88,6 +122,8 @@ export interface PlotData {
   outcomes: Record<string, number>;
   completed: number;
   clear: number;
+  /** Loaded by the data worker, never bundled into the ordinary server summary. */
+  turns?: TurnPoint[];
 }
 export interface RenderResult {
   url: string;

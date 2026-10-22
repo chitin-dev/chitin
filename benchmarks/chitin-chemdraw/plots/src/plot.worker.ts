@@ -10,6 +10,14 @@ self.onmessage = async (event: MessageEvent<{ id: number; run: string; revision:
     const response = await fetch(`/api/runs/${encodeURIComponent(event.data.run)}/data`, { signal: controller.signal });
     if (!response.ok) throw new Error((await response.json()).error ?? "Dataset load failed");
     const data = await response.json();
+    if (data.run.protocol === "diagram-quality-v3") {
+      const turns = await fetch(`/api/runs/${encodeURIComponent(event.data.run)}/turns`, { signal: controller.signal });
+      if (!turns.ok) throw new Error("Large-cycle turn data could not be loaded");
+      const payload = await turns.json();
+      if (payload.revision !== data.revision)
+        throw new Error("Run advanced while loading turn data; awaiting the next checkpoint.");
+      data.turns = payload.points;
+    }
     const derived = derive(data);
     self.postMessage({ id, data, derived });
   } catch (error) {

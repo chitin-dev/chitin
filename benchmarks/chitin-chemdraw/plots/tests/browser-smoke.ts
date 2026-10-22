@@ -46,7 +46,7 @@ try {
   const state = await until(
     "return document.querySelector('canvas') && !document.querySelector('.loading-line') && {panels:document.querySelectorAll('.plot-panel').length, text:document.querySelector('.run-context')?.textContent}",
   );
-  assert.equal(state.panels, 7);
+  assert.equal(state.panels, 8);
   assert.equal(await execute("return document.querySelectorAll('.inspector img').length"), 0);
   console.log("Initial charts ready:", state);
   await mkdir(cacheRoot, { recursive: true });
@@ -127,7 +127,7 @@ try {
   await until("const img=document.querySelector('.inspector img');return img?.complete && img.naturalWidth > 0");
   const points = await execute("return document.querySelector('.point-list-heading')?.textContent");
   console.log("Point browser:", points);
-  if (plot.run.protocol === "diagram-quality-v2") {
+  if (["diagram-quality-v2", "diagram-quality-v3"].includes(plot.run.protocol ?? "")) {
     const target =
       plot.points.find((point) => point.id === "CNP0551778.1") ?? plot.points.find((point) => point.cavity != null);
     assert.ok(target, "A measured ring fixture is required");
@@ -155,7 +155,7 @@ try {
     assert.ok(await execute("return document.querySelectorAll('.ring-face').length > 0"));
     await writeFile(join(cacheRoot, "ring-metrics.png"), Buffer.from(await command(`${root}/screenshot`), "base64"));
   } else {
-    assert.equal(await execute("return document.querySelectorAll('.metric-empty').length"), 3);
+    assert.equal(await execute("return document.querySelectorAll('.metric-empty').length"), 4);
     console.log("Legacy run: all three new metrics explicitly unavailable");
   }
   const screenshot = await command(`${root}/screenshot`);

@@ -1,11 +1,19 @@
 import { batch, createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { GROUP_COLORS, GROUP_LABELS, rankGroup, type PlotData, type RunInfo } from "../shared/types";
+import {
+  GROUP_COLORS,
+  GROUP_LABELS,
+  rankGroup,
+  type PlotData,
+  type RunInfo,
+  type TurnSelection,
+} from "../shared/types";
 import type { Derived } from "./lib/derive";
 import { Button } from "./components/ui/button";
 import { SelectField } from "./components/ui/select";
 import { Prevalence, LengthChart, AngleChart } from "./components/charts";
 import { InteractiveScatter } from "./components/interactive-scatter";
 import { Inspector } from "./components/inspector";
+import { TurnMap } from "./components/turn-map";
 import type { BenchmarkJob } from "../server/benchmark";
 
 function Panel(props: { letter: string; title: string; subtitle: string; children: JSX.Element; class?: string }) {
@@ -37,6 +45,11 @@ export default function App() {
   const [error, setError] = createSignal("");
   const [groups, setGroups] = createSignal([true, true, true, true]);
   const [selected, setSelected] = createSignal<number | null>(null);
+  const [turnSelection, setTurnSelection] = createSignal<TurnSelection | null>(null);
+  function selectMolecule(row: number) {
+    setTurnSelection(null);
+    setSelected(row);
+  }
   const [expanded, setExpanded] = createSignal(false);
   let worker: Worker | undefined;
   const [workerReady, setWorkerReady] = createSignal(false);
@@ -66,6 +79,7 @@ export default function App() {
     batch(() => {
       setRunId(run.id);
       setSelected(null);
+      setTurnSelection(null);
       setData();
       setDerived();
     });
@@ -174,6 +188,7 @@ export default function App() {
                 value={selectedRun()}
                 onChange={selectRun}
                 text={(run) => `${run.id} · ${run.cases.toLocaleString()}`}
+                optionKey={(run) => run.id}
               />
               <label class="field-label">
                 <input
@@ -241,7 +256,7 @@ export default function App() {
                 <span class="badge">{selectedRun()?.protocol}</span>
               </div>
               <div class="legend">
-                <span>Maximum block rank · B–G</span>
+                <span>Molecule maximum block rank · B–H</span>
                 <For each={GROUP_LABELS}>
                   {(label, index) => (
                     <button
@@ -283,7 +298,7 @@ export default function App() {
                     points={points()}
                     groups={groups()}
                     selected={selected()}
-                    onSelect={setSelected}
+                    onSelect={selectMolecule}
                   />
                 </Panel>
                 <Panel
@@ -310,7 +325,7 @@ export default function App() {
                     points={points()}
                     groups={groups()}
                     selected={selected()}
-                    onSelect={setSelected}
+                    onSelect={selectMolecule}
                     historical={selectedRun()?.protocol === "diagram-quality-v1"}
                   />
                   <p class="chart-note">
@@ -328,7 +343,7 @@ export default function App() {
                     points={points()}
                     groups={groups()}
                     selected={selected()}
-                    onSelect={setSelected}
+                    onSelect={selectMolecule}
                     historical={selectedRun()?.protocol === "diagram-quality-v1"}
                   />
                   <p class="chart-note">
@@ -346,12 +361,35 @@ export default function App() {
                     points={points()}
                     groups={groups()}
                     selected={selected()}
-                    onSelect={setSelected}
+                    onSelect={selectMolecule}
                     historical={selectedRun()?.protocol === "diagram-quality-v1"}
                   />
                   <p class="chart-note">
                     Salt packing does not inflate component areas. Smaller is not always better: compactness must not
                     introduce new collisions.
+                  </p>
+                </Panel>
+                <Panel
+                  letter="H"
+                  title="Large-cycle adjacent-turn map"
+                  subtitle="Topology-defined four-atom paths · signed 2D turns, not molecular torsions"
+                  class="turn-panel"
+                >
+                  <TurnMap
+                    points={data()!.turns ?? []}
+                    molecules={points()}
+                    groups={groups()}
+                    historical={selectedRun()?.protocol !== "diagram-quality-v3"}
+                    selected={turnSelection()}
+                    onSelect={(selection) => {
+                      setSelected(selection.row);
+                      setTurnSelection(selection);
+                    }}
+                  />
+                  <p class="chart-note">
+                    Paths are deduplicated across a short-first independent cycle basis, not a unique chemical ring set.
+                    Junctions, linear centers and small-ring-constrained paths have separate filters. Reflections invert
+                    both signs; no universal allowed regions are asserted.
                   </p>
                 </Panel>
               </div>
@@ -364,7 +402,16 @@ export default function App() {
           </Show>
         </main>
         <Show when={selected() !== null && runId()}>
-          <Inspector run={runId()} row={selected()!} sourceVersion={source()} onClose={() => setSelected(null)} />
+          <Inspector
+            run={runId()}
+            row={selected()!}
+            sourceVersion={source()}
+            turnSample={turnSelection()?.row === selected() ? turnSelection()?.sample : undefined}
+            onClose={() => {
+              setSelected(null);
+              setTurnSelection(null);
+            }}
+          />
         </Show>
       </div>
     </>

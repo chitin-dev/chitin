@@ -72,6 +72,8 @@ impl Aggregate {
 struct Cohort {
   selected: usize,
   generated: usize,
+  constraint_closure: usize,
+  constraint_closure_unknown: usize,
   evaluated: usize,
   clear: usize,
   readability_assessed: usize,
@@ -83,6 +85,8 @@ impl Cohort {
   fn add(&mut self, record: &Record) {
     self.selected += 1;
     self.generated += usize::from(record.svg_bytes.is_some());
+    self.constraint_closure += usize::from(record.constraint_closure == Some(true));
+    self.constraint_closure_unknown += usize::from(record.constraint_closure.is_none());
     if let Some(metrics) = &record.metrics {
       self.evaluated += 1;
       self.clear += usize::from(metrics.readability_clear == Some(true));
@@ -96,6 +100,8 @@ impl Cohort {
   /// Neither end-to-end screening yield nor conditional yield is chemical accuracy.
   fn json(&self) -> Value {
     json!({"selected_cases": self.selected, "generated_cases": self.generated, "evaluated_cases": self.evaluated,
+      "constraint_closure_cases": self.constraint_closure,
+      "constraint_closure_unavailable_cases": self.constraint_closure_unknown,
       "evaluation_coverage": ratio(self.evaluated, self.selected), "readability_clear_cases": self.clear,
       "readability_assessed_cases": self.readability_assessed,
       "readability_flagged_cases": self.readability_assessed - self.clear,

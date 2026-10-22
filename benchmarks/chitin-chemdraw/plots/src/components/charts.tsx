@@ -11,6 +11,8 @@ const NAMES: Record<string, string> = {
   label_bond_overlap: "Label–bond contact",
   label_label_overlap: "Label–label overlap",
   relative_bond_length_rmse: "Bond-length deviation",
+  macrocycle_angle_deviation_rmse_deg: "Large-cycle angle deviation",
+  macrocycle_near_linear_fraction: "Large-cycle near-straight paths",
 };
 export function Prevalence(props: { data: PlotData }) {
   const rows = createMemo(() =>
@@ -22,11 +24,12 @@ export function Prevalence(props: { data: PlotData }) {
     }),
   );
   const maximum = createMemo(() => Math.max(15, ...rows().map((row) => row.rate * 1.15)));
+  const bottom = () => Math.max(310, 25 + (rows().length - 1) * 42 + 22);
   const [hover, setHover] = createSignal<string>();
   return (
     <>
       <svg
-        viewBox="0 0 660 365"
+        viewBox={`0 0 660 ${bottom() + 55}`}
         class="data-svg"
         role="img"
         aria-label="A. Quality-flag prevalence with applicable denominators"
@@ -34,8 +37,8 @@ export function Prevalence(props: { data: PlotData }) {
         <For each={[0, 0.25, 0.5, 0.75, 1]}>
           {(fraction) => (
             <g>
-              <line x1={260 + fraction * 320} x2={260 + fraction * 320} y1="20" y2="310" class="grid-line" />
-              <text x={260 + fraction * 320} y="333" text-anchor="middle" class="axis-text">
+              <line x1={260 + fraction * 320} x2={260 + fraction * 320} y1="20" y2={bottom()} class="grid-line" />
+              <text x={260 + fraction * 320} y={bottom() + 23} text-anchor="middle" class="axis-text">
                 {(maximum() * fraction).toFixed(1)}%
               </text>
             </g>
@@ -75,7 +78,7 @@ export function Prevalence(props: { data: PlotData }) {
             </g>
           )}
         </For>
-        <text x="420" y="359" text-anchor="middle" class="axis-title">
+        <text x="420" y={bottom() + 49} text-anchor="middle" class="axis-title">
           Applicable diagrams with ≥1 flagged object (%)
         </text>
       </svg>

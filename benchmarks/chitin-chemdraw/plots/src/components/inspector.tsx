@@ -3,9 +3,16 @@ import { Dialog } from "@kobalte/core/dialog";
 import type { CaseRecord, RenderResult } from "../../shared/types";
 import { Button } from "./ui/button";
 import { SelectField } from "./ui/select";
+import { MoleculePreview } from "./molecule-preview";
 
 /** Selection, metric provenance and image loading have independent lifetimes. */
-export function Inspector(props: { run: string; row: number; sourceVersion: string; onClose: () => void }) {
+export function Inspector(props: {
+  run: string;
+  row: number;
+  sourceVersion: string;
+  onClose: () => void;
+  turnSample?: number;
+}) {
   const [mode, setMode] = createSignal<"snapshot" | "current">("snapshot");
   const [zoom, setZoom] = createSignal(1);
   const [visibleFaces, setVisibleFaces] = createSignal(6);
@@ -49,6 +56,11 @@ export function Inspector(props: { run: string; row: number; sourceVersion: stri
   // Resource errors belong to the local retry UI, not the root Solid error boundary.
   const record = () => (recordState.error ? undefined : recordState());
   const image = () => (imageState.error ? undefined : imageState());
+  const selectedPath = () =>
+    !recordState.loading && record()?.case.row === props.row && props.turnSample !== undefined
+      ? record()?.metrics?.macrocycle_geometry?.samples[props.turnSample]
+      : undefined;
+  const historicalFrame = () => (mode() === "snapshot" ? record()?.metrics?.macrocycle_geometry?.scene : undefined);
   onCleanup(() => {
     recordRequest?.abort();
     renderRequest?.abort();
@@ -57,12 +69,12 @@ export function Inspector(props: { run: string; row: number; sourceVersion: stri
     <Show when={!imageState.loading && !imageState.error && image()}>
       {(result) => (
         <div class="molecule-scroll">
-          <img
-            src={result().url}
+          <MoleculePreview
+            url={result().url}
             alt={`Chemical drawing of source row ${props.row}`}
-            loading="lazy"
-            decoding="async"
-            style={{ width: `${zoom() * 100}%`, "max-width": "none" }}
+            zoom={zoom()}
+            frame={historicalFrame()}
+            atoms={selectedPath()?.atoms}
           />
         </div>
       )}
@@ -154,7 +166,13 @@ export function Inspector(props: { run: string; row: number; sourceVersion: stri
                     ? "Historical drawing; exact benchmark renderer."
                     : "Current algorithm preview; historical scores are unchanged."}
                 </Dialog.Description>
-                <img src={image()?.url} alt="Expanded chemical structure" class="expanded-molecule" />
+                <MoleculePreview
+                  url={image()!.url}
+                  alt="Expanded chemical structure"
+                  class="expanded-molecule"
+                  frame={historicalFrame()}
+                  atoms={selectedPath()?.atoms}
+                />
               </Dialog.Content>
             </Dialog.Portal>
           </Dialog>
@@ -168,6 +186,37 @@ export function Inspector(props: { run: string; row: number; sourceVersion: stri
       <Show when={!recordState.loading && record()}>
         {(entry) => (
           <>
+            <Show when={selectedPath()}>
+              {(path) => (
+                <section class="ring-face" aria-label="Selected large-cycle path">
+                  <strong>Selected path · atoms {path().atoms.join(" → ")}</strong>
+                  <span>
+                    Signed turns{" "}
+                    {path()
+                      .turns.map((t) => t.toFixed(2) + "°")
+                      .join(" / ")}
+                  </span>
+                  <span>
+                    {path().classes.join(" / ")} · selected cycle {path().cycle_size} atoms · block rank{" "}
+                    {path().block_rank}
+                  </span>
+                  <small>
+                    {mode() === "snapshot"
+                      ? "Orange overlay marks historical source centers; labels are zero-based atom ordinals."
+                      : "Historical path statistics; overlay disabled on current-algorithm previews."}
+                  </small>
+                </section>
+              )}
+            </Show>
+            <Show when={entry().metrics?.macrocycle_geometry}>
+              {(geometry) => (
+                <p class="chart-note">
+                  Large-cycle coverage: {geometry().valid_angles} / {geometry().unique_angles} unique local angles.
+                  Selected large basis cycles: {geometry().selected_large_cycles}. Discovery/sample-excluded blocks:{" "}
+                  {geometry().excluded_blocks}.
+                </p>
+              )}
+            </Show>
             <div class="molecule-facts">
               <span>{entry().features?.atoms ?? "—"} atoms</span>
               <span>{entry().features?.bonds ?? "—"} bonds</span>

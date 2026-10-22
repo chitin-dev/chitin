@@ -1,5 +1,26 @@
 @import "tailwindcss";
 
+.turn-panel {
+  grid-column: 1 / -1;
+}
+.turn-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+.turn-controls > * {
+  min-width: 180px;
+}
+.turn-canvas-host {
+  width: 100%;
+  max-width: 850px;
+  margin-inline: auto;
+}
+.turn-map .point-search {
+  margin-top: 12px;
+}
+
 .metric-empty {
   padding: 24px 4px;
   min-height: 150px;

@@ -5,9 +5,11 @@
 //! reports belong under benchmarks/data and benchmarks/results, both ignored by Git.
 
 mod dataset;
+mod macrocycle_angles;
 mod metrics;
 mod quality;
 mod report;
+mod ring_cycles;
 mod ring_geometry;
 mod scene_quality;
 mod worker;

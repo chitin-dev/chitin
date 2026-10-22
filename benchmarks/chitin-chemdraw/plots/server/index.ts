@@ -125,14 +125,16 @@ const server = createServer(async (request, response) => {
           "image/svg+xml",
         );
       }
-      if (segments[3] === "data") {
-        const etag = `"${corpus.data.revision}"`;
+      if (segments[3] === "data" || segments[3] === "turns") {
+        const etag = `"${segments[3]}-${corpus.data.revision}"`;
         if (request.headers["if-none-match"] === etag) {
           response.writeHead(304);
           response.end();
           return;
         }
-        const content = JSON.stringify(corpus.data);
+        const content = JSON.stringify(
+          segments[3] === "turns" ? { revision: corpus.data.revision, points: corpus.turns } : corpus.data,
+        );
         response.setHeader("Content-Type", "application/json");
         response.setHeader("Cache-Control", "no-cache");
         response.setHeader("ETag", etag);

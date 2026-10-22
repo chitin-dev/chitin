@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Bump whenever metric domains, formulas, thresholds or aggregation change.
-pub const VERSION: &str = "diagram-quality-v2";
+pub const VERSION: &str = "diagram-quality-v3";
 /// Embedded normative definitions; its checksum binds reports to this document.
 pub const SPECIFICATION: &str = include_str!("../QUALITY_SPEC.md");
 
@@ -131,6 +131,9 @@ pub struct Metrics {
   /// Auditable bounded-face contours; absent in historical v1 records.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub ring_geometry: Option<crate::ring_geometry::RingGeometry>,
+  /// Source-defined large-cycle turns; absent in historical v1/v2 records.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub macrocycle_geometry: Option<crate::macrocycle_angles::MacrocycleGeometry>,
 }
 
 /// Metric keys making up the explicitly limited basic readability screen.

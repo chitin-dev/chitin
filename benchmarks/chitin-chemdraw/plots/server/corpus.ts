@@ -2,7 +2,7 @@
 import { createReadStream } from "node:fs";
 import { open, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { CaseRecord, Manifest, PlotData, PlotPoint, RunInfo } from "../shared/types";
+import type { CaseRecord, Manifest, PlotData, PlotPoint, RunInfo, TurnPoint } from "../shared/types";
 import { resultsRoot, runDirectory } from "./paths";
 
 interface Offset {
@@ -14,6 +14,7 @@ export interface Corpus {
   offsets: Map<number, Offset>;
   manifest: Manifest;
   directory: string;
+  turns: TurnPoint[];
 }
 const cache = new Map<string, Promise<Corpus>>();
 
@@ -32,7 +33,8 @@ export async function listRuns(): Promise<RunInfo[]> {
             stat(join(directory, "summary.json")),
             stat(join(directory, "cases.jsonl")),
           ]);
-          if (!["diagram-quality-v1", "diagram-quality-v2"].includes(summary.quality_version)) return null;
+          if (!["diagram-quality-v1", "diagram-quality-v2", "diagram-quality-v3"].includes(summary.quality_version))
+            return null;
           return {
             id: entry.name,
             updated: metadata.mtimeMs,
@@ -98,6 +100,7 @@ async function indexRun(run: RunInfo): Promise<Corpus> {
   const metadata = await stat(path);
   const offsets = new Map<number, Offset>();
   const data: PlotData = { run, revision: run.revision, points: [], metrics: {}, outcomes: {}, completed: 0, clear: 0 };
+  const turns: TurnPoint[] = [];
   for await (const { offset, bytes } of committedLines(path, metadata.size)) {
     const record: CaseRecord = JSON.parse(bytes.toString("utf8"));
     if (!Number.isSafeInteger(record.case.row) || offsets.has(record.case.row))
@@ -112,6 +115,7 @@ async function indexRun(run: RunInfo): Promise<Corpus> {
     const observations = record.metrics.measurements;
     const point = compactPoint(record);
     if (point) data.points.push(point);
+    turns.push(...compactTurns(record));
     for (const [key, observation] of Object.entries(observations)) {
       const metric = (data.metrics[key] ??= {
         measured_cases: 0,
@@ -129,7 +133,26 @@ async function indexRun(run: RunInfo): Promise<Corpus> {
     }
   }
   data.run = { ...run, cases: offsets.size, evaluated: data.completed };
-  return { data, offsets, manifest, directory };
+  return { data, offsets, manifest, directory, turns };
+}
+
+/** Retain exact per-record sample indices so picking resolves the historical path. */
+export function compactTurns(record: CaseRecord): TurnPoint[] {
+  if (record.status !== "success" || record.metrics?.profile !== "planar") return [];
+  return (record.metrics.macrocycle_geometry?.samples ?? []).flatMap((point, sample) =>
+    point.turns.every((value) => Number.isFinite(value) && Math.abs(value) <= 180)
+      ? [
+          {
+            row: record.case.row,
+            sample,
+            turns: point.turns,
+            classes: point.classes,
+            cycle_size: point.cycle_size,
+            rank: point.block_rank,
+          },
+        ]
+      : [],
+  );
 }
 
 /** Historical records keep absent new measurements null, not fabricated zeroes. */
