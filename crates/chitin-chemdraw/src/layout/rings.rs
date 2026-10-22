@@ -6,7 +6,10 @@
 
 use super::{BondCrossing, LayoutError as Error, placement::Topology};
 use crate::geometry::Point;
-use chitin_chem::{AtomId, MolecularGraph, perception::analyze_rings};
+use chitin_chem::{
+  AtomId, MolecularGraph,
+  perception::{RingBlock, analyze_rings},
+};
 use std::{
   cmp::Reverse,
   collections::BTreeMap,
@@ -22,6 +25,7 @@ mod general;
 mod geometry;
 mod macrocycles;
 mod projection;
+mod scaffold;
 use bridged::Bridged;
 use constraints::Constraints;
 
@@ -30,6 +34,15 @@ const LARGE_COMPONENT: usize = 150;
 
 /// Work kept outside optional pose searches for subsequent required placement.
 const PLACEMENT_RESERVE: usize = 120_000;
+
+/// Expanded cyclic candidates are admitted only after preferred placement fails.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum RingMode {
+  /// Preserve established successful ring-model selection.
+  Preferred,
+  /// Admit mixed ring systems that require mandatory coupled alkene closure.
+  Coupled,
+}
 
 /// Shared work allowance for ring discovery, assembly, and geometric trials.
 pub(super) struct Work(usize);
@@ -65,7 +78,7 @@ impl Work {
   ///
   /// # Errors
   /// Non-budget errors propagate after accounting for the consumed work.
-  fn optional<T>(
+  pub(super) fn optional<T>(
     &mut self,
     reserve: usize,
     search: impl FnOnce(&mut Self) -> Result<T, Error>,
@@ -93,6 +106,8 @@ impl Work {
 
 /// Geometry selected from topology, rather than forcing every block into polygons.
 enum Model {
+  /// Joint fragment-port embedding with explicit source-path expansion.
+  Scaffold(scaffold::Scaffold),
   /// Rigid islands and folded paths, seeded and closed as one complete block.
   General(general::General),
   /// Exact saturated cage core with a planar, unequal-length projection.
@@ -192,13 +207,25 @@ impl Rings {
     source: &MolecularGraph,
     topology: &Topology,
     work: &mut Work,
+    mode: RingMode,
   ) -> Result<Self, Error> {
     work.charge(graph.atom_count() + graph.bond_count())?;
     let report = analyze_rings(graph)?;
     let indices: BTreeMap<_, _> = topology.ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
     let mut systems = Vec::new();
     for block in report.blocks().iter().filter(|block| block.cycle_rank() > 0) {
-      let model = if let Some(cage) = cages::Cage::new(graph, block, &indices, work)? {
+      let scaffold = if mode == RingMode::Coupled {
+        work
+          .optional(PLACEMENT_RESERVE, |work| {
+            scaffold::Scaffold::new(graph, block, &indices, work)
+          })?
+          .flatten()
+      } else {
+        None
+      };
+      let model = if let Some(model) = scaffold {
+        Model::Scaffold(model)
+      } else if let Some(cage) = cages::Cage::new(graph, block, &indices, work)? {
         Model::Cage(cage)
       } else if let Some(bridge) = Bridged::new(graph, block, &indices, work)? {
         Model::Bridged(bridge)
@@ -206,29 +233,10 @@ impl Rings {
         projection::Projection::new(graph, block, &indices, child)
       })? {
         Model::Projected(projected)
-      } else if let Some(model) = general::General::new(graph, source, block, &indices, work)? {
+      } else if let Some(model) = general::General::new(graph, source, block, &indices, work, mode)? {
         Model::General(model)
       } else {
-        let constraints = Constraints::new(graph, block, &indices, work)?;
-        if constraints.faces.len() == 1 && constraints.faces[0].len() >= 9 {
-          Model::Macrocycle(macrocycles::Macrocycle::new(
-            graph,
-            &constraints.faces[0],
-            &topology.ids,
-            work,
-          )?)
-        } else if let Some(model) = fused_macrocycles::FusedMacrocycle::new(graph, &constraints, &topology.ids, work)? {
-          Model::FusedMacrocycle(model)
-        } else {
-          let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
-          for (i, face) in constraints.faces.iter().enumerate() {
-            work.charge(face.len())?;
-            for &node in face {
-              incidence.entry(node).or_default().push(i);
-            }
-          }
-          Model::Polygons { constraints, incidence }
-        }
+        conventional_model(graph, source, block, &indices, &topology.ids, work, mode)?
       };
       systems.push(System {
         model,
@@ -246,6 +254,7 @@ impl Rings {
     }
     systems.sort_by(|a, b| {
       let largest = |system: &System| match &system.model {
+        Model::Scaffold(model) => model.len(),
         Model::General(model) => model.len(),
         Model::Cage(model) => model.len(),
         Model::Polygons { constraints, .. } => constraints.faces.iter().map(Vec::len).max().unwrap_or(0),
@@ -308,6 +317,7 @@ impl Rings {
       .systems
       .iter()
       .map(|system| match &system.model {
+        Model::Scaffold(model) => model.variants(),
         Model::General(model) => model.variants(),
         Model::Projected(model) => model.variants(),
         Model::Macrocycle(_) => 12,
@@ -356,6 +366,7 @@ impl Rings {
   ) -> Result<Placement, Error> {
     let system = &self.systems[index];
     let constraints = match &system.model {
+      Model::Scaffold(model) => return model.embed(positions, variant).map(Placement::flat),
       Model::General(model) => {
         return model
           .embed(positions, work, system.source, system.rank, variant)
@@ -436,7 +447,94 @@ impl Rings {
   }
 }
 
+/// Keeps supported regular models ahead of the bounded shared-path fallback.
+///
+/// Incidence rejection or incompatible regular-face closure may select the
+/// fallback. Graph failures and budget exhaustion always propagate unchanged.
+fn conventional_model(
+  graph: &MolecularGraph,
+  source: &MolecularGraph,
+  block: &RingBlock,
+  indices: &BTreeMap<AtomId, usize>,
+  ids: &[AtomId],
+  work: &mut Work,
+  mode: RingMode,
+) -> Result<Model, Error> {
+  let constraints = match Constraints::new(graph, block, indices, work) {
+    Ok(constraints) => constraints,
+    Err(error @ Error::RingSystem { .. }) => {
+      return general::General::shared_paths(graph, source, block, indices, work, mode)?
+        .map(Model::General)
+        .ok_or(error);
+    }
+    Err(error) => return Err(error),
+  };
+  if constraints.faces.len() == 1 && constraints.faces[0].len() >= 9 {
+    Ok(Model::Macrocycle(macrocycles::Macrocycle::new(
+      graph,
+      &constraints.faces[0],
+      ids,
+      work,
+    )?))
+  } else if let Some(model) = fused_macrocycles::FusedMacrocycle::new(graph, &constraints, ids, work)? {
+    Ok(Model::FusedMacrocycle(model))
+  } else {
+    let mut incidence = BTreeMap::<usize, Vec<usize>>::new();
+    for (i, face) in constraints.faces.iter().enumerate() {
+      work.charge(face.len())?;
+      for &node in face {
+        incidence.entry(node).or_default().push(i);
+      }
+    }
+    let model = Model::Polygons { constraints, incidence };
+    if block.cycle_rank() < 3 {
+      return Ok(model);
+    }
+    // Validate the free block before attaching branches. A regular face model
+    // can have valid incidence yet incompatible geometric closure. This is a
+    // drawing limitation, not proof that the molecular graph is unsupported.
+    let system = System {
+      model,
+      atoms: block.atoms().iter().map(|id| indices[id]).collect(),
+      source: block.atoms()[0],
+      rank: block.cycle_rank(),
+    };
+    if system.regular_closes(ids.len(), work)? {
+      return Ok(system.model);
+    }
+    general::General::shared_paths(graph, source, block, indices, work, mode)?
+      .map(Model::General)
+      .ok_or_else(|| system.unsupported())
+  }
+}
+
 impl System {
+  /// Tests free regular-face closure without scoring or publishing coordinates.
+  ///
+  /// Only genuine geometric incompatibility enables the bounded fallback.
+  /// All attempts consume the same ring allowance; budget errors never trigger
+  /// a retry with a fresh allowance. Articulation anchors are added later.
+  fn regular_closes(&self, rows: usize, work: &mut Work) -> Result<bool, Error> {
+    let Model::Polygons { constraints, .. } = &self.model else {
+      return Err(Error::Invariant(self.source));
+    };
+    work.charge(rows)?;
+    let positions = vec![None; rows];
+    let root = constraints
+      .faces
+      .iter()
+      .enumerate()
+      .max_by_key(|(i, face)| (face.len(), Reverse(*i)))
+      .map(|(i, _)| i)
+      .ok_or(Error::Invariant(self.source))?;
+    for pose in poses(&constraints.faces[root], &positions, 0., work)? {
+      if self.assemble(root, pose, &positions, work)?.is_some() {
+        return Ok(true);
+      }
+    }
+    Ok(false)
+  }
+
   /// Rotates a newly placed ring about its single anchor to restore clearance.
   ///
   /// A ring with one already placed vertex is free to rotate around it: every

@@ -115,7 +115,17 @@ pub fn finish(
   layout_options: &LayoutOptions,
   depict_options: &DepictOptions,
 ) -> Result<RenderedMolecule, RenderError> {
-  let drawing = depict::depict(graph, &geometry, depict_options)?;
+  let (geometry, drawing) = match depict::depict(graph, &geometry, depict_options) {
+    Err(depict::DepictError::StereoAssignment {
+      reason: depict::StereoFailureReason::DegenerateProjection,
+      ..
+    }) if layout_options.fallback_budget > 0 => {
+      let candidate = layout::constrained_fallback(graph, layout_options)?;
+      let drawing = depict::depict(graph, &candidate, depict_options)?;
+      (candidate, drawing)
+    }
+    result => (geometry, result?),
+  };
   let before = contacts(graph, &drawing)?;
   let result = RenderedMolecule {
     layout: geometry,

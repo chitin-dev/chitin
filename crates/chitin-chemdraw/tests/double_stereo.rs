@@ -136,17 +136,22 @@ fn rotated_and_reflected_supplied_coordinates_should_preserve_reference_relation
 }
 
 #[test]
-fn incompatible_ring_configuration_should_not_tear_the_ring() -> TestResult {
+fn cyclic_opposite_sides_should_close_without_tearing_the_ring() -> TestResult {
   let graph = read_smiles("C/1=C\\CCCCCC1")?.into_graph();
-  let edge = graph
-    .double_bond_stereos()
-    .next()
-    .map(|(edge, _)| edge)
-    .ok_or("missing stereo")?;
-  assert_eq!(
-    layout::generate(&graph, &LayoutOptions::default()),
-    Err(LayoutError::DoubleBondStereo(edge))
-  );
+  let result = layout::generate(&graph, &LayoutOptions::default())?;
+  assert_relations(&graph, &result)?;
+  for (_, bond) in graph.bonds() {
+    let [a, b] = bond.atoms();
+    assert!(
+      (result
+        .position(a)
+        .ok_or("no a")?
+        .distance(result.position(b).ok_or("no b")?)
+        - 1.)
+        .abs()
+        < 1e-7
+    );
+  }
   Ok(())
 }
 

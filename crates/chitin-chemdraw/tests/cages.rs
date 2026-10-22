@@ -164,6 +164,7 @@ fn cage_search_should_respect_budgets_and_keep_unit_optimizer_contract() -> Test
         &graph,
         &LayoutOptions {
           ring_search_budget: 100,
+          fallback_budget: 0,
           ..Default::default()
         }
       ),

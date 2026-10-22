@@ -152,6 +152,7 @@ fn steroid_methyl_stereo_marks_should_render_on_distinct_substituent_bonds() -> 
               Ok(((p.x - origin.x) / length, (p.y - origin.y) / length))
             }
             StereoLigand::Hydrogen => Err("expected four explicit ligands"),
+            StereoLigand::LonePair => Err("expected four explicit ligands"),
           })
           .collect::<Result<_, _>>()?;
         let area = (others[1].0 - others[0].0) * (others[2].1 - others[0].1)

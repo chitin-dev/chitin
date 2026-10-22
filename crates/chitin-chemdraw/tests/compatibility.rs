@@ -63,7 +63,13 @@ fn unsupported_corpus_should_fail_at_the_declared_typed_boundary() -> TestResult
           parsed.graph(),
           read_smiles(&written)?.graph()
         )?);
-        match layout::generate(parsed.graph(), &layout::LayoutOptions::default()) {
+        match layout::generate(
+          parsed.graph(),
+          &layout::LayoutOptions {
+            fallback_budget: 0,
+            ..Default::default()
+          },
+        ) {
           Err(layout::LayoutError::DoubleBondStereo(_)) => "layout_stereo",
           Err(layout::LayoutError::RingSystem { .. }) => "layout_ring",
           Err(layout::LayoutError::Kekule(_)) => "layout_aromatic",

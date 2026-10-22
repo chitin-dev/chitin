@@ -2,10 +2,12 @@
 //!
 //! Short-cycle chords and explicit path ownership avoid assuming that faces
 //! share just one edge. Distance seeds place junctions before discrete folds
-//! search flexible paths. Every source edge participates in exact closure. This is a
+//! search flexible paths. Every source edge participates in closure; bounded
+//! single-bond exceptions are tried only if no exact pose closes. This is a
 //! drawing objective, not a force field, stereo inference, or energy estimate.
 
 use super::{Error, PLACEMENT_RESERVE, Point, Work, constraints::Constraints, folding::Plan};
+use crate::drawing_rules::{LengthLimit, LengthRules};
 use chitin_chem::{AtomId, BondOrder, MolecularGraph, perception::RingBlock};
 use std::{
   collections::{BTreeMap, BTreeSet, VecDeque},
@@ -18,13 +20,15 @@ pub(super) struct General {
   atoms: Vec<usize>,
   /// All source edges, using block-local rows.
   edges: Vec<[usize; 2]>,
+  /// Source-local exception bounds, aligned with `edges`, never moving targets.
+  lengths: Vec<LengthLimit>,
   /// Pairwise target distances and relative drawing weights.
   pairs: Vec<Vec<(f64, f64)>>,
   /// Complete shortest-path distances for deterministic spectral seeding.
   distances: Vec<Vec<f64>>,
   /// Largest selected cycle, used only for seed priority.
   largest: usize,
-  /// Complete unit-closed candidates, prepared once under the shared allowance.
+  /// Complete validated candidates, prepared once under the shared allowance.
   poses: Vec<Vec<Point>>,
   /// Number of leading poses produced by compact folding.
   folded: usize,
@@ -68,7 +72,7 @@ impl General {
   /// # Returns
   /// A whole-block drawing model for rank three or greater. Simple rings,
   /// known cages and small regular fused systems retain their existing paths.
-  /// Cyclic E/Z constraints remain with their dedicated supported models.
+  /// Cyclic E/Z constraints are checked and repaired on the complete placement.
   ///
   /// # Errors
   /// Source-reference errors and budget exhaustion propagate before placement.
@@ -78,6 +82,7 @@ impl General {
     block: &RingBlock,
     indices: &BTreeMap<AtomId, usize>,
     work: &mut Work,
+    mode: super::RingMode,
   ) -> Result<Option<Self>, Error> {
     if block.cycle_rank() < 3 {
       return Ok(None);
@@ -85,12 +90,62 @@ impl General {
     let cycles = Constraints::cycles(graph, block, indices, work)?;
     let largest = cycles.iter().map(Vec::len).max().unwrap_or(0);
     if largest < 8
-      || graph
-        .double_bond_stereos()
-        .any(|(_, stereo)| block.atoms().contains(&stereo.ends()[0]))
+      || (mode == super::RingMode::Preferred
+        && graph
+          .double_bond_stereos()
+          .any(|(_, s)| block.atoms().contains(&s.ends()[0])))
     {
       return Ok(None);
     }
+    Self::from_cycles(graph, source, block, indices, cycles, work).map(Some)
+  }
+
+  /// Supplies a small block after regular face incidence or geometric closure fails.
+  ///
+  /// # Parameters
+  /// - `graph`, `source`, `block`, `indices`: immutable topology and source flags.
+  /// - `work`: the same shared allowance used by the preferred embedding models.
+  ///
+  /// # Returns
+  /// Complete poses for blocks of at most 64 atoms, preferring unit closure.
+  /// Only eligible single bonds may use bounded drawing exceptions. This fallback
+  /// never displaces a supported polygon, bridge or cage model. Complete poses
+  /// must still pass the mandatory cyclic E/Z closure stage before publication.
+  ///
+  /// # Errors
+  /// Missing references, failed bounded closure or exhausted work propagate;
+  /// no partial pose or out-of-range edge is returned as a successful embedding.
+  pub(super) fn shared_paths(
+    graph: &MolecularGraph,
+    source: &MolecularGraph,
+    block: &RingBlock,
+    indices: &BTreeMap<AtomId, usize>,
+    work: &mut Work,
+    mode: super::RingMode,
+  ) -> Result<Option<Self>, Error> {
+    if block.cycle_rank() < 3
+      || block.atoms().len() > 64
+      || (mode == super::RingMode::Preferred
+        && graph
+          .double_bond_stereos()
+          .any(|(_, s)| block.atoms().contains(&s.ends()[0])))
+    {
+      return Ok(None);
+    }
+    let cycles = Constraints::cycles(graph, block, indices, work)?;
+    Self::from_cycles(graph, source, block, indices, cycles, work).map(Some)
+  }
+
+  /// Builds one bounded distance/closure model without assuming face incidence.
+  fn from_cycles(
+    graph: &MolecularGraph,
+    source: &MolecularGraph,
+    block: &RingBlock,
+    indices: &BTreeMap<AtomId, usize>,
+    cycles: Vec<Vec<usize>>,
+    work: &mut Work,
+  ) -> Result<Self, Error> {
+    let largest = cycles.iter().map(Vec::len).max().unwrap_or(0);
     let atoms: Vec<_> = block.atoms().iter().map(|id| indices[id]).collect();
     let local: BTreeMap<_, _> = atoms.iter().enumerate().map(|(i, &row)| (row, i)).collect();
     let n = atoms.len();
@@ -114,12 +169,16 @@ impl General {
     work.charge(n * n)?;
     let mut rows = vec![Vec::new(); n];
     let mut edges = Vec::new();
+    work.charge(source.atom_count() + source.bond_count())?;
+    let rules = LengthRules::new(source)?;
+    let mut lengths = Vec::new();
     for &id in block.bonds() {
       let edge = graph.bond(id).ok_or(chitin_chem::GraphError::MissingBond(id))?;
       let [a, b] = edge.atoms().map(|id| local[&indices[&id]]);
       rows[a].push(b);
       rows[b].push(a);
       edges.push([a, b]);
+      lengths.push(rules.limit(id, 1.));
     }
     let mut distances = vec![vec![f64::INFINITY; n]; n];
     for (start, distance) in distances.iter_mut().enumerate() {
@@ -204,6 +263,7 @@ impl General {
     let mut model = Self {
       atoms,
       edges,
+      lengths,
       pairs,
       distances,
       largest,
@@ -217,7 +277,7 @@ impl General {
       folding,
     };
     model.poses = model.candidates(work, block.atoms()[0], block.cycle_rank())?;
-    Ok(Some(model))
+    Ok(model)
   }
 
   /// Adds complete compact poses after all blocks have their mandatory seeds.
@@ -275,8 +335,8 @@ impl General {
   /// continues to report any unresolved crossing or crowding.
   ///
   /// # Errors
-  /// Multiple entry anchors, failed finite unit closure, or exhausted work are
-  /// explicit failures, never permission to return a partial or stretched ring.
+  /// Multiple entry anchors, failed bounded closure, or exhausted work are
+  /// explicit failures, never permission to return a partial ring.
   pub(super) fn embed(
     &self,
     old: &[Option<Point>],
@@ -342,11 +402,17 @@ impl General {
     )
   }
 
-  /// Builds and ranks finite, unit-closed seeds before external branches exist.
+  /// Prefers exact closure, then searches bounded exceptions only on total failure.
+  ///
+  /// Successful conventional poses are untouched. Failed exact trials retain
+  /// their stress seeds, not the collapsed end of an infeasible projection.
+  /// Exception candidates remain ordinary flat drawings: unresolved crossings
+  /// are reported, never assigned invented perspective order.
   fn candidates(&self, work: &mut Work, source: AtomId, rank: usize) -> Result<Vec<Vec<Point>>, Error> {
     let seed = self.seed(work)?;
     let n = seed.len();
     let mut candidates = Vec::new();
+    let mut deferred = Vec::new();
     for attempt in 0..if n > 32 { 4 } else { 8 } {
       let mut points: Vec<_> = seed
         .iter()
@@ -375,7 +441,9 @@ impl General {
         }
       }
       self.relax(&mut points, work)?;
+      let seed = points.clone();
       if !self.close(&mut points, work)? {
+        deferred.push(seed);
         continue;
       }
       let quality = work.measure(&points, &self.edges)?;
@@ -386,6 +454,21 @@ impl General {
         candidates.push((quality.cost + self.folding.turn_cost(&folded), folded));
       }
       candidates.push((actual, points));
+    }
+    if candidates.is_empty() {
+      for mut points in deferred {
+        if self.close_bounded(&mut points, work)? {
+          let quality = work.measure(&points, &self.edges)?;
+          // Deviation remains a cost even when a local exception is admissible.
+          // It must not disappear from ranking merely because closure succeeded.
+          let distortion = self
+            .edges
+            .iter()
+            .map(|&[a, b]| (points[a].distance(points[b]) - 1.).powi(2))
+            .sum::<f64>();
+          candidates.push((quality.cost + self.folding.turn_cost(&points) + distortion, points));
+        }
+      }
     }
     if candidates.is_empty() {
       return Err(Error::RingSystem {
@@ -722,6 +805,40 @@ impl General {
     }
     Ok(false)
   }
+
+  /// Projects only violated source-local bounds while preserving aromatic chords.
+  ///
+  /// All source edges are checked before admission. Modest unequal lengths may
+  /// resolve overconstrained geometry, but do not certify contact-free depiction.
+  /// Multiple/aromatic bonds remain exact and the shared work budget still applies.
+  fn close_bounded(&self, points: &mut [Point], work: &mut Work) -> Result<bool, Error> {
+    for _ in 0..800 {
+      work.charge((self.edges.len() + self.rigid_chords.len()) * 2)?;
+      for (&[a, b], &limit) in self.edges.iter().zip(&self.lengths) {
+        let length = points[a].distance(points[b]);
+        if !length.is_finite() || length < 1e-10 {
+          return Ok(false);
+        }
+        project(points, [a, b], limit.nearest(length));
+      }
+      for &(edge, target) in &self.rigid_chords {
+        project(points, edge, target);
+      }
+      if self
+        .edges
+        .iter()
+        .zip(&self.lengths)
+        .all(|(&[a, b], &limit)| limit.permits(points[a].distance(points[b])))
+        && self
+          .rigid_chords
+          .iter()
+          .all(|&([a, b], target)| (points[a].distance(points[b]) - target).abs() < 1e-10)
+      {
+        return Ok(true);
+      }
+    }
+    Ok(false)
+  }
 }
 
 /// Cancels shared cycle edges and accepts only one complete simple boundary.
@@ -792,8 +909,15 @@ mod tests {
       .iter()
       .find(|block| block.cycle_rank() >= 3)
       .ok_or("missing general block")?;
-    let model =
-      General::new(&graph, &source, block, &indices, &mut Work::new(4_000_000))?.ok_or("missing general model")?;
+    let model = General::new(
+      &graph,
+      &source,
+      block,
+      &indices,
+      &mut Work::new(4_000_000),
+      super::super::RingMode::Preferred,
+    )?
+    .ok_or("missing general model")?;
     let base = model.poses.first().ok_or("missing closed pose")?;
     let n = base.len();
     let rigid_pairs: usize = model

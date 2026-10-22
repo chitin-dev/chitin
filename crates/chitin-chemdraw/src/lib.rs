@@ -8,6 +8,11 @@
 //! [`layout::optimization`] refines complete unit coordinates with explicit pins
 //! and a finite work allowance; it is a drawing optimizer, not a force field.
 //!
+//! Chemical facts remain in the source graph. Layout models generate geometry;
+//! shared drawing rules bound local length exceptions without changing those
+//! facts. The pipeline independently checks geometry and rendered contacts, so
+//! a drawing exception is neither a stereo override nor a hidden overlap.
+//!
 //! # Examples
 //! ```
 //! use chitin_chem::io::smiles::read_smiles;
@@ -23,6 +28,7 @@
 #![deny(missing_docs)]
 
 mod chemical;
+mod drawing_rules;
 mod stereo_geometry;
 
 pub mod depict;

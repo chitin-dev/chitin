@@ -7,8 +7,4 @@ conflicting_ring	C/1=C/CCCCCC/1	read_syntax
 wildcard	*C	read_unsupported
 mapped_atom	[CH3:1]C	read_unsupported
 extended_stereo	[C@SP1](F)(Cl)(Br)I	read_unsupported
-trans_cyclic_seed	C/1=C\CCCCCC1	layout_stereo
-unmatched_polycycle	C1CC2C3CCC1C23	layout_ring
-unsaturated_adamantane_core	C1=C2CC3CC1CC(C2)C3	layout_ring
-symmetric_bridge_stereo_candidate_limit	C/1=C\C2CCC1CC2	layout_stereo
 aromatic_boron	b1ccccc1	layout_aromatic

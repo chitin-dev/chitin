@@ -406,10 +406,11 @@ pub(super) fn generate(
   graph: &MolecularGraph,
   source: &MolecularGraph,
   options: &LayoutOptions,
+  ring_work: &mut super::rings::Work,
+  mode: super::rings::RingMode,
 ) -> Result<Layout2d, Error> {
   let topology = Topology::new(graph)?;
-  let mut ring_work = super::rings::Work::new(options.ring_search_budget);
-  let rings = Rings::new(graph, source, &topology, &mut ring_work)?;
+  let rings = Rings::new(graph, source, &topology, ring_work, mode)?;
   let mut refinement_work = super::quality::Budget(options.refinement_budget);
   let mut optimization_work = super::quality::Budget(options.optimization.work_budget);
   let mut backbone_work = super::quality::Budget(options.backbone_budget);
@@ -426,11 +427,11 @@ pub(super) fn generate(
       if refinement_work.0 < 200_000 {
         break;
       }
-      let mut candidate = embed(graph, &topology, &rings, &mut ring_work, options, variant)?;
+      let mut candidate = embed(graph, &topology, &rings, ring_work, options, variant)?;
       // A conflicting compact pose must compete with all complete alternatives
       // before spending repair work. Otherwise the first speculative pose can
       // consume the entire shared allowance and starve the best-ranked one.
-      if complete_cost(graph, &candidate, &mut ring_work)?.1 {
+      if complete_cost(graph, &candidate, ring_work)?.1 {
         continue;
       }
       super::refinement::run(
@@ -453,19 +454,19 @@ pub(super) fn generate(
       }
     }
   }
-  let mut result = embed(graph, &topology, &rings, &mut ring_work, options, 0)?;
+  let mut result = embed(graph, &topology, &rings, ring_work, options, 0)?;
   // Rank complete molecules before spending the shared refinement allowance.
   // Ring-only scores cannot see collisions with the expanded substituents.
   let mut alternatives = Vec::new();
   if options.refinement_passes > 0 && rings.variants() > 1 {
-    let (cost, conflicts) = complete_cost(graph, &result, &mut ring_work)?;
+    let (cost, conflicts) = complete_cost(graph, &result, ring_work)?;
     // A clean initial pose needs no alternative enumeration. In particular,
     // long unsubstituted macrocycles must not pay for twelve identical scans.
     if conflicts {
       alternatives.push((cost, result));
       for variant in 1..rings.variants() {
-        let candidate = embed(graph, &topology, &rings, &mut ring_work, options, variant)?;
-        alternatives.push((complete_cost(graph, &candidate, &mut ring_work)?.0, candidate));
+        let candidate = embed(graph, &topology, &rings, ring_work, options, variant)?;
+        alternatives.push((complete_cost(graph, &candidate, ring_work)?.0, candidate));
       }
       alternatives.sort_by(|a, b| b.0.total_cmp(&a.0));
       result = alternatives.pop().ok_or(Error::CoordinateRange)?.1;
@@ -489,7 +490,7 @@ pub(super) fn generate(
       )
     })
   {
-    let mut cost = complete_cost(graph, &result, &mut ring_work)?.0;
+    let mut cost = complete_cost(graph, &result, ring_work)?.0;
     while let Some((_, mut candidate)) = alternatives.pop() {
       super::refinement::run(
         graph,
@@ -500,7 +501,7 @@ pub(super) fn generate(
         &mut backbone_work,
         attachment_policy,
       )?;
-      let candidate_cost = complete_cost(graph, &candidate, &mut ring_work)?.0;
+      let candidate_cost = complete_cost(graph, &candidate, ring_work)?.0;
       if candidate_cost + 1e-10 < cost {
         result = candidate;
         cost = candidate_cost;

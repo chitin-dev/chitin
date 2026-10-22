@@ -145,13 +145,19 @@ fn three_faces_meeting_at_one_atom_should_check_all_known_closure_anchors() -> T
 }
 
 #[test]
-fn incompatible_regular_polygon_closures_should_not_be_stretched() -> TestResult {
+fn incompatible_regular_polygon_closures_should_fall_back_without_losing_edges() -> TestResult {
   let graph = skeleton(&[vec![0, 1, 2, 3, 4], vec![1, 0, 5, 6, 7], vec![4, 0, 5, 8, 9]])?;
   let before = graph.clone();
-  assert!(matches!(
-    layout::generate(&graph, &LayoutOptions::default()),
-    Err(layout::LayoutError::RingSystem { .. })
-  ));
+  let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
+  assert_eq!(coordinates.positions().len(), graph.atom_count());
+  for (_, bond) in graph.bonds() {
+    let [a, b] = bond.atoms();
+    let length = coordinates
+      .position(a)
+      .ok_or("missing atom")?
+      .distance(coordinates.position(b).ok_or("missing atom")?);
+    assert!((0.9 - 1e-7..=1.2 + 1e-7).contains(&length), "{length}");
+  }
   assert_eq!(graph, before);
   Ok(())
 }
@@ -222,6 +228,7 @@ fn sparse_atom_handles_should_not_be_used_as_dense_cycle_indices() -> TestResult
 fn ring_work_budget_should_fail_explicitly_and_remain_shared_across_fragments() -> TestResult {
   let options = LayoutOptions {
     ring_search_budget: 1000,
+    fallback_budget: 0,
     ..LayoutOptions::default()
   };
   let single = read_smiles("C1CC1")?.into_graph();

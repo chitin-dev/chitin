@@ -21,11 +21,30 @@ use std::collections::BTreeSet;
 /// This stage always runs, including when quality refinement is disabled.
 ///
 /// # Errors
-/// Rejects work exhaustion, collinear reference geometry, or a cyclic mismatch;
-/// a ring is never torn apart to force an incompatible supplied configuration.
+/// Rejects work exhaustion or an unsolved coupled constraint system. Cyclic
+/// mismatches use transactional distance closure, never a torn-open ring.
 pub(super) fn enforce(graph: &MolecularGraph, layout: &mut Layout2d, mut budget: usize) -> Result<(), LayoutError> {
+  if graph.double_bond_stereos().next().is_none() {
+    return Ok(());
+  }
+  let initial = layout.clone();
+  match reflect(graph, layout, &mut budget) {
+    Err(LayoutError::DoubleBondStereo(id)) => {
+      *layout = initial;
+      if super::closure::repair(graph, layout, &mut budget)? {
+        Ok(())
+      } else {
+        Err(LayoutError::DoubleBondStereo(id))
+      }
+    }
+    result => result,
+  }
+}
+
+/// Keeps the exact rigid reflection path for ordinary acyclic constraints.
+fn reflect(graph: &MolecularGraph, layout: &mut Layout2d, budget: &mut usize) -> Result<(), LayoutError> {
   for (id, stereo) in graph.double_bond_stereos() {
-    budget = budget.checked_sub(1).ok_or(LayoutError::StereoBudgetExceeded)?;
+    *budget = budget.checked_sub(1).ok_or(LayoutError::StereoBudgetExceeded)?;
     let [a, b] = stereo.ends();
     let [ra, rb] = stereo.references();
     let points = [a, b, ra, rb].map(|atom| layout.positions[&atom]);
@@ -37,7 +56,7 @@ pub(super) fn enforce(graph: &MolecularGraph, layout: &mut Layout2d, mut budget:
     let mut pending = vec![b];
     while let Some(atom) = pending.pop() {
       let neighbors = graph.neighbors(atom)?;
-      budget = budget
+      *budget = budget
         .checked_sub(1 + neighbors.len())
         .ok_or(LayoutError::StereoBudgetExceeded)?;
       for (other, edge) in neighbors {
@@ -56,7 +75,7 @@ pub(super) fn enforce(graph: &MolecularGraph, layout: &mut Layout2d, mut budget:
     let length = origin.distance(end);
     let (ux, uy) = ((end.x - origin.x) / length, (end.y - origin.y) / length);
     for atom in side {
-      budget = budget.checked_sub(1).ok_or(LayoutError::StereoBudgetExceeded)?;
+      *budget = budget.checked_sub(1).ok_or(LayoutError::StereoBudgetExceeded)?;
       if atom == b {
         continue;
       }

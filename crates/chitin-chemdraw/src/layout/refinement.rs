@@ -802,7 +802,9 @@ pub(super) fn run(
   let mut projected_exhausted = false;
   let mut exhausted = false;
   let mut cursor = 0.;
-  layout.diagnostics.clear();
+  layout
+    .diagnostics
+    .retain(|diagnostic| matches!(diagnostic, LayoutDiagnostic::ConstraintClosure));
   for component in graph.connected_components() {
     let mut model = Model::new(graph, component, rings.bridges());
     model.restrict_hinges(&rings);

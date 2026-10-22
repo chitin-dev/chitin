@@ -159,14 +159,7 @@ fn fragments_should_be_packed_without_changing_internal_geometry() -> TestResult
 }
 
 #[test]
-fn unsupported_ring_blocks_and_unknown_orders_should_fail_explicitly_in_auto_layout() -> TestResult {
-  for source in ["C1=C2CC3CC1CC(C2)C3", "C1CC2C3CCC1C23"] {
-    let graph = read_smiles(source)?.into_graph();
-    assert!(matches!(
-      layout::generate(&graph, &LayoutOptions::default()),
-      Err(LayoutError::RingSystem { .. })
-    ));
-  }
+fn unknown_orders_should_fail_explicitly_in_auto_layout() -> TestResult {
   let mut graph = read_smiles("CC")?.into_graph();
   let edge = graph.bonds().next().map(|(id, _)| id).ok_or("no bond")?;
   for order in [BondOrder::Unknown, BondOrder::Aromatic] {
@@ -503,7 +496,9 @@ fn irreducible_local_crowding_should_remain_a_visible_diagnostic() -> TestResult
       layout::LayoutDiagnostic::CrossingBonds { a, b } => {
         assert!(graph.bond(*a).is_some() && graph.bond(*b).is_some());
       }
-      layout::LayoutDiagnostic::RefinementBudgetExhausted | layout::LayoutDiagnostic::OptimizationBudgetExhausted => {}
+      layout::LayoutDiagnostic::RefinementBudgetExhausted
+      | layout::LayoutDiagnostic::OptimizationBudgetExhausted
+      | layout::LayoutDiagnostic::ConstraintClosure => {}
     }
   }
   Ok(())

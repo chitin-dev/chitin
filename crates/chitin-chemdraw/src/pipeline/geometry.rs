@@ -1,11 +1,17 @@
 //! Immutable geometric admission rules, separate from contact ranking.
 //!
-//! A clearer scene is not eligible if it stretches a source bond, worsens a
-//! measured chain/small-ring angle, or changes a declared alkene relation.
+//! Bond-length conventions permit bounded local exceptions in complex ring
+//! blocks and at high-coordinate centers. Chemistry, measured chain/small-ring
+//! angles and declared alkene relations remain independently protected.
 
 use chitin_chem::{AtomId, BondOrder, DoubleBondRelation, Element, MolecularGraph, perception::analyze_rings};
 
-use crate::{depict::DepictError, geometry::Point, layout::Layout2d};
+use crate::{
+  depict::DepictError,
+  drawing_rules::{LengthLimit, LengthRules},
+  geometry::Point,
+  layout::Layout2d,
+};
 
 /// One angular error bound captured at stage entry, never a moving target.
 struct AngleLimit {
@@ -19,8 +25,8 @@ struct AngleLimit {
 
 /// Feasibility snapshot independent of the current contact-score champion.
 pub(super) struct GeometryGuard {
-  /// Every source bond keeps its own length, including coordination/projection.
-  bonds: Vec<([AtomId; 2], f64)>,
+  /// Source-local limits retain projected references without cumulative drift.
+  bonds: Vec<([AtomId; 2], LengthLimit)>,
   /// Local multiple-bond geometry and explicitly scored chain/ring angles.
   angles: Vec<AngleLimit>,
   /// Explicit relative sides, rechecked independently of coordinate reflection.
@@ -42,12 +48,13 @@ impl GeometryGuard {
   /// Missing source positions and inconsistent topology return typed errors.
   pub(super) fn new(graph: &MolecularGraph, baseline: &Layout2d) -> Result<Self, DepictError> {
     let topology = analyze_rings(graph)?;
+    let lengths = LengthRules::from_topology(graph, &topology)?;
     let point = |atom| baseline.position(atom).ok_or(DepictError::MissingPosition(atom));
     let bonds = graph
       .bonds()
-      .map(|(_, bond)| {
+      .map(|(id, bond)| {
         let atoms = bond.atoms();
-        Ok((atoms, point(atoms[0])?.distance(point(atoms[1])?)))
+        Ok((atoms, lengths.limit(id, point(atoms[0])?.distance(point(atoms[1])?))))
       })
       .collect::<Result<Vec<_>, DepictError>>()?;
     let mut angles = Vec::new();
@@ -122,15 +129,16 @@ impl GeometryGuard {
   }
 
   /// Tests a complete proposal against stage entry, before expensive re-depiction.
-  /// Lengths use relative numeric tolerance; angle errors use an absolute radian
-  /// tolerance. A false result rejects this trial, not the original molecule.
+  /// Length limits use source-local drawing exceptions and relative numeric
+  /// tolerance; angle errors use an absolute radian tolerance. A false result
+  /// rejects this trial, not the original molecule.
   pub(super) fn permits(&self, candidate: &Layout2d) -> bool {
     let points = candidate.positions();
     self
       .bonds
       .iter()
       .all(|(atoms, length)| match (points.get(&atoms[0]), points.get(&atoms[1])) {
-        (Some(a), Some(b)) => (a.distance(*b) - length).abs() <= 1e-7 * length.max(1.),
+        (Some(a), Some(b)) => length.permits(a.distance(*b)),
         _ => false,
       })
       && self.angles.iter().all(|constraint| {
@@ -170,7 +178,7 @@ mod tests {
 
   #[test]
   fn hydroxyl_clearance_should_offer_a_feasible_chain_angle_candidate() -> TestResult {
-    let graph=read_smiles("COC1=CC(C2=[O+]C3=CC(O)=CC(O)=C3C=C2O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O)=CC=C1O")?.into_graph();
+    let graph = read_smiles("COC1=CC(C2=[O+]C3=CC(O)=CC(O)=C3C=C2O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O)=CC=C1O")?.into_graph();
     let result = super::super::generate(
       &graph,
       &LayoutOptions::default(),
@@ -200,6 +208,44 @@ mod tests {
     assert!(guard.permits(&original));
     assert!(!guard.permits(&coordinates(&graph, &[(0., 0.), (1., 0.)])?));
     assert!(!guard.permits(&coordinates(&graph, &[(0., 0.), (2., 0.)])?));
+    Ok(())
+  }
+
+  #[test]
+  fn complex_ring_lengths_should_have_local_nonaccumulating_bounds() -> TestResult {
+    let graph = read_smiles("C1CC2C3CCC1C23")?.into_graph();
+    let baseline = layout::generate(&graph, &LayoutOptions::default())?;
+    let guard = GeometryGuard::new(&graph, &baseline)?;
+    let scaled = |factor: f64| {
+      Layout2d::from_positions(
+        baseline
+          .positions()
+          .iter()
+          .map(|(&id, p)| (id, Point::new(p.x * factor, p.y * factor)))
+          .collect(),
+      )
+    };
+    assert!(guard.permits(&scaled(1.1)?));
+    assert!(!guard.permits(&scaled(1.21)?));
+    assert!(guard.permits(&baseline));
+    Ok(())
+  }
+
+  #[test]
+  fn high_coordination_should_allow_only_bounded_length_changes() -> TestResult {
+    let graph = read_smiles("[Fe](O)(O)(O)(O)(O)O")?.into_graph();
+    let ids: Vec<_> = graph.atoms().map(|(id, _)| id).collect();
+    let mut points = std::collections::BTreeMap::from([(ids[0], Point::new(0., 0.))]);
+    for (i, &id) in ids[1..].iter().enumerate() {
+      let angle = i as f64 * std::f64::consts::TAU / 6.;
+      points.insert(id, Point::new(angle.cos(), angle.sin()));
+    }
+    let baseline = Layout2d::from_positions(points.clone())?;
+    let guard = GeometryGuard::new(&graph, &baseline)?;
+    points.insert(ids[1], Point::new(1.15, 0.));
+    assert!(guard.permits(&Layout2d::from_positions(points.clone())?));
+    points.insert(ids[1], Point::new(1.3, 0.));
+    assert!(!guard.permits(&Layout2d::from_positions(points)?));
     Ok(())
   }
 

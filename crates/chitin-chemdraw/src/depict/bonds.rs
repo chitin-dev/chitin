@@ -425,6 +425,23 @@ pub(super) fn draw(
         join(graph, points, a, b, direction, stroke, clearance)?;
       }
     }
+    // Acute projected ring corners can consume the entire inward auxiliary.
+    // Keep both double-bond strokes by using the centered representation;
+    // never erase the second stroke or reverse its endpoints to force a join.
+    if order == BondOrder::Double
+      && strokes
+        .iter()
+        .any(|stroke| stroke.trim.iter().sum::<f64>() >= length * 0.8)
+    {
+      strokes = [-0.5, 0.5]
+        .into_iter()
+        .map(|side| Stroke {
+          offset: side * options.bond_spacing,
+          trim: [0.; 2],
+          miter: false,
+        })
+        .collect();
+    }
     let mut interval = [f64::NEG_INFINITY, f64::INFINITY];
     for stroke in &strokes {
       let p = start.translated(normal.x * stroke.offset, normal.y * stroke.offset);

@@ -307,6 +307,7 @@ fn selective_h_mark_should_decode_to_source_winding_after_rotation_and_reflectio
             let point = match ligand {
               StereoLigand::Atom(atom) => coordinates.position(*atom).ok_or("missing ligand")?,
               StereoLigand::Hydrogen => hydrogen,
+              StereoLigand::LonePair => return Err("unexpected lone pair".into()),
             };
             let length = origin.distance(point);
             vectors[index] = [

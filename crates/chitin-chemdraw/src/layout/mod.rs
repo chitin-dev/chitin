@@ -1,5 +1,7 @@
 //! Detached normalized coordinates: x-right, y-up, with nominal unit bonds.
 //! Symmetric bridges and supported cage cores allow unequal projected bond lengths.
+//! Complex ring fallback may use bounded local single-bond length exceptions
+//! when exact unit closure fails; source connectivity and stereo remain unchanged.
 //!
 //! Domain ring blocks constrain rigid polygon seeds; branch expansion is followed
 //! by bounded overlap refinement. Layout constraints never assign aromaticity.
@@ -10,6 +12,7 @@ use std::collections::BTreeMap;
 
 mod alkenes;
 mod angles;
+mod closure;
 pub mod coordination;
 pub mod optimization;
 mod placement;
@@ -28,9 +31,9 @@ pub struct LayoutOptions {
   pub minimum_spacing: f64,
   /// Maximum input vertex count; exceeding this returns an error, never truncation.
   pub max_atoms: usize,
-  /// Work units for ring-cycle discovery, constraint assembly, rigid embedding,
-  /// and compact folding. Exceeding this budget returns an error, never a
-  /// partially drawn ring system.
+  /// Work units for preferred ring discovery, assembly, embedding and folding.
+  /// Exhaustion invokes the separately bounded fallback when enabled; neither
+  /// stage publishes a partially drawn ring system.
   pub ring_search_budget: usize,
   /// Maximum discrete passes; zero disables all optional refinement stages.
   pub refinement_passes: usize,
@@ -42,6 +45,9 @@ pub struct LayoutOptions {
   pub backbone_budget: usize,
   /// Work units for required double-bond stereo constraints, independent of refinement.
   pub stereo_budget: usize,
+  /// Separate whole-graph closure allowance after preferred embedding fails.
+  /// Zero disables this coverage fallback; successful fallback retains diagnostics.
+  pub fallback_budget: usize,
   /// Projected coordinate search after discrete refinement; zero iterations disables it.
   pub optimization: optimization::OptimizationOptions,
 }
@@ -58,6 +64,7 @@ impl Default for LayoutOptions {
       refinement_budget: 1_000_000,
       backbone_budget: 2_000_000,
       stereo_budget: 1_000_000,
+      fallback_budget: 16_000_000,
       optimization: optimization::OptimizationOptions::default(),
     }
   }
@@ -66,6 +73,9 @@ impl Default for LayoutOptions {
 /// A layout-quality limitation, not a claim that the molecule is invalid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LayoutDiagnostic {
+  /// Coupled graph closure repaired a failed preferred embedding or alkene pose.
+  /// This is not a readability pass or an intentional perspective crossing.
+  ConstraintClosure,
   /// Final geometry retains two atom centers closer than the requested threshold.
   CrowdedAtoms {
     /// First input handle.
@@ -103,6 +113,9 @@ pub struct BondCrossing {
 /// Layout cannot provide coordinates without dropping or inventing information.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutError {
+  /// No fully closed, stereo-valid candidate was found within the fallback allowance.
+  #[error("constrained fallback layout work budget exhausted")]
+  FallbackBudgetExceeded,
   /// A complete coordinate snapshot failed the optional optimizer's input contract.
   #[error(transparent)]
   Optimization(#[from] optimization::OptimizationError),
@@ -243,10 +256,13 @@ impl Layout2d {
 /// rigid refinement still preserves their initial lengths and ring geometry.
 /// Aromatic input uses a detached, bounded C/N/O/S Kekulé representation shared
 /// with depiction. This does not perceive aromaticity or modify input facts.
+/// Failed preferred ring/alkene placement can use the separately bounded global
+/// distance-closure fallback. Its diagnostic remains visible; successful closure
+/// guarantees complete geometry and supplied alkene sides, not readability.
 ///
 /// # Errors
 /// Rejects invalid options, exceeded budgets, unsupported bond labels, and any
-/// ring blocks incompatible with the supported polygon/path/template models.
+/// ring blocks incompatible with both preferred models and constrained fallback.
 /// Connected independent rings, spiro systems, and compatible multi-ring fused
 /// systems are supported. Ring work exhaustion is distinct from unsupported
 /// geometry. No partial layout is returned.
@@ -271,5 +287,52 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
     });
   }
   let resolved = crate::chemical::integer_bonds(graph)?;
-  placement::generate(&resolved, graph, options)
+  let mut preferred = rings::Work::new(options.ring_search_budget);
+  match placement::generate(&resolved, graph, options, &mut preferred, rings::RingMode::Preferred) {
+    Err(LayoutError::RingSystem { .. } | LayoutError::DoubleBondStereo(_) | LayoutError::RingSearchBudgetExceeded)
+      if options.fallback_budget > 0 =>
+    {
+      let mut fallback = rings::Work::new(options.fallback_budget);
+      // Preserve established successful drawings. Expanded ring candidates get
+      // only a quarter of the separate allowance; generic closure keeps the rest.
+      let retry = fallback
+        .optional(
+          options.fallback_budget - options.fallback_budget / 4,
+          |work| match placement::generate(&resolved, graph, options, work, rings::RingMode::Coupled) {
+            Ok(candidate) => Ok(Some(candidate)),
+            Err(LayoutError::RingSystem { .. } | LayoutError::DoubleBondStereo(_)) => Ok(None),
+            Err(error) => Err(error),
+          },
+        )?
+        .flatten();
+      if let Some(mut candidate) = retry {
+        if !candidate.diagnostics.contains(&LayoutDiagnostic::ConstraintClosure) {
+          candidate.diagnostics.push(LayoutDiagnostic::ConstraintClosure);
+        }
+        return Ok(candidate);
+      }
+      let options = LayoutOptions {
+        fallback_budget: fallback.remaining(),
+        ..options.clone()
+      };
+      closure::generate(&resolved, &options)
+    }
+    result => result,
+  }
+}
+
+/// Retries an automatic depiction's degenerate projection without altering chemistry.
+///
+/// # Errors
+/// Enforces the original atom limit, aromatic representation and independent
+/// fallback allowance. Explicit `depict` calls never invoke this stage.
+pub(crate) fn constrained_fallback(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, LayoutError> {
+  if graph.atom_count() > options.max_atoms {
+    return Err(LayoutError::AtomBudget {
+      count: graph.atom_count(),
+      limit: options.max_atoms,
+    });
+  }
+  let resolved = crate::chemical::integer_bonds(graph)?;
+  closure::generate(&resolved, options)
 }

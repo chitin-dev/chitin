@@ -93,6 +93,7 @@ fn complex_ring_search_should_respect_work_limits_without_partial_output() -> Te
         &graph,
         &layout::LayoutOptions {
           ring_search_budget: 100,
+          fallback_budget: 0,
           ..Default::default()
         }
       ),

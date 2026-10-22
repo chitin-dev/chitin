@@ -95,6 +95,7 @@ fn bridge_layout_should_charge_the_shared_ring_budget() -> TestResult {
         &graph,
         &LayoutOptions {
           ring_search_budget: 100,
+          fallback_budget: 0,
           ..Default::default()
         }
       ),
@@ -189,13 +190,42 @@ fn equal_shortest_bridges_should_close_without_coincident_atoms_or_crossings() -
 }
 
 #[test]
-fn unmatched_polycycles_should_still_report_the_typed_embedding_boundary() -> TestResult {
-  for source in ["C1CC2C3CCC1C23", "C1=C2CC3CC1CC(C2)C3"] {
-    let graph = read_smiles(source)?.into_graph();
-    assert!(matches!(
-      layout::generate(&graph, &LayoutOptions::default()),
-      Err(layout::LayoutError::RingSystem { .. })
-    ));
+fn incompatible_regular_faces_should_use_complete_block_closure() -> TestResult {
+  let graph = read_smiles("C1CC2C3CCC1C23")?.into_graph();
+  let original = graph.clone();
+  let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
+  assert_eq!(coordinates.positions().len(), graph.atom_count());
+  for (_, bond) in graph.bonds() {
+    let [a, b] = bond.atoms();
+    let length = coordinates
+      .position(a)
+      .ok_or("missing atom")?
+      .distance(coordinates.position(b).ok_or("missing atom")?);
+    assert!((0.9 - 1e-7..=1.2 + 1e-7).contains(&length), "{length}");
+  }
+  assert!(coordinates.bond_crossings().is_empty());
+  assert!(coordinates.drawing_depths().is_empty());
+  assert_eq!(graph, original);
+  Ok(())
+}
+
+#[test]
+fn an_unsaturated_core_fallback_should_keep_all_unit_edges_and_report_its_crossing() -> TestResult {
+  let graph = read_smiles("C1=C2CC3CC1CC(C2)C3")?.into_graph();
+  let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
+  // A complete fallback is not a promise of a crossing-free planar drawing.
+  assert!(!coordinates.diagnostics().is_empty());
+  for (_, bond) in graph.bonds() {
+    let [a, b] = bond.atoms();
+    assert!(
+      (coordinates
+        .position(a)
+        .ok_or("missing atom")?
+        .distance(coordinates.position(b).ok_or("missing atom")?)
+        - 1.)
+        .abs()
+        < 1e-8
+    );
   }
   Ok(())
 }

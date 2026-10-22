@@ -225,6 +225,7 @@ fn macrocycle_candidate_search_should_obey_the_shared_ring_budget() -> TestResul
           &graph,
           &LayoutOptions {
             ring_search_budget: budget,
+            fallback_budget: 0,
             ..Default::default()
           }
         ),

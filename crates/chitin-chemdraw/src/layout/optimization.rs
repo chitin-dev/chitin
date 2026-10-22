@@ -185,9 +185,12 @@ pub fn optimize(
   let mut budget = Budget(options.work_budget);
   let mut result = initial.clone();
   let mut report = OptimizationReport::default();
-  result
-    .diagnostics
-    .retain(|d| matches!(d, LayoutDiagnostic::RefinementBudgetExhausted));
+  result.diagnostics.retain(|d| {
+    matches!(
+      d,
+      LayoutDiagnostic::RefinementBudgetExhausted | LayoutDiagnostic::ConstraintClosure
+    )
+  });
   for ids in resolved.connected_components() {
     let mut points: Vec<_> = ids.iter().map(|id| initial.positions[id]).collect();
     let outcome = component(

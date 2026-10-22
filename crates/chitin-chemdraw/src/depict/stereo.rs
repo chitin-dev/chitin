@@ -119,13 +119,33 @@ fn candidates(graph: &MolecularGraph, bridges: &BTreeSet<BondId>, center: AtomId
     .neighbors(center)
     .into_iter()
     .flatten()
+    .filter(|(_, edge)| {
+      graph
+        .bond(*edge)
+        .is_some_and(|bond| bond.order() == chitin_chem::BondOrder::Single)
+    })
     .filter(|(neighbor, _)| graph.tetrahedral(*neighbor).is_none())
     .collect();
-  if rows.is_empty() && graph.neighbors(center).into_iter().flatten().count() >= 4 {
+  if rows.is_empty()
+    && (graph.neighbors(center).into_iter().flatten().count() >= 4
+      || graph
+        .tetrahedral(center)
+        .is_some_and(|s| s.ligands().contains(&StereoLigand::LonePair)))
+  {
     // A four-ligand center inside a fully annotated cage has no non-center
-    // ligand; a bond between centers may carry the mark. Three-ligand centers
-    // still require an expanded hydrogen rather than an ambiguous wedge.
-    rows = graph.neighbors(center).into_iter().flatten().collect();
+    // ligand; a bond between centers may carry the mark. Three-ligand carbon
+    // centers require an expanded H, whereas pyramidal heteroatoms retain an
+    // undrawn lone-pair direction and need a source bond to carry the mark.
+    rows = graph
+      .neighbors(center)
+      .into_iter()
+      .flatten()
+      .filter(|(_, edge)| {
+        graph
+          .bond(*edge)
+          .is_some_and(|bond| bond.order() == chitin_chem::BondOrder::Single)
+      })
+      .collect();
   }
   rows.sort_by_key(|&(neighbor, edge)| {
     (
@@ -192,7 +212,7 @@ fn assign(
   })
 }
 
-/// Determines a wedge's polarity for either an actual atom or a displayed H.
+/// Determines wedge polarity including an undrawn H or lone-pair reference.
 ///
 /// # Parameters
 /// - `stereo`: supplied ordered ligand references, never a CIP assignment.
@@ -202,8 +222,8 @@ fn assign(
 ///
 /// # Returns
 /// Solid/hashed polarity preserving the source configuration, or `None` for a
-/// degenerate projection. A skeletal H is opposite the other three vectors;
-/// an explicit depiction H participates directly without changing its identity.
+/// degenerate projection. A skeletal H or lone pair opposes the other three
+/// vectors; an explicit depiction H participates without changing its identity.
 ///
 /// # Errors
 /// Invalid vectors are rejected before signed-volume arithmetic is used.
@@ -215,14 +235,18 @@ pub(super) fn solid_for(
   hydrogen_point: Option<Point>,
 ) -> Result<Option<bool>, Error> {
   let mut vectors = [[0.; 3]; 4];
-  let mut implicit_hydrogen = None;
+  let mut virtual_ligand = None;
   for (i, reference) in stereo.ligands().iter().enumerate() {
     let point = match reference {
       StereoLigand::Atom(atom) => points.get(atom).copied().ok_or(Error::MissingPosition(*atom))?,
+      StereoLigand::LonePair => {
+        virtual_ligand = Some(i);
+        continue;
+      }
       StereoLigand::Hydrogen => match hydrogen_point {
         Some(point) => point,
         None => {
-          implicit_hydrogen = Some(i);
+          virtual_ligand = Some(i);
           continue;
         }
       },
@@ -237,9 +261,9 @@ pub(super) fn solid_for(
       f64::from(*reference == raised),
     ];
   }
-  if let Some(hydrogen) = implicit_hydrogen {
+  if let Some(ligand) = virtual_ligand {
     for axis in 0..3 {
-      vectors[hydrogen][axis] = -vectors.iter().map(|vector| vector[axis]).sum::<f64>();
+      vectors[ligand][axis] = -vectors.iter().map(|vector| vector[axis]).sum::<f64>();
     }
   }
   let volume = volume(vectors);

@@ -13,7 +13,7 @@ pub(super) struct Champion {
   result: RenderedMolecule,
   /// All comparisons use exact rendered label contacts and the same skeleton screen.
   score: Assessment,
-  /// Immutable feasibility bounds prevent contact improvements buying distortion.
+  /// Immutable feasibility bounds limit local exceptions without cumulative drift.
   geometry: super::geometry::GeometryGuard,
 }
 
