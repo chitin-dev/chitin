@@ -160,23 +160,19 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
     max_atoms: request.max_atoms,
     ..Default::default()
   };
-  let coordinates = record.timed("layout", || Ok(layout::generate(&graph, &options)?))?;
-  record.constraint_closure = Some(
-    coordinates
-      .diagnostics()
-      .contains(&layout::LayoutDiagnostic::ConstraintClosure),
-  );
   let (coordinates, drawing) = if request.label_feedback {
-    let result = record.timed("depict_feedback", || {
-      Ok(chitin_chemdraw::pipeline::finish(
+    // Measure the same automatic orchestration as normal consumers. Finishing
+    // a fixed seed alone would silently omit quality-triggered re-embedding.
+    let result = record.timed("automatic_drawing", || {
+      Ok(chitin_chemdraw::pipeline::generate(
         &graph,
-        coordinates,
         &options,
         &DepictOptions::default(),
       )?)
     })?;
     (result.layout, result.drawing)
   } else {
+    let coordinates = record.timed("layout", || Ok(layout::generate(&graph, &options)?))?;
     let drawing = record.timed("depict", || {
       Ok(depict::depict(&graph, &coordinates, &DepictOptions::default())?)
     })?;
@@ -184,10 +180,9 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
   };
   let document = record.timed("svg", || Ok(svg::export(&drawing, &SvgOptions::default())?))?;
   record.constraint_closure = Some(
-    record.constraint_closure == Some(true)
-      || coordinates
-        .diagnostics()
-        .contains(&layout::LayoutDiagnostic::ConstraintClosure),
+    coordinates
+      .diagnostics()
+      .contains(&layout::LayoutDiagnostic::ConstraintClosure),
   );
   record.svg_bytes = Some(document.len());
   if let Some(path) = &request.svg_path {

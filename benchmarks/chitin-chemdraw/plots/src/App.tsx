@@ -163,10 +163,10 @@ export default function App() {
         <div class="topbar-actions">
           <span class="connection">
             <i classList={{ live: connected() }} />
-            {connected() ? "Watching local runs" : "Reconnecting…"}
+            {connected() ? "Live" : "Reconnecting…"}
           </span>
           <a class="text-link" href="/api/spec" target="_blank" rel="noreferrer">
-            Metric protocol ↗
+            Metrics ↗
           </a>
         </div>
       </header>
@@ -174,11 +174,7 @@ export default function App() {
         <main class="plots-main">
           <div class="page-heading">
             <div>
-              <p class="eyebrow">SCIENTIFIC BENCHMARK · LOCAL WORKSPACE</p>
               <h1>Diagram quality</h1>
-              <p class="description">
-                Measured geometry, not a visual quality score. Inspect every molecule behind the data.
-              </p>
             </div>
             <div class="run-picker">
               <label class="field-label">Benchmark run</label>
@@ -199,22 +195,18 @@ export default function App() {
                     if (followLatest() && runs()[0]) activateRun(runs()[0]);
                   }}
                 />{" "}
-                Follow latest run
+                Follow latest
               </label>
             </div>
           </div>
           <Show when={selectedRun()}>
             <div class="run-context">
-              <span>
-                Results are measured snapshots. New runs refresh automatically; source edits refresh current-algorithm
-                previews.
-              </span>
               <Button
                 variant="outline"
                 disabled={starting() || job()?.status === "building" || job()?.status === "running"}
                 onClick={rerun}
               >
-                Rerun with current algorithm
+                Rerun benchmark
               </Button>
             </div>
           </Show>
@@ -225,8 +217,7 @@ export default function App() {
           </Show>
           <Show when={runs().length === 0 && !loading()}>
             <div class="empty-state">
-              <h2>No versioned benchmark runs yet</h2>
-              <p>Run the benchmark below. New results appear automatically; no frontend rebuild is needed.</p>
+              <h2>No benchmark runs</h2>
               <code>
                 cargo run --release -p chitin-chemdraw-benchmark -- benchmarks/chitin-chemdraw/coconut-10k.yaml --output
                 ../results/run-001
@@ -241,7 +232,7 @@ export default function App() {
           <Show when={loading()}>
             <p class="loading-line" role="status">
               <span class="spinner" />
-              {data() ? "Refreshing committed records…" : "Loading measurements in background…"}
+              {data() ? "Refreshing…" : "Loading…"}
             </p>
           </Show>
           <Show when={data() && derived()}>
@@ -252,11 +243,11 @@ export default function App() {
                 </span>
                 <span>{data()!.run.cases.toLocaleString()} inputs</span>
                 <span>{data()!.completed.toLocaleString()} evaluated</span>
-                <span>{data()!.clear.toLocaleString()} basic screens clear</span>
+                <span>{data()!.clear.toLocaleString()} clear</span>
                 <span class="badge">{selectedRun()?.protocol}</span>
               </div>
               <div class="legend">
-                <span>Molecule maximum block rank · B–H</span>
+                <span>Max block rank · B–H</span>
                 <For each={GROUP_LABELS}>
                   {(label, index) => (
                     <button
@@ -275,19 +266,10 @@ export default function App() {
                 </For>
               </div>
               <div classList={{ "plots-grid": true, "scatter-expanded": expanded() }}>
-                <Panel
-                  letter="A"
-                  title="Individual quality flags"
-                  subtitle="Applicable-case prevalence · categories overlap"
-                >
+                <Panel letter="A" title="Quality flags" subtitle="Applicable cases (%)">
                   <Prevalence data={data()!} />
                 </Panel>
-                <Panel
-                  letter="B"
-                  title="Atom proximity versus molecular size"
-                  subtitle="All measured points · click to inspect the source structure"
-                  class="scatter-panel"
-                >
+                <Panel letter="B" title="Atom proximity" subtitle="By atom count" class="scatter-panel">
                   <div class="scatter-expand">
                     <Button variant="ghost" size="sm" onClick={() => setExpanded((value) => !value)}>
                       {expanded() ? "Compact plot" : "Expand plot"}
@@ -301,25 +283,13 @@ export default function App() {
                     onSelect={selectMolecule}
                   />
                 </Panel>
-                <Panel
-                  letter="C"
-                  title="Bond-length error distribution"
-                  subtitle="Empirical survival probability · planar layouts only"
-                >
+                <Panel letter="C" title="Bond-length error" subtitle="Planar layouts · survival distribution">
                   <LengthChart derived={derived()!} groups={groups()} />
                 </Panel>
-                <Panel
-                  letter="D"
-                  title="Chain-angle error by topology"
-                  subtitle="Applicable acyclic carbon centers · full measured distributions"
-                >
+                <Panel letter="D" title="Chain-angle error" subtitle="Acyclic carbon centers">
                   <AngleChart derived={derived()!} groups={groups()} />
                 </Panel>
-                <Panel
-                  letter="E"
-                  title="Maximum ring cavity radius"
-                  subtitle="Largest empty skeleton cavity / L · simple bounded planar faces"
-                >
+                <Panel letter="E" title="Ring cavity radius" subtitle="Maximum radius / L · planar faces">
                   <InteractiveScatter
                     metric="cavity"
                     points={points()}
@@ -328,16 +298,8 @@ export default function App() {
                     onSelect={selectMolecule}
                     historical={selectedRun()?.protocol === "diagram-quality-v1"}
                   />
-                  <p class="chart-note">
-                    Search tolerance ≤ 0.02 L; incomplete searches and crossing blocks are excluded. Inspect the
-                    contributing ring size before comparing molecules.
-                  </p>
                 </Panel>
-                <Panel
-                  letter="F"
-                  title="Ring roundness"
-                  subtitle="Maximum Q = 4πA / P² · descriptive, not a pass/fail score"
-                >
+                <Panel letter="F" title="Ring roundness" subtitle="Maximum Q = 4πA / P² · descriptive">
                   <InteractiveScatter
                     metric="roundness"
                     points={points()}
@@ -346,16 +308,8 @@ export default function App() {
                     onSelect={selectMolecule}
                     historical={selectedRun()?.protocol === "diagram-quality-v1"}
                   />
-                  <p class="chart-note">
-                    Q near one means round, not necessarily wrong. Ring atom ordinals, area and perimeter are available
-                    in the inspector.
-                  </p>
                 </Panel>
-                <Panel
-                  letter="G"
-                  title="Normalized drawing footprint"
-                  subtitle="Sum of component hull areas / (source atoms × L²) · planar only"
-                >
+                <Panel letter="G" title="Drawing footprint" subtitle="Component hull area / (atoms × L²) · planar">
                   <InteractiveScatter
                     metric="footprint"
                     points={points()}
@@ -364,15 +318,11 @@ export default function App() {
                     onSelect={selectMolecule}
                     historical={selectedRun()?.protocol === "diagram-quality-v1"}
                   />
-                  <p class="chart-note">
-                    Salt packing does not inflate component areas. Smaller is not always better: compactness must not
-                    introduce new collisions.
-                  </p>
                 </Panel>
                 <Panel
                   letter="H"
-                  title="Large-cycle adjacent-turn map"
-                  subtitle="Topology-defined four-atom paths · signed 2D turns, not molecular torsions"
+                  title="Large-cycle turns"
+                  subtitle="Adjacent 2D turns · not torsions"
                   class="turn-panel"
                 >
                   <TurnMap
@@ -386,18 +336,9 @@ export default function App() {
                       setTurnSelection(selection);
                     }}
                   />
-                  <p class="chart-note">
-                    Paths are deduplicated across a short-first independent cycle basis, not a unique chemical ring set.
-                    Junctions, linear centers and small-ring-constrained paths have separate filters. Reflections invert
-                    both signs; no universal allowed regions are asserted.
-                  </p>
                 </Panel>
               </div>
-              <footer class="page-footer">
-                Basic readability is not chemical correctness or IUPAC certification. Tetrahedral decoding and chemical
-                label contents remain unverified.
-                <span>Data: committed JSONL records · automatic discovery every 2 s · SVG: on demand only</span>
-              </footer>
+              <footer class="page-footer">Geometry checks only; chemical correctness unverified.</footer>
             </>
           </Show>
         </main>

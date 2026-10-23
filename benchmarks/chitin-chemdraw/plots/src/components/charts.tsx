@@ -82,10 +82,7 @@ export function Prevalence(props: { data: PlotData }) {
           Applicable diagrams with ≥1 flagged object (%)
         </text>
       </svg>
-      <p class="chart-note h-9">
-        {hover() ??
-          "Hover a metric to see its denominator. Categories overlap; purple metrics are style proxies, not basic-readability failures."}
-      </p>
+      <p class="chart-note h-9">{hover() ?? "Hover for counts · purple: style proxies"}</p>
     </>
   );
 }
@@ -170,10 +167,7 @@ export function LengthChart(props: { derived: Derived; groups: boolean[] }) {
           Empirical fraction with RMSE ≥ x
         </text>
       </svg>
-      <p class="chart-note h-9">
-        {hover() ??
-          "Planar layouts only. L = median positive bond length. All measured values, including zero, are retained."}
-      </p>
+      <p class="chart-note h-9">{hover() ?? "L = median bond length"}</p>
     </>
   );
 }
@@ -278,10 +272,7 @@ export function AngleChart(props: { derived: Derived; groups: boolean[] }) {
           Per-molecule chain-angle RMSE (°) · symlog
         </text>
       </svg>
-      <p class="chart-note h-9">
-        {hover() ??
-          "Boxes: IQR · whiskers: 1.5 IQR · dots: outliers · diamonds: empirical P95, not confidence intervals. No KDE smoothing."}
-      </p>
+      <p class="chart-note h-9">{hover() ?? "Box: IQR · whiskers: 1.5 IQR · ◇: P95"}</p>
     </>
   );
 }

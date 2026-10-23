@@ -161,6 +161,8 @@ export function compactPoint(record: CaseRecord): PlotPoint | null {
   const observations = record.metrics.measurements;
   const value = (key: string) => (observations[key]?.state === "measured" ? observations[key].value : null);
   const contacts = observations.nonbonded_atom_proximity;
+  const count = (key: string) => (observations[key]?.state === "measured" ? observations[key].violations : null);
+  const cycles = record.metrics.macrocycle_geometry?.samples ?? [];
   return {
     row: record.case.row,
     id: record.case.id,
@@ -173,6 +175,12 @@ export function compactPoint(record: CaseRecord): PlotPoint | null {
     cavity: value("maximum_ring_cavity_radius"),
     roundness: value("ring_isoperimetric_ratio"),
     footprint: value("normalized_footprint"),
+    atomEdgeContacts: count("atom_edge_proximity"),
+    edgeContacts: count("unannotated_edge_contact"),
+    labelBondContacts: count("label_bond_overlap"),
+    labelContacts: count("label_label_overlap"),
+    macrocycleAngle: value("macrocycle_angle_deviation_rmse_deg"),
+    cycleSize: cycles.length ? Math.max(...cycles.map((sample) => sample.cycle_size)) : null,
   };
 }
 

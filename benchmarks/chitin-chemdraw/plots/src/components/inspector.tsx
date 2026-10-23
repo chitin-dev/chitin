@@ -91,21 +91,21 @@ export function Inspector(props: {
           ×
         </Button>
       </div>
-      <label class="field-label">Renderer provenance</label>
+      <label class="field-label">Renderer</label>
       <SelectField
         label="Renderer provenance"
         options={["snapshot", "current"] as const}
         value={mode()}
         onChange={setMode}
-        text={(value) => (value === "snapshot" ? "Historical run · exact renderer" : "Current algorithm · preview")}
+        text={(value) => (value === "snapshot" ? "Run snapshot" : "Current preview")}
       />
       <Show when={mode() === "current"}>
-        <p class="notice">Current preview only. The plotted historical measurements do not change.</p>
+        <p class="notice">Preview only; run metrics unchanged.</p>
       </Show>
       <Show when={imageState.loading}>
         <div class="image-loading" role="status">
           <span class="spinner" />
-          Loading SVG…<small>Only this molecule is requested.</small>
+          Loading SVG…
         </div>
       </Show>
       <Show when={imageState.error}>
@@ -117,7 +117,7 @@ export function Inspector(props: {
             </Button>
             <Show when={mode() === "snapshot"}>
               <Button size="sm" onClick={() => setMode("current")}>
-                Preview current algorithm
+                Current preview
               </Button>
             </Show>
           </div>
@@ -162,9 +162,7 @@ export function Inspector(props: {
                   </Dialog.CloseButton>
                 </div>
                 <Dialog.Description class="chart-note">
-                  {mode() === "snapshot"
-                    ? "Historical drawing; exact benchmark renderer."
-                    : "Current algorithm preview; historical scores are unchanged."}
+                  {mode() === "snapshot" ? "Run snapshot" : "Current preview · run metrics unchanged"}
                 </Dialog.Description>
                 <MoleculePreview
                   url={image()!.url}
@@ -202,8 +200,8 @@ export function Inspector(props: {
                   </span>
                   <small>
                     {mode() === "snapshot"
-                      ? "Orange overlay marks historical source centers; labels are zero-based atom ordinals."
-                      : "Historical path statistics; overlay disabled on current-algorithm previews."}
+                      ? "Orange: source atoms · zero-based indices"
+                      : "Run statistics · no preview overlay"}
                   </small>
                 </section>
               )}
@@ -211,9 +209,8 @@ export function Inspector(props: {
             <Show when={entry().metrics?.macrocycle_geometry}>
               {(geometry) => (
                 <p class="chart-note">
-                  Large-cycle coverage: {geometry().valid_angles} / {geometry().unique_angles} unique local angles.
-                  Selected large basis cycles: {geometry().selected_large_cycles}. Discovery/sample-excluded blocks:{" "}
-                  {geometry().excluded_blocks}.
+                  Angles {geometry().valid_angles}/{geometry().unique_angles} · cycles{" "}
+                  {geometry().selected_large_cycles} · excluded blocks {geometry().excluded_blocks}
                 </p>
               )}
             </Show>
@@ -231,8 +228,7 @@ export function Inspector(props: {
                 <details class="ring-details">
                   <summary>Ring geometry · {geometry().faces.length} bounded faces</summary>
                   <p class="chart-note">
-                    Areas in L²; perimeters and radii in L. Atom ordinals are zero-based source order. Excluded cyclic
-                    blocks: {geometry().excluded_blocks}.
+                    Area: L² · length: L · atoms: zero-based · excluded blocks: {geometry().excluded_blocks}
                   </p>
                   <For each={geometry().faces.slice(0, visibleFaces())}>
                     {(face, index) => (
@@ -261,7 +257,6 @@ export function Inspector(props: {
               )}
             </Show>
             <h3 class="section-title">Historical measurements</h3>
-            <p class="chart-note">Flags use the selected run’s metric protocol, not the preview renderer.</p>
             <div class="metric-table">
               <For each={Object.entries(entry().metrics?.measurements ?? {})}>
                 {([name, metric]) => (

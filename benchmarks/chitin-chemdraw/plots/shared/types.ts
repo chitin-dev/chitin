@@ -107,6 +107,13 @@ export interface PlotPoint {
   cavity?: number | null;
   roundness?: number | null;
   footprint?: number | null;
+  atomEdgeContacts?: number | null;
+  edgeContacts?: number | null;
+  labelBondContacts?: number | null;
+  labelContacts?: number | null;
+  macrocycleAngle?: number | null;
+  /** Largest selected basis cycle, not an exhaustive chemical ring size. */
+  cycleSize?: number | null;
 }
 export interface MetricSummary {
   measured_cases: number;

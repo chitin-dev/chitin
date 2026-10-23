@@ -99,7 +99,7 @@ fn main() -> Result<()> {
         .map(|(_, model)| model.trim().to_owned()))),
     "os": std::env::consts::OS, "debug_assertions": cfg!(debug_assertions), "jobs": 1,
     "pipeline": if config.label_feedback {
-      "parse -> characterize -> layout::generate -> pipeline::finish -> svg::export -> quality"
+      "parse -> characterize -> pipeline::generate (layout, label feedback, guarded assembly search) -> svg::export -> quality"
     } else {
       "parse -> characterize -> layout::generate -> depict::depict -> svg::export -> quality"
     },

@@ -3,6 +3,18 @@ import { rankGroup, type CenterClass, type PlotPoint, type TurnPoint, type TurnS
 import { TURN_BINS, turnCell, turnMatches } from "../../shared/turns";
 import { Button } from "./ui/button";
 import { SelectField } from "./ui/select";
+import { ColorLegend } from "./color-legend";
+import {
+  COLOR_KEYS,
+  COLOR_METRICS,
+  MISSING_COLOR,
+  aggregateColor,
+  colorFraction,
+  colorScale,
+  colorValue,
+  palette,
+  type ColorMetric,
+} from "../../shared/color-mapping";
 
 /** Fixed-size canvas density drawing; every coincident sample remains selectable. */
 export function TurnMap(props: {
@@ -15,6 +27,8 @@ export function TurnMap(props: {
 }) {
   const [category, setCategory] = createSignal<CenterClass | "all">("path");
   const [size, setSize] = createSignal("all");
+  const [color, setColor] = createSignal<ColorMetric | "density">("density");
+  const [aggregate, setAggregate] = createSignal<"mean" | "max">("mean");
   const [query, setQuery] = createSignal("");
   const [cell, setCell] = createSignal<number | null>(null);
   const [browse, setBrowse] = createSignal(false);
@@ -39,6 +53,28 @@ export function TurnMap(props: {
     }
     return result;
   });
+  const values = createMemo(() => {
+    const result = new Map<number, number | null>();
+    if (color() === "density") return result;
+    for (const [key, points] of bins()) {
+      result.set(
+        key,
+        aggregateColor(
+          points.map((point) => colorValue(molecules().get(point.row), color() as ColorMetric, point)),
+          aggregate(),
+        ),
+      );
+    }
+    return result;
+  });
+  const scale = createMemo(() =>
+    colorScale(
+      filtered().map((point) =>
+        color() === "density" ? null : colorValue(molecules().get(point.row), color() as ColorMetric, point),
+      ),
+      color() !== "density" && COLOR_METRICS[color() as ColorMetric].log,
+    ),
+  );
   const choices = createMemo(() =>
     browse() ? filtered() : cell() !== null ? (bins().get(cell()!) ?? []) : query().trim() ? filtered() : [],
   );
@@ -87,7 +123,13 @@ export function TurnMap(props: {
       const col = key % TURN_BINS,
         row = Math.floor(key / TURN_BINS);
       const alpha = 0.15 + (0.85 * Math.log1p(points.length)) / Math.log1p(maximum);
-      context.fillStyle = `rgba(37,99,164,${alpha})`;
+      const value = values().get(key);
+      context.fillStyle =
+        color() === "density"
+          ? `rgba(37,99,164,${alpha})`
+          : value == null
+            ? MISSING_COLOR
+            : palette(colorFraction(value, scale()));
       context.fillRect(
         x(col * 5 - 180),
         y((row + 1) * 5 - 180),
@@ -134,6 +176,9 @@ export function TurnMap(props: {
   }
   createEffect(() => {
     bins();
+    values();
+    scale();
+    color();
     props.selected;
     schedule();
   });
@@ -181,6 +226,31 @@ export function TurnMap(props: {
           text={(v) => (v === "all" ? "All selected large cycles" : `${v} atoms`)}
         />
       </div>
+      <div class="color-controls">
+        <SelectField
+          label="Color turns by"
+          options={["density", ...COLOR_KEYS] as (ColorMetric | "density")[]}
+          value={color()}
+          onChange={setColor}
+          text={(value) => (value === "density" ? "Color: sample density" : `Color: ${COLOR_METRICS[value].label}`)}
+        />
+        <Show when={color() !== "density"}>
+          <SelectField
+            label="Turn cell aggregation"
+            options={["mean", "max"] as const}
+            value={aggregate()}
+            onChange={setAggregate}
+            text={(value) => (value === "mean" ? "Cell mean" : "Cell maximum")}
+          />
+        </Show>
+      </div>
+      <Show when={color() !== "density"}>
+        <ColorLegend
+          label={color() === "cycleSize" ? "Cycle size (atoms)" : COLOR_METRICS[color() as ColorMetric].label}
+          scale={scale()}
+          note={aggregate() === "mean" ? "Cell mean · sample-weighted" : "Cell maximum"}
+        />
+      </Show>
       <div ref={host} class="turn-canvas-host" hidden={!props.points.length}>
         <canvas
           ref={canvas}
@@ -192,17 +262,19 @@ export function TurnMap(props: {
       <Show
         when={props.points.length}
         fallback={
-          <p class="metric-empty">
-            {props.historical
-              ? "Not measured in this historical run. Rerun to record large-cycle turns."
-              : "No valid large-cycle turn pairs. Inspect coverage and exclusions; unavailable is not zero."}
-          </p>
+          <p class="metric-empty">{props.historical ? "Not recorded. Rerun benchmark." : "No valid turn pairs."}</p>
         }
       >
         <p class="chart-note">
-          {filtered().length.toLocaleString()} exact observations · 5° density cells · click a cell to inspect every
-          constituent. Color uses log count; this is not a physical allowed-region map.
+          {filtered().length.toLocaleString()} pairs · 5° bins ·{" "}
+          {color() === "density" ? "log count" : color() === "cycleSize" ? "per-cycle values" : "molecule-level values"}{" "}
+          · Click to inspect
         </p>
+        <Show when={color() !== "density" && cell() !== null}>
+          <p class="chart-note">
+            Selected cell {aggregate()}: {values().get(cell()!)?.toPrecision(4) ?? "not measured"}
+          </p>
+        </Show>
         <div class="point-search">
           <input
             class="input"
@@ -216,9 +288,7 @@ export function TurnMap(props: {
           </Button>
         </div>
         <Show when={browse() || query().trim() || cell() !== null}>
-          <p class="chart-note">
-            {choices().length.toLocaleString()} matching observations · source atom ordinals appear in the inspector
-          </p>
+          <p class="chart-note">{choices().length.toLocaleString()} matches</p>
           <div class="point-list">
             <For each={choices().slice(page() * 12, page() * 12 + 12)}>
               {(point) => (

@@ -5,6 +5,46 @@ use serde_json::Value;
 use std::{fs, process::Command};
 
 #[test]
+fn automatic_worker_should_measure_quality_triggered_reembedding() -> Result<()> {
+  use std::io::Write;
+  use std::process::Stdio;
+
+  let source = include_str!("../../../crates/chitin-chemdraw/tests/fixtures/assembly.tsv")
+    .lines()
+    .nth(2)
+    .and_then(|line| line.split_once('\t'))
+    .ok_or_else(|| anyhow::anyhow!("missing constrained-cycle fixture"))?
+    .1;
+  let mut child = Command::new(env!("CARGO_BIN_EXE_chitin-chemdraw-benchmark"))
+    .arg("--worker")
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .spawn()?;
+  let request = serde_json::json!({
+    "case": { "row": 1, "id": "constrained-cycle", "smiles": source },
+    "max_atoms": 128, "svg_path": null, "label_feedback": true
+  });
+  {
+    let mut input = child
+      .stdin
+      .take()
+      .ok_or_else(|| anyhow::anyhow!("missing worker input"))?;
+    input.write_all(&serde_json::to_vec(&request)?)?;
+  }
+  let output = child.wait_with_output()?;
+  assert!(output.status.success());
+  let line = std::str::from_utf8(&output.stdout)?
+    .lines()
+    .last()
+    .ok_or_else(|| anyhow::anyhow!("missing worker output"))?;
+  let event: Value = serde_json::from_str(line)?;
+  assert_eq!(event["event"], "finished");
+  assert_eq!(event["record"]["metrics"]["readability_clear"], true);
+  assert_eq!(event["record"]["constraint_closure"], false);
+  Ok(())
+}
+
+#[test]
 fn reports_failures_without_discarding_source_records() -> Result<()> {
   let directory = tempfile::tempdir()?;
   fs::write(
@@ -87,11 +127,12 @@ fn label_feedback_should_be_explicit_and_reproducible_in_the_frozen_worker() -> 
   assert!(
     manifest["pipeline"]
       .as_str()
-      .is_some_and(|text| text.contains("pipeline::finish"))
+      .is_some_and(|text| text.contains("pipeline::generate"))
   );
   let line = fs::read_to_string(directory.path().join("results/cases.jsonl"))?;
   let record: Value = serde_json::from_str(line.trim())?;
-  assert!(record["timings_ms"]["depict_feedback"].is_number());
+  assert!(record["timings_ms"]["automatic_drawing"].is_number());
+  assert!(record["timings_ms"]["layout"].is_null());
   assert!(record["timings_ms"]["depict"].is_null());
 
   let replay = directory.path().join("replay.svg");

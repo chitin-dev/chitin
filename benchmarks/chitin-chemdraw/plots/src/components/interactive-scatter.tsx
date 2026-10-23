@@ -64,9 +64,7 @@ export function InteractiveScatter(props: {
         when={measured().length > 0}
         fallback={
           <p class="metric-empty" role="status">
-            {props.historical
-              ? "Not measured in this historical run. Rerun with the current benchmark to add these measurements."
-              : "No applicable measured values. Inspect the metric protocol and per-molecule exclusions; unavailable values are not zero."}
+            {props.historical ? "Not recorded. Rerun benchmark." : "No applicable measurements."}
           </p>
         }
       >
@@ -103,7 +101,6 @@ export function InteractiveScatter(props: {
                 {choices().length.toLocaleString()}{" "}
                 {query() ? "matching points" : browse() ? "points" : "nearby candidates"}
               </span>
-              <span>Every coincident record is selectable</span>
             </div>
             <div class="point-list">
               <For each={choices().slice(page() * 12, page() * 12 + 12)}>

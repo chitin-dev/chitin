@@ -1,8 +1,20 @@
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { GROUP_COLORS, rankGroup, type PlotPoint } from "../../shared/types";
 import { SpatialGrid, symlog, type View } from "@/lib/geometry";
 import { SCATTER_METRICS, scatterValue, scatterLabel, type ScatterMetric } from "../../shared/plot-metrics";
 import { Button } from "./ui/button";
+import { SelectField } from "./ui/select";
+import { ColorLegend } from "./color-legend";
+import {
+  COLOR_KEYS,
+  COLOR_METRICS,
+  COLOR_STEPS,
+  bucketColor,
+  colorBucket,
+  colorScale,
+  colorValue,
+  type ColorMetric,
+} from "../../shared/color-mapping";
 
 interface Prepared {
   index: number;
@@ -19,6 +31,15 @@ export function Scatter(props: {
 }) {
   const metric = () => props.metric ?? "contacts";
   const definition = () => SCATTER_METRICS[metric()];
+  const [color, setColor] = createSignal<ColorMetric | "rank">("rank");
+  const scale = createMemo(() =>
+    colorScale(
+      props.points
+        .filter((p) => props.groups[rankGroup(p.rank)] && p.atoms > 0 && scatterValue(p, metric()) !== null)
+        .map((p) => (color() === "rank" ? null : colorValue(p, color() as ColorMetric))),
+      color() !== "rank" && COLOR_METRICS[color() as ColorMetric].log,
+    ),
+  );
   const transform = (value: number) => (definition().linear ? value : symlog(value));
   let host!: HTMLDivElement, canvas!: HTMLCanvasElement, overlay!: HTMLCanvasElement;
   let width = 600,
@@ -70,7 +91,7 @@ export function Scatter(props: {
       context.stroke();
     }
   }
-  /** Four batched fills, no per-point DOM nodes or reactive event subscriptions. */
+  /** A bounded number of batched fills, without per-point DOM subscriptions. */
   function paint() {
     frame = 0;
     const context = canvas?.getContext("2d");
@@ -131,19 +152,31 @@ export function Scatter(props: {
     context.clip();
     grid = new SpatialGrid();
     let count = 0;
+    const batches: Prepared[][] = Array.from({ length: color() === "rank" ? 4 : COLOR_STEPS + 1 }, () => []);
     for (let group = 0; group < 4; group++) {
       if (!props.groups[group]) continue;
-      context.beginPath();
       for (const point of byGroup[group]) {
         if (point.x < view.x0 || point.x > view.x1 || point.y < view.y0 || point.y > view.y1) continue;
         const { x, y } = screen(point);
-        context.moveTo(x + 2.2, y);
-        context.arc(x, y, 2.2, 0, Math.PI * 2);
+        const bucket =
+          color() === "rank"
+            ? group
+            : colorBucket(colorValue(props.points[point.index], color() as ColorMetric), scale());
+        batches[bucket].push(point);
         grid.add({ index: point.index, x, y });
         count++;
       }
-      context.globalAlpha = 0.55;
-      context.fillStyle = GROUP_COLORS[group];
+    }
+    for (const [bucket, points] of batches.entries()) {
+      if (!points.length) continue;
+      context.beginPath();
+      for (const point of points) {
+        const { x, y } = screen(point);
+        context.moveTo(x + 2.2, y);
+        context.arc(x, y, 2.2, 0, Math.PI * 2);
+      }
+      context.globalAlpha = color() === "rank" ? 0.55 : 0.85;
+      context.fillStyle = color() === "rank" ? GROUP_COLORS[bucket] : bucketColor(bucket);
       context.fill();
     }
     context.restore();
@@ -207,6 +240,8 @@ export function Scatter(props: {
   });
   createEffect(() => {
     props.groups;
+    color();
+    scale();
     schedule();
   });
   createEffect(() => {
@@ -237,6 +272,27 @@ export function Scatter(props: {
   });
   return (
     <div>
+      <div class="color-controls">
+        <SelectField
+          label={`Color ${metric()} by`}
+          options={["rank", ...COLOR_KEYS] as (ColorMetric | "rank")[]}
+          value={color()}
+          onChange={setColor}
+          text={(value) => (value === "rank" ? "Color: ring-block rank" : `Color: ${COLOR_METRICS[value].label}`)}
+        />
+      </div>
+      <Show when={color() !== "rank"}>
+        <ColorLegend
+          label={
+            color() === "cycleSize"
+              ? "Largest selected cycle (atoms)"
+              : color() === "rank"
+                ? ""
+                : COLOR_METRICS[color() as ColorMetric].label
+          }
+          scale={scale()}
+        />
+      </Show>
       <div class="chart-controls">
         <span class="tabular-nums">{visible().toLocaleString()} visible · no subsampling</span>
         <div class="flex gap-1">
@@ -295,7 +351,7 @@ export function Scatter(props: {
                   ? {
                       x: Math.min(x + 12, width - 235),
                       y: Math.max(0, y - 58),
-                      text: `${point.id} · ${point.atoms} atoms · ${scatterLabel(point, metric())}${hit.count > 1 ? ` · ${hit.count} nearby: click to inspect all` : ""}`,
+                      text: `${point.id} · ${point.atoms} atoms · ${scatterLabel(point, metric())}${color() !== "rank" ? ` · ${COLOR_METRICS[color() as ColorMetric].label}: ${colorValue(point, color() as ColorMetric) ?? "not measured"}` : ""}${hit.count > 1 ? ` · ${hit.count} nearby: click to inspect all` : ""}`,
                     }
                   : undefined,
               );
@@ -345,10 +401,7 @@ export function Scatter(props: {
           )}
         </Show>
       </div>
-      <p class="chart-note">
-        Drag to pan · Ctrl/⌘ + wheel to zoom · double-click to reset · ←/→ to select · overlapping points remain
-        individually selectable
-      </p>
+      <p class="chart-note">Drag: pan · Ctrl/⌘ + wheel: zoom · Double-click: reset · ←/→: select</p>
     </div>
   );
 }

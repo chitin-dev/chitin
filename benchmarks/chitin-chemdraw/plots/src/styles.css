@@ -673,6 +673,34 @@ h1 {
     transform: rotate(360deg);
   }
 }
+.color-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+.color-controls .select-trigger {
+  width: auto;
+  min-width: 180px;
+  max-width: 100%;
+}
+.color-legend {
+  max-width: 360px;
+  margin: 8px 0 12px;
+  font-size: 11px;
+  color: #64748b;
+}
+.color-legend-title,
+.color-legend-ticks {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.color-legend-bar {
+  height: 9px;
+  border-radius: 3px;
+  margin: 5px 0;
+}
 .dialog-overlay {
   position: fixed;
   inset: 0;
