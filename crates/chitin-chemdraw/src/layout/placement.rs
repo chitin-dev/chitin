@@ -155,6 +155,9 @@ fn relax_terminal_leaves(
       continue;
     };
     let (parent, _) = topology.neighbors[node][0];
+    if rings.preserves_chain_angles() && topology.neighbors[parent].len() == 2 && rings.membership[parent].is_empty() {
+      continue;
+    }
     // A multiple-bond center fixes its substituent sectors. The narrow policy
     // keeps its ring exception for aromatic hydroxyls; the wide search never
     // rotates a double-bond reference, because that can invert E/Z.
@@ -376,7 +379,8 @@ fn candidates(
     // its 120-degree sectors are a fixed chemical projection.
     let rotatable =
       row.iter().all(|&(_, order)| order == BondOrder::Single) || !rings.membership[branch.node].is_empty();
-    if index == 0 && !branch.radial && rotatable && !linear {
+    let scored_chain = rings.preserves_chain_angles() && row.len() == 2 && rings.membership[branch.node].is_empty();
+    if index == 0 && !branch.radial && rotatable && !linear && !scored_chain {
       for step in 1..=6 {
         let angle = step as f64 * PI / 12.;
         rotations.push(angle);
@@ -414,7 +418,9 @@ pub(super) fn generate(
   let mut refinement_work = super::quality::Budget(options.refinement_budget);
   let mut optimization_work = super::quality::Budget(options.optimization.work_budget);
   let mut backbone_work = super::quality::Budget(options.backbone_budget);
-  let attachment_policy = if rings.variants() > 1 {
+  let attachment_policy = if mode == super::rings::RingMode::Constrained {
+    super::refinement::AttachmentPolicy::ScoredAngles
+  } else if rings.variants() > 1 {
     super::refinement::AttachmentPolicy::Saturated
   } else {
     super::refinement::AttachmentPolicy::Rigid
@@ -465,7 +471,23 @@ pub(super) fn generate(
     if conflicts {
       alternatives.push((cost, result));
       for variant in 1..rings.variants() {
-        let candidate = embed(graph, &topology, &rings, ring_work, options, variant)?;
+        let candidate = if matches!(
+          mode,
+          super::rings::RingMode::Exploratory | super::rings::RingMode::Constrained
+        ) {
+          let candidate = ring_work.optional(120_000, |work| {
+            match embed(graph, &topology, &rings, work, options, variant) {
+              Ok(candidate) => Ok(Some(candidate)),
+              Err(Error::RingSystem { .. } | Error::DoubleBondStereo(_)) => Ok(None),
+              Err(error) => Err(error),
+            }
+          })?;
+          let Some(candidate) = candidate else { break };
+          let Some(candidate) = candidate else { continue };
+          candidate
+        } else {
+          embed(graph, &topology, &rings, ring_work, options, variant)?
+        };
         alternatives.push((complete_cost(graph, &candidate, ring_work)?.0, candidate));
       }
       alternatives.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -587,7 +609,7 @@ fn embed(
     let root = *component.first().ok_or(Error::CoordinateRange)?;
     let mut grid = Grid::default();
     let mut pending = VecDeque::new();
-    if let Some(seed) = rings.seed(component) {
+    if let Some(seed) = rings.seed_variant(component, variant) {
       embedded[seed] = true;
       let placed = rings.embed(seed, &positions, component, 0., ring_work, variant)?;
       crossings.extend(placed.crossings);

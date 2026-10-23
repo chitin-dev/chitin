@@ -1,0 +1,2 @@
+label-sensitive	C[C@@H](O)[C@@H]1/N=C(/O)C/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C(\O)C/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C\1O
+label-sensitive	CC[C@H](C)[C@@H]1/N=C(/O)[C@H]([C@@H](C)O)/N=C(\O)C/N=C(\O)[C@H](C)/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C(\O)C/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C\1O

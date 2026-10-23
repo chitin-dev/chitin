@@ -1,4 +1,4 @@
-//! Atomic assembly of one macrocycle with one edge-fused small polygon.
+//! Atomic assembly of one macrocycle and one small polygon sharing a path.
 //!
 //! The owner evaluates whole-block geometry and deferred stereo references.
 //! Nonregular faces never masquerade as regular polygons in the general fused
@@ -9,7 +9,7 @@ use std::{
   f64::consts::{PI, TAU},
 };
 
-use chitin_chem::{AtomId, BondId, DoubleBondRelation, MolecularGraph};
+use chitin_chem::{AtomId, BondId, DoubleBondRelation, MolecularGraph, perception::RingBlock};
 
 use super::{
   Error, Point, Work,
@@ -20,7 +20,7 @@ use super::{
 };
 use crate::stereo_geometry::relation;
 
-/// Two edge-sharing faces with candidate geometry owned at the block boundary.
+/// Two path-sharing faces with candidate geometry owned at the block boundary.
 pub(super) struct FusedMacrocycle {
   /// Nonregular face candidates and constraints that do not depend on the cap.
   macrocycle: Macrocycle,
@@ -32,8 +32,10 @@ pub(super) struct FusedMacrocycle {
   neighbors: BTreeMap<usize, Vec<usize>>,
   /// Every block edge exactly once, in stable endpoint order.
   edges: Vec<[usize; 2]>,
-  /// Both endpoints of the common boundary edge.
-  shared: [usize; 2],
+  /// All vertices on the common boundary path, in large-face order.
+  shared: Vec<usize>,
+  /// One oriented shared edge for comparing the two interior sides.
+  boundary: [usize; 2],
   /// Source constraints whose axis and both references belong to this block.
   checks: Vec<(BondId, [usize; 4], DoubleBondRelation)>,
 }
@@ -57,10 +59,43 @@ impl FusedMacrocycle {
     ids: &[AtomId],
     work: &mut Work,
   ) -> Result<Option<Self>, Error> {
-    if constraints.faces.len() != 2 {
+    Self::from_faces(graph, &constraints.faces, ids, work, false)
+  }
+
+  /// Recognizes a small regular cap sharing a connected multi-edge path.
+  ///
+  /// # Returns
+  /// An optional whole-block model, without imposing polygon incidence on the
+  /// flexible face. Ordinary bridges and disconnected shared sets are excluded.
+  ///
+  /// # Errors
+  /// Propagates graph errors and bounded cycle-discovery exhaustion.
+  pub(super) fn shared_path(
+    graph: &MolecularGraph,
+    block: &RingBlock,
+    indices: &BTreeMap<AtomId, usize>,
+    ids: &[AtomId],
+    work: &mut Work,
+  ) -> Result<Option<Self>, Error> {
+    if block.cycle_rank() != 2 {
       return Ok(None);
     }
-    let (a, b) = (&constraints.faces[0], &constraints.faces[1]);
+    let faces = Constraints::cycles(graph, block, indices, work)?;
+    Self::from_faces(graph, &faces, ids, work, true)
+  }
+
+  /// Captures both face boundaries before any optional coordinate search.
+  fn from_faces(
+    graph: &MolecularGraph,
+    faces: &[Vec<usize>],
+    ids: &[AtomId],
+    work: &mut Work,
+    shared_path: bool,
+  ) -> Result<Option<Self>, Error> {
+    if faces.len() != 2 {
+      return Ok(None);
+    }
+    let (a, b) = (&faces[0], &faces[1]);
     let (face, cap) = if a.len() >= 9 && (3..=8).contains(&b.len()) {
       (a, b)
     } else if b.len() >= 9 && (3..=8).contains(&a.len()) {
@@ -70,9 +105,28 @@ impl FusedMacrocycle {
     };
     work.charge(face.len() + cap.len())?;
     let common: Vec<_> = face.iter().filter(|row| cap.contains(row)).copied().collect();
-    let Ok(shared) = <[usize; 2]>::try_from(common) else {
+    if (!shared_path && common.len() != 2) || (shared_path && common.len() < 3) || common.len() >= cap.len() {
       return Ok(None);
-    };
+    }
+    let shared_edges: Vec<_> = face
+      .iter()
+      .zip(face.iter().cycle().skip(1))
+      .take(face.len())
+      .filter(|(a, b)| common.contains(a) && common.contains(b))
+      .map(|(&a, &b)| [a, b])
+      .collect();
+    if shared_edges.len() + 1 != common.len()
+      || shared_edges.iter().any(|&[a, b]| {
+        !cap
+          .iter()
+          .zip(cap.iter().cycle().skip(1))
+          .take(cap.len())
+          .any(|(&c, &d)| [a, b] == [c, d] || [a, b] == [d, c])
+      })
+    {
+      return Ok(None);
+    }
+    let boundary = shared_edges[0];
     let deferred = cap
       .iter()
       .filter(|row| !face.contains(row))
@@ -106,7 +160,8 @@ impl FusedMacrocycle {
       cap: cap.clone(),
       neighbors,
       edges: edges.into_iter().collect(),
-      shared,
+      shared: common,
+      boundary,
       checks,
     }))
   }
@@ -114,6 +169,28 @@ impl FusedMacrocycle {
   /// Returns the largest face size for stable block seeding priority.
   pub(super) fn len(&self) -> usize {
     self.face.len()
+  }
+
+  /// Extends the flexible face without changing its rigid shared-path geometry.
+  ///
+  /// # Errors
+  /// Propagates required geometry errors; optional budget exhaustion is isolated.
+  pub(super) fn explore(&mut self, work: &mut Work) -> Result<(), Error> {
+    if self.shared.len() == 2 {
+      return self.macrocycle.explore(work);
+    }
+    // The shared path is rigid, not a second set of freely moving springs.
+    // Its internal bends must agree exactly with the regular small polygon.
+    let n = self.face.len();
+    let fixed: Vec<_> = (0..n)
+      .filter(|&i| {
+        [self.face[(i + n - 1) % n], self.face[i], self.face[(i + 1) % n]]
+          .iter()
+          .all(|row| self.shared.contains(row))
+      })
+      .map(|i| (i, -TAU / self.cap.len() as f64))
+      .collect();
+    self.macrocycle.explore_fixed(&fixed, work)
   }
 
   /// Streams large-face candidates, assembles the cap, then scores whole blocks.
@@ -253,7 +330,7 @@ impl FusedMacrocycle {
         .iter()
         .zip(cycle.iter().cycle().skip(1))
         .take(cycle.len())
-        .any(|(&a, &b)| [a, b] == self.shared);
+        .any(|(&a, &b)| [a, b] == self.boundary);
       area.signum() * if forward { 1. } else { -1. }
     };
     if interior(&self.face, &large) * interior(&self.cap, &small) >= 0. {
@@ -291,7 +368,7 @@ impl FusedMacrocycle {
     Ok(true)
   }
 
-  /// Chooses an unoccupied junction gap outside both actual face polygons.
+  /// Chooses an exterior junction gap or the free sector at an internal path atom.
   fn junction_heading(&self, row: usize, points: &[Option<Point>], work: &mut Work) -> Result<f64, Error> {
     let origin = points[row].ok_or(Error::CoordinateRange)?;
     let mut angles = self.neighbors[&row]
@@ -317,7 +394,7 @@ impl FusedMacrocycle {
           .ok_or(Error::CoordinateRange)?;
         inside |= contains(&polygon, probe);
       }
-      if !inside && gap > best.0 {
+      if (!inside || self.neighbors[&row].len() == 2) && gap > best.0 {
         best = (gap, direction);
       }
     }
@@ -333,6 +410,29 @@ mod tests {
   use super::*;
   use chitin_chem::{io::smiles::read_smiles, perception::analyze_rings};
   type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+  #[test]
+  fn a_two_edge_shared_path_should_close_with_an_exact_small_cap() -> TestResult {
+    let graph = read_smiles("C1CCCCCCCCCCCC2CC1CCC2")?.into_graph();
+    let ids: Vec<_> = graph.atoms().map(|(id, _)| id).collect();
+    let indices = ids.iter().enumerate().map(|(row, &id)| (id, row)).collect();
+    let report = analyze_rings(&graph)?;
+    let block = report
+      .blocks()
+      .iter()
+      .find(|block| block.cycle_rank() == 2)
+      .ok_or("missing block")?;
+    let mut work = Work::new(4_000_000);
+    let mut model = FusedMacrocycle::shared_path(&graph, block, &indices, &ids, &mut work)?.ok_or("missing model")?;
+    model.explore(&mut work)?;
+    let atoms: Vec<_> = (0..ids.len()).collect();
+    let placed = model.embed(&atoms, &vec![None; ids.len()], &atoms, 0., &mut work, ids[0])?;
+    let points: BTreeMap<_, _> = placed.iter().map(|&(row, point, _)| (row, point)).collect();
+    for &[a, b] in &model.edges {
+      assert!((points[&a].distance(points[&b]) - 1.).abs() < 1e-8);
+    }
+    Ok(())
+  }
 
   #[test]
   fn entry_in_either_face_should_retain_the_anchor_bit_for_bit() -> TestResult {

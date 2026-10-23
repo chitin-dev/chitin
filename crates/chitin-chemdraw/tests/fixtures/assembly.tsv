@@ -1,0 +1,6 @@
+Fused/bridged polycycle	CCOC1=CC=CC=C1N1C(=O)[C@@H]2C3C4=CC=CC=C4C(C(C)=O)(C4=CC=CC=C43)[C@@H]2C1=O
+Heteroatom-rich bridged polycycle	CON1C(=O)[C@]2(C3=CC=CC=C31)[C@H]1[C@H]3[C@H]4CO[C@@H]2CC4[C@]1([C@H](C)O)CN3C
+Macrocycle with specified imine geometry	CC(C)C[C@@H]1/N=C(\O)[C@H](CC[S+](C)[O-])/N=C(\O)[C@H](C(C)C)/N=C(\O)[C@H](CC2=CNC3=CC=CC=C23)/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C(\O)[C@H](CC2=CC=CC=C2)/N=C(\O)[C@@H]2CCCN2C(=O)[C@H](CC[S+](C)[O-])/N=C\1O
+Oversized macrocycle cavity	CCCCCCC1C=C(C)C(O)CC(O)CCCC(O)C(C)C(O)C/C=C/C=C(\C)C(O)C(C)C2CC(O[C@@H]3O[C@H](C)[C@@H](O)C(N(C)C)[C@H]3O)C(C)C(O)(CC(=O)OC(C)/C=C/C(O)CC(O)CCCC(O)C(C)C(O)CCC(C)C(O)CC(O)CC(O)CCC(O)C1O)O2
+Cyclic peptide with long conjugated branch	CC/C=C/C=C/C=C/C=C/C=C/C=C/C=C/C(=O)N(C)[C@@H]1C(=O)NC(C)C(=O)N[C@@H](CC(C)C)C(=O)N2CCC[C@H]2C(=O)NC(C)C(=O)N[C@H](C(N)=O)CCC(=O)O[C@@H]1C
+Polyphenolic multiring structure with glycoside	OC[C@H]1O[C@@H](O[C@H]2[C@H](C3=C(O)C=C(O)C4=C3O[C@H](C3=CC=C(O)C(O)=C3)[C@@H](O)C4)C3=C(O)C=C(O)C=C3O[C@@H]2C2=CC=C(O)C(O)=C2)[C@H](O)[C@@H](O)[C@@H]1O

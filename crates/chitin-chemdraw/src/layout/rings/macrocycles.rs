@@ -15,6 +15,7 @@ use super::{Error, Point, Work, score, side};
 use crate::stereo_geometry::relation;
 
 mod caps;
+mod constrained;
 mod open;
 
 /// Integer axial cell coordinates and doubled lattice vertex coordinates.
@@ -146,6 +147,37 @@ impl Macrocycle {
   /// Returns this ring's vertex count for stable block seeding priority.
   pub(super) fn len(&self) -> usize {
     self.face.len()
+  }
+
+  /// Adds bounded constraint-directed poses without replacing baseline outlines.
+  ///
+  /// # Errors
+  /// Propagates source errors; optional search exhaustion retains existing poses.
+  pub(super) fn explore(&mut self, work: &mut Work) -> Result<(), Error> {
+    if !self.requirements.is_empty() {
+      let reserve = work.remaining().saturating_sub(1_500_000);
+      if let Some(extra) = work.optional(reserve, |work| {
+        constrained::outlines(self.face.len(), &self.requirements, work)
+      })? {
+        self.outlines.extend(extra);
+      }
+    }
+    Ok(())
+  }
+
+  /// Adds closures with exact ring-local bends imposed by a shared rigid path.
+  ///
+  /// # Errors
+  /// Required source errors propagate; optional work exhaustion retains all
+  /// existing complete outlines. Geometric bends never become stereo facts.
+  pub(super) fn explore_fixed(&mut self, fixed: &[(usize, f64)], work: &mut Work) -> Result<(), Error> {
+    let reserve = work.remaining().saturating_sub(1_500_000);
+    if let Some(extra) = work.optional(reserve, |work| {
+      constrained::fixed_outlines(self.face.len(), &self.requirements, fixed, work)
+    })? {
+      self.outlines.extend(extra);
+    }
+    Ok(())
   }
 
   /// Scores closed outline permutations and rigid placements atomically.

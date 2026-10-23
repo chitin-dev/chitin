@@ -35,13 +35,17 @@ const LARGE_COMPONENT: usize = 150;
 /// Work kept outside optional pose searches for subsequent required placement.
 const PLACEMENT_RESERVE: usize = 120_000;
 
-/// Expanded cyclic candidates are admitted only after preferred placement fails.
+/// Separates baseline, failure recovery and optional quality-driven assembly.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum RingMode {
   /// Preserve established successful ring-model selection.
   Preferred,
   /// Admit mixed ring systems that require mandatory coupled alkene closure.
   Coupled,
+  /// Generate optional constraint-directed and alternate-root assemblies.
+  Exploratory,
+  /// Rigid shared-path caps and scored-angle-preserving branch expansion.
+  Constrained,
 }
 
 /// Shared work allowance for ring discovery, assembly, and geometric trials.
@@ -125,7 +129,7 @@ enum Model {
   Projected(projection::Projection),
   /// A simple macrocycle with nonregular, closed unit-edge candidates.
   Macrocycle(macrocycles::Macrocycle),
-  /// One macrocycle and one small face sharing exactly one skeleton edge.
+  /// One macrocycle and one small face sharing a connected skeleton path.
   FusedMacrocycle(fused_macrocycles::FusedMacrocycle),
 }
 
@@ -186,9 +190,18 @@ pub(super) struct Rings {
   pub(super) membership: Vec<Vec<usize>>,
   /// Complete skeleton edges in dense-row order, used by pose repair.
   edges: Vec<[usize; 2]>,
+  /// Alternate assembly order is optional, never part of baseline construction.
+  exploratory: bool,
+  /// Scored chain geometry is fixed only for the additional constrained search.
+  preserve_chain_angles: bool,
 }
 
 impl Rings {
+  /// Keeps optional seed construction compatible with final chain-angle admission.
+  pub(super) fn preserves_chain_angles(&self) -> bool {
+    self.preserve_chain_angles
+  }
+
   /// Builds shared-edge constraints without assigning aromaticity or ring names.
   ///
   /// # Parameters
@@ -223,7 +236,14 @@ impl Rings {
       } else {
         None
       };
-      let model = if let Some(model) = scaffold {
+      let shared = if mode == RingMode::Constrained {
+        fused_macrocycles::FusedMacrocycle::shared_path(graph, block, &indices, &topology.ids, work)?
+      } else {
+        None
+      };
+      let mut model = if let Some(model) = shared {
+        Model::FusedMacrocycle(model)
+      } else if let Some(model) = scaffold {
         Model::Scaffold(model)
       } else if let Some(cage) = cages::Cage::new(graph, block, &indices, work)? {
         Model::Cage(cage)
@@ -238,6 +258,13 @@ impl Rings {
       } else {
         conventional_model(graph, source, block, &indices, &topology.ids, work, mode)?
       };
+      if matches!(mode, RingMode::Exploratory | RingMode::Constrained) {
+        match &mut model {
+          Model::Macrocycle(model) => model.explore(work)?,
+          Model::FusedMacrocycle(model) => model.explore(work)?,
+          _ => {}
+        }
+      }
       systems.push(System {
         model,
         atoms: block.atoms().iter().map(|id| indices[id]).collect(),
@@ -281,6 +308,8 @@ impl Rings {
       systems,
       membership,
       edges,
+      exploratory: matches!(mode, RingMode::Exploratory | RingMode::Constrained),
+      preserve_chain_angles: mode == RingMode::Constrained,
     })
   }
 
@@ -291,6 +320,27 @@ impl Rings {
       .flat_map(|&node| self.membership[node].iter())
       .copied()
       .min()
+  }
+
+  /// Varies the assembly root without changing any block's chemical identity.
+  ///
+  /// A locally clear attachment can obstruct a later ring. Different roots
+  /// expose those future obstacles before branch placement; only complete
+  /// molecule evaluation decides whether the alternate assembly is useful.
+  pub(super) fn seed_variant(&self, component: &[usize], variant: usize) -> Option<usize> {
+    if variant == 0 || !self.exploratory {
+      return self.seed(component);
+    }
+    let systems: std::collections::BTreeSet<_> = component
+      .iter()
+      .flat_map(|&row| self.membership[row].iter().copied())
+      .collect();
+    let count = systems.len().min(4);
+    if count == 0 {
+      None
+    } else {
+      systems.into_iter().nth(variant % count)
+    }
   }
 
   /// Returns the number of rigid cyclic systems.
@@ -325,6 +375,7 @@ impl Rings {
       })
       .max()
       .unwrap_or(1)
+      .max(if self.exploratory { self.systems.len().min(4) } else { 1 })
   }
 
   /// Tests whether adjacent vertices share a rigid cyclic block.

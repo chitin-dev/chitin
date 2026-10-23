@@ -32,6 +32,8 @@ pub(super) enum AttachmentPolicy {
   Rigid,
   /// Permit bounded saturated-carbon host-angle trials around flexible blocks.
   Saturated,
+  /// Preserve scored chain bends while searching independent ring assemblies.
+  ScoredAngles,
 }
 
 /// One dense skeleton edge, retaining its original graph identity.
@@ -225,6 +227,13 @@ impl Model {
         };
         let (before, side) = angle(initial);
         let (after, actual) = angle(candidate);
+        if self.preserve_chain_angles
+          && neighbors.len() == 2
+          && self.rows[host].iter().all(|&edge| self.edges[edge].movable)
+          && (after - 2. * PI / 3.).abs() > (before - 2. * PI / 3.).abs() + 1e-8
+        {
+          return false;
+        }
         if (after - before).abs() > PI / 6. + 1e-8
           || after < before.min(PI / 3.) - 1e-8
           || (side.abs() > 1e-8 && side * actual <= 0.)
@@ -811,6 +820,7 @@ pub(super) fn run(
     if matches!(attachments, AttachmentPolicy::Rigid) {
       model.flexible_hosts.fill(false);
     }
+    model.preserve_chain_angles = matches!(attachments, AttachmentPolicy::ScoredAngles);
     for crossing in &layout.crossings {
       let front = model.edges.iter().position(|edge| edge.id == crossing.front);
       let back = model.edges.iter().position(|edge| edge.id == crossing.back);

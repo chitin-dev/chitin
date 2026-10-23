@@ -321,6 +321,34 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
   }
 }
 
+/// Generates one optional alternate assembly under its own finite allowance.
+///
+/// # Errors
+/// Unsupported topology or exhausted search rejects only this optional proposal.
+pub(crate) fn exploratory(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, LayoutError> {
+  alternate(graph, options, rings::RingMode::Exploratory)
+}
+
+/// Searches exact shared paths and preserves scored chain angles independently.
+///
+/// # Errors
+/// Failure or work exhaustion rejects only this additional automatic candidate.
+pub(crate) fn constrained(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, LayoutError> {
+  alternate(graph, options, rings::RingMode::Constrained)
+}
+
+/// Runs one alternate family with a separate finite work allowance.
+fn alternate(graph: &MolecularGraph, options: &LayoutOptions, mode: rings::RingMode) -> Result<Layout2d, LayoutError> {
+  let resolved = crate::chemical::integer_bonds(graph)?;
+  let options = LayoutOptions {
+    ring_search_budget: options.fallback_budget / 4,
+    refinement_budget: options.refinement_budget / 2,
+    ..options.clone()
+  };
+  let mut work = rings::Work::new(options.ring_search_budget);
+  placement::generate(&resolved, graph, &options, &mut work, mode)
+}
+
 /// Retries an automatic depiction's degenerate projection without altering chemistry.
 ///
 /// # Errors
