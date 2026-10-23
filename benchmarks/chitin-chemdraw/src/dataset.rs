@@ -29,6 +29,29 @@ pub struct Config {
   /// Explicit opt-in to rendered-label repair; historical configs remain unchanged.
   #[serde(default)]
   pub label_feedback: bool,
+  /// Coordinate generator; omitted historical configurations retain Chitin.
+  #[serde(default)]
+  pub layout_engine: LayoutEngine,
+  /// External interpreter, resolved relative to this configuration file.
+  #[serde(default)]
+  pub external_python: Option<PathBuf>,
+  /// Explicit external minimizer quality, independent of our layout options.
+  #[serde(default = "standard_precision")]
+  pub coordgen_precision: String,
+}
+
+/// Benchmark-only providers never become domain or product dependencies.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutEngine {
+  #[default]
+  Chitin,
+  RdkitCoordgen,
+}
+
+/// Uses the external project's standard precision, not the wrapper's coarse default.
+fn standard_precision() -> String {
+  "standard".into()
 }
 
 /// Original data-record identity; row numbers exclude comments and the header.
@@ -142,6 +165,9 @@ mod tests {
       max_atoms: 100,
       save_svg_count: 0,
       label_feedback: false,
+      layout_engine: LayoutEngine::Chitin,
+      external_python: None,
+      coordgen_precision: standard_precision(),
     };
     let first = sample(&config)?;
     assert_eq!(first, sample(&config)?);

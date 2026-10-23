@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, onCleanup, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { Dialog } from "@kobalte/core/dialog";
 import type { CaseRecord, RenderResult } from "../../shared/types";
 import { Button } from "./ui/button";
@@ -7,6 +7,7 @@ import { MoleculePreview } from "./molecule-preview";
 
 /** Selection, metric provenance and image loading have independent lifetimes. */
 export function Inspector(props: {
+  external?: boolean;
   run: string;
   row: number;
   sourceVersion: string;
@@ -14,6 +15,9 @@ export function Inspector(props: {
   turnSample?: number;
 }) {
   const [mode, setMode] = createSignal<"snapshot" | "current">("snapshot");
+  createEffect(() => {
+    if (props.external) setMode("snapshot");
+  });
   const [zoom, setZoom] = createSignal(1);
   const [visibleFaces, setVisibleFaces] = createSignal(6);
   let recordRequest: AbortController | undefined, renderRequest: AbortController | undefined;
@@ -94,10 +98,16 @@ export function Inspector(props: {
       <label class="field-label">Renderer</label>
       <SelectField
         label="Renderer provenance"
-        options={["snapshot", "current"] as const}
+        options={props.external ? ["snapshot"] : (["snapshot", "current"] as ("snapshot" | "current")[])}
         value={mode()}
         onChange={setMode}
-        text={(value) => (value === "snapshot" ? "Run snapshot" : "Current preview")}
+        text={(value) =>
+          value === "snapshot"
+            ? props.external
+              ? "CoordGen layout · Chitin drawing"
+              : "Run snapshot"
+            : "Current preview"
+        }
       />
       <Show when={mode() === "current"}>
         <p class="notice">Preview only; run metrics unchanged.</p>

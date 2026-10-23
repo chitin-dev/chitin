@@ -6,7 +6,16 @@ import { join, isAbsolute } from "node:path";
 import { committedLines, compactPoint } from "../server/corpus";
 import type { CaseRecord } from "../shared/types";
 import { runDirectory, rowNumber, plotsRoot } from "../server/paths";
-import { RenderQueue, sourceRevision, watchSources } from "../server/renderer";
+import { RenderQueue, sourceRevision, watchSources, renderSvg } from "../server/renderer";
+import type { Corpus } from "../server/corpus";
+
+test("external layout runs cannot silently substitute the current internal generator", async () => {
+  const corpus = {
+    offsets: new Map([[1, { offset: 0, length: 0 }]]),
+    manifest: { layout_engine: "rdkit_coordgen" },
+  } as unknown as Corpus;
+  await assert.rejects(renderSvg(corpus, 1, "current"), /snapshots only/);
+});
 
 test("JSONL offsets use UTF8 bytes and ignore uncommitted trailing records", async () => {
   const directory = await mkdtemp(join(tmpdir(), "chitin-plots-test-"));

@@ -44,13 +44,14 @@ export async function listRuns(): Promise<RunInfo[]> {
             cases: summary.cases,
             evaluated: summary.success,
             protocol: summary.quality_version,
+            engine: manifest.layout_engine ?? "chitin",
           } satisfies RunInfo;
         } catch {
           return null;
         }
       }),
   );
-  return runs.filter((run): run is RunInfo => run !== null).sort((a, b) => b.updated - a.updated);
+  return runs.filter((run) => run !== null).sort((a, b) => b.updated - a.updated);
 }
 
 /** Parse only newline-committed JSONL bytes from a bounded file snapshot. */

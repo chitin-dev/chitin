@@ -47,6 +47,7 @@ export interface TurnSelection {
   sample: number;
 }
 export interface CaseRecord {
+  imported_positions?: [number, number][];
   case: { row: number; id: string; smiles: string };
   status: string;
   stage: string;
@@ -76,6 +77,8 @@ export interface CaseRecord {
   timings_ms: Record<string, number>;
 }
 export interface Manifest {
+  layout_engine?: "chitin" | "rdkit_coordgen";
+  external_provider?: { rdkit_version: string } | null;
   schema_version: number;
   executable_sha256?: string;
   renderer_executable?: string;
@@ -85,6 +88,7 @@ export interface Manifest {
   config: { dataset: string; version: string; input: string; max_atoms: number; seed: number; timeout_seconds: number };
 }
 export interface RunInfo {
+  engine?: "chitin" | "rdkit_coordgen";
   id: string;
   updated: number;
   revision: string;

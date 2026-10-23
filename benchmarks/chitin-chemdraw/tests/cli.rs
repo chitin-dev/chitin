@@ -5,6 +5,47 @@ use serde_json::Value;
 use std::{fs, process::Command};
 
 #[test]
+fn imported_worker_should_evaluate_exact_coordinates_without_automatic_repair() -> Result<()> {
+  use std::io::Write;
+  use std::process::Stdio;
+  let mut child = Command::new(env!("CARGO_BIN_EXE_chitin-chemdraw-benchmark"))
+    .arg("--worker")
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .spawn()?;
+  let request = serde_json::json!({
+    "case": {"row": 1, "id": "fixed-coordinates", "smiles": "CCO"},
+    "max_atoms": 128, "svg_path": null, "label_feedback": false,
+    "imported_positions": [[0.,0.], [1.,0.], [2.,0.]]
+  });
+  child
+    .stdin
+    .take()
+    .ok_or_else(|| anyhow::anyhow!("missing worker input"))?
+    .write_all(&serde_json::to_vec(&request)?)?;
+  let output = child.wait_with_output()?;
+  assert!(output.status.success());
+  let event: Value = serde_json::from_str(
+    std::str::from_utf8(&output.stdout)?
+      .lines()
+      .last()
+      .ok_or_else(|| anyhow::anyhow!("missing event"))?,
+  )?;
+  let record = &event["record"];
+  assert_eq!(record["status"], "success");
+  assert_eq!(record["imported_positions"], request["imported_positions"]);
+  assert_eq!(record["metrics"]["version"], "diagram-quality-v3");
+  assert!(record["timings_ms"]["coordinate_import"].is_number());
+  assert!(record["timings_ms"]["automatic_drawing"].is_null());
+  assert!(record["timings_ms"]["layout"].is_null());
+  let error = record["metrics"]["measurements"]["acyclic_carbon_angle_rmse_deg"]["value"]
+    .as_f64()
+    .ok_or_else(|| anyhow::anyhow!("missing angle measurement"))?;
+  assert!((error - 60.).abs() < 1e-7);
+  Ok(())
+}
+
+#[test]
 fn automatic_worker_should_measure_quality_triggered_reembedding() -> Result<()> {
   use std::io::Write;
   use std::process::Stdio;

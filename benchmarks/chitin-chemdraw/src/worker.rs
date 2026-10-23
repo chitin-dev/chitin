@@ -30,6 +30,14 @@ pub struct Request {
   /// Must match the recorded pipeline when reproducing a historical drawing.
   #[serde(default)]
   pub label_feedback: bool,
+  /// Validated imported coordinates bypass all automatic geometry repair.
+  #[serde(default)]
+  pub imported_positions: Option<Vec<[f64; 2]>>,
+  /// Untrusted provider exchange must be checked against the source graph first.
+  #[serde(default)]
+  pub external_layout: Option<crate::external::ExternalLayout>,
+  #[serde(default)]
+  pub external_timings_ms: BTreeMap<String, f64>,
 }
 
 /// Durable per-case result, including failures and separate stage timings.
@@ -52,6 +60,9 @@ pub struct Record {
   /// Required coupled closure was used; not a claim of readability or correctness.
   #[serde(default)]
   pub constraint_closure: Option<bool>,
+  /// Persisted normalized source-order coordinates permit exact provider-free replay.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub imported_positions: Option<Vec<[f64; 2]>>,
 }
 
 /// Line-framed worker protocol; a stage marker survives timeout or process death.
@@ -79,6 +90,7 @@ impl Record {
       features: None,
       stereo_failure: None,
       constraint_closure: None,
+      imported_positions: None,
     }
   }
 
@@ -115,6 +127,7 @@ fn emit(event: &Event) -> Result<()> {
 pub fn run() -> Result<()> {
   let request: Request = serde_json::from_reader(io::stdin().lock())?;
   let mut record = Record::pending(request.case.clone());
+  record.timings_ms.clone_from(&request.external_timings_ms);
   let result = execute(&request, &mut record);
   match result {
     Ok(()) => {
@@ -156,11 +169,41 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
   record.atom_count = Some(graph.atom_count());
   record.bond_count = Some(graph.bond_count());
   record.features = Some(record.timed("characterize", || quality::characterize(&graph))?);
+  ensure!(graph.atom_count() <= request.max_atoms, "source exceeds atom budget");
   let options = LayoutOptions {
     max_atoms: request.max_atoms,
     ..Default::default()
   };
-  let (coordinates, drawing) = if request.label_feedback {
+  let (coordinates, drawing) = if request.external_layout.is_some() || request.imported_positions.is_some() {
+    ensure!(
+      !request.label_feedback,
+      "external coordinates cannot request internal label feedback"
+    );
+    ensure!(
+      !(request.external_layout.is_some() && request.imported_positions.is_some()),
+      "ambiguous imported geometry"
+    );
+    let coordinates = record.timed("coordinate_import", || {
+      match (&request.external_layout, &request.imported_positions) {
+        (Some(external), None) => crate::external::validate(&graph, external),
+        (None, Some(positions)) => crate::external::imported(&graph, positions),
+        _ => anyhow::bail!("missing imported geometry"),
+      }
+    })?;
+    record.imported_positions = Some(
+      graph
+        .atoms()
+        .map(|(id, _)| {
+          let point = coordinates.positions()[&id];
+          [point.x, point.y]
+        })
+        .collect(),
+    );
+    let drawing = record.timed("depict", || {
+      Ok(depict::depict(&graph, &coordinates, &DepictOptions::default())?)
+    })?;
+    (coordinates, drawing)
+  } else if request.label_feedback {
     // Measure the same automatic orchestration as normal consumers. Finishing
     // a fixed seed alone would silently omit quality-triggered re-embedding.
     let result = record.timed("automatic_drawing", || {

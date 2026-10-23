@@ -159,6 +159,9 @@ const queue = new RenderQueue();
 /** Rendering occurs inside the original bounded worker, with no shell interpolation. */
 async function renderWorker(binary: string, corpus: Corpus, row: number, destination: string): Promise<void> {
   const record = await readRecord(corpus, row);
+  const external = corpus.manifest.layout_engine === "rdkit_coordgen";
+  if (external && !record.imported_positions)
+    throw new Error("External snapshot has no saved coordinates; internal layout substitution is prohibited.");
   const temporary = destination + `.${process.pid}.${Date.now()}.tmp`;
   const child = spawn(binary, ["--worker"], { cwd: workspaceRoot, stdio: ["pipe", "pipe", "pipe"] });
   let output = "";
@@ -178,7 +181,8 @@ async function renderWorker(binary: string, corpus: Corpus, row: number, destina
     JSON.stringify({
       case: record.case,
       max_atoms: corpus.manifest.config.max_atoms,
-      label_feedback: corpus.manifest.label_feedback ?? false,
+      label_feedback: external ? false : (corpus.manifest.label_feedback ?? false),
+      imported_positions: external ? record.imported_positions : null,
       svg_path: temporary,
     }),
   );
@@ -206,6 +210,10 @@ async function renderWorker(binary: string, corpus: Corpus, row: number, destina
 
 export async function renderSvg(corpus: Corpus, row: number, mode: "snapshot" | "current"): Promise<RenderResult> {
   if (!corpus.offsets.has(row)) throw new Error("Source row not found");
+  if (corpus.manifest.layout_engine === "rdkit_coordgen" && mode === "current")
+    throw new Error(
+      "External-layout runs support snapshots only. Use a new benchmark run to change the layout engine.",
+    );
   if (mode === "snapshot") {
     const saved = join(corpus.directory, "svg", `${String(row).padStart(8, "0")}.svg`);
     if (
@@ -235,6 +243,8 @@ export async function renderSvg(corpus: Corpus, row: number, mode: "snapshot" | 
         case: record.case,
         max_atoms: corpus.manifest.config.max_atoms,
         label_feedback: corpus.manifest.label_feedback ?? false,
+        imported_positions: record.imported_positions,
+        layout_engine: corpus.manifest.layout_engine ?? "chitin",
       }),
     )
     .digest("hex");

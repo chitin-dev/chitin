@@ -183,7 +183,9 @@ export default function App() {
                 options={runs()}
                 value={selectedRun()}
                 onChange={selectRun}
-                text={(run) => `${run.id} · ${run.cases.toLocaleString()}`}
+                text={(run) =>
+                  `${run.id} · ${run.engine === "rdkit_coordgen" ? "CoordGen / Chitin drawing" : "Chitin"} · ${run.cases.toLocaleString()}`
+                }
                 optionKey={(run) => run.id}
               />
               <label class="field-label">
@@ -344,6 +346,7 @@ export default function App() {
         </main>
         <Show when={selected() !== null && runId()}>
           <Inspector
+            external={data()?.run.engine === "rdkit_coordgen"}
             run={runId()}
             row={selected()!}
             sourceVersion={source()}
