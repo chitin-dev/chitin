@@ -51,8 +51,6 @@ pub(super) struct Model {
   pub(super) pinned: Vec<bool>,
   /// Angle references and hard/soft classification.
   pub(super) angles: Vec<Angle>,
-  /// Whether a nonbridge edge has no alternate path of at most seven edges.
-  pub(super) large_cycle: bool,
   /// Vertices incident to multiple bonds or carrying supplied tetrahedral facts.
   protected: Vec<bool>,
   /// Graph-coordinate independent source double relations.
@@ -121,7 +119,6 @@ impl Model {
       rows,
       pinned: ids.iter().map(|id| anchors.contains(id)).collect(),
       angles: Vec::new(),
-      large_cycle: false,
       protected,
       stereo,
       distances: Vec::new(),
@@ -185,8 +182,6 @@ impl Model {
           };
           node = parent;
         }
-      } else {
-        self.large_cycle = true;
       }
     }
     let mut pairs = BTreeMap::new();
@@ -448,7 +443,6 @@ mod tests {
         &mut Budget(1_000_000)
       ));
       assert!(model.pinned.iter().all(|&p| p == expected));
-      assert_eq!(model.large_cycle, !expected);
     }
     Ok(())
   }

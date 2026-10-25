@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chitin_chem::{
-  AtomId, Element, StereoLigand,
+  AtomId, Element, StereoLigand, TetrahedralWinding,
   io::smiles::{read_smiles, write_smiles},
 };
 use chitin_chemdraw::{
@@ -188,13 +188,157 @@ fn host_isotope_label_should_not_repeat_the_expanded_h() -> TestResult {
 #[test]
 fn three_neighbor_stereocenters_should_not_need_an_unannotated_bond_when_h_is_expanded() -> TestResult {
   let graph = read_smiles("[C@H]([C@H](F)Cl)([C@H](F)Cl)[C@H](F)Cl")?.into_graph();
+  let before = graph.clone();
   let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
   assert!(matches!(
-    depict::depict(&graph, &coordinates, &DepictOptions::default()),
-    Err(depict::DepictError::Stereo(_))
+    depict::depict(
+      &graph,
+      &coordinates,
+      &DepictOptions {
+        chiral_hydrogens: ChiralHydrogenMode::Implicit,
+        ..Default::default()
+      }
+    ),
+    Err(depict::DepictError::StereoAssignment {
+      reason: depict::StereoFailureReason::NoEligibleBond,
+      ..
+    })
   ));
+  let automatic = depict::depict(&graph, &coordinates, &DepictOptions::default())?;
+  let required: BTreeSet<_> = graph
+    .tetrahedral_centers()
+    .filter_map(|(center, _)| {
+      graph
+        .neighbors(center)
+        .is_ok_and(|mut neighbors| neighbors.all(|(ligand, _)| graph.tetrahedral(ligand).is_some()))
+        .then_some(center)
+    })
+    .collect();
+  assert_eq!(labels(&automatic).keys().copied().collect::<BTreeSet<_>>(), required);
+  assert_eq!(required.len(), 1);
   let drawing = depict::depict(&graph, &coordinates, &explicit())?;
   assert_eq!(labels(&drawing).len(), 4);
+  assert_eq!(graph, before);
+  Ok(())
+}
+
+#[test]
+fn annotated_fused_ring_regressions_should_keep_source_facts_and_expand_only_required_h() -> TestResult {
+  for source in [
+    "CC1=CC(=O)C2=C(C)C[C@H](OS(=O)(=O)C3=CC=CC=C3)[C@@H]3[C@H](OC(=O)[C@H]3C)[C@@H]12",
+    "C[C@@H]1C(=O)O[C@H]2[C@H]1CC[C@@]1(C)CC3=C(N=C(NC(=O)COCC(=O)O)S3)[C@@H](C)[C@H]21",
+  ] {
+    let graph = read_smiles(source)?.into_graph();
+    let before = graph.clone();
+    let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
+    let original_coordinates = coordinates.clone();
+    let strict = DepictOptions {
+      chiral_hydrogens: ChiralHydrogenMode::Implicit,
+      ..Default::default()
+    };
+    assert!(matches!(
+      depict::depict(&graph, &coordinates, &strict),
+      Err(depict::DepictError::StereoAssignment {
+        reason: depict::StereoFailureReason::NoEligibleBond,
+        ..
+      })
+    ));
+    let automatic = depict::depict(&graph, &coordinates, &DepictOptions::default())?;
+    assert!(!labels(&automatic).is_empty());
+    for center in labels(&automatic).keys() {
+      assert!(
+        graph
+          .neighbors(*center)?
+          .all(|(ligand, _)| graph.tetrahedral(ligand).is_some())
+      );
+    }
+    assert_eq!(graph, before);
+    assert_eq!(coordinates, original_coordinates);
+    assert_eq!(
+      depict::depict(&graph, &coordinates, &DepictOptions::default())?,
+      automatic
+    );
+  }
+  Ok(())
+}
+
+#[test]
+fn selective_h_mark_should_decode_to_source_winding_after_rotation_and_reflection() -> TestResult {
+  for source in [
+    "[C@H]([C@H](F)Cl)([C@H](F)Cl)[C@H](F)Cl",
+    "[C@@H]([C@H](F)Cl)([C@H](F)Cl)[C@H](F)Cl",
+  ] {
+    let graph = read_smiles(source)?.into_graph();
+    let base = layout::generate(&graph, &LayoutOptions::default())?;
+    let options = DepictOptions::default();
+    for angle in [0_f64, 0.7, 2.1] {
+      for reflection in [1., -1.] {
+        let points = base
+          .positions()
+          .iter()
+          .map(|(&id, p)| {
+            (
+              id,
+              Point::new(
+                reflection * (p.x * angle.cos() - p.y * angle.sin()),
+                p.x * angle.sin() + p.y * angle.cos(),
+              ),
+            )
+          })
+          .collect();
+        let coordinates = Layout2d::from_positions(points)?;
+        let drawing = depict::depict(&graph, &coordinates, &options)?;
+        let expanded = labels(&drawing);
+        assert_eq!(expanded.len(), 1);
+        for (center, text) in expanded {
+          let origin = coordinates.position(center).ok_or("missing center")?;
+          let [min, max] = text.envelope()?;
+          let hydrogen = Point::new(
+            (min.x + max.x) / (2. * options.bond_length),
+            -(min.y + max.y) / (2. * options.bond_length),
+          );
+          let solid = drawing
+            .primitives()
+            .iter()
+            .any(|p| matches!(p, Primitive::Polygon(p) if p.source == Some(Source::AttachedHydrogen(center))));
+          let descriptor = graph.tetrahedral(center).ok_or("missing descriptor")?;
+          let mut vectors = [[0.; 3]; 4];
+          for (index, ligand) in descriptor.ligands().iter().enumerate() {
+            let point = match ligand {
+              StereoLigand::Atom(atom) => coordinates.position(*atom).ok_or("missing ligand")?,
+              StereoLigand::Hydrogen => hydrogen,
+              StereoLigand::LonePair => return Err("unexpected lone pair".into()),
+            };
+            let length = origin.distance(point);
+            vectors[index] = [
+              (point.x - origin.x) / length,
+              (point.y - origin.y) / length,
+              if *ligand == StereoLigand::Hydrogen {
+                if solid { 1. } else { -1. }
+              } else {
+                0.
+              },
+            ];
+          }
+          // Decode the completed scene, not the planner's chosen polarity.
+          // Triple products relative to ligand 3 have the opposite sign to
+          // the source-order oriented volume relative to ligand 0.
+          let a: [f64; 3] = std::array::from_fn(|i| vectors[0][i] - vectors[3][i]);
+          let b: [f64; 3] = std::array::from_fn(|i| vectors[1][i] - vectors[3][i]);
+          let c: [f64; 3] = std::array::from_fn(|i| vectors[2][i] - vectors[3][i]);
+          let volume = -(a[0] * (b[1] * c[2] - b[2] * c[1])
+            + a[1] * (b[2] * c[0] - b[0] * c[2])
+            + a[2] * (b[0] * c[1] - b[1] * c[0]));
+          assert!(volume.abs() > 1e-8);
+          assert_eq!(
+            volume < 0.,
+            descriptor.winding() == TetrahedralWinding::Anticlockwise,
+            "{source}, {angle}, {reflection}"
+          );
+        }
+      }
+    }
+  }
   Ok(())
 }
 

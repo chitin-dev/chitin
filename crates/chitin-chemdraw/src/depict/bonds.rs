@@ -211,13 +211,16 @@ fn side(
 /// # Parameters
 /// - `graph`, `points`: immutable adjacency and matching drawing-space positions.
 /// - `a`, `b`: spatially normalized endpoints, independent of stored edge order.
-/// - `direction`, `normal`: the unit axis and its fixed left normal.
+/// - `direction`: the unit axis, from which the fixed left normal is derived.
 /// - `stroke`: signed offset and geometric permission for a bounded miter.
+/// - `clearance`: perpendicular centerline separation after a neighbor-ray meeting.
 ///
 /// # Returns
 /// Offset auxiliary strokes only shorten. Centered double strokes can extend
 /// by at most a quarter bond length to meet the neighboring skeleton instead of
 /// leaving a detached pair. Their label clearance is still enforced afterwards.
+/// Detached double auxiliaries retreat by the clearance divided by the meeting
+/// angle's sine, keeping round caps visibly separate even at acute corners.
 ///
 /// # Errors
 /// Propagates invalid graph-local neighbor references.
@@ -227,9 +230,10 @@ fn join(
   a: AtomId,
   b: AtomId,
   direction: Point,
-  normal: Point,
   stroke: &mut Stroke,
+  clearance: f64,
 ) -> Result<(), Error> {
+  let normal = Point::new(-direction.y, direction.x);
   for (end, (id, opposite)) in [(a, b), (b, a)].into_iter().enumerate() {
     let forward = if end == 0 {
       direction
@@ -238,14 +242,14 @@ fn join(
     };
     let mut meeting: Option<f64> = None;
     for (neighbor, _) in graph.neighbors(id)? {
+      let ray = difference(points[&neighbor], points[&id]);
       if neighbor != opposite
-        && let Some(value) = intersection(
-          forward,
-          normal,
-          stroke.offset,
-          difference(points[&neighbor], points[&id]),
-        )
+        && let Some(value) = intersection(forward, normal, stroke.offset, ray)
       {
+        // Both strokes have round caps. A centerline meeting alone would make
+        // the auxiliary look like an extra skeleton edge rather than a double.
+        let sine = cross(forward, ray).abs() / ray.x.hypot(ray.y);
+        let value = value + clearance / sine;
         meeting = Some(meeting.map_or(value, |old| old.max(value)));
       }
     }
@@ -410,8 +414,33 @@ pub(super) fn draw(
     };
     for stroke in &mut strokes {
       if stroke.offset != 0. {
-        join(graph, points, a, b, direction, normal, stroke)?;
+        let clearance = if order == BondOrder::Double && !stroke.miter {
+          // Ink wider than the parallel spacing already merges the two double
+          // strokes. Bound that unsupported visual clearance rather than
+          // erasing the auxiliary in otherwise exportable thick-ink styles.
+          2. * options.stroke_width.min(options.bond_spacing / 2.)
+        } else {
+          0.
+        };
+        join(graph, points, a, b, direction, stroke, clearance)?;
       }
+    }
+    // Acute projected ring corners can consume the entire inward auxiliary.
+    // Keep both double-bond strokes by using the centered representation;
+    // never erase the second stroke or reverse its endpoints to force a join.
+    if order == BondOrder::Double
+      && strokes
+        .iter()
+        .any(|stroke| stroke.trim.iter().sum::<f64>() >= length * 0.8)
+    {
+      strokes = [-0.5, 0.5]
+        .into_iter()
+        .map(|side| Stroke {
+          offset: side * options.bond_spacing,
+          trim: [0.; 2],
+          miter: false,
+        })
+        .collect();
     }
     let mut interval = [f64::NEG_INFINITY, f64::INFINITY];
     for stroke in &strokes {

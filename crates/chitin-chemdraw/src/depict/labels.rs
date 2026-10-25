@@ -49,12 +49,15 @@ impl Recipe {
 ///
 /// # Errors
 /// Propagates missing facts and unresolved H before any text is requested.
-pub(super) fn prepare(graph: &MolecularGraph, options: &DepictOptions) -> Result<BTreeMap<AtomId, Recipe>, Error> {
+pub(super) fn prepare(
+  graph: &MolecularGraph,
+  options: &DepictOptions,
+  expanded: &BTreeSet<AtomId>,
+) -> Result<BTreeMap<AtomId, Recipe>, Error> {
   let report = match options.hydrogens {
     HydrogenMode::KnownOnly => None,
     HydrogenMode::Infer(model) => Some(analyze_valence(graph, model)?),
   };
-  let expanded = hydrogens::centers(graph, options);
   let mut recipes = BTreeMap::new();
   for (id, atom) in graph.atoms() {
     let charge = atom.formal_charge().ok_or(Error::UnknownFacts(id))?;
@@ -120,6 +123,8 @@ pub(super) fn prepare(graph: &MolecularGraph, options: &DepictOptions) -> Result
 /// `FontFace::from_measurements`. Then call `depict` with unchanged graph and
 /// options plus that font. No placeholder geometry or default-font metrics are
 /// generated. This stage needs no layout coordinates or platform font lookup.
+/// Automatic stereo-H expansion conservatively requests an H glyph even when
+/// a later nondegenerate projection can use a source bond and omit that glyph.
 ///
 /// # Errors
 /// Rejects invalid sizes, unsupported chemistry, unknown facts and unresolved H.
@@ -158,10 +163,10 @@ pub fn measurement_requests(graph: &MolecularGraph, options: &DepictOptions) -> 
     }
   }
   let mut requests = BTreeSet::new();
-  for recipe in prepare(graph, options)?.values() {
+  for recipe in prepare(graph, options, &hydrogens::centers(graph, options))?.values() {
     recipe.requests(options.font_size, &mut requests)?;
   }
-  if !hydrogens::centers(graph, options).is_empty() {
+  if hydrogens::may_expand(graph, options) {
     requests.insert(TextRequest::new("H", options.font_size)?);
   }
   Ok(requests.into_iter().collect())

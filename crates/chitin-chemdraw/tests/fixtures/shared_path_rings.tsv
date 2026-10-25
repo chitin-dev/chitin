@@ -1,0 +1,5 @@
+# Source identifier and SMILES for formerly unsupported shared-path cyclic blocks.
+unsaturated_adamantane_core	C1=C2CC3CC1CC(C2)C3
+CNP0251694.1	CN(CC1=CC=CC=C1)CC1=C(O)C(=O)C=C(CN2C[C@H]3C[C@@H](C2)C2=CC=CC(=O)N2C3)N1C
+CNP0169424.1	CC1=CC(O)=C2C(=O)OCC34C5=C(C6=C7C(=COC(=O)C7=C(O)C=C6C)C5=O)[C@@H](C(=O)C1=C23)C4O
+CNP0353345.1	O[C@@H]1[C@H](O)[C@@H]2C[C@H]1C1=NC3=CC=CC=C3N=C12

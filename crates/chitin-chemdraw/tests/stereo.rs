@@ -13,6 +13,42 @@ use chitin_chemdraw::{
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[test]
+fn lone_pair_and_phosphoryl_centers_should_keep_multiple_bonds_and_flip_enantiomer_marks() -> TestResult {
+  for source in ["C[S@](=O)CC", "C[S@+](CC)CCC", "CO[P@](=O)(O)OCCN"] {
+    let enantiomer = source.replace('@', "@@");
+    let mut solid_counts = Vec::new();
+    for source in [source, enantiomer.as_str()] {
+      let graph = read_smiles(source)?.into_graph();
+      let positions = layout::generate(&graph, &LayoutOptions::default())?;
+      let drawing = depict::depict(&graph, &positions, &geometry_options())?;
+      solid_counts.push(solids(&drawing));
+      for (id, bond) in graph
+        .bonds()
+        .filter(|(_, bond)| bond.order() == chitin_chem::BondOrder::Double)
+      {
+        assert_eq!(bond.order(), chitin_chem::BondOrder::Double);
+        assert!(
+          drawing
+            .primitives()
+            .iter()
+            .filter(|p| matches!(p, Primitive::Line(line) if line.source == Some(Source::Bond(id))))
+            .count()
+            >= 2
+        );
+        assert!(
+          !drawing
+            .primitives()
+            .iter()
+            .any(|p| matches!(p, Primitive::Polygon(polygon) if polygon.source == Some(Source::Bond(id))))
+        );
+      }
+    }
+    assert_eq!(solid_counts.iter().sum::<usize>(), 1, "{source}");
+  }
+  Ok(())
+}
+
 /// Keeps each geometric wedge whole; split-color coverage lives in bond_colors.
 fn geometry_options() -> DepictOptions {
   DepictOptions {
@@ -132,7 +168,10 @@ fn degenerate_coordinates_should_not_silently_drop_supplied_stereo() -> TestResu
     .collect();
   assert!(matches!(
     depict::depict(&graph, &Layout2d::from_positions(points)?, &geometry_options()),
-    Err(depict::DepictError::Stereo(_))
+    Err(depict::DepictError::StereoAssignment {
+      reason: depict::StereoFailureReason::DegenerateProjection,
+      ..
+    })
   ));
   Ok(())
 }

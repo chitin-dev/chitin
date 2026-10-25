@@ -102,6 +102,7 @@ fn reversing_atom_and_bond_insertion_should_preserve_configuration_not_slash_spe
     let ligands = stereo.ligands().map(|ligand| match ligand {
       chitin_chem::StereoLigand::Atom(atom) => chitin_chem::StereoLigand::Atom(mapping[&atom]),
       chitin_chem::StereoLigand::Hydrogen => chitin_chem::StereoLigand::Hydrogen,
+      chitin_chem::StereoLigand::LonePair => chitin_chem::StereoLigand::LonePair,
     });
     changed.set_tetrahedral(
       mapping[&center],

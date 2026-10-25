@@ -41,6 +41,8 @@ struct Obstacles<'a> {
 /// Finds only annotated carbon centers with a declared virtual H to display.
 ///
 /// Explicit H vertices and unannotated CH groups are not expansion candidates.
+/// This is the topology-only subset. Projection-dependent additions are resolved
+/// before final recipes; host measurement requests include their possible H run.
 pub(super) fn centers(graph: &MolecularGraph, options: &DepictOptions) -> BTreeSet<AtomId> {
   if options.chiral_hydrogens == ChiralHydrogenMode::Implicit {
     return BTreeSet::new();
@@ -49,10 +51,96 @@ pub(super) fn centers(graph: &MolecularGraph, options: &DepictOptions) -> BTreeS
     .tetrahedral_centers()
     .filter_map(|(center, stereo)| {
       (graph.atom(center).is_some_and(|atom| atom.element() == Element::Carbon)
-        && stereo.ligands().contains(&StereoLigand::Hydrogen))
+        && stereo.ligands().contains(&StereoLigand::Hydrogen)
+        && (options.chiral_hydrogens == ChiralHydrogenMode::Explicit
+          || graph.neighbors(center).is_ok_and(|neighbors| {
+            neighbors.len() == 3
+              && neighbors
+                .into_iter()
+                .all(|(ligand, _)| graph.tetrahedral(ligand).is_some())
+          })))
       .then_some(center)
     })
     .collect()
+}
+
+/// Resolves automatic expansion against the actual projection, before labels.
+///
+/// # Parameters
+/// - `graph`, `points`: source topology and validated y-down drawing coordinates.
+/// - `options`: strict skeletal, explicit, or selective automatic H policy.
+///
+/// # Returns
+/// Topologically required H plus declared H whose permitted source wedges all
+/// have zero oriented volume. Only three-neighbor annotated carbons qualify.
+/// A failed source wedge does not imply that the entire projection is singular:
+/// the three in-plane ligands may still define a valid triangle for a C–H mark.
+///
+/// # Errors
+/// Propagates inconsistent source handles. Truly collapsed projections remain
+/// unexpanded and retain the ordinary classified stereo failure.
+pub(super) fn projected_centers(
+  graph: &MolecularGraph,
+  points: &BTreeMap<AtomId, Point>,
+  options: &DepictOptions,
+) -> Result<BTreeSet<AtomId>, Error> {
+  let mut expanded = centers(graph, options);
+  if options.chiral_hydrogens != ChiralHydrogenMode::Auto {
+    return Ok(expanded);
+  }
+  for (center, descriptor) in graph.tetrahedral_centers() {
+    if expanded.contains(&center)
+      || !graph.atom(center).is_some_and(|atom| atom.element() == Element::Carbon)
+      || !descriptor.ligands().contains(&StereoLigand::Hydrogen)
+    {
+      continue;
+    }
+    let neighbors: Vec<_> = graph.neighbors(center)?.collect();
+    if neighbors.len() != 3
+      || neighbors
+        .iter()
+        .filter(|(id, _)| graph.tetrahedral(*id).is_some())
+        .count()
+        < 2
+    {
+      continue;
+    }
+    let origin = points[&center];
+    let mut usable = false;
+    for (ligand, _) in neighbors {
+      if graph.tetrahedral(ligand).is_none() {
+        usable |= stereo::solid_for(descriptor, origin, points, StereoLigand::Atom(ligand), None)?.is_some();
+      }
+    }
+    // With H as the sole out-of-plane ligand, the volume depends only on the
+    // triangle of the other three unit rays. This probe is not a drawn H point.
+    if !usable
+      && stereo::solid_for(
+        descriptor,
+        origin,
+        points,
+        StereoLigand::Hydrogen,
+        Some(origin.translated(1., 0.)),
+      )?
+      .is_some()
+    {
+      expanded.insert(center);
+    }
+  }
+  Ok(expanded)
+}
+
+/// Whether projection-dependent automatic expansion may need an H glyph.
+pub(super) fn may_expand(graph: &MolecularGraph, options: &DepictOptions) -> bool {
+  !centers(graph, options).is_empty()
+    || (options.chiral_hydrogens == ChiralHydrogenMode::Auto
+      && graph.tetrahedral_centers().any(|(center, descriptor)| {
+        graph.atom(center).is_some_and(|atom| atom.element() == Element::Carbon)
+          && descriptor.ligands().contains(&StereoLigand::Hydrogen)
+          && graph
+            .neighbors(center)
+            .is_ok_and(|neighbors| neighbors.filter(|(id, _)| graph.tetrahedral(*id).is_some()).count() >= 2)
+      }))
 }
 
 /// Chooses measured H positions and correct C–H wedge polarities in stable order.

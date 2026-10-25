@@ -65,7 +65,6 @@ fn unsupported_corpus_should_fail_at_the_declared_typed_boundary() -> TestResult
         )?);
         match layout::generate(parsed.graph(), &layout::LayoutOptions::default()) {
           Err(layout::LayoutError::DoubleBondStereo(_)) => "layout_stereo",
-          Err(layout::LayoutError::RingSystem { .. }) => "layout_ring",
           Err(layout::LayoutError::Kekule(_)) => "layout_aromatic",
           _ => "unexpected_layout_result",
         }

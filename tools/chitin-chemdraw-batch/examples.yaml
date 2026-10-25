@@ -98,3 +98,20 @@ smiles:
   - 'O1[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C(=O)O[C@H](C)C[C@H](O)C1=O'  # synthetic hydroxylated macrocyclic polyester; 30-membered ring
   - 'C1(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C1O'  # dense hydroxylated 25-membered ring; odd-size layout stress case
   - 'C1(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C(O)C1O'  # dense hydroxylated 26-membered ring; even-size layout stress case
+
+  - 'CC1C(C(=O)OC2C(C(C3(C(C(=O)C4C(C3(C2(C)O)OC4(COC(=O)C5=C1N=CC=C5)C)O)OC(=O)C)COC(=O)C)OC(=O)C)OC(=O)C)C'
+  - 'CC1=[O][Fe]2345[O]=C(N(CCCC6NC(=O)C(NC(=O)C(CCCN1O5)NC(=O)CNC(=O)CNC(=O)CNC6=O)CCCN(C(=[O]3)C)O4)O2)C'
+
+  # Cage projection comparisons; export success is not a visual-quality certificate.
+  # Keep this C60 entry at its existing index for projection comparisons.
+  - 'c12c3c4c5c1c6c7c8c2c9c1c3c2c3c4c4c%10c5c5c6c6c7c7c%11c8c9c8c9c1c2c1c2c3c4c3c4c%10c5c5c6c6c7c7c%11c8c8c9c1c1c2c3c2c4c5c6c3c7c8c1c23'  # C60 fullerene; rigid camera projection with front/back depth cues
+  - 'C12C3C1C1C2C31'  # prismane; small saturated projection control
+  - 'CC12C3C1C1C2C31'  # methyl-substituted prismane; attachment placement
+  - 'O=C(O)C12C3C1C1C2C31'  # prismane core with carboxyl labels outside the cage
+  - 'O=C(Nc1ccccc1)C12C3C1C1C2C31'  # prismane core plus planar aromatic amide
+  - 'C12C3C4C5C1C6C7C2C8C3C9C4C1C5C6C2C7C8C9C12'  # dodecahedrane; larger saturated projection control
+  - 'NC12C3C4C5C1C6C7C2C8C3C9C4C1C5C6C2C7C8C9C12'  # amino-substituted dodecahedrane; cage-edge label clearance
+  - 'C12C3C1C1C2C31CC45C6C4C4C5C64'  # two prismane cores linked by methylene; independent block poses
+  - 'C12=C3C1C1C2C31'  # synthetic unsaturated prismane topology; double-bond rendering boundary
+  - 'C12=C3C4C1C5C2C3C45'  # synthetic unsaturated cubane topology; template/projection routing boundary
+  - 'C12C3C4C5C1C6C7C8C2C9C1C3C2C3C4C4C%10C5C5C6C6C7C7C%11C8C9C8C9C1C2C1C2C3C4C3C4C%10C5C5C6C6C7C7C%11C8C8C9C1C1C2C3C2C4C5C6C3C7C8C1C23'  # synthetic saturated C60 connectivity control; not a stability or geometry claim

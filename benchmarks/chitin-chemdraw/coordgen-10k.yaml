@@ -1,0 +1,20 @@
+# Same source, seed and sample definition as coconut-10k.yaml.
+dataset: COCONUT
+version: "2026-10"
+license: CC0-1.0
+source_url: https://coconut.s3.uni-jena.de/prod/downloads/2026-10/coconut_csv_lite-10-2026.zip
+input: ../data/coconut-2026-10/coconut_csv_lite-10-2026.csv
+output: ../results/coordgen-2026-10-seed-20261020-10k-001
+delimiter: ","
+headers: true
+smiles_column: canonical_smiles
+id_column: identifier
+sample_size: 10000
+seed: 20261020
+timeout_seconds: 5
+max_atoms: 4096
+save_svg_count: 100
+layout_engine: rdkit_coordgen
+external_python: engines/coordgen/.venv/bin/python
+coordgen_precision: standard
+label_feedback: false

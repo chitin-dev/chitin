@@ -1,0 +1,16 @@
+# Paths are relative to this configuration. Use a new output for each repeat.
+dataset: chitin-layout-regressions
+version: working-tree
+license: Apache-2.0
+source_url: https://github.com/chitin-dev/chitin
+input: ../../crates/chitin-chemdraw/tests/fixtures/layout.tsv
+output: ../results/smoke-001
+delimiter: "\t"
+headers: false
+smiles_column: "1"
+id_column: "0"
+sample_size: 0
+seed: 20261020
+timeout_seconds: 10
+max_atoms: 4096
+save_svg_count: 50

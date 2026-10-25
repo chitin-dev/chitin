@@ -31,6 +31,8 @@ struct Cut {
 /// # Errors
 /// Invalid/deleted bond references, nonproper intersections, wedge/multiple-bond
 /// crossings and cuts erasing a complete bond fail instead of hiding chemistry.
+/// Dense camera cores instead validate depth order and retain all single/double
+/// strokes for depth cues; they do not use gap-based occlusion.
 pub(super) fn apply(
   graph: &MolecularGraph,
   layout: &Layout2d,
@@ -43,9 +45,16 @@ pub(super) fn apply(
   }
   let mut cuts = BTreeMap::<BondId, Vec<Cut>>::new();
   for crossing in layout.bond_crossings() {
+    // A dense spatial core keeps both strokes of every multiple bond intact.
+    // Its explicit camera depths drive the depth-cue renderer instead of gaps.
+    let spatial = [crossing.front, crossing.back].iter().all(|&id| {
+      graph
+        .bond(id)
+        .is_some_and(|bond| bond.atoms().iter().all(|id| layout.drawing_depths().contains_key(id)))
+    });
     let endpoints = |id| -> Result<_, Error> {
       let bond = graph.bond(id).ok_or(chitin_chem::GraphError::MissingBond(id))?;
-      if bond.order() != BondOrder::Single {
+      if bond.order() != BondOrder::Single && !(spatial && bond.order() == BondOrder::Double) {
         return Err(Error::Perspective(id));
       }
       Ok(bond.atoms())
@@ -71,6 +80,15 @@ pub(super) fn apply(
     let u = cross(offset, rear) / determinant;
     if !(0. < t && t < 1. && 0. < u && u < 1.) {
       return Err(Error::Perspective(crossing.back));
+    }
+    if spatial {
+      let depth = layout.drawing_depths();
+      let rear_z = depth[&back[0]] + t * (depth[&back[1]] - depth[&back[0]]);
+      let front_z = depth[&front[0]] + u * (depth[&front[1]] - depth[&front[0]]);
+      if !rear_z.is_finite() || !front_z.is_finite() || front_z - rear_z <= 1e-9 {
+        return Err(Error::Perspective(crossing.back));
+      }
+      continue;
     }
     let intersection = a.translated(rear.x * t, rear.y * t);
     for id in [crossing.front, crossing.back] {

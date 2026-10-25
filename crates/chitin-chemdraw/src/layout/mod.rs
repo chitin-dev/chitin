@@ -1,20 +1,16 @@
-//! Detached normalized coordinates: x-right, y-up, with nominal unit bonds.
-//! Symmetric bridges and supported cage cores allow unequal projected bond lengths.
-//!
-//! Domain ring blocks constrain rigid polygon seeds; branch expansion is followed
-//! by bounded overlap refinement. Layout constraints never assign aromaticity.
+//! Native rigid-fragment coordinates in normalized x-right, y-up space.
+//! Source chemistry is immutable; drawing forces may relax nominal unit bonds.
 
 use crate::geometry::{Bounds, GeometryError, Point};
 use chitin_chem::{AtomId, BondId, GraphError, MolecularGraph};
 use std::collections::BTreeMap;
 
-mod alkenes;
-mod angles;
+mod budget;
+mod engine;
+mod labels;
 pub mod optimization;
-mod placement;
 mod quality;
-mod refinement;
-mod rings;
+pub(crate) use labels::{clear_labels, contact_counts, terminal_label_trials};
 
 /// Resource, spacing, and bounded refinement policy for deterministic layout.
 #[derive(Debug, Clone, PartialEq)]
@@ -25,22 +21,17 @@ pub struct LayoutOptions {
   pub minimum_spacing: f64,
   /// Maximum input vertex count; exceeding this returns an error, never truncation.
   pub max_atoms: usize,
-  /// Work units for ring-cycle discovery, constraint assembly, rigid embedding,
-  /// and compact folding. Exceeding this budget returns an error, never a
-  /// partially drawn ring system.
-  pub ring_search_budget: usize,
-  /// Maximum discrete passes; zero disables all optional refinement stages.
+  /// Label-repair pass limit; zero also disables optional native refinement.
+  /// Native search and force integration have their own finite iteration caps.
   pub refinement_passes: usize,
   /// Work units for candidate traversal/indexing/geometric tests, shared by fragments.
   /// Initial and final quality inspection are outside this optimization budget.
   pub refinement_budget: usize,
-  /// Shared work for optional long-backbone routing; zero disables this stage.
-  /// Independent of ordinary collision repair so failed guides cannot starve it.
-  pub backbone_budget: usize,
   /// Work units for required double-bond stereo constraints, independent of refinement.
   pub stereo_budget: usize,
-  /// Projected coordinate search after discrete refinement; zero iterations disables it.
-  pub optimization: optimization::OptimizationOptions,
+  /// Shared work for native topology, ring construction, search and simulation.
+  /// Exhaustion returns an error without invoking a different layout backend.
+  pub work_budget: usize,
 }
 
 impl Default for LayoutOptions {
@@ -50,12 +41,10 @@ impl Default for LayoutOptions {
       component_gap: 3.,
       minimum_spacing: 0.55,
       max_atoms: 4096,
-      ring_search_budget: 4_000_000,
       refinement_passes: 4,
       refinement_budget: 1_000_000,
-      backbone_budget: 2_000_000,
       stereo_budget: 1_000_000,
-      optimization: optimization::OptimizationOptions::default(),
+      work_budget: 16_000_000,
     }
   }
 }
@@ -81,27 +70,31 @@ pub enum LayoutDiagnostic {
   RefinementBudgetExhausted,
   /// Projected search exhausted its separate allowance; the best validated layout remains.
   OptimizationBudgetExhausted,
+  /// Optional native fragment search stopped at its evaluation or work limit.
+  /// The best completely evaluated assembly remains available.
+  FragmentSearchLimited {
+    /// Number of unique complete states scored before stopping.
+    evaluations: usize,
+  },
 }
 
 /// Intentional perspective crossing, distinct from an unresolved layout overlap.
 ///
-/// The rear bond must have a visible gap at the proper intersection. These
+/// Template rear bonds have visible gaps; dense spatial cores retain all bond
+/// strokes and use their camera depths for front/back opacity cues. These
 /// source identities survive rigid layout transforms and never create a vertex
 /// or a chemical stereo descriptor. Caller-supplied positions have no crossings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BondCrossing {
   /// Continuous foreground bond.
   pub front: BondId,
-  /// Background bond interrupted around the crossing.
+  /// Background bond, interrupted or depth-cued according to the layout model.
   pub back: BondId,
 }
 
 /// Layout cannot provide coordinates without dropping or inventing information.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutError {
-  /// A complete coordinate snapshot failed the optional optimizer's input contract.
-  #[error(transparent)]
-  Optimization(#[from] optimization::OptimizationError),
   /// Required stereochemical constraints exceeded their separate work budget.
   #[error("double-bond stereochemistry work budget exhausted")]
   StereoBudgetExceeded,
@@ -125,17 +118,12 @@ pub enum LayoutError {
   /// Ring discovery or embedding exhausted the caller's explicit work budget.
   #[error("ring layout work budget exhausted")]
   RingSearchBudgetExceeded,
+  /// Native ring construction has no admissible complete embedding.
+  #[error("native fragment embedding incomplete at atom {0}")]
+  FragmentEmbeddingIncomplete(AtomId),
   /// An unknown order cannot provide integer-bond geometry.
   #[error("unsupported bond {0} in automatic layout")]
   Bond(BondId),
-  /// This biconnected block needs a more general ring-system embedding model.
-  #[error("ring block at atom {atom} has {cycles} independent cycles and needs a more general embedding model")]
-  RingSystem {
-    /// Smallest block handle for locating the unsupported input.
-    atom: AtomId,
-    /// E - V + 1, not an SSSR or aromatic-ring count.
-    cycles: usize,
-  },
   /// A derived coordinate exceeds the finite spatial-index range.
   #[error("layout coordinate range exceeded")]
   CoordinateRange,
@@ -164,6 +152,8 @@ pub struct Layout2d {
   diagnostics: Vec<LayoutDiagnostic>,
   /// Explicit authored over/under presentation, not inferred from arbitrary overlaps.
   crossings: Vec<BondCrossing>,
+  /// Camera-space drawing depth for spatial cores only; never chemical z coordinates.
+  depths: BTreeMap<AtomId, f64>,
 }
 
 impl Layout2d {
@@ -187,6 +177,7 @@ impl Layout2d {
       bounds,
       diagnostics: Vec::new(),
       crossings: Vec::new(),
+      depths: BTreeMap::new(),
     })
   }
   /// Returns one input atom's normalized position.
@@ -205,51 +196,42 @@ impl Layout2d {
   pub fn diagnostics(&self) -> &[LayoutDiagnostic] {
     &self.diagnostics
   }
-  /// Returns intentional perspective crossings to be rendered with rear-bond gaps.
+  /// Returns intentional perspective crossings for gap or camera-depth rendering.
   pub fn bond_crossings(&self) -> &[BondCrossing] {
     &self.crossings
   }
+  /// Returns drawing-only camera depth; positive values face the viewer.
+  pub fn drawing_depths(&self) -> &BTreeMap<AtomId, f64> {
+    &self.depths
+  }
 }
 
-/// Generates nominal-unit coordinates without changing topology or chemical facts.
+/// Generates complete native rigid-fragment geometry without alternate backends.
 ///
 /// # Parameters
-/// - `graph`: possibly disconnected input with integer or supported aromatic bonds.
-/// - `options`: fragment spacing, crowding threshold, and explicit resource budget.
-///
-/// # Returns
-/// Deterministic positions for every live atom. Chains use zigzag placement,
-/// triple/cumulated-double degree-two centers are linear, and supported ring
-/// blocks use polygon, folded macrocycle/polycycle paths, bridge-path or supported
-/// cage constraints. Whole-branch
-/// transforms, terminal hydroxyl adjustments and bounded projected refinement
-/// improve overlap with unit-bond constraints. Unresolved crowding/crossings remain diagnostic;
-/// this is not a global optimum or label-collision-free guarantee.
-/// Symmetric bridges retain unit outer arcs but may shorten the interior path;
-/// saturated adamantane/cubane cores use exact topology templates with
-/// mean core length one, not unit individual edges. These components skip the
-/// optional unit-distance projected optimizer. Discrete
-/// rigid refinement still preserves their initial lengths and ring geometry.
-/// Aromatic input uses a detached, bounded C/N/O/S Kekulé representation shared
-/// with depiction. This does not perceive aromaticity or modify input facts.
+/// - graph: immutable chemistry and graph-local source handles.
+/// - options: bounded input, simulation and stereo work.
 ///
 /// # Errors
-/// Rejects invalid options, exceeded budgets, unsupported bond labels, and any
-/// ring blocks incompatible with the supported polygon/path/template models.
-/// Connected independent rings, spiro systems, and compatible multi-ring fused
-/// systems are supported. Ring work exhaustion is distinct from unsupported
-/// geometry. No partial layout is returned.
+/// Invalid options, unsupported chemistry, incomplete construction and exhausted
+/// work fail explicitly; no partial or compatibility layout is returned.
 pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layout2d, LayoutError> {
+  validate_options(graph, options)?;
+  let resolved = crate::chemical::integer_bonds(graph)?;
+  engine::generate(&resolved, options)
+}
+
+/// Shares option and source-size checks across coordinate engines.
+fn validate_options(graph: &MolecularGraph, options: &LayoutOptions) -> Result<(), LayoutError> {
   if !options.component_gap.is_finite()
     || options.component_gap <= 0.
     || !options.minimum_spacing.is_finite()
     || options.minimum_spacing <= 0.
     || options.minimum_spacing >= 1.
     || options.max_atoms == 0
-    || options.ring_search_budget == 0
+    || options.work_budget == 0
     || options.stereo_budget == 0
     || (options.refinement_passes > 0 && options.refinement_budget == 0)
-    || !options.optimization.valid()
   {
     return Err(LayoutError::Options);
   }
@@ -259,6 +241,5 @@ pub fn generate(graph: &MolecularGraph, options: &LayoutOptions) -> Result<Layou
       limit: options.max_atoms,
     });
   }
-  let resolved = crate::chemical::integer_bonds(graph)?;
-  placement::generate(&resolved, graph, options)
+  Ok(())
 }

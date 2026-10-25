@@ -8,6 +8,30 @@ pub enum GeometryError {
   NonFinite,
 }
 
+/// Tests a finite segment against an expanded axis-aligned envelope.
+pub(crate) fn segment_enters_box(start: Point, end: Point, bounds: [Point; 2], margin: f64) -> bool {
+  let [min, max] = bounds;
+  let delta = Point::new(end.x - start.x, end.y - start.y);
+  let mut interval = [0_f64, 1_f64];
+  for (p, q) in [
+    (-delta.x, start.x - min.x + margin),
+    (delta.x, max.x - start.x + margin),
+    (-delta.y, start.y - min.y + margin),
+    (delta.y, max.y - start.y + margin),
+  ] {
+    if p.abs() < 1e-12 {
+      if q < 0. {
+        return false;
+      }
+    } else if p < 0. {
+      interval[0] = interval[0].max(q / p);
+    } else {
+      interval[1] = interval[1].min(q / p);
+    }
+  }
+  interval[0] <= interval[1]
+}
+
 /// A two-dimensional point; raw construction is validated at stage boundaries.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {

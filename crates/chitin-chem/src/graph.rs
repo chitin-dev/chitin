@@ -172,7 +172,7 @@ impl MolecularGraph {
   ///
   /// # Parameters
   /// - `center`: a live atom in this graph's namespace.
-  /// - `stereo`: four explicit neighbors, or three neighbors and one declared H.
+  /// - `stereo`: four directions from bonded atoms, declared H or a lone pair.
   ///
   /// # Returns
   /// The previous descriptor. No CIP assignment or stereogenicity perception
@@ -180,8 +180,10 @@ impl MolecularGraph {
   /// conservatively; consumers must reinstall it after validating their edit.
   ///
   /// # Errors
-  /// Rejects stale/nonneighbor references, aromatic centers, multiple bonds,
-  /// or inconsistent H/coordination. Failure leaves the graph unchanged.
+  /// Rejects stale/nonneighbor references, aromatic centers, unsupported multiple
+  /// bonds or inconsistent H/coordination. P/S multiple bonds count as one
+  /// direction. Three-coordinate N/P/S require one remaining electron pair;
+  /// no lone pair is materialized as an atom. Failure leaves the graph unchanged.
   pub fn set_tetrahedral(
     &mut self,
     center: AtomId,
@@ -193,15 +195,39 @@ impl MolecularGraph {
       if atom.declared_hydrogens() == Some(1) {
         expected.insert(StereoLigand::Hydrogen);
       }
+      let electrons = match atom.element() {
+        crate::Element::Nitrogen | crate::Element::Phosphorus => Some(5_i16),
+        crate::Element::Sulfur => Some(6_i16),
+        _ => None,
+      };
+      let bond_valence: Option<i32> = self
+        .neighbors(center)?
+        .map(|(_, edge)| match self.bond(edge).map(|bond| bond.order()) {
+          Some(BondOrder::Single) => Some(1),
+          Some(BondOrder::Double) => Some(2),
+          _ => None,
+        })
+        .sum();
+      let pyramidal = electrons
+        .zip(atom.formal_charge())
+        .zip(bond_valence)
+        .is_some_and(|((electrons, charge), valence)| i32::from(electrons) - i32::from(charge) - valence == 2);
+      if pyramidal && expected.len() == 3 && atom.declared_hydrogens() == Some(0) {
+        expected.insert(StereoLigand::LonePair);
+      }
       let supplied: BTreeSet<_> = stereo.ligands().iter().copied().collect();
       if atom.is_aromatic()
         || expected.len() != 4
         || expected != supplied
         || !matches!(atom.declared_hydrogens(), Some(0 | 1))
         || atom.implicit_hydrogen_policy() != ImplicitHydrogenPolicy::Fixed(0)
-        || self
-          .neighbors(center)?
-          .any(|(_, id)| self.bond(id).is_none_or(|bond| bond.order() != BondOrder::Single))
+        || self.neighbors(center)?.any(|(_, id)| {
+          self.bond(id).is_none_or(|bond| {
+            bond.order() != BondOrder::Single
+              && !(matches!(atom.element(), crate::Element::Phosphorus | crate::Element::Sulfur)
+                && bond.order() == BondOrder::Double)
+          })
+        })
       {
         return Err(StereoError::Coordination(center));
       }

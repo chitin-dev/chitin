@@ -70,6 +70,7 @@ impl<'a> Fixture<'a> {
             .iter()
             .map(|ligand| match ligand {
               chitin_chem::StereoLigand::Hydrogen => Some(chitin_chem::StereoLigand::Hydrogen),
+              chitin_chem::StereoLigand::LonePair => Some(chitin_chem::StereoLigand::LonePair),
               chitin_chem::StereoLigand::Atom(id) => {
                 let row = self.ids.iter().position(|candidate| candidate == id)?;
                 Some(chitin_chem::StereoLigand::Atom(other.ids[mapping[row]?]))

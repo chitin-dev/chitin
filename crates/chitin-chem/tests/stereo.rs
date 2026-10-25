@@ -11,6 +11,11 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 fn tetrahedral_facts_should_round_trip_through_an_independent_traversal() -> TestResult {
   for source in [
     "N[C@@](Br)(O)C",
+    "CO[P@](=O)(O)OCCN",
+    "C[S@](=O)CC",
+    "C[S@@+](CC)CCC",
+    "C[P@](CC)CCC",
+    "C[N@](CC)CCC",
     "N[C@](Br)(O)C",
     "N[C@H](O)C",
     "[C@H](F)(Cl)Br",
@@ -134,6 +139,7 @@ fn unsupported_coordination_and_stereo_classes_should_not_be_ignored() {
   for source in [
     "[C@]",
     "[C@H](F)Cl",
+    "[N@+](C)(CC)CCC",
     "[C@H2](F)(Cl)Br",
     "[C@](F)(Cl)(Br)(I)N",
     "F[C@](Cl)=C",

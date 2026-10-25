@@ -1,0 +1,12 @@
+[project]
+name = "chitin-benchmark-coordgen"
+version = "0.1.0"
+requires-python = ">=3.12,<3.15"
+dependencies = ["rdkit==2026.9.1"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

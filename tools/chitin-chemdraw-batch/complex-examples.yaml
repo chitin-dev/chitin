@@ -1,0 +1,8 @@
+# Complex molecules rendered by the native fragment engine.
+output_dir: generated/complex
+smiles:
+  - 'CC1C(C(=O)OC2C(C(C3(C(C(=O)C4C(C3(C2(C)O)OC4(COC(=O)C5=C1N=CC=C5)C)O)OC(=O)C)COC(=O)C)OC(=O)C)OC(=O)C)C'
+  - 'CC1=[O][Fe]2345[O]=C(N(CCCC6NC(=O)C(NC(=O)C(CCCN1O5)NC(=O)CNC(=O)CNC(=O)CNC6=O)CCCN(C(=[O]3)C)O4)O2)C'
+  # Three independent bidentate ligands; no metal configuration is supplied.
+  # Connectivity-only example: no metal-centered configuration is supplied.
+  - 'O1CCO[Fe]123(OCCO2)OCCO3'

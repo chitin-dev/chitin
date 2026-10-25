@@ -24,7 +24,11 @@ fn complete_visual_corpus_should_use_the_same_host_label_contract() -> TestResul
       case.rank
     );
     let positions = layout::generate(&graph, &LayoutOptions::default())?;
-    for chiral_hydrogens in [ChiralHydrogenMode::Implicit, ChiralHydrogenMode::Explicit] {
+    for chiral_hydrogens in [
+      ChiralHydrogenMode::Auto,
+      ChiralHydrogenMode::Implicit,
+      ChiralHydrogenMode::Explicit,
+    ] {
       let mut options = DepictOptions {
         chiral_hydrogens,
         ..Default::default()
@@ -122,7 +126,24 @@ fn custom_face_should_survive_options_and_ownership_changes_in_svg_output() -> T
 }
 
 #[test]
-fn external_request_sets_should_cover_every_final_text_run_in_both_h_modes() -> TestResult {
+fn selective_h_expansion_should_request_exact_host_glyphs() -> TestResult {
+  let graph = read_smiles("[C@H]([C@H](F)Cl)([C@H](F)Cl)[C@H](F)Cl")?.into_graph();
+  let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
+  let mut options = DepictOptions::default();
+  let before = graph.clone();
+  let requests = depict::measurement_requests(&graph, &options)?;
+  assert!(requests.contains(&TextRequest::new("H", options.font_size)?));
+  let native = depict::depict(&graph, &coordinates, &options)?;
+  options.font = measured_font(&requests, 1.)?;
+  let external = depict::depict(&graph, &coordinates, &options)?;
+  assert_eq!(text_geometry(&native), text_geometry(&external));
+  assert_eq!(native.bounds(), external.bounds());
+  assert_eq!(graph, before);
+  Ok(())
+}
+
+#[test]
+fn external_request_sets_should_cover_every_final_text_run_in_all_h_modes() -> TestResult {
   for source in [
     "[13NH2+]CO",
     "[Ca+2].[O-]C(=O)C",
@@ -135,7 +156,11 @@ fn external_request_sets_should_cover_every_final_text_run_in_both_h_modes() -> 
     let graph = read_smiles(source)?.into_graph();
     let before = graph.clone();
     let positions = layout::generate(&graph, &LayoutOptions::default())?;
-    for mode in [ChiralHydrogenMode::Implicit, ChiralHydrogenMode::Explicit] {
+    for mode in [
+      ChiralHydrogenMode::Auto,
+      ChiralHydrogenMode::Implicit,
+      ChiralHydrogenMode::Explicit,
+    ] {
       let mut options = DepictOptions {
         chiral_hydrogens: mode,
         ..Default::default()

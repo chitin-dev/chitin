@@ -61,6 +61,16 @@ views are enabled only under conservative symmetry and stereo conditions. Author
 front/rear crossings retain source bond IDs and are rendered with explicit rear
 gaps; arbitrary intersections never acquire automatic over/under order.
 
+Rigid three-connected cage blocks that no template or planar polygon family
+covers use a bounded 3D projection. Complete graph distances seed a classical
+MDS embedding; edge and one-three distance restraints relax it toward a
+tetrahedral cage. A deterministic Fibonacci sphere of view directions is scored
+by 2D crowding, crossings, bond-length distortion, and projected area. The
+selected view authors front/rear crossings from its depth order, so rear single
+bonds are broken at intersections; bonds with tetrahedral stereo or higher order
+are never ordered this way. Planar blocks and fullerene-like balls that collapse
+into a disk are rejected and keep their earlier unsupported handling.
+
 == 1.4 Branches and component-local clearance
 <component-clearance>
 

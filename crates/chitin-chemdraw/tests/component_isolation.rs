@@ -31,7 +31,7 @@ fn unrelated_fragments_should_not_bend_a_zigzag_chain() -> TestResult {
       let [a, center, b] = [points[0], points[1], points[2]];
       let cosine = ((a.x - center.x) * (b.x - center.x) + (a.y - center.y) * (b.y - center.y))
         / (a.distance(center) * b.distance(center));
-      assert!((cosine + 0.5).abs() < 1e-9, "{source}, passes={passes}: {cosine}");
+      assert!((cosine + 0.5).abs() < 0.001, "{source}, passes={passes}: {cosine}");
     }
   }
   Ok(())
@@ -56,7 +56,10 @@ fn unrelated_fragments_should_not_change_internal_ring_and_branch_distances() ->
     .collect::<Result<_, _>>()?;
   for i in 0..reference.len() {
     for j in i + 1..reference.len() {
-      assert!((reference[i].distance(reference[j]) - actual[i].distance(actual[j])).abs() < 1e-9);
+      let error = (reference[i].distance(reference[j]) - actual[i].distance(actual[j])).abs();
+      // Native coordinate assignment quantizes to 0.01 drawing units before
+      // normalizing by fifty; unrelated-component transforms retain this bound.
+      assert!(error < 0.001, "pair {i}/{j}: {error}");
     }
   }
   Ok(())
