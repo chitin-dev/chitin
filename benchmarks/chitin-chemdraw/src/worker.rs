@@ -30,6 +30,9 @@ pub struct Request {
   /// Must match the recorded pipeline when reproducing a historical drawing.
   #[serde(default)]
   pub label_feedback: bool,
+  /// Historical transport flag; both values now select the sole native backend.
+  #[serde(default)]
+  pub fragmented_layout: bool,
   /// Validated imported coordinates bypass all automatic geometry repair.
   #[serde(default)]
   pub imported_positions: Option<Vec<[f64; 2]>>,
@@ -176,6 +179,10 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
   };
   let (coordinates, drawing) = if request.external_layout.is_some() || request.imported_positions.is_some() {
     ensure!(
+      !request.fragmented_layout,
+      "imported coordinates cannot request fragment assembly"
+    );
+    ensure!(
       !request.label_feedback,
       "external coordinates cannot request internal label feedback"
     );
@@ -204,8 +211,7 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
     })?;
     (coordinates, drawing)
   } else if request.label_feedback {
-    // Measure the same automatic orchestration as normal consumers. Finishing
-    // a fixed seed alone would silently omit quality-triggered re-embedding.
+    // The same native geometry generator is used with or without label repair.
     let result = record.timed("automatic_drawing", || {
       Ok(chitin_chemdraw::pipeline::generate(
         &graph,
@@ -222,11 +228,9 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
     (coordinates, drawing)
   };
   let document = record.timed("svg", || Ok(svg::export(&drawing, &SvgOptions::default())?))?;
-  record.constraint_closure = Some(
-    coordinates
-      .diagnostics()
-      .contains(&layout::LayoutDiagnostic::ConstraintClosure),
-  );
+  // Retain the journal field for historical readers; this backend has no
+  // separate coverage-closure generator.
+  record.constraint_closure = Some(false);
   record.svg_bytes = Some(document.len());
   if let Some(path) = &request.svg_path {
     // Artifacts are outside export timings; create_new prevents accidental overwrite.
@@ -268,6 +272,41 @@ fn execute(request: &Request, record: &mut Record) -> Result<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn fragment_engine_selection_should_round_trip_without_changing_historical_requests() -> Result<()> {
+    let old = serde_json::json!({
+      "case":{"row":1,"id":"fixture","smiles":"CC"},
+      "max_atoms":4096,"svg_path":null
+    });
+    let mut request: Request = serde_json::from_value(old)?;
+    assert!(!request.fragmented_layout);
+    request.fragmented_layout = true;
+    let replay: Request = serde_json::from_value(serde_json::to_value(request)?)?;
+    assert!(replay.fragmented_layout);
+    assert!(!replay.label_feedback);
+    Ok(())
+  }
+
+  #[test]
+  fn historical_fragment_flag_should_not_select_a_different_current_generator() -> Result<()> {
+    let mut request: Request = serde_json::from_value(serde_json::json!({
+      "case":{"row":1,"id":"fixture","smiles":"CCO"},
+      "max_atoms":4096,"svg_path":null,"label_feedback":false
+    }))?;
+    let mut first = Record::pending(request.case.clone());
+    execute(&request, &mut first)?;
+    request.fragmented_layout = true;
+    let mut second = Record::pending(request.case.clone());
+    execute(&request, &mut second)?;
+    assert_eq!(
+      serde_json::to_value(first.metrics)?,
+      serde_json::to_value(second.metrics)?
+    );
+    assert_eq!(first.constraint_closure, Some(false));
+    assert_eq!(second.constraint_closure, Some(false));
+    Ok(())
+  }
 
   #[test]
   fn closure_provenance_should_round_trip_without_breaking_historical_records() -> Result<()> {

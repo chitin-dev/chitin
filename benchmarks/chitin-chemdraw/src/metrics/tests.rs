@@ -72,15 +72,12 @@ fn macrocycles_are_not_required_to_be_regular_polygons() -> Result<()> {
 }
 
 #[test]
-fn projected_cages_are_not_penalized_for_unequal_planar_lengths() -> Result<()> {
+fn native_cages_should_not_be_implicitly_classified_as_perspective() -> Result<()> {
   let graph = read_smiles("C12C3C4C1C5C2C3C45")?.into_graph();
   let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
   let result = measure(&graph, &coordinates)?;
-  assert_eq!(result.profile, "perspective");
-  assert_eq!(
-    result.measurements["relative_bond_length_rmse"].state,
-    State::NotApplicable
-  );
+  assert_eq!(result.profile, "planar");
+  assert_eq!(result.measurements["relative_bond_length_rmse"].state, State::Measured);
   Ok(())
 }
 

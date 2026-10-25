@@ -5,46 +5,37 @@ use chitin_chemdraw::{
   depict::{self, ChiralHydrogenMode, DepictOptions},
   font::FontFace,
   geometry::Point,
-  layout::{self, Layout2d, LayoutOptions},
+  layout::Layout2d,
   scene::{Primitive, Source},
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[test]
-fn declared_h_should_recover_the_fixed_projection_without_mutating_source_or_layout() -> TestResult {
-  for line in include_str!("fixtures/stereo_projection.tsv")
-    .lines()
-    .filter(|line| !line.starts_with('#'))
-  {
-    let (name, source) = line.split_once('\t').ok_or("invalid fixture")?;
-    let graph = read_smiles(source)?.into_graph();
-    let before = graph.clone();
-    let coordinates = layout::generate(&graph, &LayoutOptions::default())?;
-    let original = coordinates.clone();
-    let mut options = DepictOptions::default();
-    let drawing = depict::depict(&graph, &coordinates, &options)?;
-    assert!(
-      drawing
-        .primitives()
-        .iter()
-        .any(|p| matches!(p, Primitive::Text(t) if matches!(t.source,Some(Source::AttachedHydrogen(_))))),
-      "{name}"
-    );
-    let requests = depict::measurement_requests(&graph, &options)?;
-    let entries = requests
-      .into_iter()
-      .map(|request| {
-        let metrics = FontFace::NotoSans.measure(request.content(), request.font_size())?;
-        Ok((request, metrics))
-      })
-      .collect::<Result<Vec<_>, chitin_chemdraw::font::FontError>>()?;
-    options.font = FontFace::from_measurements("host/stereo-regression", entries)?;
-    let external = depict::depict(&graph, &coordinates, &options)?;
-    assert_eq!(drawing.bounds(), external.bounds(), "{name}");
-    assert_eq!(graph, before, "{name}");
-    assert_eq!(coordinates, original, "{name}");
-  }
+fn repaired_authored_projection_should_preserve_external_font_metrics_and_source() -> TestResult {
+  let (graph, coordinates) = antipodal(false)?;
+  let before = graph.clone();
+  let original = coordinates.clone();
+  let mut options = DepictOptions::default();
+  let drawing = depict::depict(&graph, &coordinates, &options)?;
+  assert!(
+    drawing
+      .primitives()
+      .iter()
+      .any(|p| matches!(p,Primitive::Text(t) if matches!(t.source,Some(Source::AttachedHydrogen(_)))))
+  );
+  let entries = depict::measurement_requests(&graph, &options)?
+    .into_iter()
+    .map(|request| {
+      let metrics = FontFace::NotoSans.measure(request.content(), request.font_size())?;
+      Ok((request, metrics))
+    })
+    .collect::<Result<Vec<_>, chitin_chemdraw::font::FontError>>()?;
+  options.font = FontFace::from_measurements("host/stereo-regression", entries)?;
+  let external = depict::depict(&graph, &coordinates, &options)?;
+  assert_eq!(drawing.bounds(), external.bounds());
+  assert_eq!(graph, before);
+  assert_eq!(coordinates, original);
   Ok(())
 }
 

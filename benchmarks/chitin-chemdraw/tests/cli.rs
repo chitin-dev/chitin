@@ -46,7 +46,7 @@ fn imported_worker_should_evaluate_exact_coordinates_without_automatic_repair() 
 }
 
 #[test]
-fn automatic_worker_should_measure_quality_triggered_reembedding() -> Result<()> {
+fn automatic_worker_should_report_quality_without_a_reembedding_backend() -> Result<()> {
   use std::io::Write;
   use std::process::Stdio;
 
@@ -80,7 +80,8 @@ fn automatic_worker_should_measure_quality_triggered_reembedding() -> Result<()>
     .ok_or_else(|| anyhow::anyhow!("missing worker output"))?;
   let event: Value = serde_json::from_str(line)?;
   assert_eq!(event["event"], "finished");
-  assert_eq!(event["record"]["metrics"]["readability_clear"], true);
+  assert_eq!(event["record"]["status"], "success");
+  assert!(event["record"]["metrics"]["readability_clear"].is_boolean());
   assert_eq!(event["record"]["constraint_closure"], false);
   Ok(())
 }

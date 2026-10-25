@@ -12,18 +12,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let mut options = depict::DepictOptions::default();
   let mut font_file = None;
   let mut font_index = 0;
-  let mut coordination_center = None;
   let source = loop {
     let argument = args.next().ok_or(
-      "usage: smiles-to-svg [--font-file path] [--font-index n] [--coordination-center zero-based-atom-ordinal] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--bond-color-style split|uniform] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
+      "usage: smiles-to-svg [--font-file path] [--font-index n] [--explicit-chiral-hydrogens] [--color-scheme monochrome|element] [--bond-color-style split|uniform] [--aromatic-style kekule|circle] '<SMILES>' <output.svg>",
     )?;
     match argument.as_str() {
       "--coordination-center" => {
-        coordination_center = Some(
-          args
-            .next()
-            .ok_or("--coordination-center requires a zero-based atom ordinal")?
-            .parse::<usize>()?,
+        return Err(
+          "the separate coordination backend was removed; automatic layout uses the native fragment engine".into(),
         );
       }
       "--font-file" => {
@@ -72,19 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
   let graph = read_smiles(&source)?.into_graph();
   let layout_options = layout::LayoutOptions::default();
-  let rendered = if let Some(ordinal) = coordination_center {
-    let center = graph
-      .atoms()
-      .nth(ordinal)
-      .map(|(id, _)| id)
-      .ok_or("coordination center ordinal is outside the parsed source")?;
-    let site =
-      chitin_chem::coordination::CoordinationSite::new(&graph, center, graph.neighbors(center)?.map(|(_, edge)| edge))?;
-    let coordinates = layout::coordination::generate(&graph, &site, &layout_options, &Default::default())?;
-    pipeline::finish(&graph, coordinates, &layout_options, &options)?
-  } else {
-    pipeline::generate(&graph, &layout_options, &options)?
-  };
+  let rendered = pipeline::generate(&graph, &layout_options, &options)?;
   if !rendered.layout.diagnostics().is_empty() {
     eprintln!("layout diagnostics: {:?}", rendered.layout.diagnostics());
   }

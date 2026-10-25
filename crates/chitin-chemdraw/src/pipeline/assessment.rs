@@ -75,10 +75,6 @@ impl Champion {
 pub(super) struct Assessment([usize; 5]);
 
 impl Assessment {
-  /// Triggers optional assembly search only for a currently unresolved contact.
-  pub(super) fn has_contacts(self) -> bool {
-    self.0.iter().any(|&count| count > 0)
-  }
   /// Measures the complete candidate only after it has been successfully depicted.
   pub(super) fn measure(graph: &MolecularGraph, result: &RenderedMolecule, spacing: f64) -> Result<Self, RenderError> {
     let [atoms, atom_edges, crossings] = layout::contact_counts(graph, &result.layout, spacing)?;
@@ -89,34 +85,6 @@ impl Assessment {
   /// Requires Pareto improvement: no channel can purchase an increase in another.
   pub(super) fn improves(self, previous: Self) -> bool {
     self != previous && self.0.iter().zip(previous.0).all(|(&after, before)| after <= before)
-  }
-}
-
-/// Admits a fully rendered independent seed without freezing old contact IDs.
-///
-/// # Returns
-/// The baseline unless every measured contact channel is nonincreasing and at
-/// least one improves. Geometry limits are captured from the immutable baseline;
-/// scored ideal angles and supplied alkene sides stay protected. Automatic bond
-/// lengths can recover toward unit length without cumulative bound drift.
-///
-/// # Errors
-/// Inconsistent source positions or scene measurement errors propagate.
-pub(super) fn prefer_embedding(
-  graph: &MolecularGraph,
-  reference: &Layout2d,
-  baseline: RenderedMolecule,
-  candidate: RenderedMolecule,
-  spacing: f64,
-) -> Result<RenderedMolecule, RenderError> {
-  let guard = super::geometry::GeometryGuard::reembedding(graph, reference)?;
-  if guard.permits(&candidate.layout)
-    && Assessment::measure(graph, &candidate, spacing)?.improves(Assessment::measure(graph, &baseline, spacing)?)
-    && super::edges::count(graph, &candidate.layout)? <= super::edges::count(graph, &baseline.layout)?
-  {
-    Ok(candidate)
-  } else {
-    Ok(baseline)
   }
 }
 

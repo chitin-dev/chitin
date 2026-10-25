@@ -177,9 +177,18 @@ fn stereo_marks_should_retain_bond_sources_and_use_endpoint_colors() -> TestResu
 
 #[test]
 fn generated_chiral_hydrogen_should_use_h_palette_without_inventing_graph_handles() -> TestResult {
-  let graph = read_smiles("N[C@@H](C)C(=O)O")?.into_graph();
+  let graph = read_smiles("[C@H](F)(Cl)Br")?.into_graph();
   let before = graph.clone();
-  let coordinates = chitin_chemdraw::layout::generate(&graph, &Default::default())?;
+  let coordinates = chitin_chemdraw::layout::Layout2d::from_positions(
+    graph
+      .atoms()
+      .map(|(id, _)| id)
+      .zip(
+        [(0., 0.), (1., 0.), (-0.5, 0.8660254), (-0.5, -0.8660254)]
+          .map(|(x, y)| chitin_chemdraw::geometry::Point::new(x, y)),
+      )
+      .collect(),
+  )?;
   let mut options = DepictOptions {
     chiral_hydrogens: depict::ChiralHydrogenMode::Explicit,
     ..Default::default()

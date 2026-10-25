@@ -180,6 +180,7 @@ async function renderWorker(binary: string, corpus: Corpus, row: number, destina
   child.stdin.end(
     JSON.stringify({
       case: record.case,
+      fragmented_layout: corpus.manifest.layout_engine === "chitin_fragmented",
       max_atoms: corpus.manifest.config.max_atoms,
       label_feedback: external ? false : (corpus.manifest.label_feedback ?? false),
       imported_positions: external ? record.imported_positions : null,

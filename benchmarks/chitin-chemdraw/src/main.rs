@@ -133,6 +133,11 @@ fn main() -> Result<()> {
   } else {
     None
   };
+  // Frozen migration-era executables still require their original transport
+  // flag. The current renderer treats it only as a historical compatibility field.
+  let historical_fragmented = recovery
+    .as_ref()
+    .is_some_and(|state| state.manifest["layout_engine"] == "chitin_fragmented");
   if let Some(state) = &recovery {
     eprintln!(
       "Resume{}: {} / {} observations committed; {} remaining",
@@ -181,13 +186,13 @@ fn main() -> Result<()> {
     "pipeline": if config.layout_engine == LayoutEngine::RdkitCoordgen {
       "external parse -> CoordGen coordinates -> source mapping validation -> unit normalization -> depict::depict (no repair) -> svg::export -> identical quality"
     } else if config.label_feedback {
-      "parse -> characterize -> pipeline::generate (layout, label feedback, guarded assembly search) -> svg::export -> quality"
+      "parse -> characterize -> pipeline::generate (native layout and guarded label feedback) -> svg::export -> quality"
     } else {
       "parse -> characterize -> layout::generate -> depict::depict -> svg::export -> quality"
     },
     "quality_spec_sha256": format!("{:x}", sha2::Sha256::digest(quality::SPECIFICATION.as_bytes())),
     "label_feedback": config.label_feedback, "independent_stereo_validation": "double-bond relative-side only; tetrahedral not implemented",
-    "layout_options": if config.layout_engine == LayoutEngine::Chitin {
+    "layout_options": if config.layout_engine != LayoutEngine::RdkitCoordgen {
       Some(format!("{:?}", chitin_chemdraw::layout::LayoutOptions {
         max_atoms: config.max_atoms, ..Default::default()
       }))
@@ -240,6 +245,7 @@ fn main() -> Result<()> {
         max_atoms: config.max_atoms,
         svg_path: artifact,
         label_feedback: config.label_feedback,
+        fragmented_layout: historical_fragmented,
         imported_positions: None,
         external_layout: None,
         external_timings_ms: Default::default(),

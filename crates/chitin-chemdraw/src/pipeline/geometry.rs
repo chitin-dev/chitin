@@ -47,24 +47,6 @@ impl GeometryGuard {
   /// # Errors
   /// Missing source positions and inconsistent topology return typed errors.
   pub(super) fn new(graph: &MolecularGraph, baseline: &Layout2d) -> Result<Self, DepictError> {
-    Self::capture(graph, baseline, true)
-  }
-
-  /// Protects ideal-angle errors and alkene sides across automatic seeds.
-  ///
-  /// Arbitrary multiple-bond angles from a failed initial embedding are not
-  /// immutable constraints. Linear centers remain protected independently.
-  /// Nonperspective automatic lengths may recover toward the unit ideal, not
-  /// beyond it. Caller-authored finish/depict and local repairs keep references.
-  ///
-  /// # Errors
-  /// Missing source positions and inconsistent topology return typed errors.
-  pub(super) fn reembedding(graph: &MolecularGraph, baseline: &Layout2d) -> Result<Self, DepictError> {
-    Self::capture(graph, baseline, false)
-  }
-
-  /// Captures either baseline-relative local repair or independent seed bounds.
-  fn capture(graph: &MolecularGraph, baseline: &Layout2d, local: bool) -> Result<Self, DepictError> {
     let topology = analyze_rings(graph)?;
     let lengths = LengthRules::from_topology(graph, &topology)?;
     let planar = baseline.bond_crossings().is_empty() && baseline.drawing_depths().is_empty();
@@ -74,14 +56,7 @@ impl GeometryGuard {
       .map(|(id, bond)| {
         let atoms = bond.atoms();
         let limit = lengths.limit(id, point(atoms[0])?.distance(point(atoms[1])?));
-        Ok((
-          atoms,
-          if !local && planar {
-            limit.recovering_unit()
-          } else {
-            limit
-          },
-        ))
+        Ok((atoms, limit))
       })
       .collect::<Result<Vec<_>, DepictError>>()?;
     let mut angles = Vec::new();
@@ -101,18 +76,12 @@ impl GeometryGuard {
         .iter()
         .filter_map(|(_, bond)| graph.bond(*bond).map(|bond| bond.order()))
         .collect();
-      if local && orders.iter().any(|order| *order != BondOrder::Single) {
+      if orders.iter().any(|order| *order != BondOrder::Single) {
         for (index, &(a, _)) in neighbors.iter().enumerate() {
           for &(b, _) in &neighbors[index + 1..] {
             add([a, center, b], None)?;
           }
         }
-      }
-      if !local
-        && neighbors.len() == 2
-        && (orders.contains(&BondOrder::Triple) || orders == [BondOrder::Double, BondOrder::Double])
-      {
-        add([neighbors[0].0, center, neighbors[1].0], Some(std::f64::consts::PI))?;
       }
       if planar
         && atom.element() == Element::Carbon
@@ -208,68 +177,7 @@ mod tests {
 
   type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-  #[test]
-  fn shared_path_seed_should_pass_independent_geometry_bounds() -> TestResult {
-    for line in include_str!("../../tests/fixtures/macrocycles.tsv").lines() {
-      let (name, source) = line.split_once('\t').ok_or("missing fixture")?;
-      if !["CNP0123702.4", "CNP0121851.2", "CNP0222215.3"].contains(&name) {
-        continue;
-      }
-      let graph = read_smiles(source)?.into_graph();
-      let options = LayoutOptions::default();
-      let baseline = layout::generate(&graph, &options)?;
-      let candidate = layout::constrained(&graph, &options)?;
-      let guard = GeometryGuard::reembedding(&graph, &baseline)?;
-      assert!(guard.permits(&candidate), "{name}");
-    }
-    Ok(())
-  }
-
-  #[test]
-  fn independent_macrocycle_seed_should_pass_reembedding_bounds() -> TestResult {
-    let source = include_str!("../../tests/fixtures/assembly.tsv")
-      .lines()
-      .nth(2)
-      .and_then(|line| line.split_once('\t'))
-      .ok_or("missing source")?
-      .1;
-    let graph = read_smiles(source)?.into_graph();
-    let options = LayoutOptions::default();
-    let baseline = layout::generate(&graph, &options)?;
-    let candidate = layout::exploratory(&graph, &options)?;
-    let guard = GeometryGuard::reembedding(&graph, &baseline)?;
-    for (atoms, limit) in &guard.bonds {
-      let [a, b] = atoms.map(|id| candidate.positions()[&id]);
-      assert!(limit.permits(a.distance(b)), "bond {atoms:?}: {}", a.distance(b));
-    }
-    for constraint in &guard.angles {
-      let actual = angle(constraint.atoms.map(|id| candidate.positions()[&id]));
-      assert!(
-        (actual - constraint.target).abs() <= constraint.error + 1e-7,
-        "angle {:?}: actual {actual} target {} bound {}",
-        constraint.atoms,
-        constraint.target,
-        constraint.error
-      );
-    }
-    assert!(guard.permits(&candidate));
-    Ok(())
-  }
-
-  #[test]
-  fn hydroxyl_clearance_should_offer_a_feasible_chain_angle_candidate() -> TestResult {
-    let graph = read_smiles("COC1=CC(C2=[O+]C3=CC(O)=CC(O)=C3C=C2O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O[C@@H]2O[C@H](CO)[C@@H](O)[C@H](O)[C@H]2O)=CC=C1O")?.into_graph();
-    let result = super::super::generate(
-      &graph,
-      &LayoutOptions::default(),
-      &crate::depict::DepictOptions::default(),
-    )?;
-    assert!(result.contacts.is_empty(), "{:?}", result.contacts);
-    assert_eq!(layout::contact_counts(&graph, &result.layout, 0.55)?, [0, 0, 0]);
-    Ok(())
-  }
-
-  /// Associates fixture coordinates with stable parsed atom order.
+  /// Builds authored geometry independently of any automatic generator.
   fn coordinates(graph: &MolecularGraph, points: &[(f64, f64)]) -> Result<Layout2d, crate::geometry::GeometryError> {
     Layout2d::from_positions(
       graph

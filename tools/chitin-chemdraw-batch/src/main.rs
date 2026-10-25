@@ -53,8 +53,7 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
   for (index, source) in config.smiles.iter().enumerate() {
     let number = index + 1;
     let output = destination.join(format!("{number:04}.svg"));
-    let result =
-      render(source, number, &depiction, &framing, &config.layout).and_then(|svg| publish(&output, &svg, overwrite));
+    let result = render(source, number, &depiction, &framing).and_then(|svg| publish(&output, &svg, overwrite));
     match result {
       Ok(()) => println!("[{number}] {}", output.display()),
       Err(error) => {
@@ -72,23 +71,12 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
 ///
 /// # Errors
 /// Propagates source, layout, depiction, and SVG errors without creating a file.
-fn render(
-  source: &str,
-  number: usize,
-  depiction: &depict::DepictOptions,
-  framing: &svg::SvgOptions,
-  policy: &config::LayoutConfig,
-) -> Result<String> {
+fn render(source: &str, number: usize, depiction: &depict::DepictOptions, framing: &svg::SvgOptions) -> Result<String> {
   ensure!(!source.trim().is_empty(), "empty SMILES");
   let graph = read_smiles(source).context("parse SMILES")?.into_graph();
   let layout_options = layout::LayoutOptions::default();
-  let rendered = if let Some((site, options)) = policy.site(number, &graph)? {
-    let coordinates = layout::coordination::generate(&graph, &site, &layout_options, &options)
-      .context("generate declared coordination layout")?;
-    pipeline::finish(&graph, coordinates, &layout_options, depiction).context("finish coordination drawing")?
-  } else {
-    pipeline::generate(&graph, &layout_options, depiction).context("generate layout and drawing")?
-  };
+  let rendered =
+    pipeline::generate(&graph, &layout_options, depiction).context("generate native layout and drawing")?;
   if !rendered.layout.diagnostics().is_empty() {
     eprintln!("[{number}] layout diagnostics: {:?}", rendered.layout.diagnostics());
   }

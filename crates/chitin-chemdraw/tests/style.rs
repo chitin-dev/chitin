@@ -82,8 +82,10 @@ fn ring_doubles_should_use_full_skeleton_and_short_interior_stroke_under_transfo
         assert_eq!(strokes.len(), 2);
         let baseline = strokes[0];
         let inside = strokes[1];
-        assert!((baseline.start.distance(baseline.end) - options.bond_length).abs() < 1e-8);
-        assert!(inside.start.distance(inside.end) <= options.short_bond_ratio * options.bond_length + 1e-8);
+        let [a, b] = bond.atoms().map(|id| coordinates.positions()[&id]);
+        let expected = a.distance(b) * options.bond_length;
+        assert!((baseline.start.distance(baseline.end) - expected).abs() < 1e-8);
+        assert!(inside.start.distance(inside.end) <= options.short_bond_ratio * expected + 1e-8);
         assert!(midpoint(inside).distance(center) < midpoint(baseline).distance(center));
         let [a, b] = bond.atoms();
         let a = coordinates.position(a).ok_or("missing coordinate")?;

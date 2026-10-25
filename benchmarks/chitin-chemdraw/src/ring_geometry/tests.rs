@@ -191,7 +191,8 @@ fn concave_ring_search_does_not_assume_its_bounding_box_center_is_inside() {
 fn perspective_layouts_are_excluded_from_planar_whitespace_metrics() -> Result<()> {
   let graph = read_smiles("C12C3C4C1C5C2C3C45")?.into_graph();
   let drawing = layout::generate(&graph, &LayoutOptions::default())?;
-  let result = crate::metrics::measure(&graph, &drawing)?;
+  let mut result = crate::metrics::measure(&graph, &drawing)?;
+  measure(&graph, drawing.positions(), Some(1.), true, &mut result)?;
   for key in [
     "maximum_ring_cavity_radius",
     "ring_isoperimetric_ratio",

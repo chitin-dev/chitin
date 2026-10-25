@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 
 mod assessment;
 mod contacts;
+#[cfg(test)]
 mod edges;
 mod geometry;
 pub use contacts::contacts;
@@ -67,14 +68,8 @@ pub enum RenderError {
 /// separate quarter of `refinement_budget`; exact terminal-label trials use at
 /// most eight proposals and another sixteenth. Zero refinement disables movement.
 /// Layout remains font-independent and the SVG exporter performs no repairs.
-/// Unresolved contacts additionally trigger up to two independent assembly
-/// searches: alternate roots, then rigid shared paths with scored chain angles.
-/// Each uses a quarter of `fallback_budget` and half of `refinement_budget` for
-/// layout. Final label feedback uses its usual separate allowance. A complete
-/// candidate must preserve geometry bounds and improve final contact counts
-/// without increasing any channel; optional failure retains the champion.
-/// Independent planar seeds may restore distorted automatic bonds toward unit
-/// length; authored coordinates and perspective references are never normalized.
+/// Initial coordinates use only the native fragment engine. Label repair
+/// moves complete supplied geometry but never re-embeds the source graph.
 ///
 /// # Errors
 /// Propagates required layout/depiction failures. A failed optional redraw keeps
@@ -84,37 +79,12 @@ pub fn generate(
   layout_options: &LayoutOptions,
   depict_options: &DepictOptions,
 ) -> Result<RenderedMolecule, RenderError> {
-  let baseline = finish(
+  finish(
     graph,
     layout::generate(graph, layout_options)?,
     layout_options,
     depict_options,
-  )?;
-  if layout_options.refinement_passes == 0
-    || layout_options.fallback_budget == 0
-    || !baseline.layout.bond_crossings().is_empty()
-    || !baseline.layout.drawing_depths().is_empty()
-    || !assessment::Assessment::measure(graph, &baseline, layout_options.minimum_spacing)?.has_contacts()
-  {
-    return Ok(baseline);
-  }
-  // Independent seeds are optional: neither their budget nor their failure can
-  // invalidate an already drawn result. Explicit finish/depict never re-embed.
-  let reference = baseline.layout.clone();
-  let mut champion = baseline;
-  for generate in [layout::exploratory, layout::constrained] {
-    if !assessment::Assessment::measure(graph, &champion, layout_options.minimum_spacing)?.has_contacts() {
-      break;
-    }
-    let Ok(geometry) = generate(graph, layout_options) else {
-      continue;
-    };
-    let Ok(candidate) = finish(graph, geometry, layout_options, depict_options) else {
-      continue;
-    };
-    champion = assessment::prefer_embedding(graph, &reference, champion, candidate, layout_options.minimum_spacing)?;
-  }
-  Ok(champion)
+  )
 }
 
 /// Finishes caller-authorized automatic geometry with bounded label feedback.
@@ -149,17 +119,7 @@ pub fn finish(
   layout_options: &LayoutOptions,
   depict_options: &DepictOptions,
 ) -> Result<RenderedMolecule, RenderError> {
-  let (geometry, drawing) = match depict::depict(graph, &geometry, depict_options) {
-    Err(depict::DepictError::StereoAssignment {
-      reason: depict::StereoFailureReason::DegenerateProjection,
-      ..
-    }) if layout_options.fallback_budget > 0 => {
-      let candidate = layout::constrained_fallback(graph, layout_options)?;
-      let drawing = depict::depict(graph, &candidate, depict_options)?;
-      (candidate, drawing)
-    }
-    result => (geometry, result?),
-  };
+  let drawing = depict::depict(graph, &geometry, depict_options)?;
   let before = contacts(graph, &drawing)?;
   let result = RenderedMolecule {
     layout: geometry,

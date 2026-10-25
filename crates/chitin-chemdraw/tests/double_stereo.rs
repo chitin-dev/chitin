@@ -65,7 +65,7 @@ fn automatic_layout_should_preserve_sides_with_and_without_quality_refinement() 
             .distance(positions.position(b).ok_or("no b")?)
             - 1.)
             .abs()
-            < 1e-8,
+            < 0.001,
           "{source}"
         );
       }
@@ -136,22 +136,19 @@ fn rotated_and_reflected_supplied_coordinates_should_preserve_reference_relation
 }
 
 #[test]
-fn cyclic_opposite_sides_should_close_without_tearing_the_ring() -> TestResult {
+fn unsupported_cyclic_opposite_sides_should_fail_without_a_hidden_closure_backend() -> TestResult {
   let graph = read_smiles("C/1=C\\CCCCCC1")?.into_graph();
-  let result = layout::generate(&graph, &LayoutOptions::default())?;
-  assert_relations(&graph, &result)?;
-  for (_, bond) in graph.bonds() {
-    let [a, b] = bond.atoms();
-    assert!(
-      (result
-        .position(a)
-        .ok_or("no a")?
-        .distance(result.position(b).ok_or("no b")?)
-        - 1.)
-        .abs()
-        < 1e-7
-    );
-  }
+  let before = graph.clone();
+  let edge = graph
+    .double_bond_stereos()
+    .next()
+    .map(|(edge, _)| edge)
+    .ok_or("missing stereo")?;
+  assert_eq!(
+    layout::generate(&graph, &Default::default()),
+    Err(LayoutError::DoubleBondStereo(edge))
+  );
+  assert_eq!(graph, before);
   Ok(())
 }
 

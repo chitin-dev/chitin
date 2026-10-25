@@ -7,7 +7,7 @@
 
 use chitin_chem::{
   BondId, BondOrder, GraphError, MolecularGraph,
-  perception::{RingBlock, RingTopology, analyze_rings},
+  perception::{RingBlock, RingTopology},
 };
 use std::collections::BTreeSet;
 
@@ -18,24 +18,12 @@ pub(crate) struct LengthLimit {
   reference: f64,
   /// Whether topology authorizes a local drawing exception.
   flexible: bool,
-  /// Independent automatic seeds may restore, but never overshoot, unit length.
-  recover_unit: bool,
 }
 
 impl LengthLimit {
   /// Constructs a fixed reference with optional bounded drawing flexibility.
   pub(crate) fn new(reference: f64, flexible: bool) -> Self {
-    Self {
-      reference,
-      flexible,
-      recover_unit: false,
-    }
-  }
-
-  /// Allows an independent planar seed to restore the ideal unit bond length.
-  pub(crate) fn recovering_unit(mut self) -> Self {
-    self.recover_unit = true;
-    self
+    Self { reference, flexible }
   }
 
   /// Returns the nearest admissible length without normalizing the reference.
@@ -45,11 +33,7 @@ impl LengthLimit {
     } else {
       (self.reference, self.reference)
     };
-    if self.recover_unit {
-      length.clamp(low.min(1.), high.max(1.))
-    } else {
-      length.clamp(low, high)
-    }
+    length.clamp(low, high)
   }
 
   /// Rejects collapsed/nonfinite bonds, including invalid stage-entry geometry.
@@ -82,8 +66,9 @@ impl LengthRules {
   ///
   /// # Errors
   /// Inconsistent source references propagate from topology perception.
+  #[cfg(test)]
   pub(crate) fn new(graph: &MolecularGraph) -> Result<Self, GraphError> {
-    let topology = analyze_rings(graph)?;
+    let topology = chitin_chem::perception::analyze_rings(graph)?;
     Self::from_topology(graph, &topology)
   }
 
@@ -198,22 +183,5 @@ mod tests {
       assert!(!limit.permits(length));
     }
     assert!(!LengthLimit::new(0., true).permits(0.));
-  }
-
-  #[test]
-  fn independent_recovery_should_restore_unit_lengths_without_overshooting() {
-    for reference in [0.6, 1.4] {
-      let local = LengthLimit::new(reference, false);
-      assert!(!local.permits(1.));
-      let independent = local.recovering_unit();
-      assert!(independent.permits(reference));
-      assert!(independent.permits(1.));
-      assert!(!independent.permits(if reference < 1. { 1.01 } else { 0.99 }));
-      assert!(!independent.permits(if reference < 1. {
-        reference - 0.01
-      } else {
-        reference + 0.01
-      }));
-    }
   }
 }

@@ -25,9 +25,6 @@ pub(crate) struct Config {
   /// Optional visual overrides, never chemical graph edits.
   #[serde(default)]
   pub depict: DepictConfig,
-  /// Explicit entry-local layout declarations; none are inferred from elements.
-  #[serde(default)]
-  pub layout: LayoutConfig,
   /// Document framing independent of molecular geometry.
   #[serde(default)]
   pub svg: SvgConfig,
@@ -50,78 +47,7 @@ impl Config {
   pub fn destination(&self, path: &Path) -> Result<PathBuf> {
     ensure!(!self.smiles.is_empty(), "smiles must contain at least one entry");
     ensure!(!self.output_dir.as_os_str().is_empty(), "output_dir must not be empty");
-    let mut entries = std::collections::BTreeSet::new();
-    for site in &self.layout.coordination {
-      ensure!(
-        site.entry > 0 && site.entry <= self.smiles.len(),
-        "coordination entry must name an existing one-based SMILES entry"
-      );
-      ensure!(
-        entries.insert(site.entry),
-        "only one coordination site per entry is supported"
-      );
-    }
     Ok(path.parent().unwrap_or_else(|| Path::new(".")).join(&self.output_dir))
-  }
-}
-
-/// Entry-specific layout input, independent of colors, fonts and SVG framing.
-#[derive(Debug, Default, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub(crate) struct LayoutConfig {
-  /// Entries whose existing center attachments are explicitly declared coordination.
-  coordination: Vec<CoordinationConfig>,
-}
-
-/// Explicit interpretation of one source center; not a chemical perception rule.
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CoordinationConfig {
-  /// One-based input entry, matching the generated SVG number.
-  entry: usize,
-  /// Zero-based atom ordinal in parsed source order, not an opaque handle value.
-  center_atom: usize,
-  /// Optional drawing-only attachment length, in ordinary bond units.
-  attachment_length: Option<f64>,
-  /// Optional anchored-backbone search allowance; zero retains ordinary closure.
-  routing_budget: Option<usize>,
-}
-
-impl LayoutConfig {
-  /// Resolves explicitly declared source ordinals only after parsing one entry.
-  ///
-  /// # Errors
-  /// Rejects absent centers, invalid attachment orders and inconsistent topology.
-  /// No declaration means ordinary layout, including metal-containing input.
-  pub fn site(
-    &self,
-    entry: usize,
-    graph: &chitin_chem::MolecularGraph,
-  ) -> Result<
-    Option<(
-      chitin_chem::coordination::CoordinationSite,
-      chitin_chemdraw::layout::coordination::CoordinationOptions,
-    )>,
-  > {
-    let Some(config) = self.coordination.iter().find(|site| site.entry == entry) else {
-      return Ok(None);
-    };
-    let center = graph
-      .atoms()
-      .nth(config.center_atom)
-      .map(|(id, _)| id)
-      .context("coordination center_atom is outside the parsed source")?;
-    let site =
-      chitin_chem::coordination::CoordinationSite::new(graph, center, graph.neighbors(center)?.map(|(_, edge)| edge))?;
-    let defaults = chitin_chemdraw::layout::coordination::CoordinationOptions::default();
-    Ok(Some((
-      site,
-      chitin_chemdraw::layout::coordination::CoordinationOptions {
-        attachment_length: config.attachment_length.unwrap_or(defaults.attachment_length),
-        routing_budget: config.routing_budget.unwrap_or(defaults.routing_budget),
-        ..defaults
-      },
-    )))
   }
 }
 
@@ -253,29 +179,10 @@ mod tests {
   use super::*;
 
   #[test]
-  fn coordination_routing_should_be_independently_disabled_by_yaml() -> Result<()> {
-    let config: Config = serde_yaml::from_str(
-      "smiles: ['O[Fe]O']\nlayout:\n  coordination: [{entry: 1, center_atom: 1, routing_budget: 0}]",
-    )?;
-    let graph = chitin_chem::io::smiles::read_smiles(&config.smiles[0])?.into_graph();
-    let (_, options) = config.layout.site(1, &graph)?.context("missing declaration")?;
-    assert_eq!(options.routing_budget, 0);
-    assert!(options.work_budget > 0);
-    Ok(())
-  }
-
-  #[test]
-  fn coordination_declarations_should_reject_duplicate_or_nonexistent_entries() -> Result<()> {
-    for declarations in [
-      "[{entry: 0, center_atom: 1}]",
-      "[{entry: 2, center_atom: 1}]",
-      "[{entry: 1, center_atom: 1}, {entry: 1, center_atom: 1}]",
-    ] {
-      let config: Config =
-        serde_yaml::from_str(&format!("smiles: ['O[Fe]O']\nlayout:\n  coordination: {declarations}"))?;
-      assert!(config.destination(Path::new("test.yaml")).is_err());
-    }
-    Ok(())
+  fn removed_coordination_backend_options_should_be_rejected() {
+    let result =
+      serde_yaml::from_str::<Config>("smiles: ['O[Fe]O']\nlayout:\n  coordination: [{entry: 1, center_atom: 1}]");
+    assert!(result.is_err());
   }
 
   #[test]

@@ -2,8 +2,8 @@
 //!
 //! Callers keep graph ownership and explicitly pin source atom handles. Search
 //! never constructs missing rings, edits chemistry, packs fragments, or silently
-//! weakens unit-bond constraints. Automatic embedding invokes the same solver
-//! only for crowded unit-bond components containing a cycle longer than eight edges.
+//! weakens unit-bond constraints. This explicit optimizer is independent of
+//! automatic coordinate generation and requires caller-supplied unit geometry.
 
 use super::{
   Layout2d, LayoutDiagnostic,
@@ -146,8 +146,9 @@ pub enum OptimizationError {
 /// use std::collections::BTreeSet;
 /// use chitin_chem::io::smiles::read_smiles;
 /// use chitin_chemdraw::layout::{self, optimization};
-/// let graph = read_smiles("OC1CCCCCCCCCCC1O")?.into_graph();
-/// let initial = layout::generate(&graph, &layout::LayoutOptions::default())?;
+/// let graph = read_smiles("CC")?.into_graph();
+/// let initial = layout::Layout2d::from_positions(graph.atoms().enumerate().map(|(i,(id,_))|
+///   (id, chitin_chemdraw::geometry::Point::new(i as f64, 0.))).collect())?;
 /// let anchor = graph.atoms().next().map(|(id, _)| id).ok_or("empty graph")?;
 /// let result = optimization::optimize(
 ///   &graph, &initial, &BTreeSet::from([anchor]), &Default::default(),
@@ -185,12 +186,9 @@ pub fn optimize(
   let mut budget = Budget(options.work_budget);
   let mut result = initial.clone();
   let mut report = OptimizationReport::default();
-  result.diagnostics.retain(|d| {
-    matches!(
-      d,
-      LayoutDiagnostic::RefinementBudgetExhausted | LayoutDiagnostic::ConstraintClosure
-    )
-  });
+  result
+    .diagnostics
+    .retain(|d| matches!(d, LayoutDiagnostic::RefinementBudgetExhausted));
   for ids in resolved.connected_components() {
     let mut points: Vec<_> = ids.iter().map(|id| initial.positions[id]).collect();
     let outcome = component(
@@ -203,7 +201,6 @@ pub fn optimize(
       &mut points,
       options,
       &mut budget,
-      false,
     )?;
     report.initial_geometry_cost += outcome.before;
     report.final_geometry_cost += outcome.after;
@@ -299,7 +296,6 @@ pub(super) fn component(
   points: &mut Vec<Point>,
   options: &OptimizationOptions,
   budget: &mut Budget,
-  only_large_cycles: bool,
 ) -> Result<Outcome, OptimizationError> {
   let mut model = Model::topology(scope.graph, ids, scope.anchors)?;
   let quality =
@@ -311,25 +307,11 @@ pub(super) fn component(
     iterations: 0,
     exhausted: false,
   };
-  if options.iterations == 0 || options.work_budget == 0 || (only_large_cycles && quality.cost < 1e-12) {
-    return Ok(outcome);
-  }
-  // Automatic bridge/cage projections deliberately vary some ring bonds. The
-  // unit-distance solver must not expand them or move their pinned neighbors.
-  // Standalone optimize still rejects nonunit input at its public boundary.
-  if only_large_cycles
-    && model
-      .edges
-      .iter()
-      .any(|&[a, b]| (points[a].distance(points[b]) - 1.).abs() > BOND_TOLERANCE)
-  {
+  if options.iterations == 0 || options.work_budget == 0 {
     return Ok(outcome);
   }
   if !model.prepare(scope.graph, points, scope.bridges, budget) {
     outcome.exhausted = true;
-    return Ok(outcome);
-  }
-  if only_large_cycles && !model.large_cycle {
     return Ok(outcome);
   }
   solver::improve(&model, points, quality, options, budget, &mut outcome);

@@ -184,7 +184,7 @@ export default function App() {
                 value={selectedRun()}
                 onChange={selectRun}
                 text={(run) =>
-                  `${run.id} · ${run.engine === "rdkit_coordgen" ? "CoordGen / Chitin drawing" : "Chitin"} · ${run.cases.toLocaleString()}`
+                  `${run.id} · ${run.engine === "rdkit_coordgen" ? "CoordGen / Chitin drawing" : run.engine === "chitin_fragmented" ? "Chitin fragment port" : "Chitin"} · ${run.cases.toLocaleString()}`
                 }
                 optionKey={(run) => run.id}
               />

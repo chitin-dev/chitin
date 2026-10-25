@@ -35,6 +35,27 @@ not require Python. Precision accepts `coarse`, `quick`, `standard` or `best`;
 
 ## Evaluation boundary
 
+### Default native fragment engine
+
+`layout_engine: chitin` now selects the sole native Rust generator. The old
+backend was removed. `chitin_fragmented` is accepted as a configuration alias,
+not a separate engine. See `native-default-10k.yaml` for the fixed COCONUT sample;
+keep `label_feedback: false` when comparing coordinate engines alone.
+
+Polygons, templates, constrained even/odd macrocycles, detached ring opening,
+fragment search and stereo validation never invoke an older generator or closure
+fallback. Unsupported geometry and work exhaustion fail explicitly. The default
+entry reproduces all 10,000 statuses, errors and quality measurements from
+`fragment-port-10k-009`: 9,854 generated and 9,215 readability-clear. This is
+backend replacement, not completed reference parity; known failures remain.
+
+Use a fresh output directory after algorithm changes. Resume and lazy web previews
+retain the frozen executable and historical request flag, including migration-era
+flags needed by older executables. Historical runs are not rewritten to use the
+new default. Their frozen executables may still contain retired implementations.
+
+### External coordinate provider
+
 - Direct `rdCoordGen.AddCoords` invocation; no silent default-layout fallback.
 - Original source-order atoms, explicit H vertices, isotope/charge/H
   declarations and original bonds are validated against Chitin's parsed graph.

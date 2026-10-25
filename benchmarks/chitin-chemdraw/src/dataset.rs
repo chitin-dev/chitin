@@ -45,6 +45,7 @@ pub struct Config {
 #[serde(rename_all = "snake_case")]
 pub enum LayoutEngine {
   #[default]
+  #[serde(alias = "chitin_fragmented")]
   Chitin,
   RdkitCoordgen,
 }
@@ -143,6 +144,16 @@ pub fn sample(config: &Config) -> Result<(usize, Vec<Case>)> {
 mod tests {
   use super::*;
   use std::io::Write;
+
+  #[test]
+  fn former_fragment_engine_name_should_alias_the_default_native_backend() -> Result<()> {
+    for name in ["chitin", "chitin_fragmented"] {
+      let engine: LayoutEngine = serde_json::from_value(serde_json::json!(name))?;
+      assert_eq!(engine, LayoutEngine::Chitin);
+      assert_eq!(serde_json::to_value(engine)?, "chitin");
+    }
+    Ok(())
+  }
 
   #[test]
   fn sampling_is_reproducible_and_retains_quoted_csv_fields() -> Result<()> {

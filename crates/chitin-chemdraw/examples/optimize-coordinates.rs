@@ -5,7 +5,7 @@ use chitin_chemdraw::{
   depict,
   geometry::Point,
   layout::{
-    self, Layout2d, LayoutOptions,
+    Layout2d,
     optimization::{self, OptimizationOptions},
   },
   svg,
@@ -48,9 +48,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let y = 3_f64.sqrt() / 2.;
     let mut anchors = BTreeSet::new();
     let initial = if name == "crowded_macrocycle" {
-      let mut options = LayoutOptions::default();
-      options.optimization.iterations = 0;
-      let seed = layout::generate(&graph, &options)?;
+      let radius = 1. / (2. * (std::f64::consts::PI / 12.).sin());
+      let seed = Layout2d::from_positions(
+        ids
+          .iter()
+          .copied()
+          .enumerate()
+          .map(|(i, id)| {
+            let t = i.saturating_sub(1).min(11) as f64 * std::f64::consts::PI / 6.;
+            (id, Point::new(radius * t.cos(), radius * t.sin()))
+          })
+          .collect(),
+      )?;
       let a = seed.position(ids[1]).ok_or("missing host")?;
       let b = seed.position(ids[12]).ok_or("missing host")?;
       let oxygen = Point::new((a.x + b.x) / 2. - (b.y - a.y) * y, (a.y + b.y) / 2. + (b.x - a.x) * y);

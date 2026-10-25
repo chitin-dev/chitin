@@ -77,7 +77,7 @@ export interface CaseRecord {
   timings_ms: Record<string, number>;
 }
 export interface Manifest {
-  layout_engine?: "chitin" | "rdkit_coordgen";
+  layout_engine?: "chitin" | "chitin_fragmented" | "rdkit_coordgen";
   external_provider?: { rdkit_version: string } | null;
   schema_version: number;
   executable_sha256?: string;
@@ -88,7 +88,7 @@ export interface Manifest {
   config: { dataset: string; version: string; input: string; max_atoms: number; seed: number; timeout_seconds: number };
 }
 export interface RunInfo {
-  engine?: "chitin" | "rdkit_coordgen";
+  engine?: "chitin" | "chitin_fragmented" | "rdkit_coordgen";
   id: string;
   updated: number;
   revision: string;

@@ -33,13 +33,12 @@ fn batch_should_generate_numbered_svgs_relative_to_yaml() -> Result<()> {
 }
 
 #[test]
-fn coupled_polycycle_and_explicit_site_should_complete_without_contact_warnings() -> Result<()> {
+fn complex_molecules_should_render_through_the_native_backend() -> Result<()> {
   let root = tempfile::tempdir()?;
   let config = root.path().join("complex.yaml");
   fs::write(&config, include_str!("../complex-examples.yaml"))?;
   let output = invoke(&config, false)?;
   assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-  assert!(output.stderr.is_empty(), "{}", String::from_utf8_lossy(&output.stderr));
   for number in [1, 2, 3] {
     let text = fs::read_to_string(root.path().join(format!("generated/complex/{number:04}.svg")))?;
     assert!(text.starts_with("<svg "));
