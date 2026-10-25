@@ -12,6 +12,8 @@ use clap::{Args, Subcommand, ValueEnum};
 /// Portable command tree embedded by the process CLI and built-in shell.
 #[derive(Debug, Subcommand)]
 pub enum PortableCommandArgs {
+  /// Draw molecules and authored reaction diagrams as SVG.
+  Chemdraw(super::chemdraw::ChemdrawArgs),
   /// Work with external biological databases.
   #[command(name = "db", visible_alias = "databases")]
   Database(DatabaseCommandArgs),
@@ -23,6 +25,7 @@ impl PortableCommandArgs {
   /// Converts validated command-line arguments into a portable typed command.
   pub fn into_command(self) -> Result<PortableCommand, PortableCommandLineError> {
     match self {
+      Self::Chemdraw(arguments) => Ok(arguments.into_command()),
       Self::Database(arguments) => arguments.into_command(),
       Self::Structure(arguments) => Ok(arguments.into_command()),
     }

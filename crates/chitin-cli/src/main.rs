@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Command-line access to Chitin database workflows.
+//! Command-line access to portable Chitin scientific workflows.
 
 mod cli;
 mod download;

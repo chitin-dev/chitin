@@ -14,7 +14,7 @@ use crate::{download::terminal_event_sink, error::CliError};
 
 /// Root command parsed by the `chitin` binary.
 #[derive(Debug, Parser)]
-#[command(name = "chitin", version, about = "Chitin structural biology tools")]
+#[command(name = "chitin", version, about = "Chitin chemistry and structural biology tools")]
 pub(crate) struct Cli {
   /// Selected command-line workflow.
   #[command(subcommand)]
@@ -94,9 +94,18 @@ fn execution_context(command: &PortableCommand) -> Result<CommandExecutionContex
   }
   if requires_standard_input(command) {
     let mut bytes = Vec::new();
-    std::io::stdin()
-      .read_to_end(&mut bytes)
-      .map_err(CliError::StandardInput)?;
+    if matches!(command, PortableCommand::Chemdraw(_)) {
+      // Retain one overflow byte so the shared worker can reject oversized input
+      // instead of parsing a silently truncated document or buffering all stdin.
+      std::io::stdin()
+        .take(4 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(CliError::StandardInput)?;
+    } else {
+      std::io::stdin()
+        .read_to_end(&mut bytes)
+        .map_err(CliError::StandardInput)?;
+    }
     context = context.with_standard_input(bytes);
   }
   Ok(context)
@@ -113,12 +122,13 @@ fn requires_default_download_root(command: &PortableCommand) -> bool {
   )
 }
 
-/// Returns whether a structure command reads bytes from standard input.
+/// Returns whether the command reads bytes from standard input.
 fn requires_standard_input(command: &PortableCommand) -> bool {
   match command {
     PortableCommand::Structure(StructureCommand::Inspect(arguments)) => arguments.input.input.as_os_str() == "-",
     PortableCommand::Structure(StructureCommand::Validate(arguments)) => arguments.input.input.as_os_str() == "-",
     PortableCommand::Database(_) => false,
+    PortableCommand::Chemdraw(command) => command.requires_standard_input(),
   }
 }
 

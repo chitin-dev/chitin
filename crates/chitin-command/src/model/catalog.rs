@@ -135,6 +135,20 @@ macro_rules! define_commands {
 }
 
 define_commands! {
+  /// Draw one SMILES molecule as SVG.
+  ChemdrawSmiles {
+    name: "chemdraw.smiles", title: "Draw SMILES as SVG",
+    category: CommandCategory::Structure, domain: CommandExecutionDomain::Portable,
+    requires_arguments: true, keywords: &["chemistry", "smiles", "svg", "drawing"], shortcut: None,
+    command_panel: false, frontend: []
+  },
+  /// Draw an authored reaction or mechanism diagram.
+  ChemdrawDiagram {
+    name: "chemdraw.diagram", title: "Draw Reaction Diagram as SVG",
+    category: CommandCategory::Structure, domain: CommandExecutionDomain::Portable,
+    requires_arguments: true, keywords: &["chemistry", "mechanism", "reaction", "svg"], shortcut: None,
+    command_panel: false, frontend: []
+  },
   Visibility {
     name: "visibility", title: "Change Molecular Object Visibility",
     category: CommandCategory::Structure, domain: CommandExecutionDomain::Frontend,

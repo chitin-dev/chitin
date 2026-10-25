@@ -13,9 +13,9 @@ pub mod model;
 pub mod output;
 
 pub use execution::{
-  CommandEventSink, CommandExecutionContext, CommandExecutionError, CommandExecutionEvent, CommandExecutor,
-  CommandMessage, CommandMessageLevel, CommandOutcome, CommandProgress, StructureInspection, StructureValidation,
-  resolve_rcsb_download_paths,
+  ChemdrawExecutionError, ChemdrawExport, CommandEventSink, CommandExecutionContext, CommandExecutionError,
+  CommandExecutionEvent, CommandExecutor, CommandMessage, CommandMessageLevel, CommandOutcome, CommandProgress,
+  StructureInspection, StructureValidation, resolve_rcsb_download_paths,
 };
 pub use grammar::{PortableCommandArgs, PortableCommandLineError};
 pub use model::*;

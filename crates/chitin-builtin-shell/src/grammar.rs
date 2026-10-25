@@ -67,7 +67,7 @@ pub enum CommandLineParseError {
 #[derive(Debug, Parser)]
 #[command(
   name = "chitin",
-  about = "Chitin structural biology tools",
+  about = "Chitin chemistry and structural biology tools",
   color = ColorChoice::Never,
   arg_required_else_help = true
 )]
