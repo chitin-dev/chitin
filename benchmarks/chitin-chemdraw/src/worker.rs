@@ -43,6 +43,15 @@ pub struct Request {
   pub external_timings_ms: BTreeMap<String, f64>,
 }
 
+/// Stable native substage and rejection identifiers retained in benchmark records.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LayoutFailure {
+  /// Native substage at the original rejection site.
+  pub stage: String,
+  /// Stable typed rejection code, not a parsed error message.
+  pub code: String,
+}
+
 /// Durable per-case result, including failures and separate stage timings.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Record {
@@ -50,6 +59,9 @@ pub struct Record {
   pub status: String,
   pub stage: String,
   pub error: Option<String>,
+  /// Typed native failure; absent for historical records and unrelated errors.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub layout_failure: Option<LayoutFailure>,
   pub timings_ms: BTreeMap<String, f64>,
   pub wall_ms: f64,
   pub metrics: Option<Metrics>,
@@ -84,6 +96,7 @@ impl Record {
       status: "error".into(),
       stage: "worker_start".into(),
       error: None,
+      layout_failure: None,
       timings_ms: BTreeMap::new(),
       wall_ms: 0.,
       metrics: None,
@@ -137,12 +150,35 @@ pub fn run() -> Result<()> {
       record.status = "success".into();
     }
     Err(error) => {
+      record.layout_failure = layout_failure(&error);
       record.stereo_failure = stereo_failure(&error).map(String::from);
       record.error = Some(format!("{error:#}"));
     }
   }
   emit(&Event::Finished {
     record: Box::new(record),
+  })
+}
+
+/// Extracts native provenance through contextual and transparent error wrappers.
+fn layout_failure(error: &anyhow::Error) -> Option<LayoutFailure> {
+  error.chain().find_map(|cause| {
+    let failure = cause.downcast_ref::<layout::NativeLayoutFailure>().or_else(|| {
+      let layout = cause.downcast_ref::<layout::LayoutError>().or_else(|| match cause
+        .downcast_ref::<chitin_chemdraw::pipeline::RenderError>(
+      ) {
+        Some(chitin_chemdraw::pipeline::RenderError::Layout(error)) => Some(error),
+        _ => None,
+      });
+      match layout {
+        Some(layout::LayoutError::Native(failure)) => Some(failure),
+        _ => None,
+      }
+    })?;
+    Some(LayoutFailure {
+      stage: failure.stage.code().into(),
+      code: failure.kind.code().into(),
+    })
   })
 }
 
@@ -355,6 +391,36 @@ mod tests {
       Some("degenerate_projection")
     );
     assert_eq!(stereo_failure(&anyhow::anyhow!("other failure")), None);
+    Ok(())
+  }
+
+  #[test]
+  fn native_failure_codes_should_survive_context_and_transparent_wrappers() -> Result<()> {
+    let failure = layout::NativeLayoutFailure {
+      stage: layout::NativeStage::Move,
+      kind: layout::NativeFailureKind::MissingMoveMember,
+    };
+    let expected = Some(LayoutFailure {
+      stage: "move".into(),
+      code: "missing_move_member".into(),
+    });
+    assert_eq!(layout_failure(&anyhow::Error::new(failure.clone())), expected);
+    assert_eq!(
+      layout_failure(&anyhow::Error::new(layout::LayoutError::from(failure.clone())).context("layout case")),
+      expected
+    );
+    let wrapped = chitin_chemdraw::pipeline::RenderError::from(layout::LayoutError::from(failure));
+    assert_eq!(
+      layout_failure(&anyhow::Error::new(wrapped).context("render case")),
+      expected
+    );
+    assert_eq!(
+      layout_failure(&anyhow::anyhow!("native layout failure: move/missing_move_member")),
+      None
+    );
+    let historical = serde_json::json!({"case":{"row":1,"id":"old","smiles":"C"},"status":"error","stage":"layout","error":"layout coordinate range exceeded","timings_ms":{},"wall_ms":0,"metrics":null,"svg_bytes":null,"atom_count":1,"bond_count":0,"features":null});
+    let record: Record = serde_json::from_value(historical)?;
+    assert_eq!(record.layout_failure, None);
     Ok(())
   }
 }

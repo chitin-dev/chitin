@@ -12,13 +12,17 @@ use super::{
 pub(super) struct Scopes {
   pub actions: Vec<Move>,
   registrations: Vec<Vec<usize>>,
+  /// Alignment-only endpoint excluded from the fragment's movable frame.
+  incoming_parent: Option<usize>,
 }
 
 impl Scopes {
-  pub(super) fn new(atoms: usize) -> Self {
+  /// Captures the alignment-only incoming endpoint before registering movable atoms.
+  pub(super) fn new(atoms: usize, incoming_parent: Option<usize>) -> Self {
     Self {
       actions: Vec::new(),
       registrations: vec![Vec::new(); atoms],
+      incoming_parent,
     }
   }
 
@@ -96,10 +100,79 @@ impl Scopes {
   }
 
   fn add_atom(&mut self, action: usize, atom: usize) {
+    // Incoming ghosts only establish alignment. Outgoing ghosts remain movable
+    // so a local action can carry its child attachment into the rebuilt pose.
+    if self.incoming_parent == Some(atom) {
+      return;
+    }
     match &mut self.actions[action].kind {
       Kind::ScaleAtoms { atoms, .. } | Kind::InvertBond { atoms, .. } => atoms.push(atom),
       _ => return,
     }
     self.registrations[atom].push(action);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::layout::engine::math::Vector;
+  use std::collections::BTreeMap;
+  type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+  #[test]
+  fn incoming_ghost_should_not_enter_or_propagate_a_movable_scope() -> TestResult {
+    let mut scopes = Scopes::new(5, Some(0));
+    scopes.push(
+      1,
+      Kind::ScaleAtoms {
+        pivot: 1,
+        atoms: Vec::new(),
+      },
+      2,
+    );
+    let mut work = Work::new(100);
+    scopes.placed(2, 0, &mut work)?;
+    scopes.placed(2, 3, &mut work)?;
+    scopes.placed(0, 4, &mut work)?;
+    let Kind::ScaleAtoms { atoms, .. } = &scopes.actions[0].kind else {
+      return Err("unexpected move kind".into());
+    };
+    assert_eq!(atoms, &[2, 3]);
+    assert!(scopes.registrations[0].is_empty());
+    // Row 3 represents an outgoing child port, retained even though the incoming
+    // alignment endpoint 0 is absent from the actual movable coordinate frame.
+    let mut frame = BTreeMap::from([
+      (1, Vector::default()),
+      (2, Vector::new(50., 0.)),
+      (3, Vector::new(100., 0.)),
+    ]);
+    scopes.actions[0].apply(1, &mut frame, &mut work)?;
+    assert_eq!(frame[&1], Vector::default());
+    assert_eq!(frame[&2], Vector::new(20., 0.));
+    assert_eq!(frame[&3], Vector::new(40., 0.));
+    assert_eq!(scopes.actions[0].penalty(1), 100.);
+    Ok(())
+  }
+
+  #[test]
+  fn unexcluded_registration_should_preserve_duplicate_member_semantics() -> TestResult {
+    let mut scopes = Scopes::new(4, None);
+    scopes.push(
+      0,
+      Kind::ScaleAtoms {
+        pivot: 0,
+        atoms: Vec::new(),
+      },
+      1,
+    );
+    let mut work = Work::new(100);
+    scopes.placed(1, 2, &mut work)?;
+    scopes.placed(1, 2, &mut work)?;
+    let Kind::ScaleAtoms { atoms, .. } = &scopes.actions[0].kind else {
+      return Err("unexpected move kind".into());
+    };
+    assert_eq!(atoms, &[1, 2, 2]);
+    Ok(())
   }
 }

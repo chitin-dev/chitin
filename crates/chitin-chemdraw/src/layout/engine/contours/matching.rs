@@ -1,6 +1,8 @@
 //! Bounded cyclic assignment of detached chemistry rules to integer contours.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Point, Work,
   lattice::{Cell, Shape, Vertex},
@@ -38,7 +40,7 @@ pub(crate) fn select(n: usize, rules: &Rules, work: &mut Work) -> Result<Option<
     || rules.sides.iter().any(|(slots, _)| slots.iter().any(|&i| i >= n))
     || rules.fusions.iter().any(|&(i, _, _)| i >= n)
   {
-    return Err(Error::CoordinateRange);
+    return Err(Error::native(Stage::Macrocycle, Failure::InvalidContourRules));
   }
   let mut cohort = shapes::initial_family(n, work)?;
   let mut best_score = -1000_i64;

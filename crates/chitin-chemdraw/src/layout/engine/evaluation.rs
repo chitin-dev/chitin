@@ -1,5 +1,7 @@
 //! Conservative spatial pruning preserves interaction order, energies and forces.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{Error, Work, interactions::Interaction, math::Vector};
 use std::collections::BTreeMap;
 
@@ -65,7 +67,7 @@ impl<'a> Evaluator<'a> {
     work: &mut Work,
   ) -> Result<f32, Error> {
     if points.iter().any(|point| !point.finite()) {
-      return Err(Error::CoordinateRange);
+      return Err(Error::native(Stage::Evaluation, Failure::NonFiniteCoordinates));
     }
     work.charge(points.len().saturating_mul(points.len().max(1).ilog2() as usize + 1))?;
     let mut order: Vec<_> = (0..points.len()).collect();

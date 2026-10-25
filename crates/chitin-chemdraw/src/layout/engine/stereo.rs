@@ -1,6 +1,8 @@
 //! Native local double-bond orientation and required supplied-stereo validation.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Work,
   math::{EPSILON, Vector, same_side},
@@ -52,7 +54,12 @@ pub(super) fn orient_neighbors(
     };
     ([left, right], false)
   };
-  let get = |atom| points.get(&atom).copied().ok_or(Error::CoordinateRange);
+  let get = |atom| {
+    points
+      .get(&atom)
+      .copied()
+      .ok_or(Error::native(Stage::Stereo, Failure::MissingFrameAtom))
+  };
   let (start, end) = (get(a)?, get(b)?);
   // The first endpoint is visited before the opposite branch is expanded.
   // Unplaced references retain their initial zero coordinates in this stage.
@@ -61,7 +68,9 @@ pub(super) fn orient_neighbors(
   if same_side(left, right, start, end) != refs.1 {
     work.charge(mirror.len())?;
     for atom in mirror {
-      let point = points.get_mut(&atom).ok_or(Error::CoordinateRange)?;
+      let point = points
+        .get_mut(&atom)
+        .ok_or(Error::native(Stage::Stereo, Failure::MissingFrameAtom))?;
       *point = reflect(*point, start, end)?.rounded();
     }
   }
@@ -80,7 +89,7 @@ pub(super) fn enforce(model: &Model, points: &mut [Vector], work: &mut Work) -> 
     let edge = model.neighbors[a]
       .iter()
       .find_map(|&(n, edge)| (n == b).then_some(edge))
-      .ok_or(Error::CoordinateRange)?;
+      .ok_or(Error::native(Stage::Stereo, Failure::MissingStereoBond))?;
     if relation(points, atoms) == Some(expected) {
       continue;
     }
@@ -121,7 +130,7 @@ pub(super) fn enforce(model: &Model, points: &mut [Vector], work: &mut Work) -> 
       let edge = model.neighbors[atoms[1]]
         .iter()
         .find_map(|&(n, edge)| (n == atoms[2]).then_some(edge))
-        .ok_or(Error::CoordinateRange)?;
+        .ok_or(Error::native(Stage::Stereo, Failure::MissingStereoBond))?;
       return Err(Error::DoubleBondStereo(model.edges[edge].id));
     }
   }
@@ -147,7 +156,7 @@ fn relation(points: &[Vector], [left, a, b, right]: [usize; 4]) -> Option<bool> 
 fn reflect(point: Vector, start: Vector, end: Vector) -> Result<Vector, Error> {
   let axis = end - start;
   if axis.square() < EPSILON {
-    return Err(Error::CoordinateRange);
+    return Err(Error::native(Stage::Stereo, Failure::DegenerateReflectionAxis));
   }
   let delta = point - start;
   let parallel = (axis * delta.dot(axis)) / axis.square();

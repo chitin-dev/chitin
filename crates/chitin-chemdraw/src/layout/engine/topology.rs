@@ -1,5 +1,7 @@
 //! Detached dense source topology shared by fragment assembly and interactions.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{Error, Work};
 use chitin_chem::{
   AtomId, BondId, BondOrder, GraphError, MolecularGraph,
@@ -57,12 +59,18 @@ impl Model {
     }
     let mut old_atoms: Vec<_> = std::mem::take(&mut model.atoms).into_iter().map(Some).collect();
     for old in atoms {
-      model.atoms.push(old_atoms[old].take().ok_or(Error::CoordinateRange)?);
+      model.atoms.push(
+        old_atoms[old]
+          .take()
+          .ok_or(Error::native(Stage::Topology, Failure::InvalidTopologyRemap))?,
+      );
     }
     let mut old_edges: Vec<_> = std::mem::take(&mut model.edges).into_iter().map(Some).collect();
     model.neighbors = vec![Vec::new(); model.atoms.len()];
     for old in edges {
-      let mut edge = old_edges[old].take().ok_or(Error::CoordinateRange)?;
+      let mut edge = old_edges[old]
+        .take()
+        .ok_or(Error::native(Stage::Topology, Failure::InvalidTopologyRemap))?;
       edge.ends = edge.ends.map(|i| inverse[i]);
       let [a, b] = edge.ends;
       model.neighbors[a].push((b, model.edges.len()));
@@ -174,9 +182,12 @@ impl Model {
   /// # Errors
   /// Bridges cannot be opened; traversal and coordinate namespaces remain checked.
   pub(super) fn opened(&self, edge: usize, work: &mut Work) -> Result<Self, Error> {
-    let removed = self.edges.get(edge).ok_or(Error::CoordinateRange)?;
+    let removed = self
+      .edges
+      .get(edge)
+      .ok_or(Error::native(Stage::Topology, Failure::InvalidRingCut))?;
     if !removed.cyclic {
-      return Err(Error::CoordinateRange);
+      return Err(Error::native(Stage::Topology, Failure::InvalidRingCut));
     }
     work.charge(self.atoms.len() + self.edges.len() + self.cycles.iter().map(Vec::len).sum::<usize>())?;
     let mut result = self.clone();

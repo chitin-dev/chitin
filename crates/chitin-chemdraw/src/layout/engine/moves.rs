@@ -1,6 +1,8 @@
 //! Native discrete actions in normalized local drawing frames.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Work,
   fragments::Forest,
@@ -69,7 +71,7 @@ impl Move {
   /// Applies a checked state to owned atoms and outgoing ghosts, not the parent ghost.
   pub(super) fn apply(&self, state: u16, frame: &mut BTreeMap<usize, Vector>, work: &mut Work) -> Result<(), Error> {
     if state >= self.domain().states {
-      return Err(Error::CoordinateRange);
+      return Err(Error::native(Stage::Move, Failure::InvalidMoveState));
     }
     if state == 0 {
       return Ok(());
@@ -105,22 +107,29 @@ impl Move {
         validate_scope(frame, *pivot, atoms)?;
         for atom in atoms {
           let origin = frame[pivot];
-          let point = frame.get_mut(atom).ok_or(Error::CoordinateRange)?;
+          let point = frame
+            .get_mut(atom)
+            .ok_or(Error::native(Stage::Move, Failure::MissingFrameAtom))?;
           *point = ((*point - origin) * 0.4 + origin).rounded();
         }
       }
       Kind::InvertBond { pivot, bound, atoms } => {
         validate_scope(frame, *pivot, atoms)?;
         let origin = frame[pivot];
-        let ray = *frame.get(bound).ok_or(Error::CoordinateRange)? - origin;
+        let ray = *frame
+          .get(bound)
+          .ok_or(Error::native(Stage::Move, Failure::MissingFrameAtom))?
+          - origin;
         let normal = Vector::new(ray.y, -ray.x);
         let a = origin + normal;
         let axis = (origin - normal) - a;
         if axis.square() <= super::math::EPSILON {
-          return Err(Error::CoordinateRange);
+          return Err(Error::native(Stage::Move, Failure::DegenerateReflectionAxis));
         }
         for atom in atoms {
-          let point = frame.get_mut(atom).ok_or(Error::CoordinateRange)?;
+          let point = frame
+            .get_mut(atom)
+            .ok_or(Error::native(Stage::Move, Failure::MissingFrameAtom))?;
           let delta = *point - a;
           let parallel = (axis * delta.dot(axis)) / axis.square();
           *point = (a + parallel - (delta - parallel)).rounded();
@@ -133,8 +142,11 @@ impl Move {
 
 /// Checks every scope index before an action can mutate its scratch frame.
 fn validate_scope(frame: &BTreeMap<usize, Vector>, pivot: usize, atoms: &[usize]) -> Result<(), Error> {
-  if !frame.contains_key(&pivot) || atoms.iter().any(|atom| !frame.contains_key(atom)) {
-    return Err(Error::CoordinateRange);
+  if !frame.contains_key(&pivot) {
+    return Err(Error::native(Stage::Move, Failure::MissingMovePivot));
+  }
+  if atoms.iter().any(|atom| !frame.contains_key(atom)) {
+    return Err(Error::native(Stage::Move, Failure::MissingMoveMember));
   }
   Ok(())
 }

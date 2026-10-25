@@ -1,6 +1,8 @@
 //! Whole-component drawing orientation, independent of conformational search.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Work,
   fragments::{Forest, Fragment},
@@ -135,7 +137,7 @@ pub(super) fn apply(model: &Model, forest: &Forest, points: &mut [Vector], work:
   if points.iter().all(|p| p.finite()) {
     Ok(())
   } else {
-    Err(Error::CoordinateRange)
+    Err(Error::native(Stage::Orientation, Failure::NonFiniteCoordinates))
   }
 }
 

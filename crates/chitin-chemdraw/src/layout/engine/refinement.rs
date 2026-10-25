@@ -1,6 +1,8 @@
 //! Discrete fragment search precedes continuous cleanup; neither owns source chemistry.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Work, assembly::Assembly, clashes, constraints, evaluation::Evaluator, fragments::Forest,
   interactions::Interaction, math::Vector, search, solver, topology::Model,
@@ -174,7 +176,7 @@ pub(super) fn run_with_policy(
     let preserve_stereo = super::stereo::supplied_relations_satisfied(model, &before);
     let outcome = solver::minimize(&mut points, &fixed, &terms, 1000, work)?;
     if outcome.iterations > 0 && !outcome.minimum_energy.is_finite() {
-      return Err(Error::CoordinateRange);
+      return Err(Error::native(Stage::Simulation, Failure::NonFiniteEnergy));
     }
     if preserve_stereo && !super::stereo::supplied_relations_satisfied(model, &points) {
       points = before;
