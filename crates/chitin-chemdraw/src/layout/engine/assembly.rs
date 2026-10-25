@@ -1,6 +1,8 @@
 //! Builds local fragment frames and composes oriented connection ports.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Work,
   fragments::Forest,
@@ -37,7 +39,8 @@ pub(super) fn prepare(model: &Model, forest: &Forest, seed: &[Vector], work: &mu
   let mut scoped = Vec::with_capacity(forest.fragments.len());
   for id in 0..forest.fragments.len() {
     work.charge(model.atoms.len())?;
-    let mut scopes = super::scopes::Scopes::new(model.atoms.len());
+    let incoming_parent = forest.fragments[id].parent.map(|parent| parent.parent_atom);
+    let mut scopes = super::scopes::Scopes::new(model.atoms.len(), incoming_parent);
     frames.push(frame(id, model, forest, seed, &rules, &mut scopes, work)?);
     scoped.push(scopes.actions);
   }
@@ -66,7 +69,7 @@ pub(super) fn prepare(model: &Model, forest: &Forest, seed: &[Vector], work: &mu
       let local = frames[id][&parent.parent_atom] - origin;
       let global = global_parent - target;
       if local.length() == 0. || global.length() == 0. {
-        return Err(Error::CoordinateRange);
+        return Err(Error::native(Stage::Assembly, Failure::DegenerateAttachment));
       }
       let (a, b) = (local.normalized(), global.normalized());
       (origin, target, a.y * b.x - a.x * b.y, a.dot(b))
@@ -150,7 +153,7 @@ impl Assembly {
     work: &mut Work,
   ) -> Result<Vec<Vector>, Error> {
     if moves.len() != states.len() {
-      return Err(Error::CoordinateRange);
+      return Err(Error::native(Stage::CandidateAssembly, Failure::InvalidStateVector));
     }
     work.charge(model.atoms.len())?;
     let mut points = vec![Vector::default(); model.atoms.len()];
@@ -166,7 +169,22 @@ impl Assembly {
         *point = point.rounded();
       }
       for (action, &state) in moves.iter().zip(states).filter(|(action, _)| action.fragment == id) {
-        action.apply(state, &mut local, work)?;
+        action.apply(state, &mut local, work).map_err(|error| {
+          let missing_member = matches!(&error, Error::Native(failure) if failure.kind == Failure::MissingMoveMember);
+          if missing_member
+            && let Some(parent) = fragment.parent
+            && let super::moves::Kind::ScaleAtoms { atoms, .. } | super::moves::Kind::InvertBond { atoms, .. } =
+              &action.kind
+            && atoms
+              .iter()
+              .filter(|atom| !local.contains_key(atom))
+              .all(|&atom| atom == parent.parent_atom)
+          {
+            Error::native(Stage::Move, Failure::ExcludedParentGhost)
+          } else {
+            error
+          }
+        })?;
       }
       let (target, angle) = if let Some(parent) = fragment.parent {
         let target = *transformed[parent.fragment]

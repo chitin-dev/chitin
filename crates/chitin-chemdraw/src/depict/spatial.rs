@@ -34,6 +34,9 @@ pub(super) fn apply(graph: &MolecularGraph, layout: &Layout2d, primitives: &mut 
       Primitive::Text(text) => (text.source, &mut text.color),
       Primitive::Polygon(polygon) => (polygon.source, &mut polygon.color),
       Primitive::Circle(circle) => (circle.source, &mut circle.color),
+      Primitive::Disk(disk) => (disk.source, &mut disk.color),
+      Primitive::CubicBezier(curve) => (curve.source, &mut curve.color),
+      Primitive::Group(_) => continue,
     };
     if let Some(z) = depth(source) {
       let opacity = 0.25 + 0.75 * ((z / bound + 1.) / 2.).clamp(0., 1.);

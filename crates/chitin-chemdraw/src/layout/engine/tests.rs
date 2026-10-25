@@ -474,6 +474,51 @@ fn scoped_actions_should_match_recorded_traversal_registration() -> TestResult {
 }
 
 #[test]
+fn repaired_cohort_scopes_should_fit_their_actual_movable_fragment_frames() -> TestResult {
+  let fixture = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/native-coordinate-failures.tsv"
+  ));
+  let mut checked = 0;
+  for row in fixture.lines().skip(1) {
+    let mut fields = row.split('\t');
+    let name = fields.next().ok_or("missing source ID")?;
+    let source = fields.next().ok_or("missing source SMILES")?;
+    let graph = read_smiles(source)?.into_graph();
+    let resolved = crate::chemical::integer_bonds(&graph)?;
+    let mut work = Work::new(LayoutOptions::default().work_budget);
+    let model = Model::canonical(&resolved, &mut work)?;
+    let forest = Forest::new(&model, &mut work)?;
+    let mut points = vec![Vector::default(); model.atoms.len()];
+    rings::seed(&model, &forest, &mut points, &mut work)?;
+    let assembly = assembly::prepare(&model, &forest, &points, &mut work)?;
+    for action in &assembly.actions {
+      let (pivot, bound, atoms) = match &action.kind {
+        moves::Kind::ScaleAtoms { pivot, atoms } => (*pivot, None, atoms),
+        moves::Kind::InvertBond { pivot, bound, atoms } => (*pivot, Some(*bound), atoms),
+        _ => continue,
+      };
+      let mut frame = assembly.frames[action.fragment].clone();
+      if let Some(parent) = forest.fragments[action.fragment].parent {
+        frame.remove(&parent.parent_atom);
+      }
+      assert!(frame.contains_key(&pivot), "{name}: pivot {pivot}");
+      assert!(
+        bound.is_none_or(|bound| frame.contains_key(&bound)),
+        "{name}: inversion axis"
+      );
+      assert!(
+        atoms.iter().all(|atom| frame.contains_key(atom)),
+        "{name}: scope {atoms:?}"
+      );
+    }
+    checked += 1;
+  }
+  assert_eq!(checked, 23);
+  Ok(())
+}
+
+#[test]
 fn invalid_scoped_action_should_reject_before_mutating_the_frame() {
   for kind in [
     moves::Kind::ScaleAtoms {
@@ -1698,4 +1743,91 @@ fn fragment_assembly_should_preserve_namespace_and_complete_connectivity() -> Te
     }
   }
   Ok(())
+}
+
+#[test]
+fn invalid_move_pivots_and_members_should_have_distinct_failure_codes() {
+  use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+  let mut frame = BTreeMap::from([(0, Vector::default()), (1, Vector::new(50., 0.))]);
+  for (pivot, atoms, kind) in [
+    (9, vec![1], Failure::MissingMovePivot),
+    (0, vec![9], Failure::MissingMoveMember),
+  ] {
+    let before = frame.clone();
+    let action = moves::Move {
+      fragment: 0,
+      kind: moves::Kind::ScaleAtoms { pivot, atoms },
+    };
+    assert_eq!(
+      action.apply(1, &mut frame, &mut Work::new(100)),
+      Err(Error::native(Stage::Move, kind))
+    );
+    assert_eq!(before, frame);
+  }
+}
+
+#[test]
+fn degenerate_reflection_should_not_be_reported_as_nonfinite_geometry() {
+  use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+  let mut frame = BTreeMap::from([(0, Vector::default()), (1, Vector::default())]);
+  let action = moves::Move {
+    fragment: 0,
+    kind: moves::Kind::InvertBond {
+      pivot: 0,
+      bound: 1,
+      atoms: vec![1],
+    },
+  };
+  let before = frame.clone();
+  assert_eq!(
+    action.apply(1, &mut frame, &mut Work::new(100)),
+    Err(Error::native(Stage::Move, Failure::DegenerateReflectionAxis))
+  );
+  assert_eq!(frame, before);
+}
+
+#[test]
+fn coordinate_failure_cohort_should_preserve_valid_raw_sources_and_original_rows() -> TestResult {
+  let mut rows = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/native-coordinate-failures.tsv"
+  ))
+  .lines();
+  assert_eq!(rows.next(), Some("id\tsmiles\tsource_row"));
+  let mut ids = BTreeSet::new();
+  for row in rows {
+    let fields: Vec<_> = row.split('\t').collect();
+    let [id, source, original_row] = fields.as_slice() else {
+      return Err("invalid failure cohort row".into());
+    };
+    assert!(ids.insert(*id));
+    assert!(original_row.parse::<usize>()? > 0);
+    read_smiles(source)?;
+  }
+  assert_eq!(ids.len(), 23);
+  Ok(())
+}
+
+#[test]
+fn simulation_shape_coordinate_and_energy_failures_should_be_distinguishable() {
+  use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+  let mut points = [Vector::default(), Vector::new(50., 0.)];
+  assert!(
+    matches!(solver::minimize(&mut points, &[], &[], 1, &mut Work::new(100)), Err(Error::Native(failure)) if failure.kind == Failure::InvalidSimulationDimensions)
+  );
+  let before = points;
+  let terms = [Interaction::Stretch {
+    atoms: [0, 1],
+    target: 50.,
+    tolerance: 0.,
+    k: f32::NAN,
+  }];
+  assert!(
+    matches!(solver::minimize(&mut points, &[false;2], &terms, 1, &mut Work::new(100)), Err(Error::Native(failure)) if failure.stage == Stage::Simulation && failure.kind == Failure::NonFiniteEnergy)
+  );
+  assert_eq!(points, before);
+  points[0].x = f32::NAN;
+  assert!(
+    matches!(solver::minimize(&mut points, &[false;2], &[], 1, &mut Work::new(100)), Err(Error::Native(failure)) if failure.kind == Failure::NonFiniteCoordinates)
+  );
 }

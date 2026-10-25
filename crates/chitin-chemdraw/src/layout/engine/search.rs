@@ -1,6 +1,8 @@
 //! Deterministic tiered discrete search; geometry and evaluation are caller-owned.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{Error, Work};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -42,13 +44,13 @@ pub(super) fn run(
   mut evaluate: impl FnMut(&[u16], &mut Work) -> Result<f32, Error>,
 ) -> Result<Outcome, Error> {
   if limit == 0 || domains.iter().any(|d| d.states == 0) {
-    return Err(Error::CoordinateRange);
+    return Err(Error::native(Stage::Search, Failure::InvalidSearchDomain));
   }
   work.charge(domains.len())?;
   let initial = vec![0; domains.len()];
   let score = evaluate(&initial, work)?;
   if !score.is_finite() {
-    return Err(Error::CoordinateRange);
+    return Err(Error::native(Stage::Search, Failure::NonFiniteScore));
   }
   let mut cache = BTreeMap::from([(initial.clone(), score)]);
   let mut frontier = cache.clone();
@@ -85,7 +87,7 @@ pub(super) fn run(
             }
             let score = match evaluate(&next, work) {
               Ok(score) if score.is_finite() => score,
-              Ok(_) => return Err(Error::CoordinateRange),
+              Ok(_) => return Err(Error::native(Stage::Search, Failure::NonFiniteScore)),
               Err(Error::RingSearchBudgetExceeded) => {
                 exhausted = true;
                 break 'rounds;
@@ -117,7 +119,7 @@ pub(super) fn run(
   let (states, &score) = cache
     .iter()
     .min_by(|(a, sa), (b, sb)| sa.total_cmp(sb).then(a.cmp(b)))
-    .ok_or(Error::CoordinateRange)?;
+    .ok_or(Error::native(Stage::Search, Failure::MissingSearchCandidate))?;
   Ok(Outcome {
     states: states.clone(),
     score,

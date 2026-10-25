@@ -160,8 +160,30 @@ pub fn export(drawing: &Drawing, options: &SvgOptions) -> Result<String, SvgErro
       f64::from(background.alpha) / 255.
     ));
   }
+  scene_run(drawing, &mut output)?;
+  output.push_str("</svg>\n");
+  Ok(output)
+}
+
+/// Recurses only through already validated child scenes, preserving group opacity.
+fn scene_run(drawing: &Drawing, output: &mut String) -> Result<(), SvgError> {
   for primitive in drawing.primitives() {
     match primitive {
+      Primitive::Group(group) => {
+        output.push_str(&format!("<g opacity=\"{}\">\n", f64::from(group.opacity) / 255.));
+        scene_run(&group.drawing, output)?;
+        output.push_str("</g>\n");
+      }
+      Primitive::Disk(disk) => output.push_str(&format!(
+        "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"{}\" fill-opacity=\"{}\"/>\n",
+        disk.center.x, disk.center.y, disk.radius, color(disk.color), f64::from(disk.color.alpha) / 255.
+      )),
+      Primitive::CubicBezier(curve) => output.push_str(&format!(
+        "<path d=\"M{} {} C{} {} {} {} {} {}\" fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linecap=\"butt\"/>\n",
+        curve.start.x, curve.start.y, curve.control1.x, curve.control1.y,
+        curve.control2.x, curve.control2.y, curve.end.x, curve.end.y,
+        color(curve.color), f64::from(curve.color.alpha) / 255., curve.width
+      )),
       Primitive::Circle(circle) => output.push_str(&format!(
         "<circle cx=\"{}\" cy=\"{}\" r=\"{}\" fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\"/>\n",
         circle.center.x, circle.center.y, circle.radius, color(circle.color), f64::from(circle.color.alpha) / 255., circle.width
@@ -175,8 +197,7 @@ pub fn export(drawing: &Drawing, options: &SvgOptions) -> Result<String, SvgErro
       Primitive::Text(text) => output.push_str(&text_run(text)?),
     }
   }
-  output.push_str("</svg>\n");
-  Ok(output)
+  Ok(())
 }
 
 /// Serializes asymmetric caps as one filled outline, avoiding alpha overdraw.

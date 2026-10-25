@@ -1,6 +1,8 @@
 //! Dense molecular constraints for topology-free macrocycle contour matching.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::contours::{Rules as ContourRules, select as select_contour};
 use super::{
   Error, Work,
@@ -37,7 +39,7 @@ pub(super) fn generate(model: &Model, ring: &[usize], work: &mut Work) -> Result
         if branch != previous && branch != next {
           count = count
             .checked_add(children(model, branch, atom, work)?)
-            .ok_or(Error::CoordinateRange)?;
+            .ok_or(Error::native(Stage::Macrocycle, Failure::AttachmentCountOverflow))?;
         }
       }
       rules.attachments.push((i, count));

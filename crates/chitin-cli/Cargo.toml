@@ -35,3 +35,6 @@ tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tempfile = "3"

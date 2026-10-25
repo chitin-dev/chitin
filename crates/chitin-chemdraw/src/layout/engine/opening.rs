@@ -1,6 +1,8 @@
 //! Detached ring opening, native fragment reconstruction and closure restoration.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Work, assembly,
   fragments::Forest,
@@ -47,7 +49,10 @@ pub(super) fn generate(model: &Model, ring: usize, depth: usize, work: &mut Work
   }
   let assembly = assembly::prepare(&temporary, &forest, &points, work)?;
   temporary.restore(&model.edges[edge], model, work)?;
-  let restored = temporary.edges.last().ok_or(Error::CoordinateRange)?;
+  let restored = temporary
+    .edges
+    .last()
+    .ok_or(Error::native(Stage::RingOpening, Failure::MissingClosureEdge))?;
   let closure = Interaction::Stretch {
     atoms: restored.ends,
     target: BOND,

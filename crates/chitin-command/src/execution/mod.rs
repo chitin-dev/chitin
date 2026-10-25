@@ -4,6 +4,7 @@
 //! convert the returned outcome through [`crate::output`] without embedding
 //! CLI or GPUI behavior in the executor.
 
+mod chemdraw;
 mod context;
 mod database;
 mod structure;
@@ -16,6 +17,7 @@ use std::{
 use chitin_bio::structure::StructureParseResult;
 use chitin_databases::{Client, ClientConfig, TransportError, providers::rcsb::StructureFormat};
 
+pub use chemdraw::{ChemdrawExecutionError, ChemdrawExport};
 pub use context::{
   CommandEventSink, CommandExecutionContext, CommandExecutionEvent, CommandMessage, CommandMessageLevel,
   CommandProgress,
@@ -27,6 +29,8 @@ use crate::{CommandId, CommandOutputFormat, PortableCommand};
 /// Successful result returned by a portable command.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CommandOutcome {
+  /// A molecule or authored reaction diagram was saved as SVG.
+  ChemdrawExport(ChemdrawExport),
   /// One or more RCSB artifacts were downloaded.
   DatabaseDownload {
     /// Number of unique persisted artifacts.
@@ -78,6 +82,9 @@ impl StructureValidation {
 /// Failure while preparing or executing a portable command.
 #[derive(Debug, thiserror::Error)]
 pub enum CommandExecutionError {
+  /// Chemical drawing or atomic file persistence failed.
+  #[error(transparent)]
+  Chemdraw(#[from] ChemdrawExecutionError),
   /// No default download directory was supplied for a command without output.
   #[error("command '{command_id}' requires a default download directory")]
   MissingDownloadRoot {
@@ -158,6 +165,9 @@ impl CommandExecutor {
     let command_id = command.id();
     events.emit(CommandExecutionEvent::Started { command_id });
     let outcome = match command {
+      PortableCommand::Chemdraw(command) => chemdraw::execute(*command, context)
+        .await
+        .map_err(CommandExecutionError::from),
       PortableCommand::Database(command) => {
         database::execute(self.database_client()?, command, &context, &events).await
       }

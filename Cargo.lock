@@ -788,6 +788,7 @@ dependencies = [
  "clap_complete",
  "console",
  "indicatif",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -826,6 +827,7 @@ dependencies = [
  "chitin-databases",
  "chitin-terminal",
  "clap",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
 ]
@@ -878,9 +880,14 @@ name = "chitin-command"
 version = "0.1.0"
 dependencies = [
  "chitin-bio",
+ "chitin-chem",
+ "chitin-chemdraw",
  "chitin-databases",
  "clap",
+ "serde",
  "serde_json",
+ "serde_yaml",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
 ]

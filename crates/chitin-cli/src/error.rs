@@ -15,7 +15,7 @@ pub(crate) enum CliError {
   /// The process working directory could not be read.
   #[error("could not determine the current working directory: {0}")]
   WorkingDirectory(std::io::Error),
-  /// Standard input could not be read for a structure command.
-  #[error("failed to read structure data from standard input: {0}")]
+  /// Standard input could not be read for a portable command.
+  #[error("failed to read command data from standard input: {0}")]
   StandardInput(std::io::Error),
 }

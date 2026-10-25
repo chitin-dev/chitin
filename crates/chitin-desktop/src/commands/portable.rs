@@ -230,6 +230,28 @@ fn command_targets(
   context: &CommandExecutionContext,
 ) -> Result<Vec<TaskTarget>, CommandExecutionError> {
   match command {
+    PortableCommand::Chemdraw(arguments) => {
+      // Protect output and source resources in the same contextual coordinate
+      // system used by the worker, rather than the desktop process directory.
+      let resolve = |path: &std::path::Path| {
+        if path.is_absolute() {
+          path.to_owned()
+        } else {
+          context.working_directory.join(path)
+        }
+      };
+      let mut targets = vec![TaskTarget::File(resolve(&arguments.output))];
+      match &arguments.input {
+        chitin_command::ChemdrawInput::Diagram(path) if path.as_os_str() != "-" => {
+          targets.push(TaskTarget::File(resolve(path)))
+        }
+        _ => {}
+      }
+      if let Some(path) = &arguments.style.font_file {
+        targets.push(TaskTarget::File(resolve(path)));
+      }
+      Ok(targets)
+    }
     PortableCommand::Database(DatabaseCommand::DownloadRcsbStructure(arguments)) => {
       resolve_rcsb_download_paths(arguments, context).map(|paths| paths.into_iter().map(TaskTarget::File).collect())
     }

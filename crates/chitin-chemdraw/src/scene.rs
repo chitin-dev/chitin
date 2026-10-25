@@ -102,6 +102,49 @@ pub struct Polygon {
   pub source: Option<Source>,
 }
 
+/// A filled disk, useful for atom highlights and authored electron dots.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Disk {
+  /// Center in drawing coordinates.
+  pub center: Point,
+  /// Positive radius of the filled region.
+  pub radius: f64,
+  /// Fill color, including alpha.
+  pub color: Color,
+  /// Optional chemical origin.
+  pub source: Option<Source>,
+}
+
+/// One stroked cubic Bézier curve, independent of arrow or chemical semantics.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CubicBezier {
+  /// Curve origin.
+  pub start: Point,
+  /// Departure control point.
+  pub control1: Point,
+  /// Arrival control point.
+  pub control2: Point,
+  /// Curve destination.
+  pub end: Point,
+  /// Positive stroke width; flat caps do not protrude beyond an attached arrowhead.
+  pub width: f64,
+  /// Stroke color, including alpha.
+  pub color: Color,
+  /// Optional chemical origin.
+  pub source: Option<Source>,
+}
+
+/// An isolated compositing group; opacity is applied once to the painted union.
+///
+/// Opaque, same-colored highlight pieces therefore do not darken where they meet.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Group {
+  /// Validated child scene with its own painter order.
+  pub drawing: Drawing,
+  /// Group opacity, from transparent zero to opaque 255.
+  pub opacity: u8,
+}
+
 /// One positioned text run with an explicit horizontal advance.
 ///
 /// Font identity and advances belong to the scene, not an export backend's
@@ -146,6 +189,12 @@ impl Text {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Primitive {
+  /// An isolated child scene with shared opacity.
+  Group(Group),
+  /// A filled circular region.
+  Disk(Disk),
+  /// A curved stroke with explicit control points.
+  CubicBezier(CubicBezier),
   /// An unfilled stroked circular boundary.
   Circle(Circle),
   /// A filled closed boundary, such as a solid stereochemical wedge.
@@ -199,6 +248,30 @@ impl Drawing {
     let mut points = Vec::new();
     for (index, primitive) in primitives.iter().enumerate() {
       match primitive {
+        Primitive::Group(group) => {
+          if let Some(bounds) = group.drawing.bounds() {
+            points.extend([bounds.min(), bounds.max()]);
+          }
+        }
+        Primitive::Disk(disk) => {
+          if !positive(disk.radius) {
+            return Err(DrawingError::Dimensions(index));
+          }
+          points.push(disk.center.translated(-disk.radius, -disk.radius));
+          points.push(disk.center.translated(disk.radius, disk.radius));
+        }
+        Primitive::CubicBezier(curve) => {
+          if !positive(curve.width) {
+            return Err(DrawingError::Dimensions(index));
+          }
+          // A cubic lies inside its control hull; this conservative envelope also
+          // validates every control point without numerically fragile extrema.
+          let radius = curve.width / 2.;
+          for point in [curve.start, curve.control1, curve.control2, curve.end] {
+            points.push(point.translated(-radius, -radius));
+            points.push(point.translated(radius, radius));
+          }
+        }
         Primitive::Circle(circle) => {
           if !positive(circle.radius) || !positive(circle.width) {
             return Err(DrawingError::Dimensions(index));
@@ -241,6 +314,26 @@ impl Drawing {
   /// Returns immutable commands in painter's order.
   pub fn primitives(&self) -> &[Primitive] {
     &self.primitives
+  }
+
+  /// Visits non-group commands in painter order, retaining their source handles.
+  ///
+  /// This traversal is for inspection, not painting: consumers needing group
+  /// opacity must preserve the hierarchy returned by [`Self::primitives`].
+  pub fn leaf_primitives(&self) -> impl Iterator<Item = &Primitive> {
+    let mut stack = vec![self.primitives.iter()];
+    std::iter::from_fn(move || {
+      loop {
+        let frame = stack.last_mut()?;
+        match frame.next() {
+          Some(Primitive::Group(group)) => stack.push(group.drawing.primitives.iter()),
+          Some(primitive) => return Some(primitive),
+          None => {
+            stack.pop();
+          }
+        }
+      }
+    })
   }
   /// Returns bounds, or `None` for an empty scene.
   pub const fn bounds(&self) -> Option<Bounds> {

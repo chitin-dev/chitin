@@ -3,6 +3,8 @@
 //! [`layout`] creates normalized molecular coordinates. [`depict`] converts
 //! supplied chemical facts and coordinates into a [`Drawing`] of generic
 //! primitives. [`svg`] exports that scene without reinterpreting chemistry.
+//! [`diagram`] composes molecule instances, fragment highlights and authored
+//! reaction/electron arrows without changing molecular facts or layout.
 //! Existing coordinates may replace automatic layout. No stage owns selection,
 //! windows, command history, or mutable chemical property caches.
 //! [`layout::optimization`] refines complete unit coordinates with explicit pins
@@ -32,6 +34,7 @@ mod drawing_rules;
 mod stereo_geometry;
 
 pub mod depict;
+pub mod diagram;
 pub mod font;
 pub mod geometry;
 pub mod layout;
@@ -39,4 +42,4 @@ pub mod pipeline;
 pub mod scene;
 pub mod svg;
 
-pub use scene::{Circle, Color, Drawing, Line, LineCap, Primitive, Source, Text};
+pub use scene::{Circle, Color, CubicBezier, Disk, Drawing, Group, Line, LineCap, Primitive, Source, Text};

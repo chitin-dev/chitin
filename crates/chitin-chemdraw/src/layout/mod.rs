@@ -7,9 +7,11 @@ use std::collections::BTreeMap;
 
 mod budget;
 mod engine;
+mod failure;
 mod labels;
 pub mod optimization;
 mod quality;
+pub use failure::{NativeFailureKind, NativeLayoutFailure, NativeStage};
 pub(crate) use labels::{clear_labels, contact_counts, terminal_label_trials};
 
 /// Resource, spacing, and bounded refinement policy for deterministic layout.
@@ -95,6 +97,9 @@ pub struct BondCrossing {
 /// Layout cannot provide coordinates without dropping or inventing information.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LayoutError {
+  /// A native proposal failed a classified geometric or internal-state check.
+  #[error(transparent)]
+  Native(#[from] NativeLayoutFailure),
   /// Required stereochemical constraints exceeded their separate work budget.
   #[error("double-bond stereochemistry work budget exhausted")]
   StereoBudgetExceeded,
@@ -136,6 +141,13 @@ pub enum LayoutError {
   /// Coordinates or bounds are not representable.
   #[error(transparent)]
   Geometry(#[from] GeometryError),
+}
+
+impl LayoutError {
+  /// Classifies a native failure without conflating geometry and state invariants.
+  pub(crate) const fn native(stage: NativeStage, kind: NativeFailureKind) -> Self {
+    Self::Native(NativeLayoutFailure { stage, kind })
+  }
 }
 
 /// Immutable atom coordinates, independent of graph ownership and scene primitives.

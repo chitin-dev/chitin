@@ -1,6 +1,8 @@
 //! Immutable topology templates and bounded, source-ordered graph matching.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::ordering::connectivity;
 use super::{
   Error, Work,
@@ -154,7 +156,7 @@ fn normalized(seed: &Seed, work: &mut Work) -> Result<Vec<Vector>, Error> {
   }
   let scale = groups.get(best).map_or(1., |(distance, _)| distance.sqrt());
   if scale <= 0. {
-    return Err(Error::CoordinateRange);
+    return Err(Error::native(Stage::Template, Failure::InvalidTemplateScale));
   }
   Ok(raw.into_iter().map(|p| p / scale * BOND).collect())
 }

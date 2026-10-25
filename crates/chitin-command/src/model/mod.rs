@@ -2,6 +2,7 @@
 
 mod application;
 mod catalog;
+mod chemdraw;
 mod database;
 mod panel_tab;
 mod render;
@@ -12,6 +13,7 @@ mod workspace;
 
 pub use application::ApplicationCommand;
 pub use catalog::*;
+pub use chemdraw::{ChemdrawCommand, ChemdrawInput, ChemdrawStyle, DrawingLength};
 pub use database::{DatabaseCommand, RcsbDownloadArguments};
 pub use panel_tab::PanelTabCommand;
 pub use render::{
@@ -28,6 +30,10 @@ pub use workspace::WorkspaceCommand;
 /// Commands executable without application or window state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PortableCommand {
+  /// Frontend-independent molecular and authored reaction drawing.
+  /// Box the larger argument set so shell history and submission envelopes do
+  /// not grow for every other portable workflow.
+  Chemdraw(Box<ChemdrawCommand>),
   /// Database-provider commands.
   Database(DatabaseCommand),
   /// Structure parsing and inspection commands.
@@ -38,6 +44,7 @@ impl PortableCommand {
   /// Returns the stable identity for this command.
   pub fn id(&self) -> CommandId {
     match self {
+      Self::Chemdraw(command) => command.id(),
       Self::Database(command) => command.id(),
       Self::Structure(command) => command.id(),
     }
@@ -141,6 +148,18 @@ impl From<RenderCommand> for ChitinCommand {
 impl From<DatabaseCommand> for PortableCommand {
   fn from(command: DatabaseCommand) -> Self {
     Self::Database(command)
+  }
+}
+
+impl From<ChemdrawCommand> for PortableCommand {
+  fn from(command: ChemdrawCommand) -> Self {
+    Self::Chemdraw(Box::new(command))
+  }
+}
+
+impl From<ChemdrawCommand> for ChitinCommand {
+  fn from(command: ChemdrawCommand) -> Self {
+    PortableCommand::from(command).into()
   }
 }
 

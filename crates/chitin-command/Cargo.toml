@@ -7,9 +7,15 @@ repository.workspace = true
 
 [dependencies]
 chitin-bio = { path = "../chitin-bio" }
+chitin-chem = { path = "../chitin-chem" }
+chitin-chemdraw = { path = "../chitin-chemdraw" }
 chitin-databases = { path = "../chitin-databases" }
 clap = { version = "4.6", features = ["derive"] }
 serde_json = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+tempfile = "3"
+tokio = { version = "1.52", features = ["rt"] }
 thiserror = "2.0"
 
 [dev-dependencies]

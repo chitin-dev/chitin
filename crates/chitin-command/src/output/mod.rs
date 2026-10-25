@@ -123,6 +123,28 @@ impl CommandReport {
 /// A semantic report whose wording and line structure are identical for every frontend.
 pub fn render_outcome(outcome: &CommandOutcome) -> CommandReport {
   match outcome {
+    CommandOutcome::ChemdrawExport(export) => {
+      let mut lines = vec![semantic_line(
+        CommandOutputTone::Success,
+        format!(
+          "Wrote SVG: {} ({} molecule(s), {} bytes)",
+          export.path.display(),
+          export.molecule_count,
+          export.byte_count
+        ),
+      )];
+      lines.extend(
+        export
+          .diagnostics
+          .iter()
+          .map(|d| semantic_line(CommandOutputTone::Warning, d.clone())),
+      );
+      CommandReport {
+        status: CommandReportStatus::Succeeded,
+        kind: CommandOutputKind::Text,
+        lines,
+      }
+    }
     CommandOutcome::DatabaseDownload { artifact_count } => CommandReport {
       status: CommandReportStatus::Succeeded,
       kind: CommandOutputKind::Text,

@@ -1,6 +1,8 @@
 //! Bounded drawing-force integration with immutable fixed flags and atomic commit.
 //! Source attribution and redistribution terms are in licenses/coordinate-generation.txt.
 
+use crate::layout::{NativeFailureKind as Failure, NativeStage as Stage};
+
 use super::{
   Error, Work,
   evaluation::Evaluator,
@@ -37,8 +39,11 @@ pub(super) fn minimize(
   iterations: usize,
   work: &mut Work,
 ) -> Result<Outcome, Error> {
-  if points.len() != fixed.len() || points.iter().any(|point| !point.finite()) {
-    return Err(Error::CoordinateRange);
+  if points.len() != fixed.len() {
+    return Err(Error::native(Stage::Simulation, Failure::InvalidSimulationDimensions));
+  }
+  if points.iter().any(|point| !point.finite()) {
+    return Err(Error::native(Stage::Simulation, Failure::NonFiniteCoordinates));
   }
   work.charge(3 * points.len() + iterations)?;
   let mut trial = points.to_vec();
@@ -52,7 +57,7 @@ pub(super) fn minimize(
     forces.fill(Vector::default());
     let energy = evaluator.score(&trial, &mut forces, work)?;
     if !energy.is_finite() {
-      return Err(Error::CoordinateRange);
+      return Err(Error::native(Stage::Simulation, Failure::NonFiniteEnergy));
     }
     if energy < best_energy {
       best_energy = energy;
