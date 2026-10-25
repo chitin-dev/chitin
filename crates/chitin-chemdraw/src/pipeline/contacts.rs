@@ -21,7 +21,8 @@ use std::collections::BTreeSet;
 /// Stable, deduplicated contacts. Ordinary labels exclude their incident source
 /// bonds; an expanded H label does not inherit that exemption. Its own C-H mark
 /// is excluded. Curved-circle ink and independent chemical decoding are outside
-/// this inspector's contract.
+/// this inspector's contract. Groups are traversed, but this single-graph
+/// inspector is not an instance-aware reaction-diagram quality evaluator.
 ///
 /// # Errors
 /// Rejects foreign scene handles and unsupported measured text. It never moves
@@ -29,12 +30,15 @@ use std::collections::BTreeSet;
 pub fn contacts(graph: &MolecularGraph, drawing: &Drawing) -> Result<Vec<DrawingContact>, depict::DepictError> {
   let mut labels = Vec::new();
   let mut strokes = Vec::new();
-  for primitive in drawing.primitives() {
+  for primitive in drawing.leaf_primitives() {
     let source = match primitive {
       Primitive::Text(text) => text.source,
       Primitive::Line(line) => line.source,
       Primitive::Polygon(polygon) => polygon.source,
       Primitive::Circle(circle) => circle.source,
+      Primitive::Disk(disk) => disk.source,
+      Primitive::CubicBezier(curve) => curve.source,
+      Primitive::Group(_) => None,
     };
     match source {
       Some(Source::Atom(id) | Source::AttachedHydrogen(id)) => {
