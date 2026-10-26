@@ -122,8 +122,8 @@ pub(super) fn electron(diagram: &Diagram, arrow: &ElectronArrow, out: &mut Vec<P
   if !arrow.bend.is_finite() {
     return Err(DiagramError::Geometry);
   }
-  if let super::ElectronCurve::Arc { sweep } = arrow.curve {
-    return circular::electron(diagram, arrow, sweep, out);
+  if let super::ElectronCurve::Arc { sweep, path } = arrow.curve {
+    return circular::electron(diagram, arrow, sweep, path, out);
   }
   let raw_start = diagram.resolve(arrow.from)?;
   let raw_end = diagram.resolve(arrow.to)?;
@@ -177,6 +177,13 @@ pub(super) fn electron(diagram: &Diagram, arrow: &ElectronArrow, out: &mut Vec<P
     opacity: arrow.style.color.alpha,
   }));
   Ok(())
+}
+
+/// Avoids accepting a clipped sliver merely because it fits an arrowhead.
+pub(super) fn readable_arc(arc: &crate::scene::CircularArc, style: ArrowStyle) -> bool {
+  arc.sweep.abs() >= std::f64::consts::PI / 6.
+    && arc.radius * arc.sweep.abs() >= style.head_length * 3.
+    && arc.radius * (1. - (arc.sweep.abs() / 2.).cos()) >= style.width * 1.5
 }
 
 pub(super) fn reaction(arrow: &ReactionArrow, out: &mut Vec<Primitive>) -> Result<(), DiagramError> {

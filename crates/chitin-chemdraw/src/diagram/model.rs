@@ -189,6 +189,37 @@ pub enum ElectronHead {
   FishhookRight,
 }
 
+/// Selection of one of the two paths joining endpoints on the same circle.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ArcPath {
+  /// Use only the authored minor sweep, including its direction.
+  Minor,
+  /// Use the complementary path on the same circle, reversing sweep direction.
+  Major,
+  /// Prefer a readable minor path; consider the major path when it degenerates.
+  #[default]
+  PreferMinor,
+  /// Prefer a readable major path; use the minor path when necessary.
+  PreferMajor,
+}
+
+impl ArcPath {
+  /// Whether automatic selection may consider the complementary path.
+  pub(super) const fn automatic(self) -> bool {
+    matches!(self, Self::PreferMinor | Self::PreferMajor)
+  }
+
+  /// Ordered explicit paths, without inventing a different circle.
+  pub(super) fn candidates(self) -> &'static [Self] {
+    match self {
+      Self::Minor => &[Self::Minor],
+      Self::Major => &[Self::Major],
+      Self::PreferMinor => &[Self::Minor, Self::Major],
+      Self::PreferMajor => &[Self::Major, Self::Minor],
+    }
+  }
+}
+
 /// Curve policy for electron-flow notation, independent of electron count.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub enum ElectronCurve {
@@ -201,6 +232,8 @@ pub enum ElectronCurve {
   Arc {
     /// Signed central angle; determines curvature independently of chord length.
     sweep: f64,
+    /// Explicit path or automatic path-selection preference on this circle.
+    path: ArcPath,
   },
 }
 

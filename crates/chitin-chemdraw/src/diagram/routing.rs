@@ -1,6 +1,6 @@
 //! Bounded deterministic curve search without changing chemical attachments.
 
-use super::{Annotation, Diagram, DiagramError, ElectronArrow, ElectronCurve, Target, arrows, transform};
+use super::{Annotation, ArcPath, Diagram, DiagramError, ElectronArrow, ElectronCurve, Target, arrows, transform};
 use crate::{
   geometry::{Bounds, Point},
   scene::{Drawing, Primitive, Source},
@@ -79,7 +79,10 @@ impl Diagram {
   /// Explicit control offsets are checked as a single fixed candidate; no
   /// alternative path replaces the caller's authored controls.
   /// Arc mode tries the authored signed sweep, its reverse, then sweeps in
-  /// 30-degree steps up to a semicircle. Every candidate remains an exact arc.
+  /// 30-degree steps up to a semicircle. Explicit paths remain in their family;
+  /// automatic policies additionally try complementary paths in preference order.
+  /// Clear, readable candidates outrank clipped slivers. Automatic major paths
+  /// cannot exceed 300 degrees before clipping. Every candidate is an exact arc.
   ///
   /// # Errors
   /// Rejects invalid limits, attachments, existing annotations and obstacle boxes.
@@ -222,7 +225,8 @@ impl Diagram {
       bends = vec![arrow.bend];
     }
     let mut candidates: Vec<_> = bends.into_iter().map(|bend| ElectronArrow { bend, ..arrow }).collect();
-    if let ElectronCurve::Arc { sweep } = arrow.curve {
+    let auto_path = matches!(arrow.curve, ElectronCurve::Arc { path, .. } if path.automatic());
+    if let ElectronCurve::Arc { sweep, path } = arrow.curve {
       if arrow.controls.is_some()
         || !sweep.is_finite()
         || !(std::f64::consts::PI / 180. ..=std::f64::consts::PI).contains(&sweep.abs())
@@ -237,13 +241,18 @@ impl Diagram {
           }
         }
       }
-      candidates = angles
-        .into_iter()
-        .map(|sweep| ElectronArrow {
-          curve: ElectronCurve::Arc { sweep },
-          ..arrow
-        })
-        .collect();
+      candidates.clear();
+      for &choice in path.candidates() {
+        for &sweep in &angles {
+          if auto_path && choice == ArcPath::Major && sweep.abs() < std::f64::consts::PI / 3. {
+            continue;
+          }
+          candidates.push(ElectronArrow {
+            curve: ElectronCurve::Arc { sweep, path: choice },
+            ..arrow
+          });
+        }
+      }
     }
     let total = candidates.len();
     let mut result = RoutingReport {
@@ -254,6 +263,7 @@ impl Diagram {
       work_used: 0,
       limited: false,
     };
+    let mut best_readable = false;
     for candidate in candidates.into_iter().take(options.max_candidates) {
       let mut primitives = Vec::new();
       match arrows::electron(self, &candidate, &mut primitives) {
@@ -267,6 +277,10 @@ impl Diagram {
         .find(|p| matches!(p, Primitive::CubicBezier(_) | Primitive::CircularArc(_)))
       else {
         return Err(DiagramError::Geometry);
+      };
+      let readable = match curve {
+        Primitive::CircularArc(arc) if auto_path => arrows::readable_arc(arc, arrow.style),
+        _ => true,
       };
       let points = match curve {
         Primitive::CubicBezier(c) => {
@@ -347,16 +361,18 @@ impl Diagram {
         }
       }
       result.evaluated += 1;
-      if collisions < result.collisions {
+      if collisions < result.collisions || (collisions == result.collisions && readable && !best_readable) {
         result.arrow = candidate;
         result.collisions = collisions;
+        best_readable = readable;
       }
-      if collisions == 0 {
+      if collisions == 0 && readable {
         result.clear = true;
         return Ok(result);
       }
     }
     result.limited = total > options.max_candidates;
+    result.clear = result.evaluated > 0 && result.collisions == 0;
     Ok(result)
   }
 }

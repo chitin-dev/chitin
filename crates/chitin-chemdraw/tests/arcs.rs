@@ -5,7 +5,8 @@ use chitin_chemdraw::{
   CircularArc, Color, Drawing, Primitive,
   depict::{ChargeStyle, DepictOptions},
   diagram::{
-    Anchor, Annotation, ArrowStyle, Diagram, ElectronArrow, ElectronCurve, ElectronHead, Placement, RoutingOptions,
+    Anchor, Annotation, ArcPath, ArrowStyle, Diagram, ElectronArrow, ElectronCurve, ElectronHead, Placement,
+    RoutingOptions,
   },
   geometry::{Bounds, Point},
   layout::Layout2d,
@@ -13,6 +14,114 @@ use chitin_chemdraw::{
 };
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+#[test]
+fn automatic_routing_should_fall_back_to_major_paths_when_minor_paths_are_blocked() -> TestResult {
+  let (diagram, mut arrow) = fixture(1.2)?;
+  let obstacle = Bounds::from_points([Point::new(50., -110.), Point::new(150., 110.)])?.ok_or("bounds")?;
+  arrow.curve = ElectronCurve::Arc {
+    sweep: 1.2,
+    path: ArcPath::Minor,
+  };
+  assert!(
+    !diagram
+      .route_electron_arrow(arrow, &RoutingOptions::default(), &[obstacle])?
+      .clear
+  );
+  arrow.curve = ElectronCurve::Arc {
+    sweep: 1.2,
+    path: ArcPath::PreferMinor,
+  };
+  let result = diagram.route_electron_arrow(arrow, &RoutingOptions::default(), &[obstacle])?;
+  assert!(result.clear);
+  assert!(matches!(
+    result.arrow.curve,
+    ElectronCurve::Arc {
+      path: ArcPath::Major,
+      ..
+    }
+  ));
+  Ok(())
+}
+
+#[test]
+fn complementary_paths_should_share_the_same_circle_and_reverse_sweep() -> TestResult {
+  for sweep in [1.2, -1.2] {
+    let mut circles = Vec::new();
+    for path in [ArcPath::Minor, ArcPath::Major] {
+      let (mut diagram, mut arrow) = fixture(sweep)?;
+      arrow.curve = ElectronCurve::Arc { sweep, path };
+      diagram.annotate(Annotation::ElectronArrow(arrow));
+      let drawing = diagram.render()?;
+      circles.push(arc(&drawing)?.clone());
+    }
+    assert_eq!(circles[0].center, circles[1].center);
+    assert_eq!(circles[0].radius, circles[1].radius);
+    assert_eq!(circles[0].sweep.signum(), -circles[1].sweep.signum());
+    assert!(circles[1].sweep.abs() > std::f64::consts::PI);
+  }
+  Ok(())
+}
+
+#[test]
+fn automatic_paths_should_favor_readability_for_short_carbonyl_arrows() -> TestResult {
+  let graph = read_smiles("C=O")?.into_graph();
+  let atoms: Vec<_> = graph.atoms().map(|(id, _)| id).collect();
+  let bond = graph.bonds().next().ok_or("bond")?.0;
+  let coordinates = Layout2d::from_positions([(atoms[0], Point::new(0., 0.)), (atoms[1], Point::new(0., 1.))].into())?;
+  let options = DepictOptions {
+    bond_length: 24.,
+    font_size: 14.,
+    ..Default::default()
+  };
+  let mut arcs = Vec::new();
+  for path in [ArcPath::Minor, ArcPath::Major, ArcPath::PreferMinor] {
+    let mut diagram = Diagram::new();
+    let id = diagram.add_molecule(&graph, &coordinates, &options, Placement::default())?;
+    diagram.annotate(Annotation::ElectronArrow(ElectronArrow {
+      curve: ElectronCurve::Arc {
+        sweep: std::f64::consts::FRAC_PI_2,
+        path,
+      },
+      controls: None,
+      from: Anchor::bond(id, bond),
+      to: Anchor::atom(id, atoms[1]),
+      bend: 0.,
+      head: ElectronHead::Pair,
+      style: ArrowStyle {
+        clearance: 0.5,
+        head_length: 2.5,
+        head_width: 2.,
+        width: 0.7,
+        ..Default::default()
+      },
+    }));
+    arcs.push(arc(&diagram.render()?)?.clone());
+  }
+  assert!(arcs[0].sweep.abs() < std::f64::consts::PI);
+  assert!(arcs[1].sweep.abs() > std::f64::consts::PI);
+  assert_eq!(arcs[1], arcs[2]);
+  Ok(())
+}
+
+#[test]
+fn readable_automatic_paths_should_obey_preference_without_creating_near_loops() -> TestResult {
+  for (path, major) in [(ArcPath::PreferMinor, false), (ArcPath::PreferMajor, true)] {
+    let (mut diagram, mut arrow) = fixture(1.2)?;
+    arrow.curve = ElectronCurve::Arc { sweep: 1.2, path };
+    diagram.annotate(Annotation::ElectronArrow(arrow));
+    let drawing = diagram.render()?;
+    assert_eq!(arc(&drawing)?.sweep.abs() > std::f64::consts::PI, major);
+  }
+  let (mut diagram, mut arrow) = fixture(0.1)?;
+  arrow.curve = ElectronCurve::Arc {
+    sweep: 0.1,
+    path: ArcPath::PreferMajor,
+  };
+  diagram.annotate(Annotation::ElectronArrow(arrow));
+  assert!(arc(&diagram.render()?)?.sweep.abs() < std::f64::consts::PI);
+  Ok(())
+}
 
 /// Isolates arrow tests from layout candidates and keeps opposite charges visible.
 fn fixture(sweep: f64) -> Result<(Diagram, ElectronArrow), Box<dyn std::error::Error>> {
@@ -37,7 +146,10 @@ fn fixture(sweep: f64) -> Result<(Diagram, ElectronArrow), Box<dyn std::error::E
   Ok((
     diagram,
     ElectronArrow {
-      curve: ElectronCurve::Arc { sweep },
+      curve: ElectronCurve::Arc {
+        sweep,
+        path: chitin_chemdraw::diagram::ArcPath::Minor,
+      },
       controls: None,
       from: Anchor::atom(a, atom),
       to: Anchor::atom(b, atom),
@@ -155,7 +267,7 @@ fn arc_routing_should_change_sweep_without_changing_curve_kind() -> TestResult {
   let obstacle = Bounds::from_points([Point::new(70., -65.), Point::new(130., -10.)])?.ok_or("bounds")?;
   let result = diagram.route_electron_arrow(arrow, &RoutingOptions::default(), &[obstacle])?;
   assert!(result.clear);
-  assert!(matches!(result.arrow.curve, ElectronCurve::Arc { sweep } if sweep < 0.));
+  assert!(matches!(result.arrow.curve, ElectronCurve::Arc { sweep, .. } if sweep < 0.));
   assert_eq!(result.arrow.from, arrow.from);
   assert_eq!(result.arrow.to, arrow.to);
   Ok(())

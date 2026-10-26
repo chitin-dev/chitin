@@ -2,7 +2,7 @@
 
 use super::{direction, head};
 use crate::{
-  diagram::{Diagram, DiagramError, ElectronArrow, Target},
+  diagram::{ArcPath, Diagram, DiagramError, ElectronArrow, Target},
   geometry::Point,
   scene::{CircularArc, Color, Drawing, Group, Primitive, Source},
 };
@@ -68,12 +68,8 @@ fn trim(diagram: &Diagram, arrow: &ElectronArrow, arc: &CircularArc, reverse: bo
   Err(DiagramError::Geometry)
 }
 
-pub(super) fn electron(
-  diagram: &Diagram,
-  arrow: &ElectronArrow,
-  sweep: f64,
-  out: &mut Vec<Primitive>,
-) -> Result<(), DiagramError> {
+/// Constructs and clips one explicit path while preserving the original circle.
+fn geometry(diagram: &Diagram, arrow: &ElectronArrow, sweep: f64, major: bool) -> Result<CircularArc, DiagramError> {
   if arrow.controls.is_some()
     || !sweep.is_finite()
     || !(std::f64::consts::PI / 180. ..=std::f64::consts::PI).contains(&sweep.abs())
@@ -100,7 +96,11 @@ pub(super) fn electron(
     center,
     radius: chord / (2. * (sweep / 2.).sin().abs()),
     start_angle: (start.y - center.y).atan2(start.x - center.x),
-    sweep,
+    sweep: if major {
+      sweep - sweep.signum() * std::f64::consts::TAU
+    } else {
+      sweep
+    },
     width: style.width,
     color: style.color,
     source: None,
@@ -117,6 +117,40 @@ pub(super) fn electron(
   if arc.radius * arc.sweep.abs() <= style.head_length || arc.point(0.).distance(arc.point(1.)) <= style.head_length {
     return Err(DiagramError::Geometry);
   }
+  Ok(arc)
+}
+
+pub(super) fn electron(
+  diagram: &Diagram,
+  arrow: &ElectronArrow,
+  sweep: f64,
+  path: ArcPath,
+  out: &mut Vec<Primitive>,
+) -> Result<(), DiagramError> {
+  let mut selected = None;
+  for &candidate in path.candidates() {
+    // Near-complete loops are only permitted when explicitly requested.
+    if path.automatic() && candidate == ArcPath::Major && sweep.abs() < std::f64::consts::PI / 3. {
+      continue;
+    }
+    let arc = match geometry(diagram, arrow, sweep, candidate == ArcPath::Major) {
+      Ok(arc) => arc,
+      Err(DiagramError::Geometry) => continue,
+      Err(error) => return Err(error),
+    };
+    let readable = super::readable_arc(&arc, arrow.style);
+    if selected.is_none() || readable {
+      selected = Some(arc);
+    }
+    if !path.automatic() || readable {
+      break;
+    }
+  }
+  let arc = selected.ok_or(DiagramError::Geometry)?;
+  let style = super::ArrowStyle {
+    color: arc.color,
+    ..arrow.style
+  };
   let arrowhead = head(arc.point(1.), arc.tangent(1.), arrow.head, style);
   out.push(Primitive::Group(Group {
     drawing: Drawing::new(vec![Primitive::CircularArc(arc), arrowhead])?,

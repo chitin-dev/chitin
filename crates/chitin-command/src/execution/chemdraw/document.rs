@@ -141,6 +141,42 @@ enum Curve {
   Arc,
 }
 
+/// Path selection on the circle determined by the authored minor angle.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Path {
+  /// Preserve the short path even when automatic collision routing is requested.
+  Minor,
+  /// Preserve the complementary long path.
+  Major,
+  /// Consider both paths, preferring readability and then the configured path.
+  #[default]
+  Auto,
+}
+
+/// Preferred path when both alternatives are readable.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Preference {
+  /// Prefer the compact minor path.
+  #[default]
+  Minor,
+  /// Prefer the complementary major path.
+  Major,
+}
+
+impl Path {
+  /// Maps wire policy to rendering policy without changing the input angle.
+  fn policy(self, prefer: Preference) -> d::ArcPath {
+    match (self, prefer) {
+      (Self::Minor, _) => d::ArcPath::Minor,
+      (Self::Major, _) => d::ArcPath::Major,
+      (Self::Auto, Preference::Minor) => d::ArcPath::PreferMinor,
+      (Self::Auto, Preference::Major) => d::ArcPath::PreferMajor,
+    }
+  }
+}
+
 /// A quarter-circle is a readable default independent of endpoint separation.
 fn arc_angle() -> f64 {
   90.
@@ -227,6 +263,12 @@ enum Annotation {
     /// Signed central angle in degrees for arc mode; absolute value 1..=180.
     #[serde(default = "arc_angle", rename = "arc-angle")]
     arc_angle: f64,
+    /// Minor, major or automatic path; automatic selection is the default.
+    #[serde(default, rename = "arc-path")]
+    arc_path: Path,
+    /// Preferred readable path in automatic mode; defaults to minor.
+    #[serde(default, rename = "arc-prefer")]
+    arc_prefer: Preference,
     /// Endpoint-relative departure and arrival control offsets; overrides bend.
     #[serde(default)]
     controls: Option<[[f64; 2]; 2]>,
@@ -465,6 +507,8 @@ pub(super) fn render(
       Annotation::ElectronArrow {
         curve,
         arc_angle,
+        arc_path,
+        arc_prefer,
         controls,
         from,
         to,
@@ -476,6 +520,7 @@ pub(super) fn render(
           Curve::Bezier => d::ElectronCurve::Bezier,
           Curve::Arc => d::ElectronCurve::Arc {
             sweep: arc_angle.to_radians(),
+            path: arc_path.policy(arc_prefer),
           },
         },
         controls: controls.map(|points| points.map(|p| Point::new(p[0], p[1]))),

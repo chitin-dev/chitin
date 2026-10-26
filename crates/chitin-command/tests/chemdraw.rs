@@ -13,13 +13,15 @@ type TestResult = Result<(), Box<dyn std::error::Error>>;
 #[tokio::test]
 async fn diagram_arc_mode_should_export_native_svg_arcs() -> TestResult {
   let directory = tempfile::tempdir()?;
-  let source = br#"{"version":1,"molecules":[{"id":"a","smiles":"[Cl-]","at":[0,0]},{"id":"b","smiles":"[H+]","at":[200,0]}],"annotations":[{"type":"electron-arrow","curve":"arc","arc-angle":-120,"from":{"molecule":"a","target":{"type":"atom","index":0}},"to":{"molecule":"b","target":{"type":"atom","index":0}}}]}"#;
+  let source = br#"{"version":1,"molecules":[{"id":"a","smiles":"[Cl-]","at":[0,0]},{"id":"b","smiles":"[H+]","at":[200,0]}],"annotations":[{"type":"electron-arrow","curve":"arc","arc-angle":-120,"arc-path":"major","from":{"molecule":"a","target":{"type":"atom","index":0}},"to":{"molecule":"b","target":{"type":"atom","index":0}}}]}"#;
   execute(
     command(ChemdrawInput::Diagram("-".into()), false),
     CommandExecutionContext::new(directory.path()).with_standard_input(source.to_vec()),
   )
   .await?;
-  assert!(std::fs::read_to_string(directory.path().join("out.svg"))?.contains(" A"));
+  let svg = std::fs::read_to_string(directory.path().join("out.svg"))?;
+  let arc = svg.lines().find(|line| line.contains(" A")).ok_or("arc")?;
+  assert!(arc.contains(" 0 1 "));
   Ok(())
 }
 
