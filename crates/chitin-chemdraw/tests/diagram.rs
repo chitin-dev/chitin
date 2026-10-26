@@ -152,6 +152,7 @@ fn electron_arrows_should_clear_labels_and_follow_changed_placements() -> TestRe
     },
   )?;
   diagram.annotate(Annotation::ElectronArrow(ElectronArrow {
+    curve: Default::default(),
     controls: None,
     from: Anchor::atom(a, atom),
     to: Anchor::atom(b, atom),
@@ -378,6 +379,7 @@ fn electron_fishhooks_should_select_opposite_sides_of_the_final_tangent() -> Tes
       },
     )?;
     diagram.annotate(Annotation::ElectronArrow(ElectronArrow {
+      curve: Default::default(),
       controls: None,
       from: Anchor::atom(a, atom),
       to: Anchor::atom(b, atom),
@@ -412,6 +414,7 @@ fn electron_arrows_should_reject_nonfinite_and_collapsed_geometry() -> TestResul
     let mut diagram = Diagram::new();
     let id = insert(&mut diagram, &graph, &layout)?;
     diagram.annotate(Annotation::ElectronArrow(ElectronArrow {
+      curve: Default::default(),
       controls: None,
       from: Anchor::atom(id, atom),
       to: Anchor::atom(id, atom),

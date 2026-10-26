@@ -31,6 +31,7 @@ fn fixture() -> Result<(Diagram, ElectronArrow)> {
     },
   )?;
   let arrow = ElectronArrow {
+    curve: Default::default(),
     controls: None,
     from: Anchor::atom(a, atom),
     to: Anchor::atom(b, atom),

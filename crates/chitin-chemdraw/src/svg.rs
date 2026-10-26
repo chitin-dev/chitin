@@ -169,6 +169,15 @@ pub fn export(drawing: &Drawing, options: &SvgOptions) -> Result<String, SvgErro
 fn scene_run(drawing: &Drawing, output: &mut String) -> Result<(), SvgError> {
   for primitive in drawing.primitives() {
     match primitive {
+      Primitive::CircularArc(arc) => {
+        let start = arc.point(0.);
+        let end = arc.point(1.);
+        output.push_str(&format!(
+          "<path d=\"M{} {} A{} {} 0 {} {} {} {}\" fill=\"none\" stroke=\"{}\" stroke-opacity=\"{}\" stroke-width=\"{}\" stroke-linecap=\"butt\"/>\n",
+          start.x, start.y, arc.radius, arc.radius, u8::from(arc.sweep.abs() > std::f64::consts::PI),
+          u8::from(arc.sweep > 0.), end.x, end.y, color(arc.color), f64::from(arc.color.alpha) / 255., arc.width
+        ));
+      }
       Primitive::Group(group) => {
         output.push_str(&format!("<g opacity=\"{}\">\n", f64::from(group.opacity) / 255.));
         scene_run(&group.drawing, output)?;

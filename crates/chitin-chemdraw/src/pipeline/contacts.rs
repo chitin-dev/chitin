@@ -32,6 +32,7 @@ pub fn contacts(graph: &MolecularGraph, drawing: &Drawing) -> Result<Vec<Drawing
   let mut strokes = Vec::new();
   for primitive in drawing.leaf_primitives() {
     let source = match primitive {
+      Primitive::CircularArc(arc) => arc.source,
       Primitive::Text(text) => text.source,
       Primitive::Line(line) => line.source,
       Primitive::Polygon(polygon) => polygon.source,

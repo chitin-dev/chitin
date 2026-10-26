@@ -77,6 +77,7 @@ fn controls_and_formation_sites_should_follow_both_occurrences() -> TestResult {
   let site = Anchor::bond_formation(a, atom, b, atom);
   assert_eq!(diagram.resolve(site)?, Point::new(100., 0.));
   let arrow = ElectronArrow {
+    curve: Default::default(),
     from: Anchor::atom(a, atom),
     to: Anchor::atom(b, atom),
     controls: Some([Point::new(30., -50.), Point::new(-30., -40.)]),
@@ -133,6 +134,7 @@ fn invalid_controls_and_foreign_formation_atoms_should_be_rejected() -> TestResu
   )?;
   assert!(diagram.resolve(Anchor::bond_formation(a, atom, b, foreign)).is_err());
   diagram.annotate(Annotation::ElectronArrow(ElectronArrow {
+    curve: Default::default(),
     from: Anchor::atom(a, atom),
     to: Anchor::atom(b, atom),
     controls: Some([Point::new(f64::NAN, 0.), Point::new(-30., 20.)]),
@@ -279,6 +281,7 @@ fn automatic_routing_should_not_replace_explicit_controls() -> TestResult {
     },
   )?;
   let arrow = ElectronArrow {
+    curve: Default::default(),
     from: Anchor::atom(a, atom),
     to: Anchor::atom(b, atom),
     controls: Some([Point::new(40., -50.), Point::new(-40., -50.)]),

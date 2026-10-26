@@ -7,6 +7,9 @@ use crate::font::{FontError, FontFace};
 use crate::geometry::{Bounds, GeometryError, Point};
 use chitin_chem::{AtomId, BondId};
 
+mod arc;
+pub use arc::CircularArc;
+
 /// Straight-alpha sRGB color, with no frontend-owned color type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
@@ -189,6 +192,8 @@ impl Text {
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum Primitive {
+  /// An exact constant-radius circular stroke, not a cubic approximation.
+  CircularArc(CircularArc),
   /// An isolated child scene with shared opacity.
   Group(Group),
   /// A filled circular region.
@@ -248,6 +253,36 @@ impl Drawing {
     let mut points = Vec::new();
     for (index, primitive) in primitives.iter().enumerate() {
       match primitive {
+        Primitive::CircularArc(arc) => {
+          if !positive(arc.radius)
+            || !positive(arc.width)
+            || !arc.start_angle.is_finite()
+            || !arc.sweep.is_finite()
+            || arc.sweep == 0.
+            || arc.sweep.abs() >= std::f64::consts::TAU
+          {
+            return Err(DrawingError::Dimensions(index));
+          }
+          let mut extrema = vec![arc.point(0.), arc.point(1.)];
+          for angle in [
+            0.,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+            3. * std::f64::consts::FRAC_PI_2,
+          ] {
+            if arc.contains_angle(angle) {
+              extrema.push(
+                arc
+                  .center
+                  .translated(arc.radius * angle.cos(), arc.radius * angle.sin()),
+              );
+            }
+          }
+          for point in extrema {
+            points.push(point.translated(-arc.width / 2., -arc.width / 2.));
+            points.push(point.translated(arc.width / 2., arc.width / 2.));
+          }
+        }
         Primitive::Group(group) => {
           if let Some(bounds) = group.drawing.bounds() {
             points.extend([bounds.min(), bounds.max()]);

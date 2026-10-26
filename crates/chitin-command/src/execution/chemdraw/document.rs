@@ -130,6 +130,22 @@ enum Head {
   FishhookRight,
 }
 
+/// Wire geometry policy; angles are degrees, not local drawing distances.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Curve {
+  /// Retain bend and optional Bezier controls.
+  #[default]
+  Bezier,
+  /// Constant-radius arc using the supplied signed central angle.
+  Arc,
+}
+
+/// A quarter-circle is a readable default independent of endpoint separation.
+fn arc_angle() -> f64 {
+  90.
+}
+
 /// Arrow paint and dimensions in shared SVG units, not molecule-local units.
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
@@ -205,6 +221,12 @@ enum Annotation {
   },
   /// An explicitly bent electron-flow curve, possibly between two occurrences.
   ElectronArrow {
+    /// Circular or Bezier geometry; existing requests retain Bezier output.
+    #[serde(default)]
+    curve: Curve,
+    /// Signed central angle in degrees for arc mode; absolute value 1..=180.
+    #[serde(default = "arc_angle", rename = "arc-angle")]
+    arc_angle: f64,
     /// Endpoint-relative departure and arrival control offsets; overrides bend.
     #[serde(default)]
     controls: Option<[[f64; 2]; 2]>,
@@ -441,6 +463,8 @@ pub(super) fn render(
         })
       }
       Annotation::ElectronArrow {
+        curve,
+        arc_angle,
         controls,
         from,
         to,
@@ -448,6 +472,12 @@ pub(super) fn render(
         head,
         style,
       } => d::Annotation::ElectronArrow(d::ElectronArrow {
+        curve: match curve {
+          Curve::Bezier => d::ElectronCurve::Bezier,
+          Curve::Arc => d::ElectronCurve::Arc {
+            sweep: arc_angle.to_radians(),
+          },
+        },
         controls: controls.map(|points| points.map(|p| Point::new(p[0], p[1]))),
         from: reference(&from, &entries)?,
         to: reference(&to, &entries)?,

@@ -42,4 +42,6 @@ pub mod pipeline;
 pub mod scene;
 pub mod svg;
 
-pub use scene::{Circle, Color, CubicBezier, Disk, Drawing, Group, Line, LineCap, Primitive, Source, Text};
+pub use scene::{
+  Circle, CircularArc, Color, CubicBezier, Disk, Drawing, Group, Line, LineCap, Primitive, Source, Text,
+};

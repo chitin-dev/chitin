@@ -189,9 +189,26 @@ pub enum ElectronHead {
   FishhookRight,
 }
 
+/// Curve policy for electron-flow notation, independent of electron count.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum ElectronCurve {
+  /// Existing bend or endpoint-local control-point geometry.
+  #[default]
+  Bezier,
+  /// An exact circular arc with a signed central sweep in radians.
+  /// Absolute sweep must be between one and 180 degrees, inclusive.
+  /// Positive is clockwise in y-down coordinates; `bend` is ignored.
+  Arc {
+    /// Signed central angle; determines curvature independently of chord length.
+    sweep: f64,
+  },
+}
+
 /// Authored electron movement between instance-qualified chemical objects.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ElectronArrow {
+  /// Curve geometry; exact arcs cannot be combined with Bezier controls.
+  pub curve: ElectronCurve,
   /// Optional departure/arrival control offsets relative to `from`/`to`.
   /// Each offset uses its endpoint molecule's local drawing units and scale.
   /// Both controls follow their endpoint on movement. When present, `bend` is

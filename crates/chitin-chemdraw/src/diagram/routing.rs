@@ -1,6 +1,6 @@
 //! Bounded deterministic curve search without changing chemical attachments.
 
-use super::{Annotation, Diagram, DiagramError, ElectronArrow, Target, arrows, transform};
+use super::{Annotation, Diagram, DiagramError, ElectronArrow, ElectronCurve, Target, arrows, transform};
 use crate::{
   geometry::{Bounds, Point},
   scene::{Drawing, Primitive, Source},
@@ -11,9 +11,9 @@ use crate::{
 pub struct RoutingOptions {
   /// Additional clearance around obstacles, in diagram drawing units.
   pub margin: f64,
-  /// Largest absolute perpendicular control displacement searched.
+  /// Largest absolute perpendicular control displacement searched for Bezier curves.
   pub max_bend: f64,
-  /// Spacing of bend candidates on either side of the source/destination axis.
+  /// Spacing of Bezier bend candidates on either side of the endpoint axis.
   pub bend_step: f64,
   /// Maximum complete candidates; must be in 1..=129.
   pub max_candidates: usize,
@@ -78,6 +78,8 @@ impl Diagram {
   /// claimed when limits stop evaluation. The method does not insert an arrow.
   /// Explicit control offsets are checked as a single fixed candidate; no
   /// alternative path replaces the caller's authored controls.
+  /// Arc mode tries the authored signed sweep, its reverse, then sweeps in
+  /// 30-degree steps up to a semicircle. Every candidate remains an exact arc.
   ///
   /// # Errors
   /// Rejects invalid limits, attachments, existing annotations and obstacle boxes.
@@ -219,7 +221,31 @@ impl Diagram {
     if arrow.controls.is_some() {
       bends = vec![arrow.bend];
     }
-    let total = bends.len();
+    let mut candidates: Vec<_> = bends.into_iter().map(|bend| ElectronArrow { bend, ..arrow }).collect();
+    if let ElectronCurve::Arc { sweep } = arrow.curve {
+      if arrow.controls.is_some()
+        || !sweep.is_finite()
+        || !(std::f64::consts::PI / 180. ..=std::f64::consts::PI).contains(&sweep.abs())
+      {
+        return Err(DiagramError::Geometry);
+      }
+      let mut angles = vec![sweep, -sweep];
+      for degrees in [30_f64, 60., 90., 120., 150., 180.] {
+        for angle in [degrees.to_radians(), -degrees.to_radians()] {
+          if !angles.contains(&angle) {
+            angles.push(angle);
+          }
+        }
+      }
+      candidates = angles
+        .into_iter()
+        .map(|sweep| ElectronArrow {
+          curve: ElectronCurve::Arc { sweep },
+          ..arrow
+        })
+        .collect();
+    }
+    let total = candidates.len();
     let mut result = RoutingReport {
       arrow,
       clear: false,
@@ -228,8 +254,7 @@ impl Diagram {
       work_used: 0,
       limited: false,
     };
-    for bend in bends.into_iter().take(options.max_candidates) {
-      let candidate = ElectronArrow { bend, ..arrow };
+    for candidate in candidates.into_iter().take(options.max_candidates) {
       let mut primitives = Vec::new();
       match arrows::electron(self, &candidate, &mut primitives) {
         Ok(()) => {}
@@ -237,22 +262,32 @@ impl Diagram {
         Err(error) => return Err(error),
       }
       let drawing = Drawing::new(primitives)?;
-      let Some(curve) = drawing.leaf_primitives().find_map(|p| {
-        if let Primitive::CubicBezier(c) = p {
-          Some(c)
-        } else {
-          None
-        }
-      }) else {
+      let Some(curve) = drawing
+        .leaf_primitives()
+        .find(|p| matches!(p, Primitive::CubicBezier(_) | Primitive::CircularArc(_)))
+      else {
         return Err(DiagramError::Geometry);
       };
-      let mut points = vec![curve.start];
-      if !flatten([curve.start, curve.control1, curve.control2, curve.end], 0, &mut points) {
-        continue;
-      }
+      let points = match curve {
+        Primitive::CubicBezier(c) => {
+          let mut points = vec![c.start];
+          if !flatten([c.start, c.control1, c.control2, c.end], 0, &mut points) {
+            continue;
+          }
+          points
+        }
+        Primitive::CircularArc(c) => {
+          let Some(points) = arc_points(c) else {
+            continue;
+          };
+          points
+        }
+        _ => return Err(DiagramError::Geometry),
+      };
       let clearance = options.margin + arrow.style.width.max(arrow.style.head_width) / 2. + FLATNESS;
-      let start_reach = raw_start.distance(curve.start) + clearance + arrow.style.head_length;
-      let end_reach = raw_end.distance(curve.end) + clearance + arrow.style.head_length;
+      let start_reach = raw_start.distance(points[0]) + clearance + arrow.style.head_length;
+      let end_reach =
+        raw_end.distance(*points.last().ok_or(DiagramError::Geometry)?) + clearance + arrow.style.head_length;
       let mut collisions = 0;
       for segment in points.windows(2) {
         for obstacle in &obstacles {
@@ -328,6 +363,7 @@ impl Diagram {
 
 fn source(p: &Primitive) -> Option<Source> {
   match p {
+    Primitive::CircularArc(p) => p.source,
     Primitive::Line(p) => p.source,
     Primitive::Text(p) => p.source,
     Primitive::Polygon(p) => p.source,
@@ -359,6 +395,12 @@ fn collect(p: &Primitive, start: bool, end: bool, out: &mut Vec<Obstacle>) -> Re
     })
   };
   match p {
+    Primitive::CircularArc(p) => {
+      let points = arc_points(p).ok_or(DiagramError::Geometry)?;
+      for s in points.windows(2) {
+        push(Shape::Segment(s[0], s[1], p.width / 2. + FLATNESS));
+      }
+    }
     Primitive::Line(p) => push(Shape::Segment(p.start, p.end, p.width / 2.)),
     Primitive::CubicBezier(p) => {
       let mut points = vec![p.start];
@@ -381,6 +423,19 @@ fn collect(p: &Primitive, start: bool, end: bool, out: &mut Vec<Obstacle>) -> Re
 
 fn midpoint(a: Point, b: Point) -> Point {
   Point::new(a.x / 2. + b.x / 2., a.y / 2. + b.y / 2.)
+}
+
+/// Circular sagitta is at most r*delta^2/8; cap both error and segment length.
+fn arc_points(arc: &crate::scene::CircularArc) -> Option<Vec<Point>> {
+  let delta = (8. * FLATNESS / arc.radius).sqrt().min(std::f64::consts::PI / 8.);
+  let steps = (arc.sweep.abs() / delta)
+    .ceil()
+    .max((arc.radius * arc.sweep.abs() / 8.).ceil());
+  if !steps.is_finite() || !(1. ..=4096.).contains(&steps) {
+    return None;
+  }
+  let steps = steps as usize;
+  Some((0..=steps).map(|i| arc.point(i as f64 / steps as f64)).collect())
 }
 
 fn flatten(c: [Point; 4], depth: usize, points: &mut Vec<Point>) -> bool {

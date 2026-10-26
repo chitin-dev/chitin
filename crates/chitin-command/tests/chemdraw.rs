@@ -11,6 +11,19 @@ use std::path::PathBuf;
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
 #[tokio::test]
+async fn diagram_arc_mode_should_export_native_svg_arcs() -> TestResult {
+  let directory = tempfile::tempdir()?;
+  let source = br#"{"version":1,"molecules":[{"id":"a","smiles":"[Cl-]","at":[0,0]},{"id":"b","smiles":"[H+]","at":[200,0]}],"annotations":[{"type":"electron-arrow","curve":"arc","arc-angle":-120,"from":{"molecule":"a","target":{"type":"atom","index":0}},"to":{"molecule":"b","target":{"type":"atom","index":0}}}]}"#;
+  execute(
+    command(ChemdrawInput::Diagram("-".into()), false),
+    CommandExecutionContext::new(directory.path()).with_standard_input(source.to_vec()),
+  )
+  .await?;
+  assert!(std::fs::read_to_string(directory.path().join("out.svg"))?.contains(" A"));
+  Ok(())
+}
+
+#[tokio::test]
 async fn circled_charges_and_authored_controls_should_be_available_to_commands() -> TestResult {
   let directory = tempfile::tempdir()?;
   let source = br#"{"version":1,"molecules":[{"id":"a","smiles":"[OH-]","at":[0,0]},{"id":"b","smiles":"[H+]","at":[200,0]}],"annotations":[{"type":"electron-arrow","from":{"molecule":"a","target":{"type":"atom","index":0},"offset":[0,15]},"to":{"molecule":"b","target":{"type":"bond-formation","index":0,"other_molecule":"a","other_index":0}},"bend":0,"controls":[[30,40],[-10,40]]},{"type":"electron-dot","anchor":{"molecule":"a","target":{"type":"radical","index":0},"offset":[20,-10]}}]}"#;

@@ -8,6 +8,8 @@ use crate::{
   scene::{Color, CubicBezier, Drawing, DrawingError, Group, Line, LineCap, Polygon, Primitive, Source, positive},
 };
 
+mod circular;
+
 pub(super) fn validate(style: ArrowStyle) -> Result<(), DiagramError> {
   if ![style.width, style.head_length, style.head_width]
     .into_iter()
@@ -119,6 +121,9 @@ pub(super) fn electron(diagram: &Diagram, arrow: &ElectronArrow, out: &mut Vec<P
   validate(arrow.style)?;
   if !arrow.bend.is_finite() {
     return Err(DiagramError::Geometry);
+  }
+  if let super::ElectronCurve::Arc { sweep } = arrow.curve {
+    return circular::electron(diagram, arrow, sweep, out);
   }
   let raw_start = diagram.resolve(arrow.from)?;
   let raw_end = diagram.resolve(arrow.to)?;

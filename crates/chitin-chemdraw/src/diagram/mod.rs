@@ -35,8 +35,8 @@ mod transform;
 
 pub use lone_pair::{LonePairOptions, LonePairSuggestion};
 pub use model::{
-  Anchor, Annotation, ArrowStyle, DiagramError, ElectronArrow, ElectronDot, ElectronHead, Highlight, LonePair,
-  MoleculeId, Placement, ReactionArrow, ReactionArrowKind, Target,
+  Anchor, Annotation, ArrowStyle, DiagramError, ElectronArrow, ElectronCurve, ElectronDot, ElectronHead, Highlight,
+  LonePair, MoleculeId, Placement, ReactionArrow, ReactionArrowKind, Target,
 };
 pub use routing::{RoutingOptions, RoutingReport};
 

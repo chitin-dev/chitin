@@ -30,6 +30,7 @@ pub(super) fn apply(graph: &MolecularGraph, layout: &Layout2d, primitives: &mut 
     .max(1e-12);
   for primitive in primitives {
     let (source, color) = match primitive {
+      Primitive::CircularArc(arc) => (arc.source, &mut arc.color),
       Primitive::Line(line) => (line.source, &mut line.color),
       Primitive::Text(text) => (text.source, &mut text.color),
       Primitive::Polygon(polygon) => (polygon.source, &mut polygon.color),
