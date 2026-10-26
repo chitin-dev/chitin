@@ -76,6 +76,8 @@ impl Diagram {
   /// only near the original chemical endpoint. A conservative flattened-curve
   /// envelope includes shaft and head width. No complete clear candidate is
   /// claimed when limits stop evaluation. The method does not insert an arrow.
+  /// Explicit control offsets are checked as a single fixed candidate; no
+  /// alternative path replaces the caller's authored controls.
   ///
   /// # Errors
   /// Rejects invalid limits, attachments, existing annotations and obstacle boxes.
@@ -94,6 +96,11 @@ impl Diagram {
       || !(1..=129).contains(&options.max_candidates)
       || options.work_budget == 0
       || !arrow.bend.is_finite()
+      || arrow.controls.is_some_and(|points| {
+        points
+          .iter()
+          .any(|p| !p.is_finite() || p.x.abs() > 1e6 || p.y.abs() > 1e6)
+      })
     {
       return Err(DiagramError::Geometry);
     }
@@ -154,6 +161,11 @@ impl Diagram {
           end = a.anchor == arrow.to;
           self.lone_pair(a, &mut primitives)?;
         }
+        Annotation::ElectronDot(a) => {
+          start = a.anchor == arrow.from;
+          end = a.anchor == arrow.to;
+          self.electron_dot(a, &mut primitives)?;
+        }
       }
       let drawing = Drawing::new(primitives)?;
       for p in drawing.leaf_primitives() {
@@ -202,6 +214,10 @@ impl Diagram {
           bends.push(bend);
         }
       }
+    }
+    // Explicit controls are an authored path, never silently replaced by bends.
+    if arrow.controls.is_some() {
+      bends = vec![arrow.bend];
     }
     let total = bends.len();
     let mut result = RoutingReport {
@@ -336,7 +352,10 @@ fn collect(p: &Primitive, start: bool, end: bool, out: &mut Vec<Obstacle>) -> Re
       shape,
       start_attachment: start,
       end_attachment: end,
-      label: matches!(p, Primitive::Text(_)),
+      // A circled charge is label ink, not an incident bond eligible for the
+      // near-endpoint attachment exemption.
+      label: matches!(p, Primitive::Text(_))
+        || matches!(p, Primitive::Circle(c) if matches!(c.source, Some(Source::Atom(_)))),
     })
   };
   match p {

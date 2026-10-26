@@ -91,6 +91,20 @@ struct Reference {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 enum Target {
+  /// An authored radical dot at an atom-local offset, without spin inference.
+  Radical {
+    /// Source atom index.
+    index: usize,
+  },
+  /// Intended bond midpoint; no source bond is required.
+  BondFormation {
+    /// Atom index in this occurrence.
+    index: usize,
+    /// Occurrence containing the second reacting atom.
+    other_molecule: String,
+    /// Atom index in the other occurrence.
+    other_index: usize,
+  },
   /// Source atom center, with label clearance applied by the arrow renderer.
   Atom {
     /// Zero-based atom index in the selected occurrence's SMILES parse order.
@@ -161,6 +175,17 @@ impl Paint {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 enum Annotation {
+  /// One authored electron dot, independent of chemical spin inference.
+  ElectronDot {
+    /// Radical target with an atom-local offset.
+    anchor: Reference,
+    /// Positive local dot radius.
+    #[serde(default = "dot_radius")]
+    radius: f64,
+    /// Dot paint.
+    #[serde(default = "black")]
+    color: [u8; 4],
+  },
   /// One compositing group beneath the molecules; overlap receives opacity once.
   Highlight {
     /// Occurrence whose atom and bond indices are selected.
@@ -180,11 +205,15 @@ enum Annotation {
   },
   /// An explicitly bent electron-flow curve, possibly between two occurrences.
   ElectronArrow {
+    /// Endpoint-relative departure and arrival control offsets; overrides bend.
+    #[serde(default)]
+    controls: Option<[[f64; 2]; 2]>,
     /// Source atom, bond or displaced lone-pair center.
     from: Reference,
     /// Destination atom or bond in any declared occurrence.
     to: Reference,
     /// Signed perpendicular control-point displacement in shared SVG units.
+    #[serde(default)]
     bend: f64,
     /// Full or single-electron head; independent of chemical bond order.
     #[serde(default)]
@@ -273,9 +302,18 @@ fn entry<'a>(id: &str, entries: &'a BTreeMap<String, Entry>) -> Result<&'a Entry
 /// Offset finiteness is checked when the drawing engine resolves the anchor.
 fn reference(input: &Reference, entries: &BTreeMap<String, Entry>) -> Result<d::Anchor, Error> {
   let e = entry(&input.molecule, entries)?;
-  let anchor = match input.target {
-    Target::Atom { index } => d::Anchor::atom(e.id, e.atom(index)?),
-    Target::Bond { atoms } => d::Anchor::bond(e.id, e.bond(atoms)?),
+  let anchor = match &input.target {
+    Target::Atom { index } => d::Anchor::atom(e.id, e.atom(*index)?),
+    Target::Bond { atoms } => d::Anchor::bond(e.id, e.bond(*atoms)?),
+    Target::Radical { index } => d::Anchor::radical(e.id, e.atom(*index)?, Point::new(0., 0.)),
+    Target::BondFormation {
+      index,
+      other_molecule,
+      other_index,
+    } => {
+      let other = entry(other_molecule, entries)?;
+      d::Anchor::bond_formation(e.id, e.atom(*index)?, other.id, other.atom(*other_index)?)
+    }
   };
   Ok(anchor.with_offset(Point::new(input.offset[0], input.offset[1])))
 }
@@ -381,6 +419,11 @@ pub(super) fn render(
   for annotation in input.annotations {
     cancelled(context)?;
     diagram.annotate(match annotation {
+      Annotation::ElectronDot { anchor, radius, color } => d::Annotation::ElectronDot(d::ElectronDot {
+        anchor: reference(&anchor, &entries)?,
+        radius,
+        color: rgba(color),
+      }),
       Annotation::Highlight {
         molecule,
         atoms,
@@ -398,12 +441,14 @@ pub(super) fn render(
         })
       }
       Annotation::ElectronArrow {
+        controls,
         from,
         to,
         bend,
         head,
         style,
       } => d::Annotation::ElectronArrow(d::ElectronArrow {
+        controls: controls.map(|points| points.map(|p| Point::new(p[0], p[1]))),
         from: reference(&from, &entries)?,
         to: reference(&to, &entries)?,
         bend,

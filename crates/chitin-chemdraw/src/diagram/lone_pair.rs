@@ -103,6 +103,7 @@ impl Diagram {
       match annotation {
         Annotation::Highlight(_) => {}
         Annotation::ElectronArrow(a) => arrows::electron(self, a, &mut pieces)?,
+        Annotation::ElectronDot(a) => self.electron_dot(a, &mut pieces)?,
         Annotation::ReactionArrow(a) => arrows::reaction(a, &mut pieces)?,
         Annotation::LonePair(a) => self.lone_pair(a, &mut pieces)?,
       }

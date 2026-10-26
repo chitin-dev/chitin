@@ -55,16 +55,17 @@ fn endpoint(diagram: &Diagram, anchor: Anchor, toward: Point, style: ArrowStyle)
   match anchor.target {
     Target::Atom(id) => {
       for primitive in molecule.drawing.primitives() {
-        let Primitive::Text(text) = primitive else {
-          continue;
+        let bounds = match primitive {
+          Primitive::Text(text) if text.source == Some(Source::Atom(id)) => {
+            text.envelope().map_err(DrawingError::from)?
+          }
+          Primitive::Circle(circle) if circle.source == Some(Source::Atom(id)) => {
+            let r = circle.radius + circle.width / 2.;
+            [circle.center.translated(-r, -r), circle.center.translated(r, r)]
+          }
+          _ => continue,
         };
-        if text.source != Some(Source::Atom(id)) {
-          continue;
-        }
-        let [min, max] = text
-          .envelope()
-          .map_err(DrawingError::from)?
-          .map(|p| molecule.placement.point(p));
+        let [min, max] = bounds.map(|p| molecule.placement.point(p));
         if let Some(exit) = ray_exit(point, unit, min, max, style.clearance) {
           distance = distance.max(exit);
         }
@@ -83,6 +84,8 @@ fn endpoint(diagram: &Diagram, anchor: Anchor, toward: Point, style: ArrowStyle)
         * molecule.placement.scale;
       distance += width / 2.;
     }
+    // These refer to authored electron positions or empty space, not atom ink.
+    Target::Radical(_) | Target::BondFormation { .. } => {}
   }
   if !distance.is_finite() || distance >= point.distance(toward) {
     return Err(DiagramError::Geometry);
@@ -122,8 +125,19 @@ pub(super) fn electron(diagram: &Diagram, arrow: &ElectronArrow, out: &mut Vec<P
   let unit = direction(raw_start, raw_end)?;
   let dx = raw_end.x - raw_start.x;
   let dy = raw_end.y - raw_start.y;
-  let control1 = raw_start.translated(dx / 3. - unit.y * arrow.bend, dy / 3. + unit.x * arrow.bend);
-  let control2 = raw_start.translated(2. * dx / 3. - unit.y * arrow.bend, 2. * dy / 3. + unit.x * arrow.bend);
+  let [control1, control2] = if let Some([departure, arrival]) = arrow.controls {
+    let a = diagram.molecule(arrow.from.molecule)?.placement.scale;
+    let b = diagram.molecule(arrow.to.molecule)?.placement.scale;
+    [
+      raw_start.translated(departure.x * a, departure.y * a),
+      raw_end.translated(arrival.x * b, arrival.y * b),
+    ]
+  } else {
+    [
+      raw_start.translated(dx / 3. - unit.y * arrow.bend, dy / 3. + unit.x * arrow.bend),
+      raw_start.translated(2. * dx / 3. - unit.y * arrow.bend, 2. * dy / 3. + unit.x * arrow.bend),
+    ]
+  };
   if !control1.is_finite() || !control2.is_finite() {
     return Err(DiagramError::Geometry);
   }
