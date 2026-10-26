@@ -8,7 +8,7 @@ use crate::{
   scene::{Color, CubicBezier, Drawing, DrawingError, Group, Line, LineCap, Polygon, Primitive, Source, positive},
 };
 
-fn validate(style: ArrowStyle) -> Result<(), DiagramError> {
+pub(super) fn validate(style: ArrowStyle) -> Result<(), DiagramError> {
   if ![style.width, style.head_length, style.head_width]
     .into_iter()
     .all(positive)
