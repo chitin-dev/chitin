@@ -235,7 +235,7 @@ fn circled_charges_should_enclose_measured_text_and_clip_bonds() -> TestResult {
       assert!(p.distance(circle.center) < circle.radius);
     }
     let atom = graph.atoms().next().ok_or("atom")?.0;
-    assert_eq!(circle.source, Some(Source::Atom(atom)));
+    assert_eq!(circle.source, Some(Source::Charge(atom)));
     for p in drawing.leaf_primitives() {
       if let Primitive::Line(line) = p {
         assert!(line.start.distance(circle.center) > circle.radius + circle.width / 2.);

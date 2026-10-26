@@ -135,7 +135,7 @@ impl Diagram {
         let attached = |anchor: super::Anchor, source: Option<Source>| {
           molecule.id == anchor.molecule
             && match (anchor.target, source) {
-              (Target::Atom(a), Some(Source::Atom(b))) => a == b,
+              (Target::Atom(a), Some(Source::Atom(b) | Source::Charge(b))) => a == b,
               (Target::Atom(a), Some(Source::AttachedHydrogen(b))) => a == b,
               (Target::Atom(a), Some(Source::Bond(b))) => {
                 molecule.bonds.get(&b).is_some_and(|atoms| atoms.contains(&a))
@@ -407,10 +407,27 @@ fn collect(p: &Primitive, start: bool, end: bool, out: &mut Vec<Obstacle>) -> Re
       // A circled charge is label ink, not an incident bond eligible for the
       // near-endpoint attachment exemption.
       label: matches!(p, Primitive::Text(_))
-        || matches!(p, Primitive::Circle(c) if matches!(c.source, Some(Source::Atom(_)))),
+        || matches!(p, Primitive::Circle(c) if matches!(c.source, Some(Source::Charge(_)))),
     })
   };
   match p {
+    Primitive::Circle(circle) if !matches!(circle.source, Some(Source::Charge(_))) => {
+      // Ring interiors are empty space, not filled label boxes. Reuse the
+      // bounded circular flattening tolerance to reserve only the stroke.
+      let arc = crate::scene::CircularArc {
+        center: circle.center,
+        radius: circle.radius,
+        start_angle: 0.,
+        sweep: std::f64::consts::TAU,
+        width: circle.width,
+        color: circle.color,
+        source: circle.source,
+      };
+      let points = arc_points(&arc).ok_or(DiagramError::Geometry)?;
+      for s in points.windows(2) {
+        push(Shape::Segment(s[0], s[1], circle.width / 2. + FLATNESS));
+      }
+    }
     Primitive::CircularArc(p) => {
       let points = arc_points(p).ok_or(DiagramError::Geometry)?;
       for s in points.windows(2) {

@@ -17,8 +17,9 @@ fn trim(diagram: &Diagram, arrow: &ElectronArrow, arc: &CircularArc, reverse: bo
   let mut clearance = arrow.style.clearance;
   for primitive in molecule.drawing.leaf_primitives() {
     match (anchor.target, primitive) {
-      (Target::Atom(atom), Primitive::Text(t)) if t.source == Some(Source::Atom(atom)) => {}
-      (Target::Atom(atom), Primitive::Circle(c)) if c.source == Some(Source::Atom(atom)) => {}
+      (Target::Atom(atom), Primitive::Text(t)) if matches!(t.source, Some(Source::Atom(id) | Source::Charge(id)) if id == atom) =>
+        {}
+      (Target::Atom(atom), Primitive::Circle(c)) if c.source == Some(Source::Charge(atom)) => {}
       (Target::Bond(bond), Primitive::Line(line)) if line.source == Some(Source::Bond(bond)) => {
         clearance = clearance.max(arrow.style.clearance + line.width * molecule.placement.scale / 2.);
         continue;

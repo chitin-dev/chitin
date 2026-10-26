@@ -33,7 +33,10 @@ fn charge_marker(source: Source, center: Point) -> Result<Vec<Primitive>, Box<dy
       radius: 5.,
       width: 2.,
       color: Color::BLACK,
-      source: Some(source),
+      source: Some(match source {
+        Source::Atom(atom) => Source::Charge(atom),
+        other => other,
+      }),
     }),
   ])
 }
@@ -181,7 +184,7 @@ fn charge_circles_should_keep_incident_bond_exemptions_and_validate_sources() ->
     radius: 5.,
     width: 2.,
     color: Color::BLACK,
-    source: Some(Source::Atom(foreign)),
+    source: Some(Source::Charge(foreign)),
   })])?;
   assert!(contacts(&graph, &drawing).is_err());
   Ok(())

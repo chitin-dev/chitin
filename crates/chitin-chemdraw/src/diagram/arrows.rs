@@ -58,10 +58,10 @@ fn endpoint(diagram: &Diagram, anchor: Anchor, toward: Point, style: ArrowStyle)
     Target::Atom(id) => {
       for primitive in molecule.drawing.primitives() {
         let bounds = match primitive {
-          Primitive::Text(text) if text.source == Some(Source::Atom(id)) => {
+          Primitive::Text(text) if matches!(text.source, Some(Source::Atom(atom) | Source::Charge(atom)) if atom == id) => {
             text.envelope().map_err(DrawingError::from)?
           }
-          Primitive::Circle(circle) if circle.source == Some(Source::Atom(id)) => {
+          Primitive::Circle(circle) if circle.source == Some(Source::Charge(id)) => {
             let r = circle.radius + circle.width / 2.;
             [circle.center.translated(-r, -r), circle.center.translated(r, r)]
           }

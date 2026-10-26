@@ -16,11 +16,13 @@ pub(super) fn apply(graph: &MolecularGraph, layout: &Layout2d, primitives: &mut 
     return;
   }
   let depth = |source: Option<Source>| match source {
-    Some(Source::Bond(id)) => graph.bond(id).and_then(|bond| {
+    Some(Source::Bond(id) | Source::AromaticRing(id)) => graph.bond(id).and_then(|bond| {
       let [a, b] = bond.atoms();
       Some((layout.drawing_depths().get(&a)? + layout.drawing_depths().get(&b)?) / 2.)
     }),
-    Some(Source::Atom(id) | Source::AttachedHydrogen(id)) => layout.drawing_depths().get(&id).copied(),
+    Some(Source::Atom(id) | Source::Charge(id) | Source::AttachedHydrogen(id)) => {
+      layout.drawing_depths().get(&id).copied()
+    }
     _ => None,
   };
   let bound = layout

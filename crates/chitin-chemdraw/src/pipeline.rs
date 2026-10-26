@@ -190,8 +190,8 @@ fn contact_atoms(contact: &DrawingContact) -> impl Iterator<Item = AtomId> {
     DrawingContact::AuxiliaryLabelStroke(a, _) => [Some(a), None],
   };
   sources.into_iter().flatten().filter_map(|source| match source {
-    Source::Atom(atom) | Source::AttachedHydrogen(atom) => Some(atom),
-    Source::Bond(_) => None,
+    Source::Atom(atom) | Source::Charge(atom) | Source::AttachedHydrogen(atom) => Some(atom),
+    Source::Bond(_) | Source::AromaticRing(_) => None,
   })
 }
 

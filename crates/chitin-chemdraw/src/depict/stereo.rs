@@ -319,8 +319,8 @@ pub(super) fn wedge(
   output: &mut Vec<Primitive>,
 ) -> Result<(), Error> {
   let occluded = || match source {
-    Source::Bond(edge) => Error::OccludedBond(edge),
-    Source::Atom(center) | Source::AttachedHydrogen(center) => Error::Stereo(center),
+    Source::Bond(edge) | Source::AromaticRing(edge) => Error::OccludedBond(edge),
+    Source::Atom(center) | Source::Charge(center) | Source::AttachedHydrogen(center) => Error::Stereo(center),
   };
   let margin = options.wedge_width / 2. + options.stroke_width / 2.;
   let expanded = |bounds: Option<LabelBounds>| {

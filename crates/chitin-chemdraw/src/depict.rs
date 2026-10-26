@@ -309,13 +309,13 @@ struct LabelPlacement {
   hydrogen_left: bool,
 }
 
-/// Adds one generic text run and returns its right baseline edge.
+/// Adds one explicitly sourced text run and returns its right baseline edge.
 ///
 /// # Errors
 /// Missing glyphs and invalid font measurements fail before appending a run.
 fn text(
   primitives: &mut Vec<Primitive>,
-  atom: AtomId,
+  source: Source,
   origin: Point,
   content: String,
   size: f64,
@@ -329,7 +329,7 @@ fn text(
     font_size: size,
     width,
     color: options.foreground,
-    source: Some(Source::Atom(atom)),
+    source: Some(source),
   }));
   Ok(origin.x + width)
 }
@@ -360,7 +360,7 @@ fn label(
   let left = center.x - (base.min.x + base.max.x) / 2.;
   let mut right = text(
     primitives,
-    id,
+    Source::Atom(id),
     Point::new(left, baseline),
     recipe.element.symbol().into(),
     size,
@@ -372,7 +372,7 @@ fn label(
     prefix_right = left - options.font.measure(content, small)?.advance;
     text(
       primitives,
-      id,
+      Source::Atom(id),
       Point::new(prefix_right, baseline - size * 0.5),
       content.clone(),
       small,
@@ -392,11 +392,18 @@ fn label(
     } else {
       right
     };
-    let mut h_right = text(primitives, id, Point::new(h_start, baseline), "H".into(), size, options)?;
+    let mut h_right = text(
+      primitives,
+      Source::Atom(id),
+      Point::new(h_start, baseline),
+      "H".into(),
+      size,
+      options,
+    )?;
     if recipe.hydrogens > 1 {
       h_right = text(
         primitives,
-        id,
+        Source::Atom(id),
         Point::new(h_right, baseline + size * 0.25),
         count,
         size * 0.7,
@@ -424,7 +431,7 @@ fn label(
       origin.x += radius - (metrics.min.x + metrics.max.x) / 2. + small * 0.15;
       origin.y += (plus.min.y + plus.max.y - metrics.min.y - metrics.max.y) / 2.;
     }
-    text(primitives, id, origin, content.clone(), small, options)?;
+    text(primitives, Source::Charge(id), origin, content.clone(), small, options)?;
     if options.charge_style == ChargeStyle::Circled {
       primitives.push(Primitive::Circle(Circle {
         center: origin.translated(
@@ -434,7 +441,7 @@ fn label(
         radius,
         width: options.stroke_width * 0.6,
         color: options.label_color(recipe.element),
-        source: Some(Source::Atom(id)),
+        source: Some(Source::Charge(id)),
       }));
     }
   }

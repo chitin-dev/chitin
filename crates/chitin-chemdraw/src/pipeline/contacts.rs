@@ -20,8 +20,8 @@ pub(super) use region::label_region;
 /// # Returns
 /// Stable, deduplicated contacts. Ordinary labels exclude their incident source
 /// bonds; an expanded H label does not inherit that exemption. Its own C-H mark
-/// is excluded. Atom-sourced circles reserve their enclosed disk, including the
-/// outline width, and share their text's logical source. Bond-sourced aromatic
+/// is excluded. Charge-sourced circles reserve their enclosed disk, including the
+/// outline width, and share their text's logical source. Aromatic-ring
 /// circles are not labels. Curved bond strokes and independent chemical decoding
 /// remain outside this inspector's contract. Groups are traversed, but this single-graph
 /// inspector is not an instance-aware reaction-diagram quality evaluator.
@@ -44,10 +44,10 @@ pub fn contacts(graph: &MolecularGraph, drawing: &Drawing) -> Result<Vec<Drawing
       Primitive::Group(_) => None,
     };
     match source {
-      Some(Source::Atom(id) | Source::AttachedHydrogen(id)) => {
+      Some(Source::Atom(id) | Source::Charge(id) | Source::AttachedHydrogen(id)) => {
         graph.atom(id).ok_or(chitin_chem::GraphError::MissingAtom(id))?;
       }
-      Some(Source::Bond(id)) => {
+      Some(Source::Bond(id) | Source::AromaticRing(id)) => {
         graph.bond(id).ok_or(chitin_chem::GraphError::MissingBond(id))?;
       }
       None => {}

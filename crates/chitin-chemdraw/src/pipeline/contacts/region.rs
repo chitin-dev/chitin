@@ -16,17 +16,20 @@ pub(in crate::pipeline) enum LabelRegion {
 }
 
 /// Extracts label geometry without treating aromatic bond circles as labels.
+/// Charge marks use their owner atom as a counting key only; the original
+/// scene provenance is never rewritten or used to classify ring strokes.
 pub(in crate::pipeline) fn label_region(primitive: &Primitive) -> Result<Option<(Source, LabelRegion)>, DepictError> {
   match primitive {
     Primitive::Text(text) => Ok(match text.source {
+      Some(Source::Charge(atom)) => Some((Source::Atom(atom), LabelRegion::Box(text.envelope()?))),
       Some(source @ (Source::Atom(_) | Source::AttachedHydrogen(_))) => {
         Some((source, LabelRegion::Box(text.envelope()?)))
       }
       _ => None,
     }),
     Primitive::Circle(circle) => Ok(match circle.source {
-      Some(source @ (Source::Atom(_) | Source::AttachedHydrogen(_))) => Some((
-        source,
+      Some(Source::Charge(atom)) => Some((
+        Source::Atom(atom),
         LabelRegion::Circle {
           center: circle.center,
           radius: circle.radius + circle.width / 2.,
@@ -154,7 +157,7 @@ mod tests {
       radius: 5.,
       width: 2.,
       color: Color::BLACK,
-      source: Some(Source::Atom(atom)),
+      source: Some(Source::Charge(atom)),
     });
     let (source, region) = label_region(&circle)?.ok_or("circle label")?;
     assert_eq!(source, Source::Atom(atom));

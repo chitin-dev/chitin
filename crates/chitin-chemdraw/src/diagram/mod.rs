@@ -295,10 +295,10 @@ impl Diagram {
       }));
       for primitive in m.drawing.leaf_primitives() {
         let bounds = match primitive {
-          Primitive::Text(text) if text.source == Some(Source::Atom(atom)) => {
+          Primitive::Text(text) if matches!(text.source, Some(Source::Atom(id) | Source::Charge(id)) if id == atom) => {
             text.envelope().map_err(DrawingError::from)?
           }
-          Primitive::Circle(circle) if circle.source == Some(Source::Atom(atom)) => {
+          Primitive::Circle(circle) if circle.source == Some(Source::Charge(atom)) => {
             let r = circle.radius + circle.width / 2.;
             [circle.center.translated(-r, -r), circle.center.translated(r, r)]
           }

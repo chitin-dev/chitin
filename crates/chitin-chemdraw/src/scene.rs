@@ -46,8 +46,14 @@ pub enum Source {
   /// A depiction-only attached H and its bond, identified by its host atom.
   /// No atom/bond handle is allocated and no source graph vertex is implied.
   AttachedHydrogen(AtomId),
-  /// An atom label or annotation.
+  /// An atom's ordinary label runs or atom-local annotation, excluding charge marks.
   Atom(AtomId),
+  /// A formal-charge glyph or enclosure owned by an atom, not an aromatic ring stroke.
+  /// Contact counting groups this with the owner's text without losing its role.
+  Charge(AtomId),
+  /// An aromatic inner-circle annotation located by an original ring bond.
+  /// This graph-local locator is not the bond's own stroke or a persistent ring ID.
+  AromaticRing(BondId),
   /// A bond stroke; multiple strokes may share this source.
   Bond(BondId),
 }
