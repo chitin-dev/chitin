@@ -1,4 +1,4 @@
-//! Optional automatic-layout feedback using actual scene text and stroke geometry.
+//! Optional automatic-layout feedback using scene label footprints and strokes.
 //!
 //! Explicit `depict` calls never move caller-owned coordinates. This opt-in
 //! orchestration measures final labels, supplies normalized envelopes to layout,
@@ -8,7 +8,7 @@ use crate::{
   depict::{self, DepictOptions},
   geometry::Point,
   layout::{self, Layout2d, LayoutOptions},
-  scene::{Drawing, Primitive, Source},
+  scene::{Drawing, Source},
 };
 use chitin_chem::{AtomId, BondId, MolecularGraph};
 use std::collections::BTreeMap;
@@ -23,9 +23,9 @@ pub use contacts::contacts;
 /// An unresolved contact in the actual rendered scene, not invalid chemistry.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DrawingContact {
-  /// Two different atom labels occupy overlapping measured envelopes.
+  /// Two different atom-label footprints overlap, including charge circles.
   Labels(AtomId, AtomId),
-  /// A nonincident source-bond stroke enters an atom-label envelope.
+  /// A nonincident source-bond stroke touches an atom-label footprint.
   LabelBond(AtomId, BondId),
   /// Label envelopes involving a separately drawn H; each source is Atom or AttachedHydrogen.
   AuxiliaryLabels(Source, Source),
@@ -130,14 +130,11 @@ pub fn finish(
     return Ok(result);
   }
   let mut regions: BTreeMap<AtomId, [Point; 2]> = BTreeMap::new();
-  for p in result.drawing.primitives() {
-    let Primitive::Text(text) = p else {
+  for p in result.drawing.leaf_primitives() {
+    let Some((Source::Atom(id), footprint)) = contacts::label_region(p)? else {
       continue;
     };
-    let Some(Source::Atom(id)) = text.source else {
-      continue;
-    };
-    let bounds = text.envelope().map_err(depict::DepictError::from)?;
+    let bounds = footprint.bounds();
     let center = result.layout.positions()[&id];
     let bounds = [
       Point::new(
@@ -193,8 +190,8 @@ fn contact_atoms(contact: &DrawingContact) -> impl Iterator<Item = AtomId> {
     DrawingContact::AuxiliaryLabelStroke(a, _) => [Some(a), None],
   };
   sources.into_iter().flatten().filter_map(|source| match source {
-    Source::Atom(atom) | Source::AttachedHydrogen(atom) => Some(atom),
-    Source::Bond(_) => None,
+    Source::Atom(atom) | Source::Charge(atom) | Source::AttachedHydrogen(atom) => Some(atom),
+    Source::Bond(_) | Source::AromaticRing(_) => None,
   })
 }
 

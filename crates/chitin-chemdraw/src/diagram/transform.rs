@@ -7,6 +7,11 @@ pub(super) fn drawing(input: &Drawing, placement: Placement) -> Result<Drawing, 
   let mut output = input.primitives().to_vec();
   for primitive in &mut output {
     match primitive {
+      Primitive::CircularArc(arc) => {
+        arc.center = placement.point(arc.center);
+        arc.radius *= placement.scale;
+        arc.width *= placement.scale;
+      }
       Primitive::Line(line) => {
         line.start = placement.point(line.start);
         line.end = placement.point(line.end);

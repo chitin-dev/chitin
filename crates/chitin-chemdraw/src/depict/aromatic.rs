@@ -52,7 +52,7 @@ pub(super) struct Plan {
 /// Independent rank-one cycles with all-aromatic atoms/edges can replace their
 /// inner double strokes. Every other ring remains unchanged. Geometry must be
 /// near-regular and leave a safe inner disk free of labels and non-ring bonds.
-/// A smallest-atom source is a locator, not a newly assigned chemical ring ID.
+/// A source ring bond locates the annotation without assigning a chemical ring ID.
 ///
 /// # Errors
 /// Propagates inconsistent graph references; ineligible geometry is a fallback,
@@ -144,7 +144,7 @@ pub(super) fn plan(
       radius,
       width: options.stroke_width,
       color: options.foreground,
-      source: Some(Source::Atom(cycle[0])),
+      source: Some(Source::AromaticRing(block.bonds()[0])),
     });
   }
   Ok(result)

@@ -166,6 +166,9 @@ fn input(path: &Path, context: &CommandExecutionContext) -> Result<Vec<u8>, Erro
 /// and glyph availability are validated later by the drawing engine.
 fn options(command: &ChemdrawCommand, context: &CommandExecutionContext) -> Result<depict::DepictOptions, Error> {
   let mut options = depict::DepictOptions::default();
+  if command.style.circled_charges {
+    options.charge_style = depict::ChargeStyle::Circled;
+  }
   if let Some(length) = command.style.bond_length {
     // Preserve default proportions before applying an explicit stroke width;
     // command overrides are absolute SVG units rather than scale multipliers.

@@ -20,6 +20,13 @@ pub(super) struct Recipe {
 }
 
 impl Recipe {
+  /// Matches positive/negative charge enclosures by magnitude, not glyph shape.
+  pub(super) fn charge_variants(&self) -> Option<[String; 2]> {
+    self.charge.as_ref().map(|charge| {
+      let magnitude = charge.trim_end_matches(['+', '-']);
+      [format!("{magnitude}+"), format!("{magnitude}-")]
+    })
+  }
   /// Returns the H-count subscript, absent for zero or one attached H.
   pub(super) fn hydrogen_count(&self) -> Option<String> {
     (self.hydrogens > 1).then(|| self.hydrogens.to_string())
@@ -165,6 +172,13 @@ pub fn measurement_requests(graph: &MolecularGraph, options: &DepictOptions) -> 
   let mut requests = BTreeSet::new();
   for recipe in prepare(graph, options, &hydrogens::centers(graph, options))?.values() {
     recipe.requests(options.font_size, &mut requests)?;
+    if options.charge_style == super::ChargeStyle::Circled
+      && let Some(variants) = recipe.charge_variants()
+    {
+      for content in variants {
+        requests.insert(TextRequest::new(content, options.font_size * 0.7)?);
+      }
+    }
   }
   if hydrogens::may_expand(graph, options) {
     requests.insert(TextRequest::new("H", options.font_size)?);

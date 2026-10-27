@@ -28,13 +28,17 @@
 //! ```
 
 mod arrows;
+mod lone_pair;
 mod model;
+mod routing;
 mod transform;
 
+pub use lone_pair::{LonePairOptions, LonePairSuggestion};
 pub use model::{
-  Anchor, Annotation, ArrowStyle, DiagramError, ElectronArrow, ElectronHead, Highlight, LonePair, MoleculeId,
-  Placement, ReactionArrow, ReactionArrowKind, Target,
+  Anchor, Annotation, ArcPath, ArrowStyle, DiagramError, ElectronArrow, ElectronCurve, ElectronDot, ElectronHead,
+  Highlight, LonePair, MoleculeId, Placement, ReactionArrow, ReactionArrowKind, Target,
 };
+pub use routing::{RoutingOptions, RoutingReport};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -140,6 +144,42 @@ impl Diagram {
     self
   }
 
+  /// Redraws an edited molecule while retaining its occurrence and annotations.
+  ///
+  /// Supply the original graph (or a provenance-preserving clone) with new
+  /// coordinates/facts. Surviving atom/bond handles retain their attachments.
+  /// Deleted handles cause an explicit error at render, never index rebinding.
+  /// The current occurrence placement is unchanged.
+  ///
+  /// # Errors
+  /// Rejects foreign occurrences, invalid chemistry, coordinates or transformed
+  /// geometry. Failure leaves the previous molecular snapshot intact.
+  pub fn redraw_molecule(
+    &mut self,
+    id: MoleculeId,
+    graph: &MolecularGraph,
+    layout: &Layout2d,
+    options: &DepictOptions,
+  ) -> Result<(), DiagramError> {
+    let item = self
+      .molecules
+      .iter_mut()
+      .find(|m| m.id == id)
+      .ok_or(DiagramError::MissingMolecule)?;
+    let drawing = depict::depict(graph, layout, options)?;
+    transform::drawing(&drawing, item.placement)?;
+    let atoms = layout
+      .positions()
+      .iter()
+      .map(|(&atom, p)| (atom, Point::new(p.x * options.bond_length, -p.y * options.bond_length)))
+      .collect();
+    let bonds = graph.bonds().map(|(bond, b)| (bond, b.atoms())).collect();
+    item.drawing = drawing;
+    item.atoms = atoms;
+    item.bonds = bonds;
+    Ok(())
+  }
+
   /// Resolves an attachment point in the current diagram placement.
   ///
   /// # Errors
@@ -147,7 +187,25 @@ impl Diagram {
   pub fn resolve(&self, anchor: Anchor) -> Result<Point, DiagramError> {
     let molecule = self.molecule(anchor.molecule)?;
     let point = match anchor.target {
-      Target::Atom(id) => molecule.atom(id)?,
+      Target::Atom(id) | Target::Radical(id) => molecule.atom(id)?,
+      Target::BondFormation {
+        atom,
+        other_molecule,
+        other_atom,
+      } => {
+        let a = molecule.placement.point(molecule.atom(atom)?);
+        let other = self.molecule(other_molecule)?;
+        let b = other.placement.point(other.atom(other_atom)?);
+        let point = Point::new(a.x / 2. + b.x / 2., a.y / 2. + b.y / 2.).translated(
+          anchor.offset.x * molecule.placement.scale,
+          anchor.offset.y * molecule.placement.scale,
+        );
+        return if point.is_finite() {
+          Ok(point)
+        } else {
+          Err(DiagramError::Geometry)
+        };
+      }
       Target::Bond(id) => {
         let [a, b] = molecule.bond(id)?;
         Point::new(a.x / 2. + b.x / 2., a.y / 2. + b.y / 2.)
@@ -188,6 +246,7 @@ impl Diagram {
       match annotation {
         Annotation::Highlight(_) => {}
         Annotation::ElectronArrow(arrow) => arrows::electron(self, arrow, &mut primitives)?,
+        Annotation::ElectronDot(dot) => self.electron_dot(dot, &mut primitives)?,
         Annotation::ReactionArrow(arrow) => arrows::reaction(arrow, &mut primitives)?,
         Annotation::LonePair(pair) => self.lone_pair(pair, &mut primitives)?,
       }
@@ -235,16 +294,17 @@ impl Diagram {
         source: Some(Source::Atom(atom)),
       }));
       for primitive in m.drawing.leaf_primitives() {
-        let Primitive::Text(text) = primitive else {
-          continue;
+        let bounds = match primitive {
+          Primitive::Text(text) if matches!(text.source, Some(Source::Atom(id) | Source::Charge(id)) if id == atom) => {
+            text.envelope().map_err(DrawingError::from)?
+          }
+          Primitive::Circle(circle) if circle.source == Some(Source::Charge(atom)) => {
+            let r = circle.radius + circle.width / 2.;
+            [circle.center.translated(-r, -r), circle.center.translated(r, r)]
+          }
+          _ => continue,
         };
-        if text.source != Some(Source::Atom(atom)) {
-          continue;
-        }
-        let [min, max] = text
-          .envelope()
-          .map_err(DrawingError::from)?
-          .map(|p| m.placement.point(p));
+        let [min, max] = bounds.map(|p| m.placement.point(p));
         let half_height = ((max.y - min.y) / 2. + 2. * m.placement.scale).max(radius);
         let y = min.y / 2. + max.y / 2.;
         pieces.push(Primitive::Line(Line {
@@ -261,6 +321,19 @@ impl Diagram {
       drawing: Drawing::new(pieces)?,
       opacity: highlight.color.alpha,
     }))
+  }
+
+  fn electron_dot(&self, dot: &ElectronDot, out: &mut Vec<Primitive>) -> Result<(), DiagramError> {
+    if !positive(dot.radius) || !matches!(dot.anchor.target, Target::Radical(_)) {
+      return Err(DiagramError::Geometry);
+    }
+    out.push(Primitive::Disk(Disk {
+      center: self.resolve(dot.anchor)?,
+      radius: dot.radius * self.molecule(dot.anchor.molecule)?.placement.scale,
+      color: dot.color,
+      source: None,
+    }));
+    Ok(())
   }
 
   fn lone_pair(&self, pair: &LonePair, out: &mut Vec<Primitive>) -> Result<(), DiagramError> {

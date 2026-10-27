@@ -75,7 +75,11 @@ docs-serve:
   shiroa serve --mode dyn-paged docs
 
 build-desktop-release:
-  cargo build -p chitin-desktop --release --locked
+  cargo build -p chitin-desktop --profile release-size --locked
+
+# Compare against ordinary release without changing application features.
+benchmark-release-profiles:
+  cargo run -p chitin-release-audit --locked -- measure
 
 build-cli-release:
   cargo build -p chitin --release --locked

@@ -10,6 +10,38 @@ use std::path::PathBuf;
 /// Shared test error boundary covering command failures and fixture filesystem I/O.
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+#[tokio::test]
+async fn diagram_arc_mode_should_export_native_svg_arcs() -> TestResult {
+  let directory = tempfile::tempdir()?;
+  let source = br#"{"version":1,"molecules":[{"id":"a","smiles":"[Cl-]","at":[0,0]},{"id":"b","smiles":"[H+]","at":[200,0]}],"annotations":[{"type":"electron-arrow","curve":"arc","arc-angle":-120,"arc-path":"major","from":{"molecule":"a","target":{"type":"atom","index":0}},"to":{"molecule":"b","target":{"type":"atom","index":0}}}]}"#;
+  execute(
+    command(ChemdrawInput::Diagram("-".into()), false),
+    CommandExecutionContext::new(directory.path()).with_standard_input(source.to_vec()),
+  )
+  .await?;
+  let svg = std::fs::read_to_string(directory.path().join("out.svg"))?;
+  let arc = svg.lines().find(|line| line.contains(" A")).ok_or("arc")?;
+  assert!(arc.contains(" 0 1 "));
+  Ok(())
+}
+
+#[tokio::test]
+async fn circled_charges_and_authored_controls_should_be_available_to_commands() -> TestResult {
+  let directory = tempfile::tempdir()?;
+  let source = br#"{"version":1,"molecules":[{"id":"a","smiles":"[OH-]","at":[0,0]},{"id":"b","smiles":"[H+]","at":[200,0]}],"annotations":[{"type":"electron-arrow","from":{"molecule":"a","target":{"type":"atom","index":0},"offset":[0,15]},"to":{"molecule":"b","target":{"type":"bond-formation","index":0,"other_molecule":"a","other_index":0}},"bend":0,"controls":[[30,40],[-10,40]]},{"type":"electron-dot","anchor":{"molecule":"a","target":{"type":"radical","index":0},"offset":[20,-10]}}]}"#;
+  let mut request = command(ChemdrawInput::Diagram("-".into()), false);
+  request.style.circled_charges = true;
+  execute(
+    request,
+    CommandExecutionContext::new(directory.path()).with_standard_input(source.to_vec()),
+  )
+  .await?;
+  let svg = std::fs::read_to_string(directory.path().join("out.svg"))?;
+  assert!(svg.matches("<circle").count() >= 3);
+  assert!(svg.contains(" C"));
+  Ok(())
+}
+
 /// Creates the same contextual output target for each isolated temporary directory.
 fn command(input: ChemdrawInput, force: bool) -> ChemdrawCommand {
   ChemdrawCommand {

@@ -7,7 +7,7 @@ use crate::{
   font::{FontError, FontFace},
   geometry::Point,
   layout::Layout2d,
-  scene::{Color, Drawing, DrawingError, Primitive, Source, Text, positive},
+  scene::{Circle, Color, Drawing, DrawingError, Primitive, Source, Text, positive},
 };
 use chitin_chem::perception::ValenceModel;
 use chitin_chem::{AtomId, BondId, BondOrder, Element, GraphError, MolecularGraph};
@@ -76,9 +76,21 @@ pub enum HydrogenMode {
   Infer(ValenceModel),
 }
 
+/// Visual enclosure of formal-charge superscripts, without changing chemistry.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ChargeStyle {
+  /// Conventional unenclosed superscript, preserving existing output.
+  #[default]
+  Plain,
+  /// A measured vector circle around the complete charge, including magnitude.
+  Circled,
+}
+
 /// Depiction sizes and display policies, independent of normalized layout units.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DepictOptions {
+  /// Formal-charge enclosure; neutral atoms never acquire a charge marker.
+  pub charge_style: ChargeStyle,
   /// Drawing units per normalized bond unit.
   pub bond_length: f64,
   /// Positive element-label font size.
@@ -118,6 +130,7 @@ impl Default for DepictOptions {
   /// Uses standard skeletal drawing proportions with a 48-unit bond length.
   fn default() -> Self {
     Self {
+      charge_style: ChargeStyle::Plain,
       bond_length: 48.,
       font_size: 48. * 11. / 30.,
       stroke_width: 1.6,
@@ -296,13 +309,13 @@ struct LabelPlacement {
   hydrogen_left: bool,
 }
 
-/// Adds one generic text run and returns its right baseline edge.
+/// Adds one explicitly sourced text run and returns its right baseline edge.
 ///
 /// # Errors
 /// Missing glyphs and invalid font measurements fail before appending a run.
 fn text(
   primitives: &mut Vec<Primitive>,
-  atom: AtomId,
+  source: Source,
   origin: Point,
   content: String,
   size: f64,
@@ -316,7 +329,7 @@ fn text(
     font_size: size,
     width,
     color: options.foreground,
-    source: Some(Source::Atom(atom)),
+    source: Some(source),
   }));
   Ok(origin.x + width)
 }
@@ -347,7 +360,7 @@ fn label(
   let left = center.x - (base.min.x + base.max.x) / 2.;
   let mut right = text(
     primitives,
-    id,
+    Source::Atom(id),
     Point::new(left, baseline),
     recipe.element.symbol().into(),
     size,
@@ -359,7 +372,7 @@ fn label(
     prefix_right = left - options.font.measure(content, small)?.advance;
     text(
       primitives,
-      id,
+      Source::Atom(id),
       Point::new(prefix_right, baseline - size * 0.5),
       content.clone(),
       small,
@@ -379,11 +392,18 @@ fn label(
     } else {
       right
     };
-    let mut h_right = text(primitives, id, Point::new(h_start, baseline), "H".into(), size, options)?;
+    let mut h_right = text(
+      primitives,
+      Source::Atom(id),
+      Point::new(h_start, baseline),
+      "H".into(),
+      size,
+      options,
+    )?;
     if recipe.hydrogens > 1 {
       h_right = text(
         primitives,
-        id,
+        Source::Atom(id),
         Point::new(h_right, baseline + size * 0.25),
         count,
         size * 0.7,
@@ -395,14 +415,35 @@ fn label(
     }
   }
   if let Some(content) = &recipe.charge {
-    text(
-      primitives,
-      id,
-      Point::new(right, baseline - size * 0.5),
-      content.clone(),
-      size * 0.7,
-      options,
-    )?;
+    let small = size * 0.7;
+    let metrics = options.font.measure(content, small)?;
+    let mut radius = 0.;
+    let mut origin = Point::new(right, baseline - size * 0.5);
+    if options.charge_style == ChargeStyle::Circled
+      && let Some([positive, negative]) = recipe.charge_variants()
+    {
+      let plus = options.font.measure(&positive, small)?;
+      let minus = options.font.measure(&negative, small)?;
+      let diameter = |m: crate::font::TextMetrics| (m.max.x - m.min.x).hypot(m.max.y - m.min.y);
+      radius = diameter(plus).max(diameter(minus)) / 2. + small * 0.12;
+      // Center both signs on the positive charge's vertical reference. A short
+      // minus glyph must not shrink or lower its enclosing circle.
+      origin.x += radius - (metrics.min.x + metrics.max.x) / 2. + small * 0.15;
+      origin.y += (plus.min.y + plus.max.y - metrics.min.y - metrics.max.y) / 2.;
+    }
+    text(primitives, Source::Charge(id), origin, content.clone(), small, options)?;
+    if options.charge_style == ChargeStyle::Circled {
+      primitives.push(Primitive::Circle(Circle {
+        center: origin.translated(
+          (metrics.min.x + metrics.max.x) / 2.,
+          (metrics.min.y + metrics.max.y) / 2.,
+        ),
+        radius,
+        width: options.stroke_width * 0.6,
+        color: options.label_color(recipe.element),
+        source: Some(Source::Charge(id)),
+      }));
+    }
   }
   let padding = options.label_padding + options.stroke_width / 2.;
   let mut bounds = LabelBounds {
@@ -413,9 +454,18 @@ fn label(
   // Resolve once so annotations cannot acquire a different elemental identity.
   let color = options.label_color(recipe.element);
   for primitive in &mut primitives[start..] {
-    if let Primitive::Text(run) = primitive {
-      run.color = color;
-      let [min, max] = run.envelope()?;
+    let envelope = match primitive {
+      Primitive::Text(run) => {
+        run.color = color;
+        Some(run.envelope()?)
+      }
+      Primitive::Circle(circle) => {
+        let r = circle.radius + circle.width / 2.;
+        Some([circle.center.translated(-r, -r), circle.center.translated(r, r)])
+      }
+      _ => None,
+    };
+    if let Some([min, max]) = envelope {
       bounds.min.x = bounds.min.x.min(min.x - padding);
       bounds.min.y = bounds.min.y.min(min.y - padding);
       bounds.max.x = bounds.max.x.max(max.x + padding);

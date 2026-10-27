@@ -38,10 +38,10 @@ pub fn measure(graph: &MolecularGraph, drawing: &Drawing, output: &mut Metrics) 
       _ => None,
     };
     match source {
-      Some(Source::Bond(id)) => {
+      Some(Source::Bond(id) | Source::AromaticRing(id)) => {
         ensure!(graph.bond(id).is_some(), "foreign scene bond");
       }
-      Some(Source::Atom(id) | Source::AttachedHydrogen(id)) => {
+      Some(Source::Atom(id) | Source::Charge(id) | Source::AttachedHydrogen(id)) => {
         ensure!(graph.atom(id).is_some(), "foreign scene atom");
       }
       None => {}
@@ -50,7 +50,7 @@ pub fn measure(graph: &MolecularGraph, drawing: &Drawing, output: &mut Metrics) 
       Primitive::Text(text) => {
         if let Some(source) = source {
           let key = match source {
-            Source::Atom(id) => Some((id, false)),
+            Source::Atom(id) | Source::Charge(id) => Some((id, false)),
             Source::AttachedHydrogen(id) => Some((id, true)),
             _ => None,
           };
@@ -155,7 +155,7 @@ pub fn measure(graph: &MolecularGraph, drawing: &Drawing, output: &mut Metrics) 
         State::NotApplicable
       },
       circles,
-      "aromatic-circle ink contacts are not yet evaluated",
+      "aromatic and charge-circle ink contacts are not yet evaluated",
     ),
   );
   output.measurements.insert(

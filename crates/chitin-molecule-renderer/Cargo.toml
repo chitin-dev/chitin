@@ -18,4 +18,8 @@ workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 pollster = "0.4"
-wgpu = { version = "30", default-features = false, features = ["wgsl", "vulkan"] }
+criterion = "0.5"
+
+[[bench]]
+name = "native_frame"
+harness = false

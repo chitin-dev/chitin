@@ -110,6 +110,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     },
   )?;
   diagram.annotate(Annotation::ElectronArrow(ElectronArrow {
+    curve: Default::default(),
+    controls: None,
     from: pair_anchor,
     to: Anchor::atom(substrate_id, atoms[1]),
     bend: 45.,
@@ -120,6 +122,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     .bond_between(atoms[1], atoms[3])
     .ok_or("missing leaving-group bond")?;
   diagram.annotate(Annotation::ElectronArrow(ElectronArrow {
+    curve: Default::default(),
+    controls: None,
     from: Anchor::bond(substrate_id, leaving_bond),
     to: Anchor::atom(substrate_id, atoms[3]),
     bend: -42.,

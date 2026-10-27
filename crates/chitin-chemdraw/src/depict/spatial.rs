@@ -16,11 +16,13 @@ pub(super) fn apply(graph: &MolecularGraph, layout: &Layout2d, primitives: &mut 
     return;
   }
   let depth = |source: Option<Source>| match source {
-    Some(Source::Bond(id)) => graph.bond(id).and_then(|bond| {
+    Some(Source::Bond(id) | Source::AromaticRing(id)) => graph.bond(id).and_then(|bond| {
       let [a, b] = bond.atoms();
       Some((layout.drawing_depths().get(&a)? + layout.drawing_depths().get(&b)?) / 2.)
     }),
-    Some(Source::Atom(id) | Source::AttachedHydrogen(id)) => layout.drawing_depths().get(&id).copied(),
+    Some(Source::Atom(id) | Source::Charge(id) | Source::AttachedHydrogen(id)) => {
+      layout.drawing_depths().get(&id).copied()
+    }
     _ => None,
   };
   let bound = layout
@@ -30,6 +32,7 @@ pub(super) fn apply(graph: &MolecularGraph, layout: &Layout2d, primitives: &mut 
     .max(1e-12);
   for primitive in primitives {
     let (source, color) = match primitive {
+      Primitive::CircularArc(arc) => (arc.source, &mut arc.color),
       Primitive::Line(line) => (line.source, &mut line.color),
       Primitive::Text(text) => (text.source, &mut text.color),
       Primitive::Polygon(polygon) => (polygon.source, &mut polygon.color),

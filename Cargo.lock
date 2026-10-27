@@ -953,10 +953,21 @@ dependencies = [
  "bytemuck",
  "chitin-bio",
  "chitin-wgpu",
+ "criterion",
  "glam",
  "log",
  "pollster 0.4.0",
  "wgpu",
+]
+
+[[package]]
+name = "chitin-release-audit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -2506,7 +2517,7 @@ dependencies = [
 [[package]]
 name = "gpui-base"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=be0403f152159195b57e9a6a0ccf59694a0542e9#be0403f152159195b57e9a6a0ccf59694a0542e9"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=8f13165c0445a5957eca31aa00e8a85ee24a365a#8f13165c0445a5957eca31aa00e8a85ee24a365a"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -2545,7 +2556,7 @@ dependencies = [
 [[package]]
 name = "gpui-ce"
 version = "1.0.0"
-source = "git+https://github.com/chitin-dev/gpui-wgpu?rev=d92ff407d66a52795f70fb6657a4bfa653c3d0d5#d92ff407d66a52795f70fb6657a4bfa653c3d0d5"
+source = "git+https://github.com/chitin-dev/gpui-wgpu?rev=d729d4640a0213d0a51de9b7d7ff014f93c472c7#d729d4640a0213d0a51de9b7d7ff014f93c472c7"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2625,7 +2636,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=be0403f152159195b57e9a6a0ccf59694a0542e9#be0403f152159195b57e9a6a0ccf59694a0542e9"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=8f13165c0445a5957eca31aa00e8a85ee24a365a#8f13165c0445a5957eca31aa00e8a85ee24a365a"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2667,7 +2678,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=be0403f152159195b57e9a6a0ccf59694a0542e9#be0403f152159195b57e9a6a0ccf59694a0542e9"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=8f13165c0445a5957eca31aa00e8a85ee24a365a#8f13165c0445a5957eca31aa00e8a85ee24a365a"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -2678,7 +2689,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=be0403f152159195b57e9a6a0ccf59694a0542e9#be0403f152159195b57e9a6a0ccf59694a0542e9"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=8f13165c0445a5957eca31aa00e8a85ee24a365a#8f13165c0445a5957eca31aa00e8a85ee24a365a"
 dependencies = [
  "gpui-base",
  "gpui-ce",
@@ -2689,7 +2700,7 @@ dependencies = [
 [[package]]
 name = "gpui-kit-assets"
 version = "0.7.0"
-source = "git+https://github.com/chitin-dev/gpui-kit?rev=be0403f152159195b57e9a6a0ccf59694a0542e9#be0403f152159195b57e9a6a0ccf59694a0542e9"
+source = "git+https://github.com/chitin-dev/gpui-kit?rev=8f13165c0445a5957eca31aa00e8a85ee24a365a#8f13165c0445a5957eca31aa00e8a85ee24a365a"
 dependencies = [
  "anyhow",
  "gpui-ce",
@@ -4535,6 +4546,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0125f776a10d00af4152d74616409f0d4a2053a6f57fa5b7d6aa2854ac04794"
 dependencies = [
  "bitflags 2.13.1",
+ "block2 0.6.2",
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",
 ]
@@ -4561,6 +4573,7 @@ dependencies = [
  "bitflags 2.13.1",
  "objc2 0.6.4",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-foundation 0.3.2",
  "objc2-metal 0.3.2",
 ]
@@ -7736,10 +7749,20 @@ dependencies = [
  "rustc-hash 1.1.0",
  "smallvec",
  "thiserror 2.0.20",
+ "wgpu-core-deps-apple",
  "wgpu-core-deps-windows-linux-android",
  "wgpu-hal",
  "wgpu-naga-bridge",
  "wgpu-types",
+]
+
+[[package]]
+name = "wgpu-core-deps-apple"
+version = "30.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "061f3d319a40d39d00b1ecc2c33b89fe21d4e6fe01859df3500a3a8ecccd6b68"
+dependencies = [
+ "wgpu-hal",
 ]
 
 [[package]]
@@ -7762,6 +7785,7 @@ dependencies = [
  "ash",
  "bit-set",
  "bitflags 2.13.1",
+ "block2 0.6.2",
  "bytemuck",
  "cfg-if",
  "cfg_aliases",
@@ -7772,6 +7796,12 @@ dependencies = [
  "log",
  "naga",
  "naga-types",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
  "once_cell",
  "ordered-float",
  "parking_lot",

@@ -51,6 +51,8 @@ impl FromStr for DrawingLength {
 /// options affect molecular appearance, not authored diagram placement units.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChemdrawStyle {
+  /// Enclose each formal-charge superscript in a measured vector circle.
+  pub circled_charges: bool,
   /// Optional positive drawing units per normalized bond; absent uses 48.
   pub bond_length: Option<DrawingLength>,
   /// Optional full bond-stroke width in drawing units.

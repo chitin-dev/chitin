@@ -91,6 +91,20 @@ struct Reference {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 enum Target {
+  /// An authored radical dot at an atom-local offset, without spin inference.
+  Radical {
+    /// Source atom index.
+    index: usize,
+  },
+  /// Intended bond midpoint; no source bond is required.
+  BondFormation {
+    /// Atom index in this occurrence.
+    index: usize,
+    /// Occurrence containing the second reacting atom.
+    other_molecule: String,
+    /// Atom index in the other occurrence.
+    other_index: usize,
+  },
   /// Source atom center, with label clearance applied by the arrow renderer.
   Atom {
     /// Zero-based atom index in the selected occurrence's SMILES parse order.
@@ -114,6 +128,58 @@ enum Head {
   FishhookLeft,
   /// Single-electron barb on the opposite side of the arrival tangent.
   FishhookRight,
+}
+
+/// Wire geometry policy; angles are degrees, not local drawing distances.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Curve {
+  /// Retain bend and optional Bezier controls.
+  #[default]
+  Bezier,
+  /// Constant-radius arc using the supplied signed central angle.
+  Arc,
+}
+
+/// Path selection on the circle determined by the authored minor angle.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Path {
+  /// Preserve the short path even when automatic collision routing is requested.
+  Minor,
+  /// Preserve the complementary long path.
+  Major,
+  /// Consider both paths, preferring readability and then the configured path.
+  #[default]
+  Auto,
+}
+
+/// Preferred path when both alternatives are readable.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Preference {
+  /// Prefer the compact minor path.
+  #[default]
+  Minor,
+  /// Prefer the complementary major path.
+  Major,
+}
+
+impl Path {
+  /// Maps wire policy to rendering policy without changing the input angle.
+  fn policy(self, prefer: Preference) -> d::ArcPath {
+    match (self, prefer) {
+      (Self::Minor, _) => d::ArcPath::Minor,
+      (Self::Major, _) => d::ArcPath::Major,
+      (Self::Auto, Preference::Minor) => d::ArcPath::PreferMinor,
+      (Self::Auto, Preference::Major) => d::ArcPath::PreferMajor,
+    }
+  }
+}
+
+/// A quarter-circle is a readable default independent of endpoint separation.
+fn arc_angle() -> f64 {
+  90.
 }
 
 /// Arrow paint and dimensions in shared SVG units, not molecule-local units.
@@ -161,6 +227,17 @@ impl Paint {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case", deny_unknown_fields)]
 enum Annotation {
+  /// One authored electron dot, independent of chemical spin inference.
+  ElectronDot {
+    /// Radical target with an atom-local offset.
+    anchor: Reference,
+    /// Positive local dot radius.
+    #[serde(default = "dot_radius")]
+    radius: f64,
+    /// Dot paint.
+    #[serde(default = "black")]
+    color: [u8; 4],
+  },
   /// One compositing group beneath the molecules; overlap receives opacity once.
   Highlight {
     /// Occurrence whose atom and bond indices are selected.
@@ -180,11 +257,27 @@ enum Annotation {
   },
   /// An explicitly bent electron-flow curve, possibly between two occurrences.
   ElectronArrow {
+    /// Circular or Bezier geometry; existing requests retain Bezier output.
+    #[serde(default)]
+    curve: Curve,
+    /// Signed central angle in degrees for arc mode; absolute value 1..=180.
+    #[serde(default = "arc_angle", rename = "arc-angle")]
+    arc_angle: f64,
+    /// Minor, major or automatic path; automatic selection is the default.
+    #[serde(default, rename = "arc-path")]
+    arc_path: Path,
+    /// Preferred readable path in automatic mode; defaults to minor.
+    #[serde(default, rename = "arc-prefer")]
+    arc_prefer: Preference,
+    /// Endpoint-relative departure and arrival control offsets; overrides bend.
+    #[serde(default)]
+    controls: Option<[[f64; 2]; 2]>,
     /// Source atom, bond or displaced lone-pair center.
     from: Reference,
     /// Destination atom or bond in any declared occurrence.
     to: Reference,
     /// Signed perpendicular control-point displacement in shared SVG units.
+    #[serde(default)]
     bend: f64,
     /// Full or single-electron head; independent of chemical bond order.
     #[serde(default)]
@@ -273,9 +366,18 @@ fn entry<'a>(id: &str, entries: &'a BTreeMap<String, Entry>) -> Result<&'a Entry
 /// Offset finiteness is checked when the drawing engine resolves the anchor.
 fn reference(input: &Reference, entries: &BTreeMap<String, Entry>) -> Result<d::Anchor, Error> {
   let e = entry(&input.molecule, entries)?;
-  let anchor = match input.target {
-    Target::Atom { index } => d::Anchor::atom(e.id, e.atom(index)?),
-    Target::Bond { atoms } => d::Anchor::bond(e.id, e.bond(atoms)?),
+  let anchor = match &input.target {
+    Target::Atom { index } => d::Anchor::atom(e.id, e.atom(*index)?),
+    Target::Bond { atoms } => d::Anchor::bond(e.id, e.bond(*atoms)?),
+    Target::Radical { index } => d::Anchor::radical(e.id, e.atom(*index)?, Point::new(0., 0.)),
+    Target::BondFormation {
+      index,
+      other_molecule,
+      other_index,
+    } => {
+      let other = entry(other_molecule, entries)?;
+      d::Anchor::bond_formation(e.id, e.atom(*index)?, other.id, other.atom(*other_index)?)
+    }
   };
   Ok(anchor.with_offset(Point::new(input.offset[0], input.offset[1])))
 }
@@ -381,6 +483,11 @@ pub(super) fn render(
   for annotation in input.annotations {
     cancelled(context)?;
     diagram.annotate(match annotation {
+      Annotation::ElectronDot { anchor, radius, color } => d::Annotation::ElectronDot(d::ElectronDot {
+        anchor: reference(&anchor, &entries)?,
+        radius,
+        color: rgba(color),
+      }),
       Annotation::Highlight {
         molecule,
         atoms,
@@ -398,12 +505,25 @@ pub(super) fn render(
         })
       }
       Annotation::ElectronArrow {
+        curve,
+        arc_angle,
+        arc_path,
+        arc_prefer,
+        controls,
         from,
         to,
         bend,
         head,
         style,
       } => d::Annotation::ElectronArrow(d::ElectronArrow {
+        curve: match curve {
+          Curve::Bezier => d::ElectronCurve::Bezier,
+          Curve::Arc => d::ElectronCurve::Arc {
+            sweep: arc_angle.to_radians(),
+            path: arc_path.policy(arc_prefer),
+          },
+        },
+        controls: controls.map(|points| points.map(|p| Point::new(p[0], p[1]))),
         from: reference(&from, &entries)?,
         to: reference(&to, &entries)?,
         bend,

@@ -55,6 +55,18 @@ pub enum Target {
   Atom(AtomId),
   /// The midpoint of the logical bond axis, not one colored half-stroke.
   Bond(BondId),
+  /// Explicit radical-dot position attached to an atom, with a local offset.
+  /// This is authored notation, not an inference of atomic spin or valence.
+  Radical(AtomId),
+  /// Midpoint of an intended bond, which need not exist in either source graph.
+  BondFormation {
+    /// Atom in the anchor's own occurrence.
+    atom: AtomId,
+    /// Occurrence containing the other reacting atom.
+    other_molecule: MoleculeId,
+    /// Other reacting atom in its original graph namespace.
+    other_atom: AtomId,
+  },
 }
 
 /// An instance-qualified attachment point with an optional local displacement.
@@ -69,6 +81,32 @@ pub struct Anchor {
 }
 
 impl Anchor {
+  /// Attaches an explicitly authored radical dot to an atom-local displacement.
+  pub const fn radical(molecule: MoleculeId, atom: AtomId, offset: Point) -> Self {
+    Self {
+      molecule,
+      target: Target::Radical(atom),
+      offset,
+    }
+  }
+
+  /// References a future bond's midpoint; both occurrences are resolved on render.
+  pub const fn bond_formation(
+    molecule: MoleculeId,
+    atom: AtomId,
+    other_molecule: MoleculeId,
+    other_atom: AtomId,
+  ) -> Self {
+    Self {
+      molecule,
+      target: Target::BondFormation {
+        atom,
+        other_molecule,
+        other_atom,
+      },
+      offset: Point::new(0., 0.),
+    }
+  }
   /// Attaches to a graph-local atom in one molecule occurrence.
   pub const fn atom(molecule: MoleculeId, atom: AtomId) -> Self {
     Self {
@@ -151,12 +189,67 @@ pub enum ElectronHead {
   FishhookRight,
 }
 
+/// Selection of one of the two paths joining endpoints on the same circle.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum ArcPath {
+  /// Use only the authored minor sweep, including its direction.
+  Minor,
+  /// Use the complementary path on the same circle, reversing sweep direction.
+  Major,
+  /// Prefer a readable minor path; consider the major path when it degenerates.
+  #[default]
+  PreferMinor,
+  /// Prefer a readable major path; use the minor path when necessary.
+  PreferMajor,
+}
+
+impl ArcPath {
+  /// Whether automatic selection may consider the complementary path.
+  pub(super) const fn automatic(self) -> bool {
+    matches!(self, Self::PreferMinor | Self::PreferMajor)
+  }
+
+  /// Ordered explicit paths, without inventing a different circle.
+  pub(super) fn candidates(self) -> &'static [Self] {
+    match self {
+      Self::Minor => &[Self::Minor],
+      Self::Major => &[Self::Major],
+      Self::PreferMinor => &[Self::Minor, Self::Major],
+      Self::PreferMajor => &[Self::Major, Self::Minor],
+    }
+  }
+}
+
+/// Curve policy for electron-flow notation, independent of electron count.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub enum ElectronCurve {
+  /// Existing bend or endpoint-local control-point geometry.
+  #[default]
+  Bezier,
+  /// An exact circular arc with a signed central sweep in radians.
+  /// Absolute sweep must be between one and 180 degrees, inclusive.
+  /// Positive is clockwise in y-down coordinates; `bend` is ignored.
+  Arc {
+    /// Signed central angle; determines curvature independently of chord length.
+    sweep: f64,
+    /// Explicit path or automatic path-selection preference on this circle.
+    path: ArcPath,
+  },
+}
+
 /// Authored electron movement between instance-qualified chemical objects.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ElectronArrow {
-  /// Source atom, bond, or explicitly displaced lone-pair position.
+  /// Curve geometry; exact arcs cannot be combined with Bezier controls.
+  pub curve: ElectronCurve,
+  /// Optional departure/arrival control offsets relative to `from`/`to`.
+  /// Each offset uses its endpoint molecule's local drawing units and scale.
+  /// Both controls follow their endpoint on movement. When present, `bend` is
+  /// ignored and automatic routing evaluates this exact authored curve only.
+  pub controls: Option<[Point; 2]>,
+  /// Source atom, bond, displaced lone pair, or explicitly authored radical.
   pub from: Anchor,
-  /// Destination atom or bond, potentially in a different molecule.
+  /// Destination atom, bond or intended formation site, possibly intermolecular.
   pub to: Anchor,
   /// Signed perpendicular control-point displacement in diagram units.
   /// Positive bends clockwise from the source-to-destination axis in y-down axes.
@@ -204,6 +297,17 @@ pub struct LonePair {
   pub color: Color,
 }
 
+/// One explicitly authored electron dot; no radical chemistry is inferred.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ElectronDot {
+  /// Atom-local radical anchor, retained when the occurrence is moved.
+  pub anchor: Anchor,
+  /// Positive dot radius in local drawing units.
+  pub radius: f64,
+  /// Dot paint and opacity.
+  pub color: Color,
+}
+
 /// Authored diagram annotations, separate from molecular facts and layout.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Annotation {
@@ -215,6 +319,8 @@ pub enum Annotation {
   ReactionArrow(ReactionArrow),
   /// Explicit electron pair.
   LonePair(LonePair),
+  /// A single electron at an explicitly supplied radical position.
+  ElectronDot(ElectronDot),
 }
 
 /// Typed failures at diagram construction or annotation resolution boundaries.

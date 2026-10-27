@@ -57,6 +57,9 @@ struct Options {
   /// Draw labels and bonds in the uniform foreground color.
   #[arg(long)]
   monochrome: bool,
+  /// Enclose formal-charge superscripts in vector circles.
+  #[arg(long)]
+  circled_charges: bool,
   /// Aromatic ring display; unsupported circle cases retain Kekule strokes.
   #[arg(long, value_enum, default_value = "kekule")]
   aromatic_style: Aromatic,
@@ -91,6 +94,7 @@ impl ChemdrawArgs {
       output: options.output,
       force: options.force,
       style: ChemdrawStyle {
+        circled_charges: options.circled_charges,
         bond_length: options.bond_length,
         stroke_width: options.stroke_width,
         font_file: options.font_file,

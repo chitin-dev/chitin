@@ -226,9 +226,9 @@ fn sparse_handles_should_survive_coordinates_and_primitive_provenance() -> TestR
       _ => return Err("unexpected primitive".into()),
     };
     match source {
-      Some(Source::Atom(id)) => assert!(graph.atom(id).is_some()),
+      Some(Source::Atom(id) | Source::Charge(id)) => assert!(graph.atom(id).is_some()),
       Some(Source::AttachedHydrogen(id)) => assert!(graph.atom(id).is_some()),
-      Some(Source::Bond(id)) => assert!(graph.bond(id).is_some()),
+      Some(Source::Bond(id) | Source::AromaticRing(id)) => assert!(graph.bond(id).is_some()),
       None => return Err("missing source".into()),
     }
   }
