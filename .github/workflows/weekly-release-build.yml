@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 2 * * 0"
   workflow_dispatch:
+    inputs:
+      audit:
+        description: Run desktop size and performance audit before publishing
+        type: boolean
+        default: true
   push:
     branches:
       - main
@@ -17,10 +22,15 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+<<<<<<< Updated upstream
+=======
+  # Pushes and PRs build packages only; scheduled releases always run the audit.
+  RUN_RELEASE_AUDIT: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.audit) }}
   # Software adapters make the headless frame benchmark available on both hosts.
   CHITIN_BENCH_SOFTWARE_GPU: '1'
   RAYON_NUM_THREADS: '2'
   LP_NUM_THREADS: '2'
+>>>>>>> Stashed changes
 
 jobs:
   build:
@@ -74,38 +84,53 @@ jobs:
         with:
           cache-on-failure: true
 
+<<<<<<< Updated upstream
+      - name: Build desktop release
+=======
       - name: Build stripped desktop reference
+        if: env.RUN_RELEASE_AUDIT == 'true'
         run: cargo build -p chitin-desktop --release --locked
 
       - name: Build optimized desktop release
+>>>>>>> Stashed changes
         run: just build-desktop-release
 
       - name: Build CLI release
         run: just build-cli-release
 
+<<<<<<< Updated upstream
+=======
       # Cargo builds package binaries for benches too, enabling dev-dependency
       # features. Never measure or ship a binary that those builds overwrite.
       - name: Freeze production executables
         shell: bash
         run: |
           mkdir -p target/release-frozen/baseline target/release-frozen/optimized target/release-audit
-          cp target/release/${{ matrix.desktop_executable }} target/release-frozen/baseline/
           cp target/release-size/${{ matrix.desktop_executable }} target/release-frozen/optimized/
           cp target/release/${{ matrix.cli_executable }} target/release-frozen/optimized/
+
+      - name: Freeze audit reference and record executable sizes
+        if: env.RUN_RELEASE_AUDIT == 'true'
+        shell: bash
+        run: |
+          cp target/release/${{ matrix.desktop_executable }} target/release-frozen/baseline/
           wc -c target/release-frozen/baseline/${{ matrix.desktop_executable }} \
             target/release-frozen/optimized/${{ matrix.desktop_executable }} \
             | tee target/release-audit/executable-bytes.txt
 
       - name: Check release audit tests
+        if: env.RUN_RELEASE_AUDIT == 'true'
         run: cargo test -p chitin-release-audit --locked
 
       - name: Check optimized scientific and renderer tests
         run: cargo test -p chitin-bio -p chitin-molecule-renderer --lib --profile release-size --locked
 
       - name: Prebuild and measure order-balanced profiles
+        if: env.RUN_RELEASE_AUDIT == 'true'
         run: just benchmark-release-profiles
 
       - name: Enforce desktop size and performance budgets
+        if: env.RUN_RELEASE_AUDIT == 'true'
         shell: bash
         run: |
           cargo run -p chitin-release-audit --locked -- --paired \
@@ -115,13 +140,14 @@ jobs:
             target/release-audit/comparison.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release measurements
-        if: always()
+        if: always() && env.RUN_RELEASE_AUDIT == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: release-audit-${{ matrix.target }}
           path: target/release-audit/
           if-no-files-found: warn
 
+>>>>>>> Stashed changes
       - name: Package Linux executable
         if: runner.os == 'Linux'
         run: |
