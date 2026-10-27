@@ -22,15 +22,12 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-<<<<<<< Updated upstream
-=======
   # Pushes and PRs build packages only; scheduled releases always run the audit.
   RUN_RELEASE_AUDIT: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.audit) }}
   # Software adapters make the headless frame benchmark available on both hosts.
   CHITIN_BENCH_SOFTWARE_GPU: '1'
   RAYON_NUM_THREADS: '2'
   LP_NUM_THREADS: '2'
->>>>>>> Stashed changes
 
 jobs:
   build:
@@ -84,22 +81,16 @@ jobs:
         with:
           cache-on-failure: true
 
-<<<<<<< Updated upstream
-      - name: Build desktop release
-=======
       - name: Build stripped desktop reference
         if: env.RUN_RELEASE_AUDIT == 'true'
         run: cargo build -p chitin-desktop --release --locked
 
       - name: Build optimized desktop release
->>>>>>> Stashed changes
         run: just build-desktop-release
 
       - name: Build CLI release
         run: just build-cli-release
 
-<<<<<<< Updated upstream
-=======
       # Cargo builds package binaries for benches too, enabling dev-dependency
       # features. Never measure or ship a binary that those builds overwrite.
       - name: Freeze production executables
@@ -147,7 +138,6 @@ jobs:
           path: target/release-audit/
           if-no-files-found: warn
 
->>>>>>> Stashed changes
       - name: Package Linux executable
         if: runner.os == 'Linux'
         run: |
