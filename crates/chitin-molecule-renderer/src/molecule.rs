@@ -2776,12 +2776,12 @@ mod tests {
 
   #[cfg(not(target_arch = "wasm32"))]
   #[test]
-  #[ignore = "requires a Vulkan adapter; run explicitly for GPU validation"]
+  #[ignore = "requires a native GPU adapter; run explicitly for GPU validation"]
   fn appearance_gpu_paths_should_render_and_resize_without_validation_errors() -> Result<(), Box<dyn std::error::Error>>
   {
     use std::sync::Arc;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-      backends: wgpu::Backends::VULKAN,
+      backends: wgpu::Backends::all(),
       ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
     let adapter = pollster::block_on(instance.request_adapter(&Default::default()))?;

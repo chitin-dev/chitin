@@ -6,6 +6,11 @@ license.workspace = true
 repository.workspace = true
 description = "Reusable GPUI components for chitin desktop application"
 
+[features]
+default = ["x11", "wayland"]
+x11 = ["gpui/x11", "gpui-kit/x11"]
+wayland = ["gpui/wayland", "gpui-kit/wayland"]
+
 [dependencies]
 chitin-terminal = { path = "../chitin-terminal" }
 gpui.workspace = true
