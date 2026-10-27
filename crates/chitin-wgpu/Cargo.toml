@@ -5,8 +5,18 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[features]
+# Native primary backends are target-selected; Windows can opt into Vulkan too.
+vulkan = ["wgpu/vulkan"]
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "android"))'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["dx12", "wgsl"] }
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["metal", "wgsl"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wgpu = { version = "30", default-features = false, features = ["webgpu", "wgsl"] }

@@ -5,6 +5,14 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["x11", "wayland"]
+# Forward through UI so transitive dependencies cannot restore window defaults.
+x11 = ["chitin-ui/x11"]
+wayland = ["chitin-ui/wayland"]
+# Windows uses DX12 by default; Vulkan is an explicit additional backend.
+vulkan = ["gpui/vulkan", "chitin-wgpu/vulkan"]
+
 [dependencies]
 chitin-builtin-shell = { path = "../chitin-builtin-shell" }
 chitin-command = { path = "../chitin-command" }
@@ -16,12 +24,12 @@ chitin-databases = { path = "../chitin-databases" }
 chitin-molecule-renderer = { path = "../chitin-molecule-renderer" }
 chitin-terminal = { path = "../chitin-terminal" }
 chitin-utils = { path = "../chitin-utils" }
-chitin-ui = { path = "../chitin-ui" }
+chitin-ui = { path = "../chitin-ui", default-features = false }
 chitin-wgpu = { path = "../chitin-wgpu" }
 gpui.workspace = true
 gpui-kit.workspace = true
 tokio = { version = "1.52", features = ["rt-multi-thread", "sync"] }
-wgpu = { version = "30", default-features = false, features = ["vulkan", "wgsl"] }
+wgpu = { version = "30", default-features = false, features = ["wgsl"] }
 thiserror = "2.0"
 
 [dev-dependencies]
