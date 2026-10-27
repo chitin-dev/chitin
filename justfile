@@ -78,8 +78,8 @@ build-desktop-release:
   cargo build -p chitin-desktop --profile release-size --locked
 
 # Compare against ordinary release without changing application features.
-benchmark-release-profile profile label:
-  bash tools/benchmark-release-profile.sh "{{profile}}" "{{label}}"
+benchmark-release-profiles:
+  cargo run -p chitin-release-audit --locked -- measure
 
 build-cli-release:
   cargo build -p chitin --release --locked

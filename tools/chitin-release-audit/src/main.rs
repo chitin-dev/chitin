@@ -3,6 +3,11 @@
 //! Usage: chitin-release-audit CRITERION_ROOT BASELINE CANDIDATE BEFORE_EXE
 //! AFTER_EXE REPORT_JSON. Criterion runs must use distinct `--save-baseline`
 //! names and a fresh shared `CRITERION_HOME` for each comparison.
+//! Use `measure [ROOT]` (defaulting to `CRITERION_HOME`) to run the paired suite;
+//! prefix comparison arguments with `--paired` to combine both rounds of each
+//! profile.
+
+mod measure;
 
 use std::{collections::BTreeMap, env, fs, path::Path};
 
@@ -36,6 +41,7 @@ struct Report {
   baseline_bytes: u64,
   candidate_bytes: u64,
   max_slowdown: f64,
+  paired: bool,
   timings: Vec<Timing>,
   passed: bool,
 }
@@ -120,6 +126,24 @@ fn compare_timings(baseline: &BTreeMap<String, f64>, candidate: &BTreeMap<String
     .collect()
 }
 
+/// Combines both order-balanced rounds using a geometric mean; no phase or
+/// outlying result is dropped. Missing or mismatched phases fail closed.
+fn read_pair(root: &Path, label: &str) -> Result<BTreeMap<String, f64>> {
+  let first = read_timings(root, &format!("{label}-0"))?;
+  let second = read_timings(root, &format!("{label}-1"))?;
+  ensure!(
+    first.keys().eq(second.keys()),
+    "paired benchmark sets differ for {label}"
+  );
+  Ok(
+    first
+      .into_iter()
+      .zip(second.into_values())
+      .map(|((name, a), b)| (name, a.sqrt() * b.sqrt()))
+      .collect(),
+  )
+}
+
 /// Requires a strictly smaller executable and bounded per-benchmark slowdown.
 fn check_budget(baseline_bytes: u64, candidate_bytes: u64, timings: &[Timing]) -> bool {
   baseline_bytes > 0
@@ -131,16 +155,27 @@ fn check_budget(baseline_bytes: u64, candidate_bytes: u64, timings: &[Timing]) -
 
 fn main() -> Result<()> {
   let arguments: Vec<_> = env::args_os().skip(1).collect();
-  let [root, baseline, candidate, before, after, output] = arguments.as_slice() else {
+  if let [mode] = arguments.as_slice()
+    && mode == "measure"
+  {
+    let root = env::var_os("CRITERION_HOME").context("set CRITERION_HOME to a new measurement directory")?;
+    return measure::run(Path::new(&root));
+  }
+  if let [mode, root] = arguments.as_slice()
+    && mode == "measure"
+  {
+    return measure::run(Path::new(root));
+  }
+  let paired = arguments.first().is_some_and(|argument| argument == "--paired");
+  let arguments = if paired { &arguments[1..] } else { &arguments[..] };
+  let [root, baseline, candidate, before, after, output] = arguments else {
     bail!("usage: chitin-release-audit CRITERION_ROOT BASELINE CANDIDATE BEFORE_EXE AFTER_EXE REPORT_JSON");
   };
   ensure!(baseline != candidate, "profile labels must differ");
   let baseline = baseline.to_str().context("baseline name must be UTF-8")?;
   let candidate = candidate.to_str().context("candidate name must be UTF-8")?;
-  let timings = compare_timings(
-    &read_timings(Path::new(root), baseline)?,
-    &read_timings(Path::new(root), candidate)?,
-  )?;
+  let read = if paired { read_pair } else { read_timings };
+  let timings = compare_timings(&read(Path::new(root), baseline)?, &read(Path::new(root), candidate)?)?;
   // A partially executed benchmark script must not produce a passing release.
   for required in ["native_structure_parse_512_atoms", "native_molecule_frame_512_atoms"] {
     ensure!(
@@ -160,6 +195,7 @@ fn main() -> Result<()> {
     baseline_bytes,
     candidate_bytes,
     max_slowdown: MAX_SLOWDOWN,
+    paired,
     passed: check_budget(baseline_bytes, candidate_bytes, &timings),
     timings,
   };
@@ -171,6 +207,9 @@ fn main() -> Result<()> {
 
   println!("## Native release comparison\n");
   println!("Executable: {baseline_bytes} → {candidate_bytes} bytes. Per-benchmark slowdown budget: 5%.\n");
+  if paired {
+    println!("ABBA comparison: geometric mean of both saved medians per profile; all raw phases retained.\n");
+  }
   println!("| Benchmark | Baseline (ns) | Candidate (ns) | Change | Result |");
   println!("|---|---:|---:|---:|---|");
   for timing in &report.timings {
@@ -259,6 +298,34 @@ mod tests {
   fn parent_directory_cannot_be_used_as_a_label() -> Result<()> {
     let temporary = tempfile::tempdir()?;
     assert!(read_timings(temporary.path(), "..").is_err());
+    Ok(())
+  }
+
+  #[test]
+  fn paired_estimates_require_both_phases() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let path = temporary.path().join("render/baseline-0");
+    fs::create_dir_all(&path)?;
+    fs::write(path.join("estimates.json"), br#"{"median":{"point_estimate":100.0}}"#)?;
+    assert!(read_pair(temporary.path(), "baseline").is_err());
+    Ok(())
+  }
+
+  #[test]
+  fn paired_estimates_include_the_slower_phase() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    for (phase, median) in [(0, 100.0), (1, 400.0)] {
+      let path = temporary.path().join(format!("render/baseline-{phase}"));
+      fs::create_dir_all(&path)?;
+      fs::write(
+        path.join("estimates.json"),
+        serde_json::to_vec(&serde_json::json!({"median":{"point_estimate":median}}))?,
+      )?;
+    }
+    assert_eq!(
+      read_pair(temporary.path(), "baseline")?,
+      BTreeMap::from([("render".to_owned(), 200.0)])
+    );
     Ok(())
   }
 }

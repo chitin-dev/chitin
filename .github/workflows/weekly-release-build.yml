@@ -83,22 +83,35 @@ jobs:
       - name: Build CLI release
         run: just build-cli-release
 
+      # Cargo builds package binaries for benches too, enabling dev-dependency
+      # features. Never measure or ship a binary that those builds overwrite.
+      - name: Freeze production executables
+        shell: bash
+        run: |
+          mkdir -p target/release-frozen/baseline target/release-frozen/optimized target/release-audit
+          cp target/release/${{ matrix.desktop_executable }} target/release-frozen/baseline/
+          cp target/release-size/${{ matrix.desktop_executable }} target/release-frozen/optimized/
+          cp target/release/${{ matrix.cli_executable }} target/release-frozen/optimized/
+          wc -c target/release-frozen/baseline/${{ matrix.desktop_executable }} \
+            target/release-frozen/optimized/${{ matrix.desktop_executable }} \
+            | tee target/release-audit/executable-bytes.txt
+
+      - name: Check release audit tests
+        run: cargo test -p chitin-release-audit --locked
+
       - name: Check optimized scientific and renderer tests
         run: cargo test -p chitin-bio -p chitin-molecule-renderer --lib --profile release-size --locked
 
-      - name: Benchmark stripped reference
-        run: just benchmark-release-profile release baseline
-
-      - name: Benchmark optimized release
-        run: just benchmark-release-profile release-size optimized
+      - name: Prebuild and measure order-balanced profiles
+        run: just benchmark-release-profiles
 
       - name: Enforce desktop size and performance budgets
         shell: bash
         run: |
-          cargo run -p chitin-release-audit --locked -- \
+          cargo run -p chitin-release-audit --locked -- --paired \
             "$CRITERION_HOME" baseline optimized \
-            target/release/${{ matrix.desktop_executable }} \
-            target/release-size/${{ matrix.desktop_executable }} \
+            target/release-frozen/baseline/${{ matrix.desktop_executable }} \
+            target/release-frozen/optimized/${{ matrix.desktop_executable }} \
             target/release-audit/comparison.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release measurements
@@ -113,8 +126,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist/${{ matrix.archive }}
-          cp target/release-size/chitin-desktop dist/${{ matrix.archive }}/chitin-desktop
-          cp target/release/chitin dist/${{ matrix.archive }}/chitin
+          cp target/release-frozen/optimized/chitin-desktop dist/${{ matrix.archive }}/chitin-desktop
+          cp target/release-frozen/optimized/chitin dist/${{ matrix.archive }}/chitin
           cp README.md LICENSE dist/${{ matrix.archive }}/
           tar -C dist -czf dist/${{ matrix.archive }}.tar.gz ${{ matrix.archive }}
           sha256sum dist/${{ matrix.archive }}.tar.gz > dist/${{ matrix.archive }}.sha256
@@ -124,8 +137,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/${{ matrix.archive }}
-          Copy-Item target/release-size/chitin-desktop.exe dist/${{ matrix.archive }}/chitin-desktop.exe
-          Copy-Item target/release/chitin.exe dist/${{ matrix.archive }}/chitin.exe
+          Copy-Item target/release-frozen/optimized/chitin-desktop.exe dist/${{ matrix.archive }}/chitin-desktop.exe
+          Copy-Item target/release-frozen/optimized/chitin.exe dist/${{ matrix.archive }}/chitin.exe
           Copy-Item README.md,LICENSE dist/${{ matrix.archive }}/
           Compress-Archive -Path dist/${{ matrix.archive }} -DestinationPath dist/${{ matrix.archive }}.zip -Force
           $hash = (Get-FileHash dist/${{ matrix.archive }}.zip -Algorithm SHA256).Hash.ToLower()
