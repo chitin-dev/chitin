@@ -17,6 +17,32 @@ use serde::{Deserialize, Serialize};
 /// Maximum permitted increase in each benchmark's median execution time.
 const MAX_SLOWDOWN: f64 = 0.05;
 
+/// Old implementations exist only in the comparison benchmark, not the app.
+const HISTORICAL_CONTROLS: &[&str] = &[
+  "sequence_columns/all_columns_before/1000",
+  "sequence_columns/all_columns_before/10000",
+  "sequence_columns/all_columns_before/100000",
+  "sequence_box_hit/scan_all_cells_before/1000",
+  "sequence_box_hit/scan_all_cells_before/10000",
+  "sequence_box_hit/scan_all_cells_before/100000",
+];
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Workload {
+  Runtime,
+  HistoricalControl,
+}
+
+/// Unknown or newly added benchmarks are gated unless explicitly historical.
+fn workload(name: &str) -> Workload {
+  if HISTORICAL_CONTROLS.contains(&name) {
+    Workload::HistoricalControl
+  } else {
+    Workload::Runtime
+  }
+}
+
 #[derive(Deserialize)]
 struct Estimate {
   point_estimate: f64,
@@ -30,6 +56,7 @@ struct Estimates {
 #[derive(Serialize)]
 struct Timing {
   benchmark: String,
+  workload: Workload,
   baseline_ns: f64,
   candidate_ns: f64,
   ratio: f64,
@@ -117,6 +144,7 @@ fn compare_timings(baseline: &BTreeMap<String, f64>, candidate: &BTreeMap<String
       ensure!(ratio.is_finite(), "invalid ratio for {name}");
       Ok(Timing {
         benchmark: name.clone(),
+        workload: workload(name),
         baseline_ns: *before,
         candidate_ns: *after,
         ratio,
@@ -144,13 +172,16 @@ fn read_pair(root: &Path, label: &str) -> Result<BTreeMap<String, f64>> {
   )
 }
 
-/// Requires a strictly smaller executable and bounded per-benchmark slowdown.
+/// Requires a smaller executable and bounded slowdown on every current path.
 fn check_budget(baseline_bytes: u64, candidate_bytes: u64, timings: &[Timing]) -> bool {
   baseline_bytes > 0
     && candidate_bytes > 0
     && candidate_bytes < baseline_bytes
-    && !timings.is_empty()
-    && timings.iter().all(|timing| timing.passed)
+    && timings.iter().any(|timing| timing.workload == Workload::Runtime)
+    && timings
+      .iter()
+      .filter(|timing| timing.workload == Workload::Runtime)
+      .all(|timing| timing.passed)
 }
 
 fn main() -> Result<()> {
@@ -183,7 +214,13 @@ fn main() -> Result<()> {
       "missing benchmark {required}"
     );
   }
-  for prefix in ["sequence_", "kit_tree_", "molecular_surface"] {
+  for prefix in [
+    "sequence_columns/visible_columns_after/",
+    "sequence_box_hit/row_interval_after/",
+    "sequence_wrapped_row_lookup_",
+    "kit_tree_",
+    "molecular_surface",
+  ] {
     ensure!(
       timings.iter().any(|timing| timing.benchmark.starts_with(prefix)),
       "missing benchmark family {prefix}"
@@ -206,20 +243,31 @@ fn main() -> Result<()> {
   fs::write(output, serde_json::to_vec_pretty(&report)?)?;
 
   println!("## Native release comparison\n");
-  println!("Executable: {baseline_bytes} → {candidate_bytes} bytes. Per-benchmark slowdown budget: 5%.\n");
+  println!("Executable: {baseline_bytes} → {candidate_bytes} bytes. Current-runtime slowdown budget: 5%.\n");
+  println!("Historical controls are informational; their measured regressions remain in this report.\n");
   if paired {
     println!("ABBA comparison: geometric mean of both saved medians per profile; all raw phases retained.\n");
   }
-  println!("| Benchmark | Baseline (ns) | Candidate (ns) | Change | Result |");
-  println!("|---|---:|---:|---:|---|");
+  println!("| Benchmark | Workload | Baseline (ns) | Candidate (ns) | Change | Result |");
+  println!("|---|---|---:|---:|---:|---|");
   for timing in &report.timings {
     println!(
-      "| {} | {:.1} | {:.1} | {:+.2}% | {} |",
+      "| {} | {} | {:.1} | {:.1} | {:+.2}% | {} |",
       timing.benchmark,
+      if timing.workload == Workload::Runtime {
+        "runtime"
+      } else {
+        "historical control"
+      },
       timing.baseline_ns,
       timing.candidate_ns,
       (timing.ratio - 1.0) * 100.0,
-      if timing.passed { "pass" } else { "FAIL" }
+      match (timing.workload, timing.passed) {
+        (Workload::Runtime, true) => "pass",
+        (Workload::Runtime, false) => "FAIL",
+        (Workload::HistoricalControl, true) => "control only",
+        (Workload::HistoricalControl, false) => "control only (>5%)",
+      }
     );
   }
   ensure!(
@@ -326,6 +374,33 @@ mod tests {
       read_pair(temporary.path(), "baseline")?,
       BTreeMap::from([("render".to_owned(), 200.0)])
     );
+    Ok(())
+  }
+
+  #[test]
+  fn historical_regressions_are_retained_without_gating_current_paths() -> Result<()> {
+    let historical = "sequence_columns/all_columns_before/1000".to_owned();
+    let baseline = BTreeMap::from([(historical.clone(), 100.0), ("runtime".to_owned(), 100.0)]);
+    let candidate = BTreeMap::from([(historical, 150.0), ("runtime".to_owned(), 102.0)]);
+    let timings = compare_timings(&baseline, &candidate)?;
+    assert!(check_budget(100, 90, &timings));
+    assert!(
+      timings
+        .iter()
+        .any(|timing| timing.workload == Workload::HistoricalControl && !timing.passed)
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn a_new_benchmark_with_before_in_its_name_is_still_gated() {
+    assert!(workload("new_before_benchmark") == Workload::Runtime);
+  }
+
+  #[test]
+  fn historical_controls_alone_cannot_pass_a_release() -> Result<()> {
+    let timings = BTreeMap::from([("sequence_columns/all_columns_before/1000".to_owned(), 100.0)]);
+    assert!(!check_budget(100, 90, &compare_timings(&timings, &timings)?));
     Ok(())
   }
 }
