@@ -38,6 +38,7 @@ criterion = "0.5"
 gpui = { workspace = true, features = ["test-support"] }
 bytemuck = "1.24"
 glam = "0.33"
+pollster = "0.4"
 rayon = "1.11"
 
 [[bench]]
