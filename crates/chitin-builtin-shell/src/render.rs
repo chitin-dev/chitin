@@ -1,8 +1,8 @@
 //! Shell-only grammar for typed molecular presentation commands.
 
 use chitin_command::{
-  RenderAtomStyle, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle, RenderRgb,
-  RenderSurfaceBackend, RenderSurfaceStyle,
+  RenderAtomStyle, RenderBackground, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle,
+  RenderRgb, RenderSurfaceBackend, RenderSurfaceStyle,
 };
 use clap::Subcommand;
 
@@ -24,6 +24,11 @@ pub(crate) enum RenderArgs {
   Surface {
     #[command(subcommand)]
     command: SurfaceArgs,
+  },
+  /// Set the viewport clear color; auto follows the light or dark theme.
+  Background {
+    /// `auto`, `black`, `white`, or an sRGB color such as #1E1E1E.
+    color: RenderBackground,
   },
 }
 
@@ -112,6 +117,7 @@ impl RenderArgs {
       Self::Surface {
         command: SurfaceArgs::Backend { backend },
       } => RenderCommand::SurfaceBackend(backend),
+      Self::Background { color } => RenderCommand::Background(color),
     }
   }
 }

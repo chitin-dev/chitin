@@ -61,6 +61,8 @@ pub enum RenderCommand {
   },
   /// Change a layer's opacity without disabling it or regenerating geometry.
   Opacity { layer: RenderLayer, value: RenderOpacity },
+  /// Change the viewport clear color, or follow the host theme automatically.
+  Background(RenderBackground),
 }
 
 impl RenderCommand {
@@ -74,6 +76,28 @@ impl RenderCommand {
       Self::SurfaceBackend(_) => super::CommandId::RenderSurfaceBackend,
       Self::Color { .. } => super::CommandId::RenderColor,
       Self::Opacity { .. } => super::CommandId::RenderOpacity,
+      Self::Background(_) => super::CommandId::RenderBackground,
+    }
+  }
+}
+
+/// Viewport background chosen by a user or shell command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderBackground {
+  /// Follow the host theme: black in dark mode, white in light mode.
+  Auto,
+  /// Use an explicit sRGB color.
+  Custom(RenderRgb),
+}
+
+impl std::str::FromStr for RenderBackground {
+  type Err = String;
+  fn from_str(value: &str) -> Result<Self, Self::Err> {
+    match value.to_ascii_lowercase().as_str() {
+      "auto" => Ok(Self::Auto),
+      "black" => Ok(Self::Custom(RenderRgb([0, 0, 0]))),
+      "white" => Ok(Self::Custom(RenderRgb([255, 255, 255]))),
+      _ => value.parse().map(Self::Custom),
     }
   }
 }

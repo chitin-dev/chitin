@@ -245,6 +245,18 @@ define_commands! {
     command_panel: false,
     frontend: []
   },
+  /// Set Viewport Background.
+  RenderBackground {
+    name: "render.background",
+    title: "Set Viewport Background",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true,
+    keywords: &["render", "background", "canvas", "theme", "color"],
+    shortcut: None,
+    command_panel: false,
+    frontend: []
+  },
   /// Focus the previous project entry.
   WorkspaceFocusPrevious {
     name: "workspace.focus_previous_entry",

@@ -13,3 +13,4 @@ docs/superpowers
 .codex/
 .agents/
 .commandcode/
+.nix-dev-profile*

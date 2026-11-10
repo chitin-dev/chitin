@@ -86,6 +86,8 @@ pub struct ChitinApp {
   pub(crate) pending_structure_loads: BTreeSet<PathBuf>,
   /// Window-level transient notification queue.
   pub(crate) toast_viewport: Option<Entity<ToastViewport>>,
+  /// Subscription that keeps the theme aligned with OS appearance changes.
+  theme_appearance_subscription: Option<gpui::Subscription>,
 }
 
 impl ChitinApp {
@@ -170,7 +172,18 @@ impl ChitinApp {
       sequence_panel: SequencePanelState::default(),
       pending_structure_loads: BTreeSet::new(),
       toast_viewport: None,
+      theme_appearance_subscription: None,
     }
+  }
+
+  /// Keeps the active theme aligned with operating-system appearance changes.
+  ///
+  /// Explicit light and dark preferences ignore system changes; the automatic
+  /// mode follows them. The subscription lives with the app entity.
+  pub fn follow_system_theme(&mut self, window: &mut Window) {
+    self.theme_appearance_subscription = Some(window.observe_window_appearance(|window, cx| {
+      chitin_ui::theme::apply_system_appearance(window.appearance(), cx);
+    }));
   }
 
   /// Creates app state with a preallocated project-sidebar focus handle.
@@ -553,7 +566,11 @@ impl Render for ChitinApp {
           });
         }
       })
-      .child(render_window_bar(theme, app.clone()))
+      .child(render_window_bar(
+        theme,
+        chitin_ui::theme::effective_mode(cx),
+        app.clone(),
+      ))
       .child(
         div().flex().flex_1().min_h_0().child(
           div()

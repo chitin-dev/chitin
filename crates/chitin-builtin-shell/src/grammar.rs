@@ -499,7 +499,8 @@ mod tests {
   #[test]
   fn render_requests_should_be_typed_frontend_commands() -> Result<(), CommandLineParseError> {
     use chitin_command::{
-      RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle,
+      RenderAtomStyle, RenderBackground, RenderCommand, RenderPolymerStyle, RenderRgb, RenderSurfaceBackend,
+      RenderSurfaceStyle,
     };
     for (input, expected) in [
       ("render status", RenderCommand::Status),
@@ -543,12 +544,29 @@ mod tests {
         "render surface backend implicit-scalar-field",
         RenderCommand::SurfaceBackend(RenderSurfaceBackend::ImplicitScalarField),
       ),
+      (
+        "render background auto",
+        RenderCommand::Background(RenderBackground::Auto),
+      ),
+      (
+        "render background black",
+        RenderCommand::Background(RenderBackground::Custom(RenderRgb([0, 0, 0]))),
+      ),
+      (
+        "render background white",
+        RenderCommand::Background(RenderBackground::Custom(RenderRgb([255, 255, 255]))),
+      ),
+      (
+        "render background #1e1e1e",
+        RenderCommand::Background(RenderBackground::Custom(RenderRgb([30, 30, 30]))),
+      ),
     ] {
       assert!(
         matches!(parse_builtin_command_line(input)?, BuiltinCommandLine::Frontend(FrontendCommand::Render(command)) if command == expected)
       );
     }
     assert!(parse_builtin_command_line("render atom style invalid").is_err());
+    assert!(parse_builtin_command_line("render background navy").is_err());
     Ok(())
   }
 

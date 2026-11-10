@@ -89,6 +89,8 @@ const OTHER_VDW_RADIUS: f32 = 1.50;
 const UNIFORM_BUFFER_SIZE: u64 = 288;
 /// Byte offset at which the lighting and material vectors begin.
 const MATERIAL_UNIFORM_OFFSET: u64 = 192;
+/// Byte offset of the background vector inside the material block.
+const BACKGROUND_UNIFORM_OFFSET: u64 = MATERIAL_UNIFORM_OFFSET + 4 * 16;
 /// Byte offset of the per-frame absolute depth-cue vector.
 const DEPTH_CUE_UNIFORM_OFFSET: u64 = 240;
 
@@ -298,7 +300,7 @@ impl Default for BallAndStickStyle {
       },
       bond_radius: DEFAULT_STICK_RADIUS,
       ball_radius_scale: DEFAULT_BALL_RADIUS_SCALE,
-      background_color: [0.003, 0.003, 0.005],
+      background_color: [0.0, 0.0, 0.0],
       depth_cue_start: 0.25,
       depth_cue_end: 1.0,
       depth_cue_strength: 0.18,
@@ -1167,6 +1169,53 @@ impl MoleculeRenderer {
     if let Some(transparency) = &mut self.transparency {
       transparency.resize(&self.device, size);
     }
+  }
+
+  /// Changes the clear color used by the next frame without recreating resources.
+  ///
+  /// Colors are linear RGB. Non-finite values are rejected and finite values are
+  /// clamped to the unit interval, so a host theme or user picker cannot produce
+  /// an invalid clear operation.
+  ///
+  /// # Parameters
+  ///
+  /// * `color` supplies linear RGB components.
+  ///
+  /// # Returns
+  ///
+  /// `true` when the stored clear color changed; otherwise `false`.
+  pub fn set_background_color(&mut self, color: [f64; 3]) -> bool {
+    if !color.iter().all(|channel| channel.is_finite()) {
+      return false;
+    }
+    let color = color.map(|channel| channel.clamp(0.0, 1.0));
+    let updated = wgpu::Color {
+      r: color[0],
+      g: color[1],
+      b: color[2],
+      a: 1.0,
+    };
+    if self.background_color == updated {
+      return false;
+    }
+    self.background_color = updated;
+    // The shader blends distant geometry toward this same color. Keep the
+    // depth cue and the clear color in sync across theme changes.
+    self.queue.write_buffer(
+      &self.uniform_buffer,
+      BACKGROUND_UNIFORM_OFFSET,
+      bytemuck::cast_slice(&[color[0] as f32, color[1] as f32, color[2] as f32, 1.0]),
+    );
+    true
+  }
+
+  /// Returns the clear color used by the next frame as linear RGB.
+  pub fn background_color(&self) -> [f64; 3] {
+    [
+      self.background_color.r,
+      self.background_color.g,
+      self.background_color.b,
+    ]
   }
 
   /// Returns the current render target aspect ratio.

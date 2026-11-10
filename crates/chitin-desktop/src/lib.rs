@@ -10,6 +10,7 @@ pub(crate) mod features;
 pub mod fonts;
 pub mod keybindings;
 pub mod services;
+pub mod settings;
 pub mod workbench;
 
 // Preserve the public application integration entrypoints.

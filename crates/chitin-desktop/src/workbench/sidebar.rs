@@ -1,6 +1,7 @@
 //! Primary workbench navigation and its project, document, and function views.
 
 use chitin_command::CommandId;
+use chitin_ui::theme::ThemePreference;
 use chitin_ui::workbench::{WorkbenchStyle, panel_surface};
 use gpui::{
   Context, Div, InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled, Window, div, px,
@@ -9,6 +10,7 @@ use gpui_kit::component::{
   Icon, Sizable as _,
   button::{Button, ButtonVariants as _},
   collapsible::Collapsible,
+  switch::Switch,
   tab::{Tab, TabBar},
   theme::ThemeColor,
 };
@@ -31,6 +33,8 @@ pub(crate) enum SidebarView {
   Entries,
   /// Curated functional commands grouped into collapsible categories.
   Functions,
+  /// Application appearance and future user preferences.
+  Settings,
 }
 
 impl SidebarView {
@@ -42,6 +46,7 @@ impl SidebarView {
       Self::Project => "Project",
       Self::Entries => "Entries",
       Self::Functions => "Functions",
+      Self::Settings => "Settings",
     }
   }
 
@@ -51,6 +56,7 @@ impl SidebarView {
       Self::Project => "icons/folder-closed.svg",
       Self::Entries => "icons/activity-workspace.svg",
       Self::Functions => "icons/activity-jobs.svg",
+      Self::Settings => "icons/activity-settings.svg",
     }
   }
 }
@@ -63,16 +69,16 @@ pub(crate) fn render_primary_sidebar(
   cx: &mut Context<ChitinApp>,
 ) -> impl IntoElement {
   let focus = app.project_sidebar_focus(cx);
-  let selected = SidebarView::ALL
-    .iter()
-    .position(|view| *view == app.sidebar_view)
-    .unwrap_or(0);
+  let selected = SidebarView::ALL.iter().position(|view| *view == app.sidebar_view);
   let weak = cx.weak_entity();
-  let navigation = TabBar::new("primary-sidebar-navigation")
+  let mut navigation = TabBar::new("primary-sidebar-navigation")
     .segmented()
     .selected_background(WorkbenchStyle::new(theme).raised_background)
-    .small()
-    .selected_index(selected)
+    .small();
+  if let Some(selected) = selected {
+    navigation = navigation.selected_index(selected);
+  }
+  let navigation = navigation
     .children(SidebarView::ALL.map(sidebar_tab))
     .on_click(move |index, window, cx| {
       if let Some(view) = SidebarView::ALL.get(*index) {
@@ -90,6 +96,7 @@ pub(crate) fn render_primary_sidebar(
     .into_any_element(),
     SidebarView::Entries => super::entries::render_entries(app, theme, window, cx).into_any_element(),
     SidebarView::Functions => render_functions(app, theme, cx).into_any_element(),
+    SidebarView::Settings => render_settings(theme, cx).into_any_element(),
   };
   panel_surface(WorkbenchStyle::new(theme))
     .border_r_1()
@@ -121,6 +128,44 @@ fn sidebar_tab(view: SidebarView) -> Tab {
           .child(view.label()),
       ),
   )
+}
+
+/// Renders application preferences, currently limited to the color theme.
+fn render_settings(theme: ThemeColor, cx: &mut Context<ChitinApp>) -> impl IntoElement {
+  let preference = chitin_ui::theme::preference(cx);
+  let mode = chitin_ui::theme::effective_mode(cx);
+  let weak = cx.weak_entity();
+  let follow_system = Switch::new("settings-follow-system")
+    .small()
+    .checked(preference == ThemePreference::System)
+    .label("Follow system theme")
+    .on_change(move |checked, _, cx| {
+      let _ = weak.update(cx, |app, cx| {
+        let preference = if *checked {
+          ThemePreference::System
+        } else if chitin_ui::theme::effective_mode(cx).is_dark() {
+          ThemePreference::Dark
+        } else {
+          ThemePreference::Light
+        };
+        app.set_theme_preference(preference, cx);
+      });
+    });
+  div()
+    .id("sidebar-settings")
+    .flex()
+    .flex_col()
+    .flex_1()
+    .min_h_0()
+    .overflow_y_scroll()
+    .gap_2()
+    .p_2()
+    .child(div().text_sm().child("Appearance"))
+    .child(follow_system)
+    .child(div().text_xs().text_color(theme.muted_foreground).child(format!(
+      "Current theme: {}. Use the sun/moon button in the title bar to switch light and dark.",
+      if mode.is_dark() { "Dark" } else { "Light" }
+    )))
 }
 
 /// Renders curated command categories using retained expansion state.
@@ -377,6 +422,11 @@ mod tests {
     assert_eq!(
       SidebarView::ALL.map(SidebarView::label),
       ["Project", "Entries", "Functions"]
+    );
+    assert!(
+      chitin_ui::assets::ChitinAssets
+        .load(SidebarView::Settings.icon_path())?
+        .is_some()
     );
     Ok(())
   }
