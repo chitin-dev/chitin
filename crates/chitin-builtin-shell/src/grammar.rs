@@ -560,6 +560,13 @@ mod tests {
         "render background #1e1e1e",
         RenderCommand::Background(RenderBackground::Custom(RenderRgb([30, 30, 30]))),
       ),
+      ("render export", RenderCommand::ExportImage { output: None }),
+      (
+        "render export custom.png",
+        RenderCommand::ExportImage {
+          output: Some(std::path::PathBuf::from("custom.png")),
+        },
+      ),
     ] {
       assert!(
         matches!(parse_builtin_command_line(input)?, BuiltinCommandLine::Frontend(FrontendCommand::Render(command)) if command == expected)

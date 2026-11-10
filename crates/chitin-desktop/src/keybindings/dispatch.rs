@@ -60,8 +60,9 @@ impl ChitinApp {
       FrontendCommand::Workspace(command) => self.dispatch_workspace_command(command, cx),
       FrontendCommand::Application(command) => self.dispatch_application_command(command, cx),
       FrontendCommand::Render(command) => {
+        let command_id = command.id();
         if let Err(error) = self.dispatch_render_command(None, command, cx) {
-          log::error!("Cannot dispatch {} without an explicit target: {error}", command.id());
+          log::error!("Cannot dispatch {command_id} without an explicit target: {error}");
         }
       }
       FrontendCommand::Selection(command) => {

@@ -932,6 +932,7 @@ dependencies = [
  "gpui-ce",
  "gpui-kit",
  "log",
+ "png 0.17.16",
  "rayon",
  "thiserror 2.0.20",
  "tokio",

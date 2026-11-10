@@ -1,5 +1,7 @@
 //! Frontend-only molecular presentation requests, independent of GPU/UI types.
 
+use std::path::PathBuf;
+
 /// Display style for the atom-and-bond layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum RenderAtomStyle {
@@ -41,7 +43,7 @@ pub enum RenderSurfaceBackend {
 }
 
 /// One presentation operation applied to an explicitly resolved rendering tab.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RenderCommand {
   /// Read the current presentation settings.
   Status,
@@ -63,11 +65,16 @@ pub enum RenderCommand {
   Opacity { layer: RenderLayer, value: RenderOpacity },
   /// Change the viewport clear color, or follow the host theme automatically.
   Background(RenderBackground),
+  /// Write the current viewport to an image file.
+  ExportImage {
+    /// Optional destination; the default is a timestamped workspace export.
+    output: Option<PathBuf>,
+  },
 }
 
 impl RenderCommand {
   /// Returns the stable command identity.
-  pub const fn id(self) -> super::CommandId {
+  pub const fn id(&self) -> super::CommandId {
     match self {
       Self::Status => super::CommandId::RenderStatus,
       Self::AtomStyle(_) => super::CommandId::RenderAtomStyle,
@@ -77,6 +84,7 @@ impl RenderCommand {
       Self::Color { .. } => super::CommandId::RenderColor,
       Self::Opacity { .. } => super::CommandId::RenderOpacity,
       Self::Background(_) => super::CommandId::RenderBackground,
+      Self::ExportImage { .. } => super::CommandId::RenderExportImage,
     }
   }
 }

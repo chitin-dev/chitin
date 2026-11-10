@@ -8,7 +8,7 @@ use crate::{
   app::ChitinApp,
   keybindings::{CloseTab, FocusNextPanelTab, FocusPreviousPanelTab, PANEL_CONTAINER_KEY_CONTEXT},
 };
-use chitin_command::PanelTabCommand;
+use chitin_command::{PanelTabCommand, RenderCommand};
 use gpui::{
   AnyElement, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Styled,
   WeakEntity, div, px, svg,
@@ -20,6 +20,7 @@ use gpui_kit::component::{
 
 const SPLIT_HORIZONTAL_ICON_PATH: &str = "icons/panel-split-horizontal.svg";
 const SPLIT_VERTICAL_ICON_PATH: &str = "icons/panel-split-vertical.svg";
+const EXPORT_IMAGE_ICON_PATH: &str = "icons/image-export.svg";
 const PANEL_ACTION_ICON_SIZE: Pixels = px(16.0);
 
 /// Composes the Kit docking view with desktop document commands.
@@ -62,23 +63,26 @@ pub fn render_document_area(
 /// # Parameters
 ///
 /// * `panel_id` identifies the panel controlled by the split buttons.
+/// * `tab_id` identifies the stable rendering tab targeted by export.
 /// * `theme` supplies colors for the action buttons.
 /// * `app` is the weak app entity updated by button clicks.
+/// * `export_supported` adds the protein-image export action when true.
 ///
 /// # Returns
 ///
-/// A GPUI element containing horizontal and vertical split buttons.
+/// A GPUI element containing export and split buttons.
 pub(super) fn render_panel_tab_strip_actions(
   panel_id: PanelId,
+  tab_id: u64,
   theme: ThemeColor,
   app: WeakEntity<ChitinApp>,
+  export_supported: bool,
 ) -> gpui::Div {
-  div()
-    .flex()
-    .items_center()
-    .h_full()
-    .flex_none()
-    .bg(theme.muted)
+  let mut actions = div().flex().items_center().h_full().flex_none().bg(theme.muted);
+  if export_supported {
+    actions = actions.child(render_panel_export_button(tab_id, theme, app.clone()));
+  }
+  actions
     .child(render_panel_split_button(
       panel_id,
       PanelSplitAxis::Horizontal,
@@ -93,6 +97,68 @@ pub(super) fn render_panel_tab_strip_actions(
       theme,
       app,
     ))
+}
+
+/// Renders the protein-image export button for one document panel.
+fn render_panel_export_button(tab_id: u64, theme: ThemeColor, app: WeakEntity<ChitinApp>) -> Button {
+  Button::new(format!("document-export-{tab_id}"))
+    .with_variant(ButtonVariant::Ghost)
+    .size(px(30.0))
+    .px(px(0.0))
+    .tooltip("Export image")
+    .accessibility_label("Export protein image")
+    .on_click(move |_, window, cx| {
+      let suggested = app
+        .update(cx, |app, _| app.export_dialog_default(tab_id))
+        .ok()
+        .flatten();
+      let Some((directory, suggested_name)) = suggested else {
+        let _ = app.update(cx, |app, cx| {
+          if let Err(error) = app.dispatch_render_command(Some(tab_id), RenderCommand::ExportImage { output: None }, cx)
+          {
+            log::error!("{error}");
+          }
+        });
+        return;
+      };
+      if let Err(error) = std::fs::create_dir_all(&directory) {
+        log::warn!("failed to create export directory '{}': {error}", directory.display());
+      }
+      let receiver = cx.prompt_for_new_path(&directory, Some(&suggested_name));
+      let app = app.clone();
+      window
+        .spawn(cx, async move |cx| {
+          let result = match receiver.await {
+            Ok(result) => result,
+            Err(error) => {
+              log::error!("export save dialog channel closed: {error}");
+              return;
+            }
+          };
+          let path = match result {
+            Ok(Some(path)) => path,
+            Ok(None) => return,
+            Err(error) => {
+              log::error!("export save dialog failed: {error}");
+              return;
+            }
+          };
+          let _ = app.update_in(cx, |app, _window, cx| {
+            if let Err(error) =
+              app.dispatch_render_command(Some(tab_id), RenderCommand::ExportImage { output: Some(path) }, cx)
+            {
+              log::error!("{error}");
+            }
+          });
+        })
+        .detach();
+    })
+    .child(
+      svg()
+        .path(EXPORT_IMAGE_ICON_PATH)
+        .size(PANEL_ACTION_ICON_SIZE)
+        .text_color(theme.muted_foreground),
+    )
 }
 
 /// Renders one split button for a document panel.

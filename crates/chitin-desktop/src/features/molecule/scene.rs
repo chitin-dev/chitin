@@ -317,6 +317,7 @@ pub(crate) fn build_structure_view_from_scene(
   let visibility_panel = panel.clone();
   let input_panel = panel.clone();
   let background_panel = panel.clone();
+  let export_panel = panel.clone();
   let view = view
     .with_selection(
       Arc::clone(&scene),
@@ -344,6 +345,9 @@ pub(crate) fn build_structure_view_from_scene(
           cx.notify();
         }
       });
+    })
+    .with_export(move |path, cx| {
+      export_panel.update(cx, |panel, _| panel.export_png(path).map_err(|error| error.to_string()))
     });
   let backend_scene = Arc::clone(&scene);
   let backend_toasts = toast_viewport;

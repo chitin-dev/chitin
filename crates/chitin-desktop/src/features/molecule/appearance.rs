@@ -15,7 +15,10 @@ use gpui_kit::component::{
   slider::{Slider, SliderEvent, SliderState, SliderValue},
   theme::ThemeColor,
 };
-use std::{cell::Cell, rc::Rc};
+use std::{
+  cell::{Cell, RefCell},
+  rc::Rc,
+};
 
 /// Shared maximum width for compact inline molecular editors.
 pub(super) const EDITOR_MAX_WIDTH: gpui::Pixels = px(260.0);
@@ -55,7 +58,7 @@ struct LayerControls {
   /// Opacity editor whose release completes one undoable edit.
   opacity: Entity<SliderState>,
   /// Pending command and source view identity, preventing stale frame updates.
-  pending_opacity: Rc<Cell<Option<(u64, gpui::EntityId, RenderCommand)>>>,
+  pending_opacity: Rc<RefCell<Option<(u64, gpui::EntityId, RenderCommand)>>>,
 }
 
 impl LayerControls {
@@ -63,7 +66,7 @@ impl LayerControls {
   fn sync_opacity(&self, appearance: LayerAppearance, window: &mut Window, cx: &mut App) {
     // A coalesced command may not have reached the model yet. Do not roll the
     // thumb back to last frame's value while that command is waiting.
-    if self.pending_opacity.get().is_none()
+    if self.pending_opacity.borrow().is_none()
       && (self.opacity.read(cx).value().end() - appearance.opacity()).abs() > f32::EPSILON
     {
       self
@@ -115,14 +118,14 @@ impl AppearanceControls {
         }),
         color: cx.new(|cx| ColorPickerState::new(window, cx)),
         opacity: cx.new(|_| SliderState::new().min(0.0).max(1.0).step(0.01).default_value(1.0)),
-        pending_opacity: Rc::new(Cell::new(None)),
+        pending_opacity: Rc::new(RefCell::new(None)),
       }),
     }
   }
   /// Discards queued slider previews when the inspector changes its target.
   pub fn clear_pending(&self) {
     for layer in &self.layers {
-      layer.pending_opacity.take();
+      layer.pending_opacity.borrow_mut().take();
     }
   }
 
@@ -222,7 +225,7 @@ impl AppearanceControls {
         };
         let command = RenderCommand::Opacity { layer, value };
         if matches!(event, SliderEvent::Release(_)) {
-          pending.take();
+          pending.borrow_mut().take();
           if let Err(error) =
             app.dispatch_render_edit(Some(target), command, crate::commands::history::EditPhase::Finish, cx)
           {
@@ -366,14 +369,14 @@ mod tests {
       let Ok(value) = RenderOpacity::new(0.35) else {
         panic!("valid opacity should be accepted");
       };
-      layer.pending_opacity.set(Some((
+      *layer.pending_opacity.borrow_mut() = Some((
         1,
         app.entity_id(),
         RenderCommand::Opacity {
           layer: RenderLayer::Atom,
           value,
         },
-      )));
+      ));
       let appearance = LayerAppearance::new(ColorScheme::Element);
       layer.sync_opacity(appearance, window, cx);
       assert_eq!(layer.opacity.read(cx).value(), SliderValue::Single(0.35));

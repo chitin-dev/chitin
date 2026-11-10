@@ -32,6 +32,8 @@ pub enum RenderCommandError {
   UnsupportedBackend { id: u64 },
   #[error("rendering panel #{id} does not support viewport background selection")]
   UnsupportedBackground { id: u64 },
+  #[error("image export failed: {0}")]
+  Export(String),
 }
 
 impl ChitinApp {
@@ -55,17 +57,15 @@ impl ChitinApp {
     let id = target.ok_or(RenderCommandError::MissingContext)?;
     let before =
       super::history::ViewSnapshot::read(&self.document_panels, id).ok_or(RenderCommandError::Unavailable { id })?;
+    let command_id = command.id();
+    let is_status = command == RenderCommand::Status;
+    let layer = match &command {
+      RenderCommand::Color { layer, .. } | RenderCommand::Opacity { layer, .. } => Some(*layer),
+      _ => None,
+    };
     let output = self.apply_render_command(target, command, cx)?;
-    if command != RenderCommand::Status
-      && let Some(after) = super::history::ViewSnapshot::read(&self.document_panels, id)
-    {
-      let layer = match command {
-        RenderCommand::Color { layer, .. } | RenderCommand::Opacity { layer, .. } => Some(layer),
-        _ => None,
-      };
-      self
-        .edit_history
-        .changed(id, (command.id(), layer), before, after, phase);
+    if !is_status && let Some(after) = super::history::ViewSnapshot::read(&self.document_panels, id) {
+      self.edit_history.changed(id, (command_id, layer), before, after, phase);
     }
     Ok(output)
   }
@@ -149,6 +149,12 @@ impl ChitinApp {
           on_change(value, cx);
           cx.notify();
         }
+      }
+      RenderCommand::ExportImage { output } => {
+        let path = self
+          .export_document_image(id, output.as_deref(), cx)
+          .map_err(RenderCommandError::Export)?;
+        return Ok(format!("Exported image to {}", path.display()));
       }
     }
     if let Some(on_change) = self.document_panels.select_representation_layers(id, layers) {

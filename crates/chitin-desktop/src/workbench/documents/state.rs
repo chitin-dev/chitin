@@ -25,6 +25,8 @@ type SelectionInputBinder = dyn Fn(SelectionInputHandler, &mut App);
 type SelectionChangeHandler = dyn Fn(Arc<AtomSelection>, &mut App);
 /// Callback that applies a viewport background policy to one WGPU document view.
 type BackgroundChangeHandler = dyn Fn(ViewportBackground, &mut App);
+/// Callback that captures one WGPU document view to a PNG path.
+type ExportHandler = dyn Fn(&Path, &mut App) -> Result<(), String>;
 
 /// Result produced when a WGPU document factory creates a fresh view.
 pub struct WgpuDocumentView {
@@ -37,6 +39,8 @@ pub struct WgpuDocumentView {
   surface_backend: Option<WgpuSurfaceBackendControl>,
   /// Optional viewport background controller.
   background: Option<WgpuBackgroundControl>,
+  /// Optional PNG export controller.
+  export: Option<WgpuExportControl>,
 }
 
 /// Scientific selection state and its renderer callback, scoped to one view.
@@ -100,6 +104,13 @@ pub(crate) struct WgpuBackgroundControl {
   on_change: Rc<BackgroundChangeHandler>,
 }
 
+/// PNG export callback for one independent panel view.
+#[derive(Clone)]
+pub(crate) struct WgpuExportControl {
+  /// Callback that renders and writes the image.
+  on_export: Rc<ExportHandler>,
+}
+
 type FreshWgpuSurfaceCallback = Rc<dyn Fn(&Path, &mut Window, &mut App) -> WgpuDocumentView>;
 
 /// Factory used to create independent WGPU document views for split panels.
@@ -148,6 +159,8 @@ pub(crate) enum DocumentPanelContent {
     surface_backend: Option<WgpuSurfaceBackendControl>,
     /// Viewport background state when this view supports a customized clear color.
     background: Option<WgpuBackgroundControl>,
+    /// PNG export callback when this view supports image capture.
+    export: Option<WgpuExportControl>,
     /// Callback that creates an independent view for split-panel clones.
     clone_view: WgpuDocumentViewFactory,
   },
@@ -197,6 +210,7 @@ impl WgpuDocumentView {
       representation_layers: None,
       surface_backend: None,
       background: None,
+      export: None,
     }
   }
 
@@ -215,6 +229,7 @@ impl WgpuDocumentView {
       }),
       surface_backend: None,
       background: None,
+      export: None,
     }
   }
 
@@ -284,6 +299,23 @@ impl WgpuDocumentView {
     self.background = Some(WgpuBackgroundControl {
       background,
       on_change: Rc::new(on_change),
+    });
+    self
+  }
+
+  /// Adds PNG export support for this viewport.
+  ///
+  /// # Parameters
+  ///
+  /// * `on_export` renders and writes the current camera view to the supplied
+  ///   path.
+  ///
+  /// # Returns
+  ///
+  /// This document view with its export controller installed.
+  pub fn with_export(mut self, on_export: impl Fn(&Path, &mut App) -> Result<(), String> + 'static) -> Self {
+    self.export = Some(WgpuExportControl {
+      on_export: Rc::new(on_export),
     });
     self
   }
@@ -409,6 +441,20 @@ impl WgpuBackgroundControl {
   }
 }
 
+impl fmt::Debug for WgpuExportControl {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.debug_struct("WgpuExportControl").finish_non_exhaustive()
+  }
+}
+
+impl PartialEq for WgpuExportControl {
+  fn eq(&self, other: &Self) -> bool {
+    Rc::ptr_eq(&self.on_export, &other.on_export)
+  }
+}
+
+impl Eq for WgpuExportControl {}
+
 impl WgpuDocumentViewFactory {
   /// Creates a factory for independent WGPU document views.
   ///
@@ -514,6 +560,7 @@ impl DocumentPanelContent {
       representation_layers: document_view.representation_layers,
       surface_backend: document_view.surface_backend,
       background: document_view.background,
+      export: document_view.export,
       clone_view,
     }
   }
@@ -586,6 +633,22 @@ impl DocumentPanelContent {
       } => Some(control.background),
       Self::ProjectDocument(_) | Self::WgpuInteractive { .. } => None,
     }
+  }
+
+  /// Returns whether this view supports PNG image capture.
+  pub(super) fn supports_export(&self) -> bool {
+    matches!(self, Self::WgpuInteractive { export: Some(_), .. })
+  }
+
+  /// Renders an exported image through this view's capture controller.
+  pub(super) fn export_image(&self, path: &Path, cx: &mut App) -> Option<Result<(), String>> {
+    let Self::WgpuInteractive {
+      export: Some(control), ..
+    } = self
+    else {
+      return None;
+    };
+    Some((control.on_export)(path, cx))
   }
 
   /// Updates molecular selection state and returns its scene callback.
@@ -679,6 +742,7 @@ impl DocumentPanelContent {
           representation_layers: document_view.representation_layers,
           surface_backend: document_view.surface_backend,
           background: document_view.background,
+          export: document_view.export,
           clone_view: clone_view.clone(),
         }
       }
@@ -1079,6 +1143,42 @@ impl DocumentPanelState {
       .find(|tab| tab.id == active_tab_id)
       .map(|tab| &mut tab.payload)?;
     content.select_background(background)
+  }
+
+  /// Returns whether a stable rendering tab supports PNG image capture.
+  pub(crate) fn supports_export(&self, id: u64) -> bool {
+    self.rendering_panel_location(id).is_some_and(|(panel, tab)| {
+      self
+        .tree
+        .leaf(panel)
+        .and_then(|leaf| leaf.tabs.iter().find(|entry| entry.id == tab))
+        .is_some_and(|entry| entry.payload.supports_export())
+    })
+  }
+
+  /// Returns the stable display title for one rendering tab.
+  pub(crate) fn tab_title(&self, id: u64) -> Option<&str> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    self
+      .tree
+      .leaf(panel)?
+      .tabs
+      .iter()
+      .find(|entry| entry.id == tab)
+      .map(|entry| entry.title.as_str())
+  }
+
+  /// Writes a PNG through a stable rendering tab's capture controller.
+  pub(crate) fn export_image(&self, id: u64, path: &Path, cx: &mut App) -> Option<Result<(), String>> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    self
+      .tree
+      .leaf(panel)?
+      .tabs
+      .iter()
+      .find(|entry| entry.id == tab)?
+      .payload
+      .export_image(path, cx)
   }
 
   /// Splits one document panel and copies its active tab to the new panel.

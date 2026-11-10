@@ -1,5 +1,7 @@
 //! Experimental WGPU document panel component.
 
+mod export;
+
 use std::{
   cell::Cell,
   rc::Rc,
