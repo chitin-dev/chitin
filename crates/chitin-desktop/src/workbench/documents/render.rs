@@ -128,24 +128,21 @@ fn render_panel_export_button(tab_id: u64, theme: ThemeColor, app: WeakEntity<Ch
       let app = app.clone();
       window
         .spawn(cx, async move |cx| {
-          let result = match receiver.await {
-            Ok(result) => result,
-            Err(error) => {
-              log::error!("export save dialog channel closed: {error}");
-              return;
+          let path = match receiver.await {
+            Ok(Ok(Some(path))) => Some(path),
+            Ok(Ok(None)) => return,
+            Ok(Err(error)) => {
+              log::warn!("native export save dialog unavailable ({error}); using the default export path");
+              None
             }
-          };
-          let path = match result {
-            Ok(Some(path)) => path,
-            Ok(None) => return,
             Err(error) => {
-              log::error!("export save dialog failed: {error}");
-              return;
+              log::warn!("export save dialog channel closed ({error}); using the default export path");
+              None
             }
           };
           let _ = app.update_in(cx, |app, _window, cx| {
             if let Err(error) =
-              app.dispatch_render_command(Some(tab_id), RenderCommand::ExportImage { output: Some(path) }, cx)
+              app.dispatch_render_command(Some(tab_id), RenderCommand::ExportImage { output: path }, cx)
             {
               log::error!("{error}");
             }

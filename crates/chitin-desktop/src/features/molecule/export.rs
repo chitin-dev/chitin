@@ -6,32 +6,35 @@ use std::{
 };
 
 use chitin_ui::widgets::toast::{Toast, ToastVariant};
-use gpui::Context;
+use gpui::{AsyncApp, Context};
 
 use crate::app::ChitinApp;
 
 impl ChitinApp {
-  /// Exports one protein viewport to a timestamped PNG under the workspace.
+  /// Starts an asynchronous export of one protein viewport.
   ///
   /// The file is written to `<workspace>/.chitin/exports/<title>-<unix-seconds>.png`.
-  /// When no workspace is open, the current working directory is used. A toast
-  /// reports the final path or the failure reason.
+  /// When no workspace is open, the current working directory is used. GPU
+  /// submission happens immediately; polling, readback, PNG encoding, and the
+  /// file write run on the background executor. Toasts report progress and the
+  /// final result.
   ///
   /// # Parameters
   ///
   /// * `panel_id` identifies the stable rendering tab to capture.
   /// * `output` optionally supplies a destination file or directory. Relative
   ///   paths resolve inside the workspace; non-PNG extensions become `.png`.
-  /// * `cx` updates the toast viewport after the capture completes.
+  /// * `cx` schedules the background worker and reports through the toast viewport.
   ///
   /// # Returns
   ///
-  /// The written image path on success.
+  /// The destination path once GPU work has been submitted. The file may not
+  /// exist yet when this returns.
   ///
   /// # Errors
   ///
   /// Returns a user-facing message when the tab is unavailable, the panel does
-  /// not support export, or the GPU/PNG write fails.
+  /// not support export, or GPU submission fails.
   pub(crate) fn export_document_image(
     &mut self,
     panel_id: u64,
@@ -42,31 +45,70 @@ impl ChitinApp {
       return Err("the requested rendering tab is not open".into());
     };
     let path = self.export_image_path(&title, output);
-    match self.document_panels.export_image(panel_id, &path, cx) {
-      Some(Ok(())) => {
-        self.show_toast(
-          Toast::new("Protein image exported")
-            .description(path.display().to_string())
-            .variant(ToastVariant::Success),
-          cx,
-        );
-        Ok(path)
-      }
+    let toast_viewport = self.toast_viewport(cx);
+    let info = toast_viewport.update(cx, |viewport, cx| {
+      viewport.push(
+        Toast::new("Exporting protein image")
+          .description(path.display().to_string())
+          .variant(ToastVariant::Info)
+          .duration(None),
+        cx,
+      )
+    });
+    let task = match self.document_panels.export_image(panel_id, &path, cx) {
+      Some(Ok(task)) => task,
       Some(Err(error)) => {
-        self.show_toast(
-          Toast::new("Failed to export protein image")
-            .description(error.clone())
-            .variant(ToastVariant::Error),
-          cx,
-        );
-        Err(error)
+        toast_viewport.update(cx, |viewport, cx| {
+          viewport.dismiss(info, cx);
+          viewport.push(
+            Toast::new("Failed to export protein image")
+              .description(error.clone())
+              .variant(ToastVariant::Error),
+            cx,
+          );
+        });
+        return Err(error);
       }
       None => {
         let error = "This panel does not support image export".to_string();
-        self.show_toast(Toast::new(error.clone()).variant(ToastVariant::Warning), cx);
-        Err(error)
+        toast_viewport.update(cx, |viewport, cx| {
+          viewport.dismiss(info, cx);
+          viewport.push(Toast::new(error.clone()).variant(ToastVariant::Warning), cx);
+        });
+        return Err(error);
       }
-    }
+    };
+
+    let toast_viewport = toast_viewport.clone();
+    cx.spawn(async move |_app, async_cx: &mut AsyncApp| {
+      let result = async_cx.background_executor().spawn(async move { task() }).await;
+      async_cx.update(|cx| {
+        toast_viewport.update(cx, |viewport, cx| {
+          viewport.dismiss(info, cx);
+          match result {
+            Ok(path) => {
+              viewport.push(
+                Toast::new("Protein image exported")
+                  .description(path.display().to_string())
+                  .variant(ToastVariant::Success),
+                cx,
+              );
+            }
+            Err(error) => {
+              viewport.push(
+                Toast::new("Failed to export protein image")
+                  .description(error)
+                  .variant(ToastVariant::Error),
+                cx,
+              );
+            }
+          }
+        });
+      });
+    })
+    .detach();
+
+    Ok(path)
   }
 
   /// Resolves the export destination for a viewport title.

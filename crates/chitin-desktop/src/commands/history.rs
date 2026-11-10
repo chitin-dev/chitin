@@ -220,7 +220,11 @@ mod tests {
     )
     .with_surface_backend(MolecularSurfaceBackend::ImplicitScalarField, |_, _| {})
     .with_background(ViewportBackground::Auto, |_, _| {})
-    .with_export(|_, _| Ok(()))
+    .with_export(|_, _| {
+      Ok(Box::new(|| {
+        Ok(std::env::temp_dir().join(format!("chitin-export-{}.png", std::process::id())))
+      }))
+    })
     .with_selection(Arc::new(scene), |_, _| {}, |_, _| {})
     .with_visibility(|_, _| {})
   }
@@ -411,7 +415,7 @@ mod tests {
       app.update(cx, |app, cx| {
         assert!(app.document_panels.supports_export(1));
         let path = std::env::temp_dir().join(format!("chitin-export-{}.png", std::process::id()));
-        assert_eq!(app.document_panels.export_image(1, &path, cx), Some(Ok(())));
+        assert!(matches!(app.document_panels.export_image(1, &path, cx), Some(Ok(_))));
         assert!(!app.document_panels.supports_export(99));
       });
     });
@@ -426,7 +430,7 @@ mod tests {
           .dispatch_render_command(Some(1), RenderCommand::ExportImage { output: None }, cx)
           .unwrap_or_else(|error| panic!("export command should succeed: {error}"));
         assert!(
-          output.starts_with("Exported image to "),
+          output.starts_with("Exporting image to "),
           "command output should identify the destination: {output}"
         );
         assert!(output.ends_with(".png"));

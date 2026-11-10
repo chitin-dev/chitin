@@ -25,8 +25,10 @@ type SelectionInputBinder = dyn Fn(SelectionInputHandler, &mut App);
 type SelectionChangeHandler = dyn Fn(Arc<AtomSelection>, &mut App);
 /// Callback that applies a viewport background policy to one WGPU document view.
 type BackgroundChangeHandler = dyn Fn(ViewportBackground, &mut App);
-/// Callback that captures one WGPU document view to a PNG path.
-type ExportHandler = dyn Fn(&Path, &mut App) -> Result<(), String>;
+/// Blocking worker that finishes an already-submitted image capture.
+pub(crate) type ExportTask = Box<dyn FnOnce() -> Result<PathBuf, String> + Send>;
+/// Callback that submits one WGPU document view capture.
+type ExportHandler = dyn Fn(&Path, &mut App) -> Result<ExportTask, String>;
 
 /// Result produced when a WGPU document factory creates a fresh view.
 pub struct WgpuDocumentView {
@@ -307,13 +309,13 @@ impl WgpuDocumentView {
   ///
   /// # Parameters
   ///
-  /// * `on_export` renders and writes the current camera view to the supplied
-  ///   path.
+  /// * `on_export` submits the GPU capture and returns a worker that performs
+  ///   the blocking readback and file write off the UI thread.
   ///
   /// # Returns
   ///
   /// This document view with its export controller installed.
-  pub fn with_export(mut self, on_export: impl Fn(&Path, &mut App) -> Result<(), String> + 'static) -> Self {
+  pub fn with_export(mut self, on_export: impl Fn(&Path, &mut App) -> Result<ExportTask, String> + 'static) -> Self {
     self.export = Some(WgpuExportControl {
       on_export: Rc::new(on_export),
     });
@@ -641,7 +643,7 @@ impl DocumentPanelContent {
   }
 
   /// Renders an exported image through this view's capture controller.
-  pub(super) fn export_image(&self, path: &Path, cx: &mut App) -> Option<Result<(), String>> {
+  pub(super) fn export_image(&self, path: &Path, cx: &mut App) -> Option<Result<ExportTask, String>> {
     let Self::WgpuInteractive {
       export: Some(control), ..
     } = self
@@ -1169,7 +1171,7 @@ impl DocumentPanelState {
   }
 
   /// Writes a PNG through a stable rendering tab's capture controller.
-  pub(crate) fn export_image(&self, id: u64, path: &Path, cx: &mut App) -> Option<Result<(), String>> {
+  pub(crate) fn export_image(&self, id: u64, path: &Path, cx: &mut App) -> Option<Result<ExportTask, String>> {
     let (panel, tab) = self.rendering_panel_location(id)?;
     self
       .tree

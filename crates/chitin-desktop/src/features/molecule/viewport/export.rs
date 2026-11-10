@@ -1,6 +1,12 @@
 //! Offscreen PNG capture for one molecular viewport.
 
-use std::{fs::File, io::BufWriter, path::Path, sync::mpsc, time::Duration};
+use std::{
+  fs::File,
+  io::BufWriter,
+  path::{Path, PathBuf},
+  sync::mpsc,
+  time::Duration,
+};
 
 use chitin_wgpu::RenderTargetSize;
 
@@ -32,26 +38,27 @@ pub(crate) enum ExportError {
 }
 
 impl ChitinWgpuDocumentPanel {
-  /// Renders the current camera view into an offscreen texture and writes a PNG.
+  /// Starts an offscreen capture of the current camera view.
   ///
-  /// The capture uses the live viewport's physical resolution and clear color,
-  /// so it matches what the user currently sees without including the FPS or
-  /// selection overlays drawn by GPUI.
+  /// This half runs on the UI thread and only performs GPU submission: it
+  /// creates the target texture, renders the scene, and queues the readback.
+  /// Polling, mapping, PNG encoding, and file I/O happen in
+  /// [`PendingExport::finish`] on a background worker.
   ///
   /// # Parameters
   ///
-  /// * `path` is the destination image path; missing parent directories are
-  ///   created before writing.
+  /// * `path` is the final image path. The target directory is not created
+  ///   until the background write runs.
   ///
   /// # Returns
   ///
-  /// `Ok(())` after the PNG has been written.
+  /// A pending capture that can be finished off the UI thread.
   ///
   /// # Errors
   ///
-  /// Returns [`ExportError`] when the surface is unavailable, the GPU readback
-  /// fails, or the image cannot be encoded or written.
-  pub(crate) fn export_png(&mut self, path: &Path) -> Result<(), ExportError> {
+  /// Returns [`ExportError`] when the surface is unavailable, the target is
+  /// empty, or GPU submission fails.
+  pub(crate) fn begin_export(&mut self, path: &Path) -> Result<PendingExport, ExportError> {
     let Some(surface) = self.surface.as_ref() else {
       return Err(ExportError::NoSurface);
     };
@@ -59,11 +66,11 @@ impl ChitinWgpuDocumentPanel {
     if width == 0 || height == 0 {
       return Err(ExportError::EmptyTarget);
     }
-    let format = surface.format();
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     let device = surface.device();
     let queue = surface.queue();
     // Prevent a surface resize from reconfiguring the shared queue while the
-    // offscreen capture is submitted.
+    // offscreen capture is submitted. The guard is released before returning.
     let _submit_guard = surface.submit_guard();
 
     let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -95,40 +102,87 @@ impl ChitinWgpuDocumentPanel {
       elapsed,
     });
 
-    let rgba = read_texture_rgba(device, queue, &texture, format, width, height)?;
-    if let Some(parent) = path.parent() {
+    let (readback, submission) = submit_texture_readback(device, queue, &texture, width, height)?;
+    Ok(PendingExport {
+      device: device.clone(),
+      path: path.to_path_buf(),
+      width,
+      height,
+      format,
+      readback,
+      submission,
+    })
+  }
+}
+
+/// Submitted GPU capture whose readback and file write can run off the UI thread.
+pub(crate) struct PendingExport {
+  /// Device used by the submitted copy.
+  device: wgpu::Device,
+  /// Final image path.
+  path: PathBuf,
+  /// Capture width in physical pixels.
+  width: u32,
+  /// Capture height in physical pixels.
+  height: u32,
+  /// Format of the source render target.
+  format: wgpu::TextureFormat,
+  /// Buffer receiving the texture copy.
+  readback: wgpu::Buffer,
+  /// Queue submission that must complete before mapping.
+  submission: wgpu::SubmissionIndex,
+}
+
+impl PendingExport {
+  /// Waits for the GPU copy, reads it back, and writes the PNG.
+  ///
+  /// This blocks the calling worker until the GPU finishes, so callers must not
+  /// invoke it on the GPUI event thread.
+  ///
+  /// # Returns
+  ///
+  /// The written image path.
+  ///
+  /// # Errors
+  ///
+  /// Returns [`ExportError`] when GPU readback fails or the image cannot be
+  /// encoded or written.
+  pub(crate) fn finish(self) -> Result<PathBuf, ExportError> {
+    let mut rgba = read_buffer_rgba(
+      &self.device,
+      &self.readback,
+      self.format,
+      self.width,
+      self.height,
+      Some(self.submission),
+    )?;
+    if self.format.is_srgb() {
+      decode_presentation_rgb(&mut rgba);
+    }
+    if let Some(parent) = self.path.parent() {
       std::fs::create_dir_all(parent).map_err(|source| ExportError::Io {
         path: parent.display().to_string(),
         source,
       })?;
     }
-    let file = File::create(path).map_err(|source| ExportError::Io {
-      path: path.display().to_string(),
+    let file = File::create(&self.path).map_err(|source| ExportError::Io {
+      path: self.path.display().to_string(),
       source,
     })?;
-    encode_png(BufWriter::new(file), width, height, &rgba)?;
-    Ok(())
+    encode_png(BufWriter::new(file), self.width, self.height, &rgba)?;
+    Ok(self.path)
   }
 }
 
-/// Copies one texture into a mappable buffer and returns tightly packed RGBA.
-fn read_texture_rgba(
+/// Queues a texture-to-buffer copy and returns the buffer with its submission.
+fn submit_texture_readback(
   device: &wgpu::Device,
   queue: &wgpu::Queue,
   texture: &wgpu::Texture,
-  format: wgpu::TextureFormat,
   width: u32,
   height: u32,
-) -> Result<Vec<u8>, ExportError> {
-  let unpadded_bytes_per_row = width * 4;
-  let padded_bytes_per_row =
-    unpadded_bytes_per_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-  let readback = device.create_buffer(&wgpu::BufferDescriptor {
-    label: Some("chitin_protein_export_readback"),
-    size: u64::from(padded_bytes_per_row) * u64::from(height),
-    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-    mapped_at_creation: false,
-  });
+) -> Result<(wgpu::Buffer, wgpu::SubmissionIndex), ExportError> {
+  let (readback, padded_bytes_per_row) = create_readback_buffer(device, width, height);
   let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
     label: Some("chitin_protein_export_encoder"),
   });
@@ -153,10 +207,36 @@ fn read_texture_rgba(
       depth_or_array_layers: 1,
     },
   );
-  let copy_submission = queue.submit(Some(encoder.finish()));
+  let submission = queue.submit(Some(encoder.finish()));
+  Ok((readback, submission))
+}
+
+/// Creates the mappable readback buffer and returns its aligned row stride.
+fn create_readback_buffer(device: &wgpu::Device, width: u32, height: u32) -> (wgpu::Buffer, u32) {
+  let unpadded_bytes_per_row = width * 4;
+  let padded_bytes_per_row =
+    unpadded_bytes_per_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+  let readback = device.create_buffer(&wgpu::BufferDescriptor {
+    label: Some("chitin_protein_export_readback"),
+    size: u64::from(padded_bytes_per_row) * u64::from(height),
+    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+    mapped_at_creation: false,
+  });
+  (readback, padded_bytes_per_row)
+}
+
+/// Waits for a submitted copy and returns tightly packed RGBA bytes.
+fn read_buffer_rgba(
+  device: &wgpu::Device,
+  readback: &wgpu::Buffer,
+  format: wgpu::TextureFormat,
+  width: u32,
+  height: u32,
+  submission: Option<wgpu::SubmissionIndex>,
+) -> Result<Vec<u8>, ExportError> {
   device
     .poll(wgpu::PollType::Wait {
-      submission_index: Some(copy_submission),
+      submission_index: submission.clone(),
       timeout: Some(Duration::from_secs(30)),
     })
     .map_err(|error| ExportError::Readback(error.to_string()))?;
@@ -168,7 +248,7 @@ fn read_texture_rgba(
   });
   device
     .poll(wgpu::PollType::Wait {
-      submission_index: None,
+      submission_index: submission,
       timeout: Some(Duration::from_secs(30)),
     })
     .map_err(|error| ExportError::Readback(error.to_string()))?;
@@ -180,6 +260,9 @@ fn read_texture_rgba(
   let mapped = slice
     .get_mapped_range()
     .map_err(|error| ExportError::Readback(error.to_string()))?;
+  let unpadded_bytes_per_row = width * 4;
+  let padded_bytes_per_row =
+    unpadded_bytes_per_row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
   let mut rgba = Vec::with_capacity((width as usize) * (height as usize) * 4);
   for row in 0..height {
     let start = (row as usize) * (padded_bytes_per_row as usize);
@@ -207,6 +290,68 @@ fn encode_png(mut writer: impl std::io::Write, width: u32, height: u32, rgba: &[
   let mut png = encoder.write_header()?;
   png.write_image_data(rgba)?;
   Ok(())
+}
+
+/// Matches the values GPUI currently presents for a WGPU surface.
+///
+/// The production viewport uses an sRGB surface that GPUI samples into linear
+/// space and writes to a non-sRGB swapchain. Exporting the raw sRGB bytes looks
+/// brighter than that viewport, so decode the RGB channels before writing PNG.
+fn decode_presentation_rgb(rgba: &mut [u8]) {
+  for pixel in rgba.chunks_exact_mut(4) {
+    pixel[0] = srgb_to_linear_channel(pixel[0]);
+    pixel[1] = srgb_to_linear_channel(pixel[1]);
+    pixel[2] = srgb_to_linear_channel(pixel[2]);
+  }
+}
+
+/// Converts one sRGB-encoded channel to the linear value shown by GPUI.
+fn srgb_to_linear_channel(value: u8) -> u8 {
+  let encoded = f32::from(value) / 255.0;
+  let linear = if encoded <= 0.040_45 {
+    encoded / 12.92
+  } else {
+    ((encoded + 0.055) / 1.055).powf(2.4)
+  };
+  (linear * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+#[cfg(test)]
+fn read_texture_rgba(
+  device: &wgpu::Device,
+  queue: &wgpu::Queue,
+  texture: &wgpu::Texture,
+  format: wgpu::TextureFormat,
+  width: u32,
+  height: u32,
+) -> Result<Vec<u8>, ExportError> {
+  let (readback, padded_bytes_per_row) = create_readback_buffer(device, width, height);
+  let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+    label: Some("chitin_export_test_encoder"),
+  });
+  encoder.copy_texture_to_buffer(
+    wgpu::TexelCopyTextureInfo {
+      texture,
+      mip_level: 0,
+      origin: wgpu::Origin3d::ZERO,
+      aspect: wgpu::TextureAspect::All,
+    },
+    wgpu::TexelCopyBufferInfo {
+      buffer: &readback,
+      layout: wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(padded_bytes_per_row),
+        rows_per_image: Some(height),
+      },
+    },
+    wgpu::Extent3d {
+      width,
+      height,
+      depth_or_array_layers: 1,
+    },
+  );
+  let submission = queue.submit(Some(encoder.finish()));
+  read_buffer_rgba(device, &readback, format, width, height, Some(submission))
 }
 
 #[cfg(test)]
@@ -238,6 +383,16 @@ mod tests {
     assert_eq!(info.width, 6);
     assert_eq!(info.height, 1);
     assert_eq!(&output[..pixels.len()], &pixels);
+  }
+
+  #[test]
+  fn presentation_decode_should_keep_endpoints_and_darken_midtones() {
+    let mut pixels = [0, 0, 0, 255, 255, 255, 255, 255, 226, 226, 226, 255];
+    decode_presentation_rgb(&mut pixels);
+    assert_eq!(&pixels[0..4], &[0, 0, 0, 255]);
+    assert_eq!(&pixels[4..8], &[255, 255, 255, 255]);
+    assert!(pixels[8] < 200, "sRGB midtones should decode toward linear");
+    assert!(srgb_to_linear_channel(64) < 64);
   }
 
   /// Manual GPU check; ignored so CI does not require an adapter.

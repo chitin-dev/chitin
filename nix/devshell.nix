@@ -13,6 +13,7 @@ pkgs.mkShell {
     rustfmt
     typst
     wasm-pack
+    zenity
     z3
   ];
   buildInputs = platform;

@@ -154,7 +154,7 @@ impl ChitinApp {
         let path = self
           .export_document_image(id, output.as_deref(), cx)
           .map_err(RenderCommandError::Export)?;
-        return Ok(format!("Exported image to {}", path.display()));
+        return Ok(format!("Exporting image to {}", path.display()));
       }
     }
     if let Some(on_change) = self.document_panels.select_representation_layers(id, layers) {
