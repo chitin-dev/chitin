@@ -295,7 +295,7 @@ fn read_buffer_rgba(
     let pixels = &mapped[start..end];
     match format {
       wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
-        for pixel in pixels.chunks_exact(4) {
+        for pixel in pixels.as_chunks::<4>().0 {
           rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
         }
       }
@@ -323,7 +323,7 @@ fn encode_png(mut writer: impl std::io::Write, width: u32, height: u32, rgba: &[
 /// space and writes to a non-sRGB swapchain. Exporting the raw sRGB bytes looks
 /// brighter than that viewport, so decode the RGB channels before writing PNG.
 fn decode_presentation_rgb(rgba: &mut [u8]) {
-  for pixel in rgba.chunks_exact_mut(4) {
+  for pixel in rgba.as_chunks_mut::<4>().0 {
     pixel[0] = srgb_to_linear_channel(pixel[0]);
     pixel[1] = srgb_to_linear_channel(pixel[1]);
     pixel[2] = srgb_to_linear_channel(pixel[2]);
@@ -512,7 +512,7 @@ mod tests {
       queue.submit(Some(encoder.finish()));
       let rgba = read_texture_rgba(&device, &queue, &texture, wgpu::TextureFormat::Rgba8UnormSrgb, 2, 2)
         .unwrap_or_else(|error| panic!("readback should succeed: {error}"));
-      for pixel in rgba.chunks_exact(4) {
+      for pixel in rgba.as_chunks::<4>().0 {
         for (channel, expected) in pixel[..3].iter().zip(expected) {
           assert!(
             i32::from(*channel).abs_diff(expected) <= 1,
