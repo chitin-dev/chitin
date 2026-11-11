@@ -1,16 +1,22 @@
 //! Offscreen PNG capture for one molecular viewport.
 
 use std::{
-  fs::{File, OpenOptions},
+  fs::OpenOptions,
   io::{BufWriter, ErrorKind},
   path::{Path, PathBuf},
-  sync::mpsc,
+  sync::{
+    atomic::{AtomicU64, Ordering},
+    mpsc,
+  },
   time::Duration,
 };
 
 use chitin_wgpu::RenderTargetSize;
 
 use super::{ChitinWgpuDocumentPanel, WgpuPanelFrame};
+
+/// Sequence used to keep temporary output names unique within one process.
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Failure while rendering or writing a protein image.
 #[derive(Debug, thiserror::Error)]
@@ -172,31 +178,68 @@ impl PendingExport {
         source,
       })?;
     }
-    let file = open_export_file(&self.path, self.create_new)?;
-    encode_png(BufWriter::new(file), self.width, self.height, &rgba)?;
+    write_atomic_png(&self.path, self.create_new, self.width, self.height, &rgba)?;
     Ok(self.path)
   }
 }
 
-/// Opens the destination, optionally refusing to replace an existing file.
-fn open_export_file(path: &Path, create_new: bool) -> Result<File, ExportError> {
-  let mut options = OpenOptions::new();
-  options.write(true);
-  if create_new {
-    options.create_new(true);
-  } else {
-    options.create(true).truncate(true);
+/// Writes a PNG through a temporary sibling and replaces the destination only
+/// after encoding, flushing, and syncing succeed.
+fn write_atomic_png(path: &Path, create_new: bool, width: u32, height: u32, rgba: &[u8]) -> Result<(), ExportError> {
+  let temporary = temporary_export_path(path);
+  let result = write_png_file(&temporary, width, height, rgba);
+  if let Err(error) = result {
+    let _ = std::fs::remove_file(&temporary);
+    return Err(error);
   }
-  options.open(path).map_err(|source| {
-    if create_new && source.kind() == ErrorKind::AlreadyExists {
-      ExportError::AlreadyExists(path.display().to_string())
-    } else {
-      ExportError::Io {
-        path: path.display().to_string(),
-        source,
+  if create_new && path.exists() {
+    let _ = std::fs::remove_file(&temporary);
+    return Err(ExportError::AlreadyExists(path.display().to_string()));
+  }
+  if let Err(source) = std::fs::rename(&temporary, path) {
+    let _ = std::fs::remove_file(&temporary);
+    return Err(ExportError::Io {
+      path: path.display().to_string(),
+      source,
+    });
+  }
+  Ok(())
+}
+
+/// Encodes a PNG into a fresh temporary file and verifies the final flush.
+fn write_png_file(path: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), ExportError> {
+  let file = OpenOptions::new()
+    .write(true)
+    .create_new(true)
+    .open(path)
+    .map_err(|source| {
+      if source.kind() == ErrorKind::AlreadyExists {
+        ExportError::AlreadyExists(path.display().to_string())
+      } else {
+        ExportError::Io {
+          path: path.display().to_string(),
+          source,
+        }
       }
-    }
-  })
+    })?;
+  let mut writer = BufWriter::new(file);
+  encode_png(&mut writer, width, height, rgba)?;
+  let file = writer.into_inner().map_err(|error| ExportError::Io {
+    path: path.display().to_string(),
+    source: error.into_error(),
+  })?;
+  file.sync_all().map_err(|source| ExportError::Io {
+    path: path.display().to_string(),
+    source,
+  })?;
+  Ok(())
+}
+
+/// Returns a unique sibling path for an in-progress export.
+fn temporary_export_path(path: &Path) -> PathBuf {
+  let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("image.png");
+  let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+  path.with_file_name(format!(".{name}.tmp-{}-{sequence}", std::process::id()))
 }
 
 /// Queues a texture-to-buffer copy and returns the buffer with its submission.
@@ -314,6 +357,7 @@ fn encode_png(mut writer: impl std::io::Write, width: u32, height: u32, rgba: &[
   encoder.set_depth(png::BitDepth::Eight);
   let mut png = encoder.write_header()?;
   png.write_image_data(rgba)?;
+  png.finish()?;
   Ok(())
 }
 
@@ -420,6 +464,26 @@ mod tests {
     assert!(srgb_to_linear_channel(64) < 64);
   }
 
+  struct FlushFailWriter;
+
+  impl std::io::Write for FlushFailWriter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+      Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+      Err(std::io::Error::other("intentional flush failure"))
+    }
+  }
+
+  #[test]
+  fn png_encoder_should_report_final_flush_failures() {
+    assert!(
+      encode_png(FlushFailWriter, 1, 1, &[255, 0, 0, 255]).is_err(),
+      "encode_png must surface the final flush error"
+    );
+  }
+
   #[test]
   fn create_new_exports_should_not_replace_an_existing_file() {
     let directory = std::env::temp_dir().join(format!(
@@ -433,14 +497,34 @@ mod tests {
       panic!("test directory should be creatable: {error}");
     }
     let path = directory.join("image.png");
-    let first = open_export_file(&path, true);
-    assert!(first.is_ok());
-    drop(first);
+    let original = [255, 0, 0, 255];
+    if let Err(error) = write_atomic_png(&path, true, 1, 1, &original) {
+      panic!("initial export should succeed: {error}");
+    }
+    let first = match std::fs::read(&path) {
+      Ok(bytes) => bytes,
+      Err(error) => panic!("initial export should be readable: {error}"),
+    };
     assert!(matches!(
-      open_export_file(&path, true),
+      write_atomic_png(&path, true, 1, 1, &[0, 255, 0, 255]),
       Err(ExportError::AlreadyExists(_))
     ));
-    assert!(open_export_file(&path, false).is_ok());
+    let preserved = match std::fs::read(&path) {
+      Ok(bytes) => bytes,
+      Err(error) => panic!("existing export should remain readable: {error}"),
+    };
+    assert_eq!(first, preserved);
+    if let Err(error) = write_atomic_png(&path, false, 1, 1, &[0, 255, 0, 255]) {
+      panic!("explicit overwrite should succeed: {error}");
+    }
+    let replaced = match std::fs::read(&path) {
+      Ok(bytes) => bytes,
+      Err(error) => panic!("replacement export should be readable: {error}"),
+    };
+    assert_ne!(first, replaced);
+    if let Ok(entries) = std::fs::read_dir(&directory) {
+      assert_eq!(entries.count(), 1, "temporary export files must be cleaned up");
+    }
     let _ = std::fs::remove_dir_all(&directory);
   }
 
