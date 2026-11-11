@@ -3,7 +3,7 @@
 use crate::{app::ChitinApp, workbench::documents::DocumentPanelState};
 use chitin_bio::{structure::selection::AtomSelection, surface::MolecularSurfaceBackend};
 use chitin_command::{CommandId, RenderLayer, history::CommandHistory};
-use chitin_molecule_renderer::RepresentationLayers;
+use chitin_molecule_renderer::{RepresentationLayers, ViewportBackground};
 use gpui::{Context, EntityId};
 use std::sync::Arc;
 
@@ -20,6 +20,7 @@ pub(crate) struct ViewSnapshot {
   view: EntityId,
   layers: RepresentationLayers,
   backend: Option<MolecularSurfaceBackend>,
+  background: Option<ViewportBackground>,
   selection: Option<Arc<AtomSelection>>,
   hidden: Option<Arc<AtomSelection>>,
 }
@@ -30,6 +31,7 @@ impl ViewSnapshot {
       view: state.rendering_view_id(target)?,
       layers,
       backend,
+      background: state.background(target),
       selection: state.selection_control(target).map(|control| control.atoms.clone()),
       hidden: state.selection_control(target).map(|control| control.hidden.clone()),
     })
@@ -152,6 +154,11 @@ impl ChitinApp {
     {
       callback(backend, cx);
     }
+    if let Some(background) = snapshot.background
+      && let Some(callback) = self.document_panels.select_background(change.target, background)
+    {
+      callback(background, cx);
+    }
     if let Some(callback) = self
       .document_panels
       .select_representation_layers(change.target, snapshot.layers)
@@ -188,8 +195,10 @@ mod tests {
     state::{WgpuDocumentView, WgpuDocumentViewFactory},
   };
   use chitin_bio::structure::{PdbParser, StructureScene};
-  use chitin_command::{RenderAtomStyle, RenderCommand, RenderOpacity, SelectionCommand, SelectionMode};
-  use chitin_molecule_renderer::AtomStyle;
+  use chitin_command::{
+    RenderAtomStyle, RenderBackground, RenderCommand, RenderOpacity, RenderRgb, SelectionCommand, SelectionMode,
+  };
+  use chitin_molecule_renderer::{AtomStyle, ViewportBackground};
   use gpui::{App, AppContext, IntoElement, Render, Window};
 
   struct Probe;
@@ -210,6 +219,12 @@ mod tests {
       |_, _| {},
     )
     .with_surface_backend(MolecularSurfaceBackend::ImplicitScalarField, |_, _| {})
+    .with_background(ViewportBackground::Auto, |_, _| {})
+    .with_export(|_, _, _| {
+      Ok(Box::new(|| {
+        Ok(std::env::temp_dir().join(format!("chitin-export-{}.png", std::process::id())))
+      }))
+    })
     .with_selection(Arc::new(scene), |_, _| {}, |_, _| {})
     .with_visibility(|_, _| {})
   }
@@ -388,6 +403,76 @@ mod tests {
             .rendering_settings(1)
             .map(|(_, layers, _)| layers.atom_style()),
           Some(Some(AtomStyle::Sphere))
+        );
+      })
+    });
+  }
+
+  #[gpui::test]
+  fn export_capability_should_follow_the_rendering_tab(cx: &mut gpui::TestAppContext) {
+    let (app, cx) = mount(cx);
+    cx.update(|_, cx| {
+      app.update(cx, |app, cx| {
+        assert!(app.document_panels.supports_export(1));
+        let path = std::env::temp_dir().join(format!("chitin-export-{}.png", std::process::id()));
+        assert!(matches!(
+          app.document_panels.export_image(1, &path, true, cx),
+          Some(Ok(_))
+        ));
+        assert!(!app.document_panels.supports_export(99));
+      });
+    });
+  }
+
+  #[gpui::test]
+  fn export_command_should_report_the_destination_path(cx: &mut gpui::TestAppContext) {
+    let (app, cx) = mount(cx);
+    cx.update(|_, cx| {
+      app.update(cx, |app, cx| {
+        let output = app
+          .dispatch_render_command(Some(1), RenderCommand::ExportImage { output: None }, cx)
+          .unwrap_or_else(|error| panic!("export command should succeed: {error}"));
+        assert!(
+          output.starts_with("Exporting image to "),
+          "command output should identify the destination: {output}"
+        );
+        assert!(output.ends_with(".png"));
+      });
+    });
+  }
+
+  #[gpui::test]
+  fn viewport_background_should_be_undoable_and_independent_of_layer_style(cx: &mut gpui::TestAppContext) {
+    let (app, cx) = mount(cx);
+    cx.update(|_, cx| {
+      app.update(cx, |app, cx| {
+        assert_eq!(app.document_panels.background(1), Some(ViewportBackground::Auto));
+        assert!(
+          app
+            .dispatch_render_command(
+              Some(1),
+              RenderCommand::Background(RenderBackground::Custom(RenderRgb([255, 255, 255]))),
+              cx,
+            )
+            .is_ok()
+        );
+        assert_eq!(
+          app.document_panels.background(1),
+          Some(ViewportBackground::Custom([255, 255, 255]))
+        );
+        assert_eq!(
+          app
+            .document_panels
+            .rendering_settings(1)
+            .map(|(_, layers, _)| layers.atom_style()),
+          Some(Some(AtomStyle::Stick))
+        );
+        assert!(app.dispatch_history_command(false, cx).is_ok());
+        assert_eq!(app.document_panels.background(1), Some(ViewportBackground::Auto));
+        assert!(app.dispatch_history_command(true, cx).is_ok());
+        assert_eq!(
+          app.document_panels.background(1),
+          Some(ViewportBackground::Custom([255, 255, 255]))
         );
       })
     });

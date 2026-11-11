@@ -11,6 +11,7 @@
     #prefix-chapter("src/cli/completions.typ")[Shell completion]
     #prefix-chapter("src/cli/database.typ")[Database commands]
     #prefix-chapter("src/cli/bio.typ")[Bio commands]
+    #prefix-chapter("src/cli/chemdraw.typ")[Chemical drawing commands]
 
     = `chitin-bio` architecture
     #prefix-chapter("src/architecture/bio/overview.typ")[Overview]

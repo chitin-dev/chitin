@@ -10,6 +10,7 @@
 //! [`RepresentationLayers`], and retain ownership of the target surface.
 
 pub mod appearance;
+pub mod background;
 mod box_selection;
 pub mod camera;
 mod cartoon;
@@ -22,6 +23,7 @@ mod surface;
 mod transparency;
 mod visibility;
 
+pub use background::ViewportBackground;
 pub use camera::{DragMode, ViewerCamera, ViewportDrag};
 pub use molecule::{
   BallAndStickElementStyle, BallAndStickMaterial, BallAndStickPalette, BallAndStickStyle, MoleculeDebugMode,

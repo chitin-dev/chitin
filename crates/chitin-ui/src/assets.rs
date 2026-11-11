@@ -55,6 +55,7 @@ mod tests {
   fn asset_bundle_should_include_application_and_kit_icons() -> Result<()> {
     assert!(ChitinAssets.load("icons/terminal-builtin.svg")?.is_some());
     assert!(ChitinAssets.load("icons/download.svg")?.is_some());
+    assert!(ChitinAssets.load("icons/image-export.svg")?.is_some());
     assert!(ChitinAssets.load("icons/chevron-down.svg")?.is_some());
     Ok(())
   }

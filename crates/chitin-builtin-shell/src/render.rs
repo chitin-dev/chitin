@@ -1,8 +1,8 @@
 //! Shell-only grammar for typed molecular presentation commands.
 
 use chitin_command::{
-  RenderAtomStyle, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle, RenderRgb,
-  RenderSurfaceBackend, RenderSurfaceStyle,
+  RenderAtomStyle, RenderBackground, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle,
+  RenderRgb, RenderSurfaceBackend, RenderSurfaceStyle,
 };
 use clap::Subcommand;
 
@@ -24,6 +24,17 @@ pub(crate) enum RenderArgs {
   Surface {
     #[command(subcommand)]
     command: SurfaceArgs,
+  },
+  /// Set the viewport clear color; auto follows the light or dark theme.
+  Background {
+    /// `auto`, `black`, `white`, or an sRGB color such as #1E1E1E.
+    color: RenderBackground,
+  },
+  /// Export the current viewport to a PNG under the workspace.
+  Export {
+    /// Optional file name or path; relative paths resolve inside the workspace.
+    #[arg(value_name = "PATH")]
+    output: Option<std::path::PathBuf>,
   },
 }
 
@@ -112,6 +123,8 @@ impl RenderArgs {
       Self::Surface {
         command: SurfaceArgs::Backend { backend },
       } => RenderCommand::SurfaceBackend(backend),
+      Self::Background { color } => RenderCommand::Background(color),
+      Self::Export { output } => RenderCommand::ExportImage { output },
     }
   }
 }

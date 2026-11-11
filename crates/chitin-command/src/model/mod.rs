@@ -17,8 +17,8 @@ pub use chemdraw::{ChemdrawCommand, ChemdrawInput, ChemdrawStyle, DrawingLength}
 pub use database::{DatabaseCommand, RcsbDownloadArguments};
 pub use panel_tab::PanelTabCommand;
 pub use render::{
-  RenderAtomStyle, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle, RenderRgb,
-  RenderSurfaceBackend, RenderSurfaceStyle,
+  RenderAtomStyle, RenderBackground, RenderColorScheme, RenderCommand, RenderLayer, RenderOpacity, RenderPolymerStyle,
+  RenderRgb, RenderSurfaceBackend, RenderSurfaceStyle,
 };
 pub use selection::{AtomSpec, SelectionCommand, SelectionMode};
 pub use structure::{

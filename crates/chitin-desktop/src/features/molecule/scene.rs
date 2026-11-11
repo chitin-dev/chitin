@@ -11,13 +11,13 @@ use chitin_bio::{
 };
 use chitin_molecule_renderer::{
   AtomStyle, BallAndStickStyle, MoleculeDebugMode, MoleculeRenderInput, MoleculeRenderer, PolymerStyle,
-  RepresentationLayers,
+  RepresentationLayers, ViewportBackground,
 };
 use chitin_ui::widgets::toast::{Toast, ToastVariant, ToastViewport};
 use gpui::{AnyWindowHandle, App, AppContext, AsyncApp, Entity, Window};
 
 use super::viewport::{ChitinWgpuDocumentPanel, WgpuPanelFrame, WgpuPanelScene};
-use crate::workbench::documents::state::WgpuDocumentView;
+use crate::workbench::documents::state::{ExportTask, WgpuDocumentView};
 
 /// Default representation used when GPUI opens a PDB or mmCIF document.
 const DEFAULT_STRUCTURE_REPRESENTATION: RepresentationLayers =
@@ -72,6 +72,8 @@ pub(crate) struct StructureMoleculeScene {
   debug_mode: MoleculeDebugMode,
   /// Representation layers currently rendered by this scene.
   representation: RepresentationLayers,
+  /// Resolved linear-RGB viewport clear color.
+  background_color: [f64; 3],
 }
 
 impl StructureMoleculeScene {
@@ -85,6 +87,7 @@ impl StructureMoleculeScene {
       surface: None,
       debug_mode: MoleculeDebugMode::Final,
       representation,
+      background_color: [0.0, 0.0, 0.0],
     }
   }
 }
@@ -184,6 +187,7 @@ impl WgpuPanelScene for StructureMoleculeScene {
         &BallAndStickStyle::default(),
       )
     });
+    renderer.set_background_color(self.background_color);
     renderer.set_selection(&self.scene, Arc::clone(&self.selected));
     renderer.set_hidden(Arc::clone(&self.hidden));
     renderer.set_selection_scale(frame.scale_factor);
@@ -211,6 +215,21 @@ impl WgpuPanelScene for StructureMoleculeScene {
         representation,
         &BallAndStickStyle::default(),
       );
+    }
+    true
+  }
+
+  fn set_background_color(&mut self, color: [f64; 3]) -> bool {
+    if !color.iter().all(|channel| channel.is_finite()) {
+      return false;
+    }
+    let color = color.map(|channel| channel.clamp(0.0, 1.0));
+    if self.background_color == color {
+      return false;
+    }
+    self.background_color = color;
+    if let Some(renderer) = self.renderer.as_mut() {
+      renderer.set_background_color(color);
     }
     true
   }
@@ -297,6 +316,8 @@ pub(crate) fn build_structure_view_from_scene(
   let selection_panel = panel.clone();
   let visibility_panel = panel.clone();
   let input_panel = panel.clone();
+  let background_panel = panel.clone();
+  let export_panel = panel.clone();
   let view = view
     .with_selection(
       Arc::clone(&scene),
@@ -317,6 +338,21 @@ pub(crate) fn build_structure_view_from_scene(
           cx.notify();
         }
       });
+    })
+    .with_background(ViewportBackground::Auto, move |background, cx| {
+      background_panel.update(cx, |panel, cx| {
+        if panel.set_background(background) {
+          cx.notify();
+        }
+      });
+    })
+    .with_export(move |path, create_new, cx| {
+      export_panel.update(cx, |panel, _| {
+        panel
+          .begin_export(path, create_new)
+          .map(|pending| Box::new(move || pending.finish().map_err(|error| error.to_string())) as ExportTask)
+          .map_err(|error| error.to_string())
+      })
     });
   let backend_scene = Arc::clone(&scene);
   let backend_toasts = toast_viewport;

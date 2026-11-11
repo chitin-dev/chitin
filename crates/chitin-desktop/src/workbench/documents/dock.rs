@@ -125,10 +125,18 @@ impl Panel for DocumentTab {
   }
 
   fn title_suffix(&mut self, _: &mut Window, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    let panel_id = self.panel_id;
+    let tab_id = self.tab.id.value();
+    let export_supported = self
+      .app
+      .update(cx, |app, _| app.document_panels.supports_export(tab_id))
+      .unwrap_or(false);
     Some(render_panel_tab_strip_actions(
-      self.panel_id,
+      panel_id,
+      tab_id,
       cx.theme().colors,
       self.app.clone(),
+      export_supported,
     ))
   }
 }

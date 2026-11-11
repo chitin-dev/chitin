@@ -1,10 +1,12 @@
 //! Shared presentation command bus for menus, shell sessions, and typed callers.
 
 use chitin_bio::surface::MolecularSurfaceBackend;
-use chitin_command::{RenderAtomStyle, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle};
+use chitin_command::{
+  RenderAtomStyle, RenderBackground, RenderCommand, RenderPolymerStyle, RenderSurfaceBackend, RenderSurfaceStyle,
+};
 use chitin_command::{RenderColorScheme, RenderLayer};
 use chitin_molecule_renderer::appearance::ColorScheme;
-use chitin_molecule_renderer::{AtomStyle, PolymerStyle, SurfaceStyle};
+use chitin_molecule_renderer::{AtomStyle, PolymerStyle, SurfaceStyle, ViewportBackground};
 use gpui::Context;
 
 use crate::app::ChitinApp;
@@ -28,6 +30,10 @@ pub enum RenderCommandError {
   Unavailable { id: u64 },
   #[error("rendering panel #{id} does not support surface backend selection")]
   UnsupportedBackend { id: u64 },
+  #[error("rendering panel #{id} does not support viewport background selection")]
+  UnsupportedBackground { id: u64 },
+  #[error("image export failed: {0}")]
+  Export(String),
 }
 
 impl ChitinApp {
@@ -51,17 +57,15 @@ impl ChitinApp {
     let id = target.ok_or(RenderCommandError::MissingContext)?;
     let before =
       super::history::ViewSnapshot::read(&self.document_panels, id).ok_or(RenderCommandError::Unavailable { id })?;
+    let command_id = command.id();
+    let is_status = command == RenderCommand::Status;
+    let layer = match &command {
+      RenderCommand::Color { layer, .. } | RenderCommand::Opacity { layer, .. } => Some(*layer),
+      _ => None,
+    };
     let output = self.apply_render_command(target, command, cx)?;
-    if command != RenderCommand::Status
-      && let Some(after) = super::history::ViewSnapshot::read(&self.document_panels, id)
-    {
-      let layer = match command {
-        RenderCommand::Color { layer, .. } | RenderCommand::Opacity { layer, .. } => Some(layer),
-        _ => None,
-      };
-      self
-        .edit_history
-        .changed(id, (command.id(), layer), before, after, phase);
+    if !is_status && let Some(after) = super::history::ViewSnapshot::read(&self.document_panels, id) {
+      self.edit_history.changed(id, (command_id, layer), before, after, phase);
     }
     Ok(output)
   }
@@ -135,6 +139,23 @@ impl ChitinApp {
           cx.notify();
         }
       }
+      RenderCommand::Background(value) => {
+        self
+          .document_panels
+          .background(id)
+          .ok_or(RenderCommandError::UnsupportedBackground { id })?;
+        let value = viewport_background(value);
+        if let Some(on_change) = self.document_panels.select_background(id, value) {
+          on_change(value, cx);
+          cx.notify();
+        }
+      }
+      RenderCommand::ExportImage { output } => {
+        let path = self
+          .export_document_image(id, output.as_deref(), cx)
+          .map_err(RenderCommandError::Export)?;
+        return Ok(format!("Exporting image to {}", path.display()));
+      }
     }
     if let Some(on_change) = self.document_panels.select_representation_layers(id, layers) {
       on_change(layers, cx);
@@ -163,8 +184,13 @@ impl ChitinApp {
       Some(MolecularSurfaceBackend::ImplicitScalarField) => "implicit-scalar-field",
       Some(MolecularSurfaceBackend::Msms) => "msms",
     };
+    let background = match self.document_panels.background(id) {
+      None => "unavailable".to_string(),
+      Some(ViewportBackground::Auto) => "auto (follows theme)".to_string(),
+      Some(ViewportBackground::Custom([r, g, b])) => format!("#{r:02X}{g:02X}{b:02X}"),
+    };
     let mut output = format!(
-      "Panel #{id}: {}\nAtom style: {atom}\nPolymer style: {polymer}\nSurface style: {surface}\nSurface backend: {backend}",
+      "Panel #{id}: {}\nAtom style: {atom}\nPolymer style: {polymer}\nSurface style: {surface}\nSurface backend: {backend}\nBackground: {background}",
       super::terminal_label(&title)
     );
     for (name, appearance) in ["Atom", "Polymer", "Surface"].into_iter().zip(layers.appearances()) {
@@ -189,5 +215,13 @@ fn layer_index(layer: RenderLayer) -> usize {
     RenderLayer::Atom => 0,
     RenderLayer::Polymer => 1,
     RenderLayer::Surface => 2,
+  }
+}
+
+/// Converts a typed command value into the renderer's theme-independent policy.
+fn viewport_background(background: RenderBackground) -> ViewportBackground {
+  match background {
+    RenderBackground::Auto => ViewportBackground::Auto,
+    RenderBackground::Custom(color) => ViewportBackground::Custom(color.0),
   }
 }

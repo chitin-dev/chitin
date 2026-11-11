@@ -245,6 +245,30 @@ define_commands! {
     command_panel: false,
     frontend: []
   },
+  /// Set Viewport Background.
+  RenderBackground {
+    name: "render.background",
+    title: "Set Viewport Background",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: true,
+    keywords: &["render", "background", "canvas", "theme", "color"],
+    shortcut: None,
+    command_panel: false,
+    frontend: []
+  },
+  /// Export Protein Image.
+  RenderExportImage {
+    name: "render.export_image",
+    title: "Export Protein Image",
+    category: CommandCategory::Structure,
+    domain: CommandExecutionDomain::Frontend,
+    requires_arguments: false,
+    keywords: &["render", "export", "image", "png", "protein"],
+    shortcut: None,
+    command_panel: false,
+    frontend: [super::RenderCommand::ExportImage { output: None }]
+  },
   /// Focus the previous project entry.
   WorkspaceFocusPrevious {
     name: "workspace.focus_previous_entry",

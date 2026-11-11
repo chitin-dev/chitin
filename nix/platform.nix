@@ -3,6 +3,7 @@
 with pkgs;
 lib.optionals stdenv.hostPlatform.isLinux [
   alsa-lib
+  dbus
   fontconfig
   libX11
   libXi

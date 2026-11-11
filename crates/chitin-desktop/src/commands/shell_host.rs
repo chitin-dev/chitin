@@ -324,9 +324,11 @@ impl ChitinApp {
           self.document_panels.activate_tab(leaf, tab);
         }
         let result = match command {
-          FrontendCommand::Render(command) => {
-            self.dispatch_render_command(submission.rendering_panel().map(|panel| panel.id()), *command, cx)
-          }
+          FrontendCommand::Render(command) => self.dispatch_render_command(
+            submission.rendering_panel().map(|panel| panel.id()),
+            command.clone(),
+            cx,
+          ),
           FrontendCommand::Selection(command) => self.dispatch_selection_command(
             submission.rendering_panel().map(|panel| panel.id()),
             command.clone(),

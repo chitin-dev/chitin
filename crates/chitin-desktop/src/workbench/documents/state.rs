@@ -12,7 +12,7 @@ use crate::workbench::documents::layout::{
 };
 use chitin_bio::structure::{StructureScene, selection::AtomSelection};
 use chitin_bio::surface::MolecularSurfaceBackend;
-use chitin_molecule_renderer::RepresentationLayers;
+use chitin_molecule_renderer::{RepresentationLayers, ViewportBackground};
 use gpui::{AnyView, App, Window};
 
 /// Callback that applies molecule representation layers to one WGPU document view.
@@ -23,6 +23,12 @@ type SurfaceBackendChangeHandler = dyn Fn(MolecularSurfaceBackend, &mut App);
 pub(crate) type SelectionInputHandler = Rc<dyn Fn(chitin_command::SelectionCommand, &mut App)>;
 type SelectionInputBinder = dyn Fn(SelectionInputHandler, &mut App);
 type SelectionChangeHandler = dyn Fn(Arc<AtomSelection>, &mut App);
+/// Callback that applies a viewport background policy to one WGPU document view.
+type BackgroundChangeHandler = dyn Fn(ViewportBackground, &mut App);
+/// Blocking worker that finishes an already-submitted image capture.
+pub(crate) type ExportTask = Box<dyn FnOnce() -> Result<PathBuf, String> + Send>;
+/// Callback that submits one WGPU document view capture.
+type ExportHandler = dyn Fn(&Path, bool, &mut App) -> Result<ExportTask, String>;
 
 /// Result produced when a WGPU document factory creates a fresh view.
 pub struct WgpuDocumentView {
@@ -33,6 +39,10 @@ pub struct WgpuDocumentView {
   representation_layers: Option<WgpuRepresentationLayersControl>,
   /// Optional molecule-specific surface backend controller.
   surface_backend: Option<WgpuSurfaceBackendControl>,
+  /// Optional viewport background controller.
+  background: Option<WgpuBackgroundControl>,
+  /// Optional PNG export controller.
+  export: Option<WgpuExportControl>,
 }
 
 /// Scientific selection state and its renderer callback, scoped to one view.
@@ -87,6 +97,22 @@ pub(crate) struct WgpuSurfaceBackendControl {
   on_change: Rc<SurfaceBackendChangeHandler>,
 }
 
+/// Mutable viewport background state and its view update callback.
+#[derive(Clone)]
+pub(crate) struct WgpuBackgroundControl {
+  /// Clear-color policy currently selected for this independent panel view.
+  background: ViewportBackground,
+  /// Callback that applies the resolved color to the hosted panel.
+  on_change: Rc<BackgroundChangeHandler>,
+}
+
+/// PNG export callback for one independent panel view.
+#[derive(Clone)]
+pub(crate) struct WgpuExportControl {
+  /// Callback that renders and writes the image.
+  on_export: Rc<ExportHandler>,
+}
+
 type FreshWgpuSurfaceCallback = Rc<dyn Fn(&Path, &mut Window, &mut App) -> WgpuDocumentView>;
 
 /// Factory used to create independent WGPU document views for split panels.
@@ -133,6 +159,10 @@ pub(crate) enum DocumentPanelContent {
     representation_layers: Option<WgpuRepresentationLayersControl>,
     /// Surface algorithm state when this view supports molecular rendering.
     surface_backend: Option<WgpuSurfaceBackendControl>,
+    /// Viewport background state when this view supports a customized clear color.
+    background: Option<WgpuBackgroundControl>,
+    /// PNG export callback when this view supports image capture.
+    export: Option<WgpuExportControl>,
     /// Callback that creates an independent view for split-panel clones.
     clone_view: WgpuDocumentViewFactory,
   },
@@ -181,6 +211,8 @@ impl WgpuDocumentView {
       view: view.into(),
       representation_layers: None,
       surface_backend: None,
+      background: None,
+      export: None,
     }
   }
 
@@ -198,6 +230,8 @@ impl WgpuDocumentView {
         on_change: Rc::new(on_change),
       }),
       surface_backend: None,
+      background: None,
+      export: None,
     }
   }
 
@@ -249,6 +283,49 @@ impl WgpuDocumentView {
     self
   }
 
+  /// Adds an independently mutable viewport background policy.
+  ///
+  /// # Parameters
+  ///
+  /// * `background` is the initial clear-color policy for this view.
+  /// * `on_change` applies later policy changes to the hosted panel.
+  ///
+  /// # Returns
+  ///
+  /// This document view with its background controller installed.
+  pub fn with_background(
+    mut self,
+    background: ViewportBackground,
+    on_change: impl Fn(ViewportBackground, &mut App) + 'static,
+  ) -> Self {
+    self.background = Some(WgpuBackgroundControl {
+      background,
+      on_change: Rc::new(on_change),
+    });
+    self
+  }
+
+  /// Adds PNG export support for this viewport.
+  ///
+  /// # Parameters
+  ///
+  /// * `on_export` submits the GPU capture and returns a worker that performs
+  ///   the blocking readback and file write off the UI thread. The second
+  ///   argument rejects an existing destination instead of overwriting it.
+  ///
+  /// # Returns
+  ///
+  /// This document view with its export controller installed.
+  pub fn with_export(
+    mut self,
+    on_export: impl Fn(&Path, bool, &mut App) -> Result<ExportTask, String> + 'static,
+  ) -> Self {
+    self.export = Some(WgpuExportControl {
+      on_export: Rc::new(on_export),
+    });
+    self
+  }
+
   /// Applies a copied representation to a newly created independent view.
   fn select_representation_layers(&mut self, representation: RepresentationLayers, cx: &mut App) {
     let Some(control) = self.representation_layers.as_mut() else {
@@ -266,6 +343,16 @@ impl WgpuDocumentView {
     };
     if let Some(on_change) = control.select(backend) {
       on_change(backend, cx);
+    }
+  }
+
+  /// Applies a copied background policy to a newly created independent view.
+  fn select_background(&mut self, background: ViewportBackground, cx: &mut App) {
+    let Some(control) = self.background.as_mut() else {
+      return;
+    };
+    if let Some(on_change) = control.select(background) {
+      on_change(background, cx);
     }
   }
 }
@@ -331,6 +418,48 @@ impl WgpuSurfaceBackendControl {
     Some(Rc::clone(&self.on_change))
   }
 }
+
+impl fmt::Debug for WgpuBackgroundControl {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter
+      .debug_struct("WgpuBackgroundControl")
+      .field("background", &self.background)
+      .finish_non_exhaustive()
+  }
+}
+
+impl PartialEq for WgpuBackgroundControl {
+  fn eq(&self, other: &Self) -> bool {
+    self.background == other.background && Rc::ptr_eq(&self.on_change, &other.on_change)
+  }
+}
+
+impl Eq for WgpuBackgroundControl {}
+
+impl WgpuBackgroundControl {
+  /// Selects a new background policy and returns the callback that applies it.
+  fn select(&mut self, background: ViewportBackground) -> Option<Rc<BackgroundChangeHandler>> {
+    if self.background == background {
+      return None;
+    }
+    self.background = background;
+    Some(Rc::clone(&self.on_change))
+  }
+}
+
+impl fmt::Debug for WgpuExportControl {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.debug_struct("WgpuExportControl").finish_non_exhaustive()
+  }
+}
+
+impl PartialEq for WgpuExportControl {
+  fn eq(&self, other: &Self) -> bool {
+    Rc::ptr_eq(&self.on_export, &other.on_export)
+  }
+}
+
+impl Eq for WgpuExportControl {}
 
 impl WgpuDocumentViewFactory {
   /// Creates a factory for independent WGPU document views.
@@ -436,6 +565,8 @@ impl DocumentPanelContent {
       view: document_view.view,
       representation_layers: document_view.representation_layers,
       surface_backend: document_view.surface_backend,
+      background: document_view.background,
+      export: document_view.export,
       clone_view,
     }
   }
@@ -499,6 +630,33 @@ impl DocumentPanelContent {
     }
   }
 
+  /// Returns the viewport background policy for molecular content.
+  pub(super) fn background(&self) -> Option<ViewportBackground> {
+    match self {
+      Self::WgpuInteractive {
+        background: Some(control),
+        ..
+      } => Some(control.background),
+      Self::ProjectDocument(_) | Self::WgpuInteractive { .. } => None,
+    }
+  }
+
+  /// Returns whether this view supports PNG image capture.
+  pub(super) fn supports_export(&self) -> bool {
+    matches!(self, Self::WgpuInteractive { export: Some(_), .. })
+  }
+
+  /// Renders an exported image through this view's capture controller.
+  pub(super) fn export_image(&self, path: &Path, create_new: bool, cx: &mut App) -> Option<Result<ExportTask, String>> {
+    let Self::WgpuInteractive {
+      export: Some(control), ..
+    } = self
+    else {
+      return None;
+    };
+    Some((control.on_export)(path, create_new, cx))
+  }
+
   /// Updates molecular selection state and returns its scene callback.
   fn select_representation_layers(
     &mut self,
@@ -526,6 +684,18 @@ impl DocumentPanelContent {
     control.select(backend)
   }
 
+  /// Updates background state and returns its panel callback.
+  fn select_background(&mut self, background: ViewportBackground) -> Option<Rc<BackgroundChangeHandler>> {
+    let Self::WgpuInteractive {
+      background: Some(control),
+      ..
+    } = self
+    else {
+      return None;
+    };
+    control.select(background)
+  }
+
   /// Creates an independent payload for a split panel.
   ///
   /// # Parameters
@@ -545,6 +715,7 @@ impl DocumentPanelContent {
         selection,
         representation_layers,
         surface_backend,
+        background,
         clone_view,
         ..
       } => {
@@ -557,6 +728,9 @@ impl DocumentPanelContent {
         }
         if let Some(control) = representation_layers {
           document_view.select_representation_layers(control.representation, cx);
+        }
+        if let Some(control) = background {
+          document_view.select_background(control.background, cx);
         }
         if let (Some(source), Some(destination)) = (selection, document_view.selection.as_mut()) {
           destination.atoms = source.atoms.clone();
@@ -573,6 +747,8 @@ impl DocumentPanelContent {
           view: document_view.view,
           representation_layers: document_view.representation_layers,
           surface_backend: document_view.surface_backend,
+          background: document_view.background,
+          export: document_view.export,
           clone_view: clone_view.clone(),
         }
       }
@@ -950,6 +1126,71 @@ impl DocumentPanelState {
       .find(|tab| tab.id == active_tab_id)
       .map(|tab| &mut tab.payload)?;
     content.select_surface_backend(backend)
+  }
+
+  /// Reads a stable molecular tab's viewport background policy.
+  pub(crate) fn background(&self, id: u64) -> Option<ViewportBackground> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    let entry = self.tree.leaf(panel)?.tabs.iter().find(|entry| entry.id == tab)?;
+    entry.payload.background()
+  }
+
+  /// Changes a stable molecular tab's background and returns its panel callback.
+  pub(crate) fn select_background(
+    &mut self,
+    id: u64,
+    background: ViewportBackground,
+  ) -> Option<Rc<BackgroundChangeHandler>> {
+    let (panel_id, active_tab_id) = self.rendering_panel_location(id)?;
+    let leaf = self.tree.leaf_mut(panel_id)?;
+    let content = leaf
+      .tabs
+      .iter_mut()
+      .find(|tab| tab.id == active_tab_id)
+      .map(|tab| &mut tab.payload)?;
+    content.select_background(background)
+  }
+
+  /// Returns whether a stable rendering tab supports PNG image capture.
+  pub(crate) fn supports_export(&self, id: u64) -> bool {
+    self.rendering_panel_location(id).is_some_and(|(panel, tab)| {
+      self
+        .tree
+        .leaf(panel)
+        .and_then(|leaf| leaf.tabs.iter().find(|entry| entry.id == tab))
+        .is_some_and(|entry| entry.payload.supports_export())
+    })
+  }
+
+  /// Returns the stable display title for one rendering tab.
+  pub(crate) fn tab_title(&self, id: u64) -> Option<&str> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    self
+      .tree
+      .leaf(panel)?
+      .tabs
+      .iter()
+      .find(|entry| entry.id == tab)
+      .map(|entry| entry.title.as_str())
+  }
+
+  /// Writes a PNG through a stable rendering tab's capture controller.
+  pub(crate) fn export_image(
+    &self,
+    id: u64,
+    path: &Path,
+    create_new: bool,
+    cx: &mut App,
+  ) -> Option<Result<ExportTask, String>> {
+    let (panel, tab) = self.rendering_panel_location(id)?;
+    self
+      .tree
+      .leaf(panel)?
+      .tabs
+      .iter()
+      .find(|entry| entry.id == tab)?
+      .payload
+      .export_image(path, create_new, cx)
   }
 
   /// Splits one document panel and copies its active tab to the new panel.

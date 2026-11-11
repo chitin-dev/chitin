@@ -16,6 +16,9 @@ fn main() {
     // Every layer Chitin draws from, and the theme global each of them reads.
     // It has to run before anything else is constructed.
     chitin_ui::init(cx);
+    // The saved choice may override the system default; no window exists yet,
+    // so this applies before the first frame is painted.
+    chitin_ui::theme::set_preference(chitin_desktop::settings::load_theme_preference(), cx);
     // The compositor owns outer shadows; keep Kit's controls and resize band
     // without reserving an empty client-side shadow gutter.
     cx.set_global(gpui_kit::component::WindowBorderOptions::default().with_shadow_size(px(0.0)));
@@ -41,7 +44,9 @@ fn main() {
         let project_sidebar_focus = cx.focus_handle();
         window.focus(&project_sidebar_focus, cx);
         window.activate_window();
-        cx.new(|_| ChitinApp::new_with_project_sidebar_focus(project_path, project_sidebar_focus))
+        let app = cx.new(|_| ChitinApp::new_with_project_sidebar_focus(project_path, project_sidebar_focus));
+        app.update(cx, |app, _| app.follow_system_theme(window));
+        app
       },
     );
 

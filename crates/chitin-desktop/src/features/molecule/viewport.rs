@@ -1,5 +1,7 @@
 //! Experimental WGPU document panel component.
 
+mod export;
+
 use std::{
   cell::Cell,
   rc::Rc,
@@ -11,7 +13,7 @@ use chitin_bio::structure::selection::AtomSelection;
 use chitin_bio::surface::MolecularSurfaceArtifact;
 use chitin_command::{SelectionCommand, SelectionMode};
 use chitin_molecule_renderer::picking::MolecularPick;
-use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportDrag};
+use chitin_molecule_renderer::{DragMode, RepresentationLayers, ViewerCamera, ViewportBackground, ViewportDrag};
 use chitin_ui::workbench::{WorkbenchStyle, viewport_container, viewport_position};
 use chitin_wgpu::RenderTargetSize;
 use gpui::{
@@ -93,6 +95,11 @@ pub trait WgpuPanelScene {
     false
   }
 
+  /// Applies a resolved linear-RGB viewport clear color when supported.
+  fn set_background_color(&mut self, _color: [f64; 3]) -> bool {
+    false
+  }
+
   /// Installs a computed molecular surface when the hosted scene supports it.
   fn set_molecular_surface(&mut self, _surface: MolecularSurfaceArtifact) -> bool {
     false
@@ -130,6 +137,8 @@ pub struct ChitinWgpuDocumentPanel {
   started_at: Instant,
   /// Actual inset viewport bounds, updated during layout rather than rendering.
   viewport_bounds: Rc<Cell<Bounds<Pixels>>>,
+  /// User-selected clear-color policy for this viewport.
+  background: ViewportBackground,
 }
 
 struct SelectionGesture {
@@ -170,7 +179,21 @@ impl ChitinWgpuDocumentPanel {
       active_drag: None,
       started_at: Instant::now(),
       viewport_bounds: Rc::new(Cell::new(Bounds::default())),
+      background: ViewportBackground::Auto,
     }
+  }
+
+  /// Changes the viewport clear-color policy.
+  ///
+  /// The next rendered frame resolves automatic colors against the current
+  /// theme, so callers do not need to know whether the app is in light or dark
+  /// mode. Returns `true` when the policy changed.
+  pub(crate) fn set_background(&mut self, background: ViewportBackground) -> bool {
+    if self.background == background {
+      return false;
+    }
+    self.background = background;
+    true
   }
 
   pub(crate) fn bind_selection_input(&mut self, handler: SelectionInputHandler) {
@@ -543,7 +566,11 @@ impl Render for ChitinWgpuDocumentPanel {
   ///
   /// A GPUI element tree containing the WGPU surface and a small FPS overlay.
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    let theme = Theme::global(cx).colors;
+    let (theme, dark) = {
+      let theme = Theme::global(cx);
+      (theme.colors, theme.mode.is_dark())
+    };
+    self.scene.set_background_color(self.background.resolve(dark));
     let style = WorkbenchStyle::new(theme);
     let viewport_bounds = self.viewport_bounds.clone();
     if self.selection_gesture.is_some() {
