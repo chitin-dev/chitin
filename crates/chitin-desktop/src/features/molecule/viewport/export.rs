@@ -1,8 +1,8 @@
 //! Offscreen PNG capture for one molecular viewport.
 
 use std::{
-  fs::File,
-  io::BufWriter,
+  fs::{File, OpenOptions},
+  io::{BufWriter, ErrorKind},
   path::{Path, PathBuf},
   sync::mpsc,
   time::Duration,
@@ -32,6 +32,9 @@ pub(crate) enum ExportError {
     /// Underlying filesystem error.
     source: std::io::Error,
   },
+  /// The caller requested that an existing file not be replaced.
+  #[error("refusing to overwrite existing image {0}")]
+  AlreadyExists(String),
   /// PNG encoding failed.
   #[error("failed to encode PNG: {0}")]
   Png(#[from] png::EncodingError),
@@ -49,6 +52,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// * `path` is the final image path. The target directory is not created
   ///   until the background write runs.
+  /// * `create_new` rejects an existing destination instead of overwriting it.
   ///
   /// # Returns
   ///
@@ -58,7 +62,7 @@ impl ChitinWgpuDocumentPanel {
   ///
   /// Returns [`ExportError`] when the surface is unavailable, the target is
   /// empty, or GPU submission fails.
-  pub(crate) fn begin_export(&mut self, path: &Path) -> Result<PendingExport, ExportError> {
+  pub(crate) fn begin_export(&mut self, path: &Path, create_new: bool) -> Result<PendingExport, ExportError> {
     let Some(surface) = self.surface.as_ref() else {
       return Err(ExportError::NoSurface);
     };
@@ -111,6 +115,7 @@ impl ChitinWgpuDocumentPanel {
       format,
       readback,
       submission,
+      create_new,
     })
   }
 }
@@ -131,6 +136,8 @@ pub(crate) struct PendingExport {
   readback: wgpu::Buffer,
   /// Queue submission that must complete before mapping.
   submission: wgpu::SubmissionIndex,
+  /// Reject an existing destination instead of overwriting it.
+  create_new: bool,
 }
 
 impl PendingExport {
@@ -165,13 +172,31 @@ impl PendingExport {
         source,
       })?;
     }
-    let file = File::create(&self.path).map_err(|source| ExportError::Io {
-      path: self.path.display().to_string(),
-      source,
-    })?;
+    let file = open_export_file(&self.path, self.create_new)?;
     encode_png(BufWriter::new(file), self.width, self.height, &rgba)?;
     Ok(self.path)
   }
+}
+
+/// Opens the destination, optionally refusing to replace an existing file.
+fn open_export_file(path: &Path, create_new: bool) -> Result<File, ExportError> {
+  let mut options = OpenOptions::new();
+  options.write(true);
+  if create_new {
+    options.create_new(true);
+  } else {
+    options.create(true).truncate(true);
+  }
+  options.open(path).map_err(|source| {
+    if create_new && source.kind() == ErrorKind::AlreadyExists {
+      ExportError::AlreadyExists(path.display().to_string())
+    } else {
+      ExportError::Io {
+        path: path.display().to_string(),
+        source,
+      }
+    }
+  })
 }
 
 /// Queues a texture-to-buffer copy and returns the buffer with its submission.
@@ -393,6 +418,30 @@ mod tests {
     assert_eq!(&pixels[4..8], &[255, 255, 255, 255]);
     assert!(pixels[8] < 200, "sRGB midtones should decode toward linear");
     assert!(srgb_to_linear_channel(64) < 64);
+  }
+
+  #[test]
+  fn create_new_exports_should_not_replace_an_existing_file() {
+    let directory = std::env::temp_dir().join(format!(
+      "chitin-export-overwrite-{}-{}",
+      std::process::id(),
+      std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos())
+    ));
+    if let Err(error) = std::fs::create_dir_all(&directory) {
+      panic!("test directory should be creatable: {error}");
+    }
+    let path = directory.join("image.png");
+    let first = open_export_file(&path, true);
+    assert!(first.is_ok());
+    drop(first);
+    assert!(matches!(
+      open_export_file(&path, true),
+      Err(ExportError::AlreadyExists(_))
+    ));
+    assert!(open_export_file(&path, false).is_ok());
+    let _ = std::fs::remove_dir_all(&directory);
   }
 
   /// Manual GPU check; ignored so CI does not require an adapter.

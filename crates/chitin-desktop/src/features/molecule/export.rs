@@ -2,6 +2,7 @@
 
 use std::{
   path::{Path, PathBuf},
+  sync::atomic::{AtomicU64, Ordering},
   time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -10,10 +11,21 @@ use gpui::{AsyncApp, Context};
 
 use crate::app::ChitinApp;
 
+/// Sequence used to keep default export names unique within one process.
+static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Resolved export path and whether it may overwrite an existing file.
+struct ExportDestination {
+  /// Absolute destination path.
+  path: PathBuf,
+  /// Reject an existing file instead of replacing it.
+  create_new: bool,
+}
+
 impl ChitinApp {
   /// Starts an asynchronous export of one protein viewport.
   ///
-  /// The file is written to `<workspace>/.chitin/exports/<title>-<unix-seconds>.png`.
+  /// The file is written to `<workspace>/.chitin/exports/<title>-<millis>-<sequence>.png`.
   /// When no workspace is open, the current working directory is used. GPU
   /// submission happens immediately; polling, readback, PNG encoding, and the
   /// file write run on the background executor. Toasts report progress and the
@@ -44,7 +56,8 @@ impl ChitinApp {
     let Some(title) = self.document_panels.tab_title(panel_id).map(str::to_owned) else {
       return Err("the requested rendering tab is not open".into());
     };
-    let path = self.export_image_path(&title, output);
+    let destination = self.export_image_path(&title, output);
+    let path = destination.path;
     let toast_viewport = self.toast_viewport(cx);
     let info = toast_viewport.update(cx, |viewport, cx| {
       viewport.push(
@@ -55,7 +68,10 @@ impl ChitinApp {
         cx,
       )
     });
-    let task = match self.document_panels.export_image(panel_id, &path, cx) {
+    let task = match self
+      .document_panels
+      .export_image(panel_id, &path, destination.create_new, cx)
+    {
       Some(Ok(task)) => task,
       Some(Err(error)) => {
         toast_viewport.update(cx, |viewport, cx| {
@@ -112,7 +128,7 @@ impl ChitinApp {
   }
 
   /// Resolves the export destination for a viewport title.
-  fn export_image_path(&self, title: &str, output: Option<&Path>) -> PathBuf {
+  fn export_image_path(&self, title: &str, output: Option<&Path>) -> ExportDestination {
     match output {
       Some(output) => {
         let mut path = if output.is_absolute() {
@@ -122,16 +138,25 @@ impl ChitinApp {
         };
         if path.is_dir() || output.to_string_lossy().ends_with(['/', '\\']) {
           path.push(self.default_export_name(title));
-        } else if !path
-          .extension()
-          .and_then(|extension| extension.to_str())
-          .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
-        {
-          path.set_extension("png");
+          ExportDestination { path, create_new: true }
+        } else {
+          if !path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("png"))
+          {
+            path.set_extension("png");
+          }
+          ExportDestination {
+            path,
+            create_new: false,
+          }
         }
-        path
       }
-      None => self.export_directory().join(self.default_export_name(title)),
+      None => ExportDestination {
+        path: self.export_directory().join(self.default_export_name(title)),
+        create_new: true,
+      },
     }
   }
 
@@ -148,10 +173,11 @@ impl ChitinApp {
 
   /// Returns a timestamped PNG filename derived from a tab title.
   fn default_export_name(&self, title: &str) -> String {
-    let timestamp = SystemTime::now()
+    let millis = SystemTime::now()
       .duration_since(UNIX_EPOCH)
-      .map_or(0, |duration| duration.as_secs());
-    format!("{}-{timestamp}.png", export_stem(title))
+      .map_or(0, |duration| duration.as_millis());
+    let sequence = EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{millis}-{sequence}.png", export_stem(title))
   }
 
   /// Returns the workspace root, or the process directory when none is open.
@@ -204,18 +230,32 @@ mod tests {
   fn export_paths_should_resolve_relative_destinations_and_force_png() {
     let app = ChitinApp::new(None);
     let absolute = std::env::temp_dir().join("chitin-export.png");
-    assert_eq!(app.export_image_path("1ABC.pdb", Some(&absolute)), absolute);
-    let relative = app.export_image_path("1ABC.pdb", Some(Path::new("images/view.jpg")));
-    assert!(relative.is_absolute());
-    assert!(relative.ends_with("images/view.png"));
-    let directory = app.export_image_path("1ABC.pdb", Some(Path::new("images/")));
+    let destination = app.export_image_path("1ABC.pdb", Some(&absolute));
+    assert_eq!(destination.path, absolute);
+    assert!(!destination.create_new);
+    let destination = app.export_image_path("1ABC.pdb", Some(Path::new("images/view.jpg")));
+    assert!(destination.path.is_absolute());
+    assert!(destination.path.ends_with("images/view.png"));
+    assert!(!destination.create_new);
+    let destination = app.export_image_path("1ABC.pdb", Some(Path::new("images/")));
     assert_eq!(
-      directory.parent().and_then(|parent| parent.file_name()),
+      destination.path.parent().and_then(|parent| parent.file_name()),
       Some(std::ffi::OsStr::new("images"))
     );
     assert_eq!(
-      directory.extension().and_then(|extension| extension.to_str()),
+      destination.path.extension().and_then(|extension| extension.to_str()),
       Some("png")
     );
+    assert!(destination.create_new);
+  }
+
+  #[test]
+  fn default_export_names_should_not_repeat_within_a_process() {
+    let app = ChitinApp::new(None);
+    let first = app.default_export_name("1ABC.pdb");
+    let second = app.default_export_name("1ABC.pdb");
+    assert_ne!(first, second);
+    assert!(first.ends_with(".png"));
+    assert!(second.ends_with(".png"));
   }
 }

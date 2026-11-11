@@ -346,10 +346,10 @@ pub(crate) fn build_structure_view_from_scene(
         }
       });
     })
-    .with_export(move |path, cx| {
+    .with_export(move |path, create_new, cx| {
       export_panel.update(cx, |panel, _| {
         panel
-          .begin_export(path)
+          .begin_export(path, create_new)
           .map(|pending| Box::new(move || pending.finish().map_err(|error| error.to_string())) as ExportTask)
           .map_err(|error| error.to_string())
       })

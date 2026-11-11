@@ -220,7 +220,7 @@ mod tests {
     )
     .with_surface_backend(MolecularSurfaceBackend::ImplicitScalarField, |_, _| {})
     .with_background(ViewportBackground::Auto, |_, _| {})
-    .with_export(|_, _| {
+    .with_export(|_, _, _| {
       Ok(Box::new(|| {
         Ok(std::env::temp_dir().join(format!("chitin-export-{}.png", std::process::id())))
       }))
@@ -415,7 +415,10 @@ mod tests {
       app.update(cx, |app, cx| {
         assert!(app.document_panels.supports_export(1));
         let path = std::env::temp_dir().join(format!("chitin-export-{}.png", std::process::id()));
-        assert!(matches!(app.document_panels.export_image(1, &path, cx), Some(Ok(_))));
+        assert!(matches!(
+          app.document_panels.export_image(1, &path, true, cx),
+          Some(Ok(_))
+        ));
         assert!(!app.document_panels.supports_export(99));
       });
     });

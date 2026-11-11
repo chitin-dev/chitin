@@ -28,7 +28,7 @@ type BackgroundChangeHandler = dyn Fn(ViewportBackground, &mut App);
 /// Blocking worker that finishes an already-submitted image capture.
 pub(crate) type ExportTask = Box<dyn FnOnce() -> Result<PathBuf, String> + Send>;
 /// Callback that submits one WGPU document view capture.
-type ExportHandler = dyn Fn(&Path, &mut App) -> Result<ExportTask, String>;
+type ExportHandler = dyn Fn(&Path, bool, &mut App) -> Result<ExportTask, String>;
 
 /// Result produced when a WGPU document factory creates a fresh view.
 pub struct WgpuDocumentView {
@@ -310,12 +310,16 @@ impl WgpuDocumentView {
   /// # Parameters
   ///
   /// * `on_export` submits the GPU capture and returns a worker that performs
-  ///   the blocking readback and file write off the UI thread.
+  ///   the blocking readback and file write off the UI thread. The second
+  ///   argument rejects an existing destination instead of overwriting it.
   ///
   /// # Returns
   ///
   /// This document view with its export controller installed.
-  pub fn with_export(mut self, on_export: impl Fn(&Path, &mut App) -> Result<ExportTask, String> + 'static) -> Self {
+  pub fn with_export(
+    mut self,
+    on_export: impl Fn(&Path, bool, &mut App) -> Result<ExportTask, String> + 'static,
+  ) -> Self {
     self.export = Some(WgpuExportControl {
       on_export: Rc::new(on_export),
     });
@@ -643,14 +647,14 @@ impl DocumentPanelContent {
   }
 
   /// Renders an exported image through this view's capture controller.
-  pub(super) fn export_image(&self, path: &Path, cx: &mut App) -> Option<Result<ExportTask, String>> {
+  pub(super) fn export_image(&self, path: &Path, create_new: bool, cx: &mut App) -> Option<Result<ExportTask, String>> {
     let Self::WgpuInteractive {
       export: Some(control), ..
     } = self
     else {
       return None;
     };
-    Some((control.on_export)(path, cx))
+    Some((control.on_export)(path, create_new, cx))
   }
 
   /// Updates molecular selection state and returns its scene callback.
@@ -1171,7 +1175,13 @@ impl DocumentPanelState {
   }
 
   /// Writes a PNG through a stable rendering tab's capture controller.
-  pub(crate) fn export_image(&self, id: u64, path: &Path, cx: &mut App) -> Option<Result<ExportTask, String>> {
+  pub(crate) fn export_image(
+    &self,
+    id: u64,
+    path: &Path,
+    create_new: bool,
+    cx: &mut App,
+  ) -> Option<Result<ExportTask, String>> {
     let (panel, tab) = self.rendering_panel_location(id)?;
     self
       .tree
@@ -1180,7 +1190,7 @@ impl DocumentPanelState {
       .iter()
       .find(|entry| entry.id == tab)?
       .payload
-      .export_image(path, cx)
+      .export_image(path, create_new, cx)
   }
 
   /// Splits one document panel and copies its active tab to the new panel.
