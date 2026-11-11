@@ -1,4 +1,8 @@
-# Chemical drawing commands
+#import "/book.typ": book-page
+#show: book-page
+
+= 1 Chemical drawing commands
+<chemdraw-commands>
 
 The CLI and built-in shell share these commands. Omit the initial `chitin`
 inside the built-in shell. Relative paths use the command's working directory.
@@ -21,21 +25,25 @@ Use `-` as the SMILES or diagram input to consume standard input. Shell hosts
 must supply stdin through their execution context; this is not shell piping.
 Diagram input accepts JSON or YAML, is limited to 4 MiB, and requires `version: 1`.
 
-## Diagram format
+== 1.1 Diagram format
+<chemdraw-diagram-format>
 
-See [the complete example](../../crates/chitin-command/examples/reaction.yaml).
+See
+#link("https://github.com/chitin-dev/chitin/blob/main/crates/chitin-command/examples/reaction.yaml")[the complete example].
 Each molecule has a unique `id`, a `smiles` string, an `at: [x, y]` placement,
-optional positive `scale`, and optional complete `positions` in SMILES atom order.
-Placements use SVG units with y down; authored atom positions use normalized
-bond units with y up. Atom indices are zero-based and scoped to their molecule.
+optional positive `scale`, and optional complete `positions` in SMILES atom
+order. Placements use SVG units with y down; authored atom positions use
+normalized bond units with y up. Atom indices are zero-based and scoped to their
+molecule.
 
 Annotations use `type: highlight|electron-arrow|reaction-arrow|lone-pair`.
 An atom reference is `{molecule: id, target: {type: atom, index: 0}}`; a bond
 reference uses `target: {type: bond, atoms: [0, 1]}`. Optional reference offsets
 are local SVG units and follow molecule scaling. Colors are `[r, g, b, alpha]`
-bytes. Electron arrows accept `head: pair|fishhook-left|fishhook-right`; reaction
-arrows accept `equilibrium: true`. Arrow `style` accepts `color`, `width`,
-`head-length`, `head-width`, and `clearance`. Lone-pair angles use radians.
+bytes. Electron arrows accept `head: pair|fishhook-left|fishhook-right`;
+reaction arrows accept `equilibrium: true`. Arrow `style` accepts `color`,
+`width`, `head-length`, `head-width`, and `clearance`. Lone-pair angles use
+radians.
 
 Mechanisms are authored, not inferred. Arrow routing is not automatic. Layout
 warnings are reported without treating every quality diagnostic as a failure.
